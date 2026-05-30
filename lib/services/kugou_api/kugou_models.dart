@@ -29,16 +29,38 @@ class KugouSearchResult {
     if (list is List && list.isNotEmpty) {
       final first = list.first;
       if (first is Map<String, dynamic>) {
-        if (first.containsKey('hash') || first.containsKey('FileHash') || first.containsKey('songname') || first.containsKey('SongName')) {
-          songs = list.map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>)).toList();
-        } else if (first.containsKey('albumid') || first.containsKey('AlbumID') || first.containsKey('album_name') || first.containsKey('AlbumName')) {
-          albums = list.map((e) => KugouAlbumBrief.fromJson(e as Map<String, dynamic>)).toList();
-        } else if (first.containsKey('singerid') || first.containsKey('SingerID') || first.containsKey('author_name')) {
-          artists = list.map((e) => KugouArtistBrief.fromJson(e as Map<String, dynamic>)).toList();
-        } else if (first.containsKey('specialid') || first.containsKey('global_collection_id') || first.containsKey('specialname')) {
-          playlists = list.map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>)).toList();
+        if (first.containsKey('hash') ||
+            first.containsKey('FileHash') ||
+            first.containsKey('songname') ||
+            first.containsKey('SongName')) {
+          songs = list
+              .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
+              .toList();
+        } else if (first.containsKey('albumid') ||
+            first.containsKey('AlbumID') ||
+            first.containsKey('album_name') ||
+            first.containsKey('AlbumName')) {
+          albums = list
+              .map((e) => KugouAlbumBrief.fromJson(e as Map<String, dynamic>))
+              .toList();
+        } else if (first.containsKey('singerid') ||
+            first.containsKey('SingerID') ||
+            first.containsKey('author_name')) {
+          artists = list
+              .map((e) => KugouArtistBrief.fromJson(e as Map<String, dynamic>))
+              .toList();
+        } else if (first.containsKey('specialid') ||
+            first.containsKey('global_collection_id') ||
+            first.containsKey('specialname')) {
+          playlists = list
+              .map(
+                (e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>),
+              )
+              .toList();
         } else {
-          songs = list.map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>)).toList();
+          songs = list
+              .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
+              .toList();
         }
       }
     }
@@ -66,9 +88,28 @@ class KugouArtistBrief {
 
   factory KugouArtistBrief.fromJson(Map<String, dynamic> json) {
     return KugouArtistBrief(
-      id: _str(json['singerid'] ?? json['artist_id'] ?? json['AuthorID'] ?? json['id'] ?? ''),
-      name: _str(json['singername'] ?? json['artist_name'] ?? json['SingerName'] ?? json['author_name'] ?? json['name'] ?? ''),
-      avatarUrl: _resolveArtworkUri(json['imgurl'] ?? json['avatar_url'] ?? json['img'] ?? json['pic'] ?? json['ImgUrl']),
+      id: _str(
+        json['singerid'] ??
+            json['artist_id'] ??
+            json['AuthorID'] ??
+            json['id'] ??
+            '',
+      ),
+      name: _str(
+        json['singername'] ??
+            json['artist_name'] ??
+            json['SingerName'] ??
+            json['author_name'] ??
+            json['name'] ??
+            '',
+      ),
+      avatarUrl: _resolveArtworkUri(
+        json['imgurl'] ??
+            json['avatar_url'] ??
+            json['img'] ??
+            json['pic'] ??
+            json['ImgUrl'],
+      ),
     );
   }
 
@@ -98,10 +139,33 @@ class KugouAlbumBrief {
 
   factory KugouAlbumBrief.fromJson(Map<String, dynamic> json) {
     return KugouAlbumBrief(
-      id: _str(json['albumid'] ?? json['album_id'] ?? json['AlbumID'] ?? json['id'] ?? ''),
-      name: _str(json['album_name'] ?? json['AlbumName'] ?? json['albumname'] ?? json['name'] ?? ''),
-      coverUrl: _resolveArtworkUri(json['imgurl'] ?? json['cover_url'] ?? json['img'] ?? json['pic'] ?? json['ImgUrl']),
-      artistName: _strNull(json['singername'] ?? json['artist_name'] ?? json['SingerName'] ?? json['author_name']),
+      id: _str(
+        json['albumid'] ??
+            json['album_id'] ??
+            json['AlbumID'] ??
+            json['id'] ??
+            '',
+      ),
+      name: _str(
+        json['album_name'] ??
+            json['AlbumName'] ??
+            json['albumname'] ??
+            json['name'] ??
+            '',
+      ),
+      coverUrl: _resolveArtworkUri(
+        json['imgurl'] ??
+            json['cover_url'] ??
+            json['img'] ??
+            json['pic'] ??
+            json['ImgUrl'],
+      ),
+      artistName: _strNull(
+        json['singername'] ??
+            json['artist_name'] ??
+            json['SingerName'] ??
+            json['author_name'],
+      ),
     );
   }
 
@@ -133,10 +197,16 @@ class KugouPlaylistBrief {
 
   factory KugouPlaylistBrief.fromJson(Map<String, dynamic> json) {
     return KugouPlaylistBrief(
-      id: _str(json['specialid'] ?? json['id'] ?? json['global_collection_id'] ?? ''),
+      id: _str(
+        json['specialid'] ?? json['id'] ?? json['global_collection_id'] ?? '',
+      ),
       name: _str(json['specialname'] ?? json['name'] ?? ''),
-      coverUrl: _resolveArtworkUri(json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['cover_url']),
-      songCount: _parseInt(json['songcount'] ?? json['song_count'] ?? json['count'] ?? 0),
+      coverUrl: _resolveArtworkUri(
+        json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['cover_url'],
+      ),
+      songCount: _parseInt(
+        json['songcount'] ?? json['song_count'] ?? json['count'] ?? 0,
+      ),
       globalCollectionId: _strNull(json['global_collection_id']),
     );
   }
@@ -170,6 +240,7 @@ class KugouSongDetail {
   final String? fileName;
   final int privilege;
   final String? albumAudioId2;
+  final String? songId;
 
   const KugouSongDetail({
     required this.hash,
@@ -189,6 +260,7 @@ class KugouSongDetail {
     this.fileName,
     this.privilege = 0,
     this.albumAudioId2,
+    this.songId,
   });
 
   factory KugouSongDetail.fromJson(Map<String, dynamic> json) {
@@ -203,23 +275,105 @@ class KugouSongDetail {
     }
 
     return KugouSongDetail(
-      hash: _str(json['hash'] ?? json['FileHash'] ?? json['Hash128'] ?? json['SQFileHash'] ?? json['HQFileHash'] ?? json['trans_param']?['ogg_128_hash'] ?? ''),
+      hash: _str(
+        json['hash'] ??
+            json['FileHash'] ??
+            json['Hash128'] ??
+            json['SQFileHash'] ??
+            json['HQFileHash'] ??
+            json['trans_param']?['ogg_128_hash'] ??
+            '',
+      ),
       albumId: _strNull(json['album_id'] ?? json['AlbumID'] ?? json['albumid']),
-      albumName: _strNull(json['album_name'] ?? json['AlbumName'] ?? json['albumname'] ?? json['albuminfo']?['name']),
-      artistId: _extractFirst(json['SingerId'] ?? json['singerid'] ?? json['SingerID'] ?? json['AuthorID'] ?? json['artist_id']),
-      artistName: artistName ?? _strNull(json['author_name'] ?? json['SingerName'] ?? json['artist_name'] ?? json['singername']),
-      songName: _str(json['songname'] ?? json['SongName'] ?? json['name'] ?? json['ori_audio_name'] ?? json['FileName'] ?? json['filename'] ?? ''),
-      duration: _parseInt(json['time_length'] ?? json['HQDuration'] ?? json['Duration'] ?? json['duration'] ?? json['SuperDuration'] ?? json['timelength'] ?? json['timelen'] ?? 0),
-      sqHash: _strNull(json['hash_flac'] ?? json['SQHash'] ?? json['sq_hash'] ?? json['SQFileHash']),
-      hqHash: _strNull(json['hash_320'] ?? json['HQHash'] ?? json['hq_hash'] ?? json['HQFileHash']),
-      hash320: _strNull(json['hash_320'] ?? json['320Hash'] ?? json['Hash320'] ?? json['trans_param']?['ogg_320_hash']),
-      hash128: _strNull(json['hash_128'] ?? json['128Hash'] ?? json['Hash128'] ?? json['trans_param']?['ogg_128_hash']),
+      albumName: _strNull(
+        json['album_name'] ??
+            json['AlbumName'] ??
+            json['albumname'] ??
+            json['albuminfo']?['name'],
+      ),
+      artistId: _extractFirst(
+        json['SingerId'] ??
+            json['singerid'] ??
+            json['SingerID'] ??
+            json['AuthorID'] ??
+            json['artist_id'],
+      ),
+      artistName:
+          artistName ??
+          _strNull(
+            json['author_name'] ??
+                json['SingerName'] ??
+                json['artist_name'] ??
+                json['singername'],
+          ),
+      songName: _str(
+        json['songname'] ??
+            json['SongName'] ??
+            json['name'] ??
+            json['ori_audio_name'] ??
+            json['FileName'] ??
+            json['filename'] ??
+            '',
+      ),
+      duration: _parseInt(
+        json['time_length'] ??
+            json['HQDuration'] ??
+            json['Duration'] ??
+            json['duration'] ??
+            json['SuperDuration'] ??
+            json['timelength'] ??
+            json['timelen'] ??
+            0,
+      ),
+      sqHash: _strNull(
+        json['hash_flac'] ??
+            json['SQHash'] ??
+            json['sq_hash'] ??
+            json['SQFileHash'],
+      ),
+      hqHash: _strNull(
+        json['hash_320'] ??
+            json['HQHash'] ??
+            json['hq_hash'] ??
+            json['HQFileHash'],
+      ),
+      hash320: _strNull(
+        json['hash_320'] ??
+            json['320Hash'] ??
+            json['Hash320'] ??
+            json['trans_param']?['ogg_320_hash'],
+      ),
+      hash128: _strNull(
+        json['hash_128'] ??
+            json['128Hash'] ??
+            json['Hash128'] ??
+            json['trans_param']?['ogg_128_hash'],
+      ),
       lyrics: _strNull(json['lyrics'] ?? json['Lyrics']),
-      albumAudioId: _strNull(json['album_audio_id'] ?? json['AlbumAudioID'] ?? json['MixSongID'] ?? json['mixsongid'] ?? json['add_mixsongid'] ?? json['Audioid'] ?? json['audio_id']),
-      artworkUri: _resolveArtworkUri(json['sizable_cover'] ?? json['Image'] ?? json['ImgUrl'] ?? json['img'] ?? json['pic'] ?? json['cover'] ?? json['trans_param']?['union_cover']),
-      fileName: _strNull(json['filename'] ?? json['FileName'] ?? json['ori_audio_name']),
+      albumAudioId: _strNull(
+        json['album_audio_id'] ??
+            json['AlbumAudioID'] ??
+            json['MixSongID'] ??
+            json['mixsongid'] ??
+            json['add_mixsongid'] ??
+            json['Audioid'] ??
+            json['audio_id'],
+      ),
+      artworkUri: _resolveArtworkUri(
+        json['sizable_cover'] ??
+            json['Image'] ??
+            json['ImgUrl'] ??
+            json['img'] ??
+            json['pic'] ??
+            json['cover'] ??
+            json['trans_param']?['union_cover'],
+      ),
+      fileName: _strNull(
+        json['filename'] ?? json['FileName'] ?? json['ori_audio_name'],
+      ),
       privilege: _parseInt(json['privilege'] ?? 0),
       albumAudioId2: _strNull(json['album_audio_id']),
+      songId: _strNull(json['songid'] ?? json['song_id'] ?? json['SongId'] ?? json['SongID']),
     );
   }
 
@@ -262,8 +416,20 @@ class KugouPlayUrl {
     }
     return KugouPlayUrl(
       url: url,
-      fileSize: _parseInt(json['fileSize'] ?? json['file_size'] ?? json['FileSize'] ?? json['filesize'] ?? 0),
-      bitRate: _parseInt(json['bitRate'] ?? json['bit_rate'] ?? json['BitRate'] ?? json['bitrate'] ?? 0),
+      fileSize: _parseInt(
+        json['fileSize'] ??
+            json['file_size'] ??
+            json['FileSize'] ??
+            json['filesize'] ??
+            0,
+      ),
+      bitRate: _parseInt(
+        json['bitRate'] ??
+            json['bit_rate'] ??
+            json['BitRate'] ??
+            json['bitrate'] ??
+            0,
+      ),
       quality: _str(json['quality'] ?? '128'),
     );
   }
@@ -272,9 +438,7 @@ class KugouPlayUrl {
 class KugouRankList {
   final List<KugouRank> ranks;
 
-  const KugouRankList({
-    this.ranks = const [],
-  });
+  const KugouRankList({this.ranks = const []});
 
   factory KugouRankList.fromJson(Map<String, dynamic> json) {
     final data = json['data'] as Map<String, dynamic>? ?? json;
@@ -302,9 +466,22 @@ class KugouRank {
 
   factory KugouRank.fromJson(Map<String, dynamic> json) {
     return KugouRank(
-      id: _str(json['rankid'] ?? json['id'] ?? json['rank_id'] ?? json['classify'] ?? ''),
+      id: _str(
+        json['rankid'] ??
+            json['id'] ??
+            json['rank_id'] ??
+            json['classify'] ??
+            '',
+      ),
       name: _str(json['rankname'] ?? json['name'] ?? ''),
-      coverUrl: _resolveArtworkUri(json['imgurl'] ?? json['img_9'] ?? json['banner_9'] ?? json['bannerurl'] ?? json['cover_url'] ?? json['ImgUrl']),
+      coverUrl: _resolveArtworkUri(
+        json['imgurl'] ??
+            json['img_9'] ??
+            json['banner_9'] ??
+            json['bannerurl'] ??
+            json['cover_url'] ??
+            json['ImgUrl'],
+      ),
       songCount: _parseInt(json['songcount'] ?? json['song_count'] ?? 0),
     );
   }
@@ -341,13 +518,20 @@ class KugouPlaylist {
 
   factory KugouPlaylist.fromJson(Map<String, dynamic> json) {
     return KugouPlaylist(
-      id: _str(json['specialid'] ?? json['id'] ?? json['global_collection_id'] ?? ''),
+      id: _str(
+        json['specialid'] ?? json['id'] ?? json['global_collection_id'] ?? '',
+      ),
       name: _str(json['specialname'] ?? json['name'] ?? ''),
-      coverUrl: _resolveArtworkUri(json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['cover_url']),
+      coverUrl: _resolveArtworkUri(
+        json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['cover_url'],
+      ),
       creator: _strNull(json['nickname'] ?? json['creator']),
-      songCount: _parseInt(json['songcount'] ?? json['song_count'] ?? json['count'] ?? 0),
+      songCount: _parseInt(
+        json['songcount'] ?? json['song_count'] ?? json['count'] ?? 0,
+      ),
       description: _strNull(json['intro'] ?? json['description']),
-      songs: (json['songs'] as List<dynamic>?)
+      songs:
+          (json['songs'] as List<dynamic>?)
               ?.map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
               .toList() ??
           [],
@@ -371,10 +555,7 @@ class KugouCommentList {
   final List<KugouComment> comments;
   final int total;
 
-  const KugouCommentList({
-    this.comments = const [],
-    this.total = 0,
-  });
+  const KugouCommentList({this.comments = const [], this.total = 0});
 
   factory KugouCommentList.fromJson(Map<String, dynamic> json) {
     final data = json['data'] as Map<String, dynamic>? ?? json;
@@ -383,7 +564,9 @@ class KugouCommentList {
       comments: (list as List<dynamic>)
           .map((e) => KugouComment.fromJson(e as Map<String, dynamic>))
           .toList(),
-      total: _parseInt(data['total'] ?? data['count'] ?? data['comment_count'] ?? 0),
+      total: _parseInt(
+        data['total'] ?? data['count'] ?? data['comment_count'] ?? 0,
+      ),
     );
   }
 }
@@ -408,7 +591,9 @@ class KugouComment {
   factory KugouComment.fromJson(Map<String, dynamic> json) {
     return KugouComment(
       id: _str(json['commentid'] ?? json['id'] ?? ''),
-      username: _str(json['user_name'] ?? json['username'] ?? json['nickname'] ?? ''),
+      username: _str(
+        json['user_name'] ?? json['username'] ?? json['nickname'] ?? '',
+      ),
       avatar: _strNull(json['user_pic'] ?? json['user_img'] ?? json['avatar']),
       content: _str(json['content'] ?? json['comment_text'] ?? ''),
       time: _parseInt(json['createtime'] ?? json['time'] ?? 0),
@@ -430,9 +615,15 @@ class KugouLyric {
 
   factory KugouLyric.fromJson(Map<String, dynamic> json) {
     return KugouLyric(
-      content: _str(json['content'] ?? json['lrcContent'] ?? json['lyrics'] ?? ''),
-      decodedContent: _strNull(json['decodeContent'] ?? json['decoded_content'] ?? json['lrcContent']),
-      translatedContent: _strNull(json['translated_content'] ?? json['trans'] ?? json['lrcContentChi']),
+      content: _str(
+        json['content'] ?? json['lrcContent'] ?? json['lyrics'] ?? '',
+      ),
+      decodedContent: _strNull(
+        json['decodeContent'] ?? json['decoded_content'] ?? json['lrcContent'],
+      ),
+      translatedContent: _strNull(
+        json['translated_content'] ?? json['trans'] ?? json['lrcContentChi'],
+      ),
     );
   }
 
@@ -458,10 +649,30 @@ class KugouArtistDetail {
 
   factory KugouArtistDetail.fromJson(Map<String, dynamic> json) {
     return KugouArtistDetail(
-      id: _str(json['singerid'] ?? json['artist_id'] ?? json['AuthorID'] ?? json['id'] ?? ''),
-      name: _str(json['singername'] ?? json['artist_name'] ?? json['SingerName'] ?? json['name'] ?? ''),
-      avatarUrl: _resolveArtworkUri(json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['ImgUrl'] ?? json['avatar_url']),
-      description: _strNull(json['intro'] ?? json['description'] ?? json['desc']),
+      id: _str(
+        json['singerid'] ??
+            json['artist_id'] ??
+            json['AuthorID'] ??
+            json['id'] ??
+            '',
+      ),
+      name: _str(
+        json['singername'] ??
+            json['artist_name'] ??
+            json['SingerName'] ??
+            json['name'] ??
+            '',
+      ),
+      avatarUrl: _resolveArtworkUri(
+        json['imgurl'] ??
+            json['img'] ??
+            json['pic'] ??
+            json['ImgUrl'] ??
+            json['avatar_url'],
+      ),
+      description: _strNull(
+        json['intro'] ?? json['description'] ?? json['desc'],
+      ),
       songCount: _parseInt(json['songcount'] ?? json['song_count'] ?? 0),
       albumCount: _parseInt(json['albumcount'] ?? json['album_count'] ?? 0),
     );
@@ -482,10 +693,7 @@ class KugouArtistAlbums {
   final List<KugouAlbumBrief> albums;
   final int total;
 
-  const KugouArtistAlbums({
-    this.albums = const [],
-    this.total = 0,
-  });
+  const KugouArtistAlbums({this.albums = const [], this.total = 0});
 
   factory KugouArtistAlbums.fromJson(Map<String, dynamic> json) {
     final data = json['data'] as Map<String, dynamic>? ?? json;
@@ -503,10 +711,7 @@ class KugouArtistAudios {
   final List<KugouSongDetail> songs;
   final int total;
 
-  const KugouArtistAudios({
-    this.songs = const [],
-    this.total = 0,
-  });
+  const KugouArtistAudios({this.songs = const [], this.total = 0});
 
   factory KugouArtistAudios.fromJson(Map<String, dynamic> json) {
     final data = json['data'] as Map<String, dynamic>? ?? json;
@@ -541,13 +746,36 @@ class KugouAlbumDetail {
 
   factory KugouAlbumDetail.fromJson(Map<String, dynamic> json) {
     return KugouAlbumDetail(
-      id: _str(json['albumid'] ?? json['album_id'] ?? json['AlbumID'] ?? json['id'] ?? ''),
-      name: _str(json['album_name'] ?? json['AlbumName'] ?? json['albumname'] ?? json['name'] ?? ''),
-      coverUrl: _resolveArtworkUri(json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['cover_url']),
-      artistName: _strNull(json['singername'] ?? json['SingerName'] ?? json['author_name'] ?? json['artist_name']),
-      description: _strNull(json['intro'] ?? json['description'] ?? json['desc']),
+      id: _str(
+        json['albumid'] ??
+            json['album_id'] ??
+            json['AlbumID'] ??
+            json['id'] ??
+            '',
+      ),
+      name: _str(
+        json['album_name'] ??
+            json['AlbumName'] ??
+            json['albumname'] ??
+            json['name'] ??
+            '',
+      ),
+      coverUrl: _resolveArtworkUri(
+        json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['cover_url'],
+      ),
+      artistName: _strNull(
+        json['singername'] ??
+            json['SingerName'] ??
+            json['author_name'] ??
+            json['artist_name'],
+      ),
+      description: _strNull(
+        json['intro'] ?? json['description'] ?? json['desc'],
+      ),
       songCount: _parseInt(json['songcount'] ?? json['song_count'] ?? 0),
-      publishDate: _strNull(json['publishtime'] ?? json['publish_date'] ?? json['PublishDate']),
+      publishDate: _strNull(
+        json['publishtime'] ?? json['publish_date'] ?? json['PublishDate'],
+      ),
     );
   }
 
@@ -566,10 +794,7 @@ class KugouAlbumSongs {
   final List<KugouSongDetail> songs;
   final int total;
 
-  const KugouAlbumSongs({
-    this.songs = const [],
-    this.total = 0,
-  });
+  const KugouAlbumSongs({this.songs = const [], this.total = 0});
 
   factory KugouAlbumSongs.fromJson(Map<String, dynamic> json) {
     final data = json['data'] as Map<String, dynamic>? ?? json;
@@ -596,7 +821,9 @@ class KugouPlaylistCategory {
     final data = json['data'] as Map<String, dynamic>? ?? json;
     return KugouPlaylistCategory(
       hasNext: _parseInt(data['has_next'] ?? json['has_next'] ?? 0) == 1,
-      playlistList: _parsePlList(data['special_list'] ?? data['plist'] ?? data['list'] ?? []),
+      playlistList: _parsePlList(
+        data['special_list'] ?? data['plist'] ?? data['list'] ?? [],
+      ),
     );
   }
 }
@@ -605,10 +832,7 @@ class KugouPlaylistCategoryItem {
   final String id;
   final String name;
 
-  const KugouPlaylistCategoryItem({
-    required this.id,
-    required this.name,
-  });
+  const KugouPlaylistCategoryItem({required this.id, required this.name});
 
   factory KugouPlaylistCategoryItem.fromJson(Map<String, dynamic> json) {
     return KugouPlaylistCategoryItem(
@@ -622,10 +846,7 @@ class KugouPlaylistSongs {
   final List<KugouSongDetail> songs;
   final int total;
 
-  const KugouPlaylistSongs({
-    this.songs = const [],
-    this.total = 0,
-  });
+  const KugouPlaylistSongs({this.songs = const [], this.total = 0});
 
   factory KugouPlaylistSongs.fromJson(Map<String, dynamic> json) {
     final data = json['data'] as Map<String, dynamic>? ?? json;
@@ -640,7 +861,7 @@ class KugouPlaylistSongs {
 }
 
 String _str(dynamic v) => v?.toString() ?? '';
-String? _strNull(dynamic v) => v == null ? null : v.toString();
+String? _strNull(dynamic v) => v?.toString();
 int _parseInt(dynamic v) {
   if (v == null) return 0;
   if (v is int) return v;
@@ -664,7 +885,9 @@ String? _extractFirst(dynamic v) {
 List<KugouPlaylistBrief> _parsePlList(dynamic v) {
   if (v == null) return [];
   if (v is List) {
-    return v.map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>)).toList();
+    return v
+        .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
   return [];
 }
@@ -716,6 +939,15 @@ class KugouQrCheck {
   }
 }
 
+class KugouQuality {
+  KugouQuality._();
+
+  static const String standard = '128';
+  static const String high = '320';
+  static const String lossless = 'flac';
+  static const String master = 'hi-res';
+}
+
 class KugouUserDetail {
   final String? nickname;
   final String? avatar;
@@ -739,6 +971,222 @@ class KugouUserDetail {
       userid: _strNull(data['userid'] ?? data['userId'] ?? data['id']),
       username: _strNull(data['username'] ?? data['name']),
       rawData: data,
+    );
+  }
+}
+
+class KugouUserVipDetail {
+  final String? nickname;
+  final int? vipLevel;
+  final bool isVip;
+  final String? expireTime;
+
+  const KugouUserVipDetail({
+    this.nickname,
+    this.vipLevel,
+    this.isVip = false,
+    this.expireTime,
+  });
+
+  factory KugouUserVipDetail.fromJson(Map<String, dynamic> json) {
+    final data = json['data'] as Map<String, dynamic>? ?? json;
+    final vip = data['vip'] as Map<String, dynamic>? ?? data;
+    return KugouUserVipDetail(
+      nickname: _strNull(data['nickname']),
+      vipLevel: _parseInt(vip['level'] ?? vip['vip_level']),
+      isVip: (vip['status']?.toString() == '1') || (vip['is_vip'] == true),
+      expireTime: _strNull(vip['expire_time'] ?? vip['expireTime']),
+    );
+  }
+}
+
+class KugouSongClimax {
+  final String? climaxStart;
+  final String? climaxEnd;
+  final String? startTime;
+  final String? endTime;
+
+  const KugouSongClimax({
+    this.climaxStart,
+    this.climaxEnd,
+    this.startTime,
+    this.endTime,
+  });
+
+  factory KugouSongClimax.fromJson(Map<String, dynamic> json) {
+    final data = json['data'] as Map<String, dynamic>? ?? json;
+    return KugouSongClimax(
+      climaxStart: _strNull(data['climax_start'] ?? data['climaxStart']),
+      climaxEnd: _strNull(data['climax_end'] ?? data['climaxEnd']),
+      startTime: _strNull(data['start_time'] ?? data['startTime']),
+      endTime: _strNull(data['end_time'] ?? data['endTime']),
+    );
+  }
+}
+
+class KugouSongRanking {
+  final int? rank;
+  final int? score;
+  final String? rankType;
+
+  const KugouSongRanking({this.rank, this.score, this.rankType});
+
+  factory KugouSongRanking.fromJson(Map<String, dynamic> json) {
+    final data = json['data'] as Map<String, dynamic>? ?? json;
+    return KugouSongRanking(
+      rank: _parseInt(data['rank'] ?? data['rankNum']),
+      score: _parseInt(data['score']),
+      rankType: _strNull(data['rank_type'] ?? data['rankType']),
+    );
+  }
+}
+
+class KugouFmInfo {
+  final String id;
+  final String name;
+  final String? coverUrl;
+  final String? desc;
+
+  const KugouFmInfo({
+    required this.id,
+    required this.name,
+    this.coverUrl,
+    this.desc,
+  });
+
+  factory KugouFmInfo.fromJson(Map<String, dynamic> json) {
+    return KugouFmInfo(
+      id: _str(json['id'] ?? json['fm_id'] ?? ''),
+      name: _str(json['name'] ?? json['fm_name'] ?? ''),
+      coverUrl: _resolveArtworkUri(
+        json['img'] ?? json['imgurl'] ?? json['cover'],
+      ),
+      desc: _strNull(json['desc'] ?? json['description']),
+    );
+  }
+}
+
+class KugouSceneInfo {
+  final String id;
+  final String name;
+  final String? coverUrl;
+
+  const KugouSceneInfo({required this.id, required this.name, this.coverUrl});
+
+  factory KugouSceneInfo.fromJson(Map<String, dynamic> json) {
+    return KugouSceneInfo(
+      id: _str(json['id'] ?? json['scene_id'] ?? ''),
+      name: _str(json['name'] ?? json['scene_name'] ?? ''),
+      coverUrl: _resolveArtworkUri(
+        json['img'] ?? json['imgurl'] ?? json['cover'],
+      ),
+    );
+  }
+}
+
+class KugouThemeInfo {
+  final String id;
+  final String name;
+  final String? coverUrl;
+  final int songCount;
+
+  const KugouThemeInfo({
+    required this.id,
+    required this.name,
+    this.coverUrl,
+    this.songCount = 0,
+  });
+
+  factory KugouThemeInfo.fromJson(Map<String, dynamic> json) {
+    return KugouThemeInfo(
+      id: _str(json['id'] ?? json['theme_id'] ?? ''),
+      name: _str(json['name'] ?? json['theme_name'] ?? ''),
+      coverUrl: _resolveArtworkUri(
+        json['img'] ?? json['imgurl'] ?? json['cover'],
+      ),
+      songCount: _parseInt(json['songcount'] ?? json['song_count'] ?? 0),
+    );
+  }
+}
+
+class KugouSheetInfo {
+  final String id;
+  final String name;
+  final String? coverUrl;
+  final int songCount;
+
+  const KugouSheetInfo({
+    required this.id,
+    required this.name,
+    this.coverUrl,
+    this.songCount = 0,
+  });
+
+  factory KugouSheetInfo.fromJson(Map<String, dynamic> json) {
+    return KugouSheetInfo(
+      id: _str(json['id'] ?? json['sheet_id'] ?? json['specialid'] ?? ''),
+      name: _str(
+        json['name'] ?? json['sheet_name'] ?? json['specialname'] ?? '',
+      ),
+      coverUrl: _resolveArtworkUri(
+        json['img'] ?? json['imgurl'] ?? json['cover'],
+      ),
+      songCount: _parseInt(json['songcount'] ?? json['song_count'] ?? 0),
+    );
+  }
+}
+
+class KugouYouthChannel {
+  final String id;
+  final String name;
+  final String? coverUrl;
+  final String? desc;
+
+  const KugouYouthChannel({
+    required this.id,
+    required this.name,
+    this.coverUrl,
+    this.desc,
+  });
+
+  factory KugouYouthChannel.fromJson(Map<String, dynamic> json) {
+    return KugouYouthChannel(
+      id: _str(json['id'] ?? json['channel_id'] ?? json['channelid'] ?? ''),
+      name: _str(
+        json['name'] ?? json['channel_name'] ?? json['channelname'] ?? '',
+      ),
+      coverUrl: _resolveArtworkUri(
+        json['img'] ?? json['imgurl'] ?? json['cover'],
+      ),
+      desc: _strNull(json['desc'] ?? json['description']),
+    );
+  }
+}
+
+class KugouLongAudioAlbum {
+  final String id;
+  final String name;
+  final String? coverUrl;
+  final String? author;
+  final int audioCount;
+
+  const KugouLongAudioAlbum({
+    required this.id,
+    required this.name,
+    this.coverUrl,
+    this.author,
+    this.audioCount = 0,
+  });
+
+  factory KugouLongAudioAlbum.fromJson(Map<String, dynamic> json) {
+    return KugouLongAudioAlbum(
+      id: _str(json['id'] ?? json['album_id'] ?? ''),
+      name: _str(json['name'] ?? json['album_name'] ?? json['title'] ?? ''),
+      coverUrl: _resolveArtworkUri(
+        json['img'] ?? json['imgurl'] ?? json['cover'],
+      ),
+      author: _strNull(json['author'] ?? json['author_name']),
+      audioCount: _parseInt(json['audio_count'] ?? json['audiocount'] ?? 0),
     );
   }
 }

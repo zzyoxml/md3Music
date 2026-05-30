@@ -36,14 +36,6 @@ class ArtistTile extends StatelessWidget {
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
-      subtitle: Text(
-        '${artist.songCount} 首歌曲 · ${artist.albumCount} 张专辑',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
-      ),
       onTap: onTap,
     );
   }

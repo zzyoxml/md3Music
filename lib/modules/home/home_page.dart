@@ -82,7 +82,7 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('EchoMusic'),
+        title: const Text('MD3Music'),
         actions: [
           Consumer<KugouProvider>(
             builder: (context, kugouProvider, child) {
@@ -476,15 +476,6 @@ class _PlaylistHorizontalCard extends StatelessWidget {
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
                               color: colorScheme.onSurface,
-                            ),
-                          ),
-                          Text(
-                            '$songCount 首',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 10,
-                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],

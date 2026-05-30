@@ -4,13 +4,17 @@ import 'package:provider/provider.dart';
 import 'core/layout/responsive_layout.dart';
 import 'core/theme/app_theme.dart';
 import 'data/models/playlist.dart';
-import 'modules/home/home_page.dart';
-import 'modules/library/library_page.dart';
+import 'modules/discover/discover_page.dart';
+import 'modules/charts/charts_page.dart';
+import 'modules/user/user_center_page.dart';
+
 import 'modules/player/full_player.dart';
 import 'modules/player/mini_player.dart';
 import 'modules/playlist/playlist_page.dart';
 import 'modules/search/search_page.dart';
 import 'modules/settings/settings_page.dart';
+import 'modules/library/library_page.dart';
+import 'modules/personal_fm/personal_fm_page.dart';
 import 'providers/kugou_provider.dart';
 import 'providers/library_provider.dart';
 import 'providers/player_provider.dart';
@@ -41,7 +45,7 @@ class _AppView extends StatelessWidget {
     final themeProvider = context.watch<ThemeProvider>();
 
     return MaterialApp(
-      title: 'EchoMusic',
+      title: 'MD3Music',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
@@ -52,15 +56,20 @@ class _AppView extends StatelessWidget {
         '/search': (_) => const SearchPage(),
         '/library': (_) => const LibraryPage(),
         '/settings': (_) => const SettingsPage(),
-        '/playlist': (_) => const PlaylistPage(
-              playlist: Playlist(
-                id: '',
-                name: '',
-                songCount: 0,
-                songs: [],
-              ),
-            ),
         '/player': (_) => const FullPlayer(),
+        '/personal_fm': (_) => const PersonalFmPage(),
+      },
+      onGenerateRoute: (settings) {
+        if (settings.name == '/playlist') {
+          final playlist = settings.arguments as Playlist;
+          return PageRouteBuilder(
+            pageBuilder: (_, _, _) => PlaylistPage(playlist: playlist),
+            transitionsBuilder: (_, animation, _, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+          );
+        }
+        return null;
       },
     );
   }
@@ -77,78 +86,78 @@ class _MainLayoutState extends State<_MainLayout> {
   int _selectedIndex = 0;
 
   final List<Widget> _pages = const [
-    HomePage(),
-    SearchPage(),
-    LibraryPage(),
-    SettingsPage(),
+    DiscoverPage(),
+    ChartsPage(),
+    PersonalFmPage(),
+    UserCenterPage(),
   ];
 
   static const List<NavigationDestination> _destinations = [
     NavigationDestination(
-      icon: Icon(Icons.home_outlined),
-      selectedIcon: Icon(Icons.home),
-      label: '首页',
+      icon: Icon(Icons.explore_outlined),
+      selectedIcon: Icon(Icons.explore),
+      label: '发现',
     ),
     NavigationDestination(
-      icon: Icon(Icons.search_outlined),
-      selectedIcon: Icon(Icons.search),
-      label: '搜索',
+      icon: Icon(Icons.trending_up_outlined),
+      selectedIcon: Icon(Icons.trending_up),
+      label: '排行',
     ),
     NavigationDestination(
-      icon: Icon(Icons.library_music_outlined),
-      selectedIcon: Icon(Icons.library_music),
-      label: '音乐库',
+      icon: Icon(Icons.radio_outlined),
+      selectedIcon: Icon(Icons.radio),
+      label: '私人FM',
     ),
     NavigationDestination(
-      icon: Icon(Icons.settings_outlined),
-      selectedIcon: Icon(Icons.settings),
-      label: '设置',
+      icon: Icon(Icons.person_outlined),
+      selectedIcon: Icon(Icons.person),
+      label: '我的',
     ),
   ];
 
   static const List<NavigationRailDestination> _railDestinations = [
     NavigationRailDestination(
-      icon: Icon(Icons.home_outlined),
-      selectedIcon: Icon(Icons.home),
-      label: Text('首页'),
+      icon: Icon(Icons.explore_outlined),
+      selectedIcon: Icon(Icons.explore),
+      label: Text('发现'),
     ),
     NavigationRailDestination(
-      icon: Icon(Icons.search_outlined),
-      selectedIcon: Icon(Icons.search),
-      label: Text('搜索'),
+      icon: Icon(Icons.trending_up_outlined),
+      selectedIcon: Icon(Icons.trending_up),
+      label: Text('排行'),
     ),
     NavigationRailDestination(
-      icon: Icon(Icons.library_music_outlined),
-      selectedIcon: Icon(Icons.library_music),
-      label: Text('音乐库'),
+      icon: Icon(Icons.radio_outlined),
+      selectedIcon: Icon(Icons.radio),
+      label: Text('私人FM'),
     ),
     NavigationRailDestination(
-      icon: Icon(Icons.settings_outlined),
-      selectedIcon: Icon(Icons.settings),
-      label: Text('设置'),
+      icon: Icon(Icons.person_outlined),
+      selectedIcon: Icon(Icons.person),
+      label: Text('我的'),
     ),
   ];
 
   static const List<NavigationDrawerDestination> _drawerDestinations = [
     NavigationDrawerDestination(
-      icon: Icon(Icons.home_outlined),
-      selectedIcon: Icon(Icons.home),
-      label: Text('首页'),
+      icon: Icon(Icons.explore_outlined),
+      selectedIcon: Icon(Icons.explore),
+      label: Text('发现'),
     ),
     NavigationDrawerDestination(
-      icon: Icon(Icons.search_outlined),
-      selectedIcon: Icon(Icons.search),
-      label: Text('搜索'),
+      icon: Icon(Icons.trending_up_outlined),
+      selectedIcon: Icon(Icons.trending_up),
+      label: Text('排行'),
     ),
     NavigationDrawerDestination(
-      icon: Icon(Icons.library_music_outlined),
-      selectedIcon: Icon(Icons.library_music),
-      label: Text('音乐库'),
+      icon: Icon(Icons.radio_outlined),
+      selectedIcon: Icon(Icons.radio),
+      label: Text('私人FM'),
     ),
     NavigationDrawerDestination(
-      icon: Icon(Icons.settings_outlined),
-      selectedIcon: Icon(Icons.settings),
-      label: Text('设置'),
+      icon: Icon(Icons.person_outlined),
+      selectedIcon: Icon(Icons.person),
+      label: Text('我的'),
     ),
   ];
 
@@ -166,33 +175,25 @@ class _MainLayoutState extends State<_MainLayout> {
       },
       body: Column(
         children: [
-          Expanded(
-            child: _pages[_selectedIndex],
-          ),
+          Expanded(child: _pages[_selectedIndex]),
           const MiniPlayer(),
         ],
       ),
       compactBody: Column(
         children: [
-          Expanded(
-            child: _pages[_selectedIndex],
-          ),
+          Expanded(child: _pages[_selectedIndex]),
           const MiniPlayer(),
         ],
       ),
       mediumBody: Column(
         children: [
-          Expanded(
-            child: _pages[_selectedIndex],
-          ),
+          Expanded(child: _pages[_selectedIndex]),
           const MiniPlayer(),
         ],
       ),
       expandedBody: Column(
         children: [
-          Expanded(
-            child: _pages[_selectedIndex],
-          ),
+          Expanded(child: _pages[_selectedIndex]),
           const MiniPlayer(),
         ],
       ),

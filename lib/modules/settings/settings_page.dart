@@ -15,7 +15,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final SettingsRepository _settingsRepository = SettingsRepository();
   final TextEditingController _apiServerController = TextEditingController(
-    text: 'http://localhost:8080',
+    text: 'http://115.29.236.96:3000',
   );
   ThemeMode _themeMode = ThemeMode.system;
   String _defaultQuality = 'hq';
@@ -24,6 +24,7 @@ class _SettingsPageState extends State<SettingsPage> {
   int _cacheSizeMb = 500;
   bool _isTestingConnection = false;
   String? _connectionResult;
+  bool _autoReceiveVip = true;
 
   @override
   void initState() {
@@ -43,6 +44,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final autoPlay = await _settingsRepository.getAutoPlay();
     final showLyrics = await _settingsRepository.getShowLyrics();
     final cacheSize = await _settingsRepository.getCacheSize();
+    final autoReceiveVip = await _settingsRepository.getAutoReceiveVip();
+    final apiServerUrl = await _settingsRepository.getApiServerUrl();
 
     setState(() {
       _themeMode = themeMode;
@@ -50,7 +53,12 @@ class _SettingsPageState extends State<SettingsPage> {
       _autoPlay = autoPlay;
       _showLyrics = showLyrics;
       _cacheSizeMb = cacheSize;
+      _autoReceiveVip = autoReceiveVip;
+      _apiServerController.text = apiServerUrl;
     });
+
+    final kugouProvider = context.read<KugouProvider>();
+    kugouProvider.setBaseUrl(apiServerUrl);
   }
 
   Future<void> _testConnection() async {
@@ -59,16 +67,19 @@ class _SettingsPageState extends State<SettingsPage> {
       _connectionResult = null;
     });
 
+    final url = _apiServerController.text.trim();
     final kugouProvider = context.read<KugouProvider>();
-    kugouProvider.setBaseUrl(_apiServerController.text.trim());
+    kugouProvider.setBaseUrl(url);
 
     try {
       await kugouProvider.getHotSearch();
+      final success = kugouProvider.error == null;
       setState(() {
-        _connectionResult = kugouProvider.error == null
-            ? '连接成功'
-            : '连接失败: ${kugouProvider.error}';
+        _connectionResult = success ? '连接成功' : '连接失败: ${kugouProvider.error}';
       });
+      if (success) {
+        await _settingsRepository.setApiServerUrl(url);
+      }
     } catch (e) {
       setState(() {
         _connectionResult = '连接失败: $e';
@@ -195,6 +206,17 @@ class _SettingsPageState extends State<SettingsPage> {
             _settingsRepository.setAutoPlay(value);
           },
         ),
+        SwitchListTile(
+          title: const Text('自动领取VIP'),
+          subtitle: const Text('每次启动自动领取每日VIP（需要登录）'),
+          value: _autoReceiveVip,
+          onChanged: (value) {
+            setState(() {
+              _autoReceiveVip = value;
+            });
+            _settingsRepository.setAutoReceiveVip(value);
+          },
+        ),
       ],
     );
   }
@@ -208,7 +230,7 @@ class _SettingsPageState extends State<SettingsPage> {
             controller: _apiServerController,
             decoration: InputDecoration(
               labelText: 'API 服务器地址',
-              hintText: 'http://localhost:8080',
+              hintText: 'http://115.29.236.96:3000',
               border: const OutlineInputBorder(),
               suffixIcon: IconButton(
                 icon: _isTestingConnection
@@ -331,7 +353,7 @@ class _SettingsPageState extends State<SettingsPage> {
           onTap: () {
             showLicensePage(
               context: context,
-              applicationName: 'EchoMusic',
+              applicationName: 'MD3Music',
               applicationVersion: '1.0.0',
             );
           },

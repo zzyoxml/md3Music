@@ -49,7 +49,6 @@ module.exports = (params, useAxios) => {
     encryptType: 'android',
     headers: { 'x-router': 'trackercdn.kugou.com' },
     encryptKey: true,
-    notSign: true,
     cookie: Object.assign({}, { 
       dfid: dfid,
       KUGOU_API_MID: mid,

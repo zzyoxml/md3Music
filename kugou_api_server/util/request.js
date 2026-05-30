@@ -35,10 +35,12 @@ const createRequest = (options) => {
     const mid = `${options?.cookie?.KUGOU_API_MID}`;
     const uuid = '-'; //cryptoMd5(`${dfid}${mid}`); // 可以自定义
     const token = options?.cookie?.token || '';
-    const userid = options?.cookie?.userid || 0;
+    const userid = Number(options?.cookie?.userid || 0);
     const clienttime = Math.floor(Date.now() / 1000);
     const ip = options?.realIP || options?.ip || '';
     const headers = { dfid, clienttime, mid, 'kg-rc': '1', 'kg-thash': '5d816a0', 'kg-rec': 1, 'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F' };
+
+    console.log(`[REQUEST] token=${token ? token.substring(0, 10) + '...' : 'empty'}, userid=${userid}`);
 
     if (ip) {
       headers['X-Real-IP'] = ip;

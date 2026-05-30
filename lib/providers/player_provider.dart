@@ -7,10 +7,16 @@ import '../core/services/audio_service.dart';
 import '../data/models/song.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 
-enum AppLoopMode {
-  off,
-  one,
-  all,
+enum AppLoopMode { off, one, all }
+
+enum AudioQuality {
+  standard('128', '标准音质'),
+  high('320', '高音质'),
+  flac('flac', '无损音质');
+
+  const AudioQuality(this.value, this.label);
+  final String value;
+  final String label;
 }
 
 class PlayerProvider extends ChangeNotifier {
@@ -26,6 +32,7 @@ class PlayerProvider extends ChangeNotifier {
   double _speed = 1.0;
   bool _isResolvingUrl = false;
   String? _resolveError;
+  AudioQuality _audioQuality = AudioQuality.standard;
 
   Song? get currentSong => _currentSong;
   bool get isPlaying => _isPlaying;
@@ -39,6 +46,8 @@ class PlayerProvider extends ChangeNotifier {
   double get speed => _speed;
   bool get isResolvingUrl => _isResolvingUrl;
   String? get resolveError => _resolveError;
+  AudioQuality get audioQuality => _audioQuality;
+  String get audioQualityLabel => _audioQuality.label;
 
   StreamSubscription<Duration>? _positionSubscription;
   StreamSubscription<Duration?>? _durationSubscription;
@@ -49,6 +58,7 @@ class PlayerProvider extends ChangeNotifier {
 
   dynamic _audioService;
   bool _audioInitialized = false;
+  Future<void> Function()? onPlaylistEnd;
 
   PlayerProvider() {
     _initAudioService();
@@ -71,7 +81,7 @@ class PlayerProvider extends ChangeNotifier {
 
   void _initStreams() {
     if (_audioService == null || !_audioInitialized) return;
-    
+
     try {
       _positionSubscription = _audioService.positionStream.listen(
         (position) {
@@ -106,7 +116,8 @@ class PlayerProvider extends ChangeNotifier {
       _playerStateSubscription = _audioService.playerStateStream.listen(
         (playerState) {
           try {
-            if (playerState.processingState == just_audio.ProcessingState.completed) {
+            if (playerState.processingState ==
+                just_audio.ProcessingState.completed) {
               _handlePlaybackCompleted();
             }
           } catch (e) {
@@ -124,10 +135,15 @@ class PlayerProvider extends ChangeNotifier {
             if (sequenceState != null && sequenceState.currentSource != null) {
               final tag = sequenceState.currentSource!.tag;
               if (tag != null) {
-                final effectiveIndex = sequenceState.effectiveSequence.indexOf(sequenceState.currentSource!);
+                final effectiveIndex = sequenceState.effectiveSequence.indexOf(
+                  sequenceState.currentSource!,
+                );
                 if (effectiveIndex >= 0 && effectiveIndex < _playlist.length) {
                   _currentIndex = effectiveIndex;
                   _currentSong = _playlist[effectiveIndex];
+                  if (effectiveIndex >= _playlist.length - 2 && onPlaylistEnd != null) {
+                    onPlaylistEnd!();
+                  }
                   notifyListeners();
                 }
               }
@@ -155,18 +171,24 @@ class PlayerProvider extends ChangeNotifier {
     }
   }
 
-  void _handlePlaybackCompleted() {
+  Future<void> _handlePlaybackCompleted() async {
     if (_loopMode == AppLoopMode.one) {
       seek(Duration.zero);
       _audioService?.play();
-    } else if (_loopMode == AppLoopMode.all && _currentIndex >= _playlist.length - 1) {
-      _currentIndex = 0;
-      if (_playlist.isNotEmpty) {
-        _currentSong = _playlist[0];
+    } else if (_currentIndex >= _playlist.length - 1) {
+      if (onPlaylistEnd != null) {
+        await onPlaylistEnd!();
+      } else if (_loopMode == AppLoopMode.all) {
+        _currentIndex = 0;
+        if (_playlist.isNotEmpty) {
+          _currentSong = _playlist[0];
+        }
+        seek(Duration.zero);
+        _audioService?.play();
+        notifyListeners();
       }
-      seek(Duration.zero);
-      _audioService?.play();
-      notifyListeners();
+    } else {
+      next();
     }
   }
 
@@ -190,39 +212,58 @@ class PlayerProvider extends ChangeNotifier {
   }
 
   Future<void> playOnlineSong(Song song) async {
+    debugPrint('playOnlineSong: START - ${song.title} by ${song.artist}');
     _currentSong = song;
     _playlist = [song];
     _currentIndex = 0;
     _isResolvingUrl = true;
     _resolveError = null;
+    debugPrint('playOnlineSong: notifyListeners() - set initial state');
     notifyListeners();
 
     try {
       final apiClient = KugouApiClient();
+      debugPrint(
+        'playOnlineSong: song=${song.title}, isLoggedIn=${apiClient.isLoggedIn}, token=${apiClient.token?.substring(0, 10) ?? 'null'}, userid=${apiClient.userid}',
+      );
+
       final result = await apiClient.getSongUrl(
         song.id,
+        quality: _audioQuality.value,
         albumId: song.albumId,
         albumAudioId: song.albumAudioId,
       );
 
       if (result != null && result.url.isNotEmpty) {
+        debugPrint(
+          'playOnlineSong: got URL: ${result.url.substring(0, 50)}...',
+        );
         final resolvedSong = song.copyWith(url: result.url);
         _currentSong = resolvedSong;
         _playlist = [resolvedSong];
         _isResolvingUrl = false;
+        debugPrint(
+          'playOnlineSong: notifyListeners() - update with resolved song',
+        );
         notifyListeners();
 
         if (_audioService != null) {
+          debugPrint('playOnlineSong: setting playlist and playing');
           final source = _createAudioSource(resolvedSong);
           await _audioService.setPlaylist([source], startIndex: 0);
           await _audioService.play();
+          debugPrint('playOnlineSong: audio playback started');
+        } else {
+          debugPrint('playOnlineSong: audioService is null');
         }
       } else {
+        debugPrint('playOnlineSong: no URL received');
         _isResolvingUrl = false;
         _resolveError = '无法获取播放链接';
         notifyListeners();
       }
     } catch (e) {
+      debugPrint('playOnlineSong error: $e');
       _isResolvingUrl = false;
       _resolveError = e.toString();
       notifyListeners();
@@ -246,6 +287,7 @@ class PlayerProvider extends ChangeNotifier {
         final apiClient = KugouApiClient();
         final result = await apiClient.getSongUrl(
           _currentSong!.id,
+          quality: _audioQuality.value,
           albumId: _currentSong!.albumId,
           albumAudioId: _currentSong!.albumAudioId,
         );
@@ -258,8 +300,10 @@ class PlayerProvider extends ChangeNotifier {
           notifyListeners();
 
           if (_audioService != null) {
-            final source = _createAudioSource(resolvedSong);
-            await _audioService.setPlaylist([source], startIndex: 0);
+            final sources = _playlist
+                .map((song) => _createAudioSource(song))
+                .toList();
+            await _audioService.setPlaylist(sources, startIndex: startIndex);
             await _audioService.play();
           }
         } else {
@@ -295,6 +339,7 @@ class PlayerProvider extends ChangeNotifier {
       final apiClient = KugouApiClient();
       final result = await apiClient.getSongUrl(
         _currentSong!.id,
+        quality: _audioQuality.value,
         albumId: _currentSong!.albumId,
         albumAudioId: _currentSong!.albumAudioId,
       );
@@ -307,8 +352,10 @@ class PlayerProvider extends ChangeNotifier {
         notifyListeners();
 
         if (_audioService != null) {
-          final source = _createAudioSource(resolvedSong);
-          await _audioService.setPlaylist([source], startIndex: 0);
+          final sources = _playlist
+              .map((song) => _createAudioSource(song))
+              .toList();
+          await _audioService.setPlaylist(sources, startIndex: startIndex);
           await _audioService.play();
         }
       } else {
@@ -327,18 +374,25 @@ class PlayerProvider extends ChangeNotifier {
 
   void _prefetchNextSongs(int startIndex) {
     final prefetchCount = 3;
-    for (int i = startIndex + 1; i < _playlist.length && i <= startIndex + prefetchCount; i++) {
+    for (
+      int i = startIndex + 1;
+      i < _playlist.length && i <= startIndex + prefetchCount;
+      i++
+    ) {
       final song = _playlist[i];
       if (song.isOnline && song.url == null) {
-        KugouApiClient().getSongUrl(
-          song.id,
-          albumId: song.albumId,
-          albumAudioId: song.albumAudioId,
-        ).then((result) {
-          if (result != null && result.url.isNotEmpty) {
-            _playlist[i] = song.copyWith(url: result.url);
-          }
-        });
+        KugouApiClient()
+            .getSongUrl(
+              song.id,
+              quality: _audioQuality.value,
+              albumId: song.albumId,
+              albumAudioId: song.albumAudioId,
+            )
+            .then((result) {
+              if (result != null && result.url.isNotEmpty) {
+                _playlist[i] = song.copyWith(url: result.url);
+              }
+            });
       }
     }
   }
@@ -365,6 +419,7 @@ class PlayerProvider extends ChangeNotifier {
       try {
         final result = await KugouApiClient().getSongUrl(
           _currentSong!.id,
+          quality: _audioQuality.value,
           albumId: _currentSong!.albumId,
           albumAudioId: _currentSong!.albumAudioId,
         );
@@ -387,8 +442,10 @@ class PlayerProvider extends ChangeNotifier {
     notifyListeners();
 
     if (_audioService != null) {
-      final source = _createAudioSource(_currentSong!);
-      await _audioService.setPlaylist([source], startIndex: 0);
+      final sources = _playlist
+          .map((song) => _createAudioSource(song))
+          .toList();
+      await _audioService.setPlaylist(sources, startIndex: _currentIndex);
       await _audioService.play();
     }
     return true;
@@ -412,14 +469,12 @@ class PlayerProvider extends ChangeNotifier {
         return;
       }
 
-      if (!_playlist[nextIndex].isOnline || _playlist[nextIndex].url != null || _loopMode == AppLoopMode.all) {
-        _currentIndex = nextIndex;
-        _currentSong = _playlist[nextIndex];
-        _resolveError = null;
+      _currentIndex = nextIndex;
+      _currentSong = _playlist[nextIndex];
+      _resolveError = null;
 
-        if (await _resolveAndPlayCurrentSong()) return;
-        _resolveError = '无法获取播放链接';
-      }
+      if (await _resolveAndPlayCurrentSong()) return;
+      _resolveError = '无法获取播放链接';
     }
     notifyListeners();
   }
@@ -442,16 +497,41 @@ class PlayerProvider extends ChangeNotifier {
         return;
       }
 
-      if (!_playlist[prevIndex].isOnline || _playlist[prevIndex].url != null || _loopMode == AppLoopMode.all) {
-        _currentIndex = prevIndex;
-        _currentSong = _playlist[prevIndex];
-        _resolveError = null;
+      _currentIndex = prevIndex;
+      _currentSong = _playlist[prevIndex];
+      _resolveError = null;
 
-        if (await _resolveAndPlayCurrentSong()) return;
-        _resolveError = '无法获取播放链接';
+      if (await _resolveAndPlayCurrentSong()) return;
+      _resolveError = '无法获取播放链接';
+    }
+    notifyListeners();
+  }
+
+  Future<void> playSongAt(int index) async {
+    if (index < 0 || index >= _playlist.length) return;
+
+    _currentIndex = index;
+    _currentSong = _playlist[index];
+    _resolveError = null;
+    notifyListeners();
+
+    await _resolveAndPlayCurrentSong();
+  }
+
+  Future<void> appendPlaylist(List<Song> songs) async {
+    final newSongs = <Song>[];
+    for (final song in songs) {
+      if (!_playlist.any((s) => s.id == song.id)) {
+        newSongs.add(song);
+        _playlist.add(song);
       }
     }
     notifyListeners();
+
+    if (newSongs.isNotEmpty && _audioService != null) {
+      final sources = newSongs.map((song) => _createAudioSource(song)).toList();
+      await _audioService.addAllAudioSources(sources);
+    }
   }
 
   Future<void> toggleLoopMode() async {
@@ -487,6 +567,11 @@ class PlayerProvider extends ChangeNotifier {
   Future<void> setSpeed(double speed) async {
     _speed = speed.clamp(0.25, 4.0);
     await _audioService?.setSpeed(_speed);
+    notifyListeners();
+  }
+
+  void setAudioQuality(AudioQuality quality) {
+    _audioQuality = quality;
     notifyListeners();
   }
 

@@ -422,10 +422,14 @@ async function consturctServer(moduleDefs) {
       // 这样客户端可以通过 Authorization 头传递认证信息，例如: token=xxx;userid=xxx
       const authHeader = req.headers['authorization'];
       if (authHeader) {
+        const authCookie = cookieToJson(authHeader);
+        console.log('[AUTH] Authorization header received:', authCookie);
         query.cookie = {
           ...query.cookie,
-          ...cookieToJson(authHeader),
+          ...authCookie,
         };
+      } else {
+        console.log('[AUTH] No Authorization header');
       }
 
       try {
@@ -450,6 +454,20 @@ async function consturctServer(moduleDefs) {
 
         // 请求成功日志
         console.log('[OK]', decode(req.originalUrl));
+        
+        // 调试：记录响应内容，特别是歌曲 URL
+        if (req.path.includes('/song/url')) {
+          console.log('[SONG_URL_RESPONSE]', JSON.stringify(moduleResponse.body));
+          // 额外打印关键信息
+          const body = moduleResponse.body;
+          if (body && body.data) {
+            const data = body.data;
+            console.log('[SONG_URL_DEBUG] url:', data.url ? data.url.substring(0, 50) + '...' : 'null');
+            console.log('[SONG_URL_DEBUG] status:', data.status);
+            console.log('[SONG_URL_DEBUG] fail_process:', data.fail_process);
+            console.log('[SONG_URL_DEBUG] error:', data.error);
+          }
+        }
 
         // Step 6: 处理模块返回的 Cookie
         // 将模块设置的 Cookie 通过 Set-Cookie 响应头写回客户端
@@ -582,8 +600,8 @@ async function consturctServer(moduleDefs) {
  * // PORT=4000 HOST=127.0.0.1 node index.js
  */
 async function startService() {
-  const port = Number(process.env.PORT || '3000');
-  const host = process.env.HOST || '';
+  const port = Number(process.env.PORT || '8080');
+  const host = process.env.HOST || '127.0.0.1';
 
   const app = await consturctServer();
 

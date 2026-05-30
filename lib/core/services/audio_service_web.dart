@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 class AudioService {
@@ -9,6 +8,7 @@ class AudioService {
   AudioService._internal();
 
   final AudioPlayer _player = AudioPlayer();
+  final ConcatenatingAudioSource _playlistSource = ConcatenatingAudioSource(children: []);
 
   AudioPlayer get player => _player;
 
@@ -58,15 +58,24 @@ class AudioService {
   }
 
   Future<void> setPlaylist(List<UriAudioSource> sources, {int startIndex = 0}) async {
-    final playlist = ConcatenatingAudioSource(
-      children: sources,
-      useLazyPreparation: true,
-    );
+    _playlistSource.clear();
+    if (sources.isNotEmpty) {
+      _playlistSource.addAll(sources);
+    }
+    final safeStartIndex = startIndex.clamp(0, sources.isEmpty ? 0 : sources.length - 1);
     await _player.setAudioSource(
-      playlist,
-      initialIndex: startIndex,
+      _playlistSource,
+      initialIndex: safeStartIndex,
       initialPosition: Duration.zero,
     );
+  }
+
+  Future<void> addAudioSource(UriAudioSource source) async {
+    await _playlistSource.add(source);
+  }
+
+  Future<void> addAllAudioSources(List<UriAudioSource> sources) async {
+    await _playlistSource.addAll(sources);
   }
 
   Future<void> setSpeed(double speed) async {

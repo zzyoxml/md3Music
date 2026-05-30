@@ -459,7 +459,6 @@ class _SearchPageState extends State<SearchPage>
                   ),
                 ),
           title: Text(pl.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          subtitle: Text('${pl.songCount} 首'),
           onTap: () {},
         );
       },
