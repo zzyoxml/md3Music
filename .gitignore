@@ -33,6 +33,10 @@ migrate_working_dir/
 /build/
 /coverage/
 
+# Node.js
+node_modules/
+kugou_api_server/node_modules/
+
 # Symbolication related
 app.*.symbols
 

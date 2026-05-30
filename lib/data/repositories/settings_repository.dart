@@ -7,6 +7,18 @@ class SettingsRepository {
   static const String _keyCacheSize = 'settings_cache_size';
   static const String _keyAutoPlay = 'settings_auto_play';
   static const String _keyShowLyrics = 'settings_show_lyrics';
+  static const String _keyAutoReceiveVip = 'settings_auto_receive_vip';
+  static const String _keyApiServerUrl = 'settings_api_server_url';
+
+  Future<String> getApiServerUrl() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyApiServerUrl) ?? 'http://115.29.236.96:3000';
+  }
+
+  Future<void> setApiServerUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyApiServerUrl, url);
+  }
 
   Future<ThemeMode> getThemeMode() async {
     final prefs = await SharedPreferences.getInstance();
@@ -60,5 +72,15 @@ class SettingsRepository {
   Future<void> setShowLyrics(bool showLyrics) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyShowLyrics, showLyrics);
+  }
+
+  Future<bool> getAutoReceiveVip() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyAutoReceiveVip) ?? true;
+  }
+
+  Future<void> setAutoReceiveVip(bool autoReceive) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAutoReceiveVip, autoReceive);
   }
 }
