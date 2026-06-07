@@ -322,8 +322,19 @@ class KugouSongDetail {
             json['duration'] ??
             json['SuperDuration'] ??
             json['timelength'] ??
-            json['timelen'] ??
-            0,
+            (() {
+              final tl = json['timelen'];
+              if (tl != null) return (tl as int) ~/ 1000; // 歌单API的timelen单位为毫秒
+              final ai = json['audio_info'] as Map<String, dynamic>?;
+              if (ai != null) {
+                final d = ai['duration_flac'] as int? ??
+                    ai['duration_320'] as int? ??
+                    ai['duration_high'] as int? ??
+                    ai['duration_128'] as int?;
+                if (d != null) return d ~/ 1000; // 排行榜API单位为毫秒
+              }
+              return null;
+            })(),
       ),
       sqHash: _strNull(
         json['hash_flac'] ??
