@@ -45,6 +45,7 @@ class KugouProvider extends ChangeNotifier {
   List<String> _searchSuggest = [];
   KugouPlayUrl? _songUrl;
   KugouLyric? _lyric;
+  String? _lyricSongId;
   KugouCommentList? _comments;
   KugouPlaylistSongs? _playlistSongs;
   List<KugouSongDetail> _personalFmSongs = [];
@@ -242,16 +243,25 @@ class KugouProvider extends ChangeNotifier {
   Future<void> getLyric(String hash, {String? songName}) async {
     _isLoading = true;
     _error = null;
+    // 先清空旧歌词，避免切换歌曲时残留上首歌的歌词
+    _lyric = null;
+    _lyricSongId = hash;
     notifyListeners();
     try {
       final result = await _apiClient.getLyric(hash, songName: songName);
+      if (_lyricSongId != hash) {
+        // 期间切换了歌曲，丢弃旧结果
+        return;
+      }
       if (result != null) {
         _lyric = result;
       } else {
         _error = '获取歌词失败';
       }
     } catch (e) {
-      _error = e.toString();
+      if (_lyricSongId == hash) {
+        _error = e.toString();
+      }
     }
     _isLoading = false;
     notifyListeners();

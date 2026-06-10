@@ -486,7 +486,7 @@ class _FullPlayerState extends State<FullPlayer>
                 milliseconds: (duration.inMilliseconds * value).round(),
               );
               playerProvider.seek(newPosition);
-              _lyricsKey.currentState?.forceScrollToPosition();
+              _lyricsKey.currentState?.forceScrollToPosition(newPosition);
             },
           ),
         ),

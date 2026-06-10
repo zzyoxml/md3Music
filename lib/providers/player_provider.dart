@@ -412,6 +412,13 @@ class PlayerProvider extends ChangeNotifier {
   }
 
   Future<void> seek(Duration position) async {
+    // 立即更新位置，让 UI（进度条、歌词行高亮、滚动）即时响应
+    // 否则要等 just_audio positionStream 触发，会有一帧的滞后，
+    // 导致拖动 slider 后歌词不跟随。
+    if (_position != position) {
+      _position = position;
+      notifyListeners();
+    }
     await _audioService?.seek(position);
   }
 
@@ -577,8 +584,66 @@ class PlayerProvider extends ChangeNotifier {
   }
 
   void setAudioQuality(AudioQuality quality) {
+    if (_audioQuality == quality) return;
     _audioQuality = quality;
     notifyListeners();
+    _applyQualityToCurrent();
+  }
+
+  Future<void> _applyQualityToCurrent() async {
+    final song = _currentSong;
+    if (song == null || !song.isOnline) return;
+    if (_audioService == null) return;
+
+    final wasPlaying = _audioService!.playing;
+    final savedPosition = _audioService!.position;
+    _isResolvingUrl = true;
+    _resolveError = null;
+    notifyListeners();
+
+    try {
+      final apiClient = KugouApiClient();
+      final result = await apiClient.getSongUrl(
+        song.id,
+        quality: _audioQuality.value,
+        albumId: song.albumId,
+        albumAudioId: song.albumAudioId,
+      );
+
+      if (result == null || result.url.isEmpty) {
+        _isResolvingUrl = false;
+        _resolveError = '无法获取播放链接';
+        notifyListeners();
+        return;
+      }
+
+      final resolvedSong = song.copyWith(url: result.url);
+      _currentSong = resolvedSong;
+      if (_playlist.isNotEmpty && _currentIndex >= 0) {
+        _playlist[_currentIndex] = resolvedSong;
+      } else {
+        _playlist
+          ..clear()
+          ..add(resolvedSong);
+        _currentIndex = 0;
+      }
+      _isResolvingUrl = false;
+      notifyListeners();
+
+      // 重建整个播放队列，仅替换当前歌曲的源，保留其他歌曲的位置
+      final sources = _playlist.map(_createAudioSource).toList();
+      await _audioService!.setPlaylist(sources, startIndex: _currentIndex);
+      if (savedPosition > Duration.zero) {
+        await _audioService!.seek(savedPosition);
+      }
+      if (wasPlaying) {
+        await _audioService!.play();
+      }
+    } catch (e) {
+      _isResolvingUrl = false;
+      _resolveError = e.toString();
+      notifyListeners();
+    }
   }
 
   void _recordHistory(Song song) {
