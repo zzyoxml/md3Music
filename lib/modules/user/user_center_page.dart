@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/kugou_provider.dart';
@@ -22,6 +23,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
       final kugou = context.read<KugouProvider>();
       if (kugou.isLoggedIn) {
         kugou.getVipDetail();
+        kugou.getVipMonthRecord();
         kugou.getUserCloud();
         kugou.getUserHistory();
       }
@@ -39,9 +41,9 @@ class _UserCenterPageState extends State<UserCenterPage> {
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const SettingsPage()),
-            ),
+            onPressed: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const SettingsPage())),
           ),
           Consumer<KugouProvider>(
             builder: (context, kugou, _) => IconButton(
@@ -80,6 +82,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
           return RefreshIndicator(
             onRefresh: () async {
               await kugou.getVipDetail();
+              await kugou.getVipMonthRecord();
               await kugou.getUserCloud();
               await kugou.getUserHistory();
             },
@@ -87,6 +90,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
               slivers: [
                 _buildUserHeader(cs, tt, kugou),
                 _buildVipCard(cs, tt, kugou),
+                _buildVipCalendar(cs, tt, kugou, context),
                 _buildActionGrid(cs),
                 _buildCloudSection(cs, kugou),
                 _buildHistorySection(cs, kugou),
@@ -243,10 +247,6 @@ class _UserCenterPageState extends State<UserCenterPage> {
                   ],
                 ),
               ),
-              FilledButton.tonal(
-                onPressed: () {},
-                child: Text(vip?.isVip == true ? '续费' : '开通'),
-              ),
             ],
           ),
         ),
@@ -373,5 +373,315 @@ class _UserCenterPageState extends State<UserCenterPage> {
         ),
       ),
     );
+  }
+
+  Widget _buildVipCalendar(
+    ColorScheme cs,
+    TextTheme tt,
+    KugouProvider kugou,
+    BuildContext context,
+  ) {
+    final record = kugou.vipMonthRecord;
+    final now = DateTime.now();
+    final curYear = now.year;
+    final curMonth = now.month;
+    final receivedDays = <int>{};
+    if (record != null) {
+      final data = record['data'] as Map<String, dynamic>?;
+      final list = data?['list'] ?? data?['record_list'] ?? record['list'];
+      if (list is List) {
+        for (final item in list) {
+          if (item is Map<String, dynamic>) {
+            final dm = _parseReceivedYearMonthDay(item);
+            if (dm != null && dm.year == curYear && dm.month == curMonth) {
+              receivedDays.add(dm.day);
+            }
+          }
+        }
+      }
+    }
+    final monthLabel = DateFormat('yyyy 年 M 月', 'zh_CN').format(now);
+    final daysInMonth = DateTime(curYear, curMonth + 1, 0).day;
+    // weekday: Mon=1..Sun=7 → 周一开头 0 个前导
+    final leading = DateTime(curYear, curMonth, 1).weekday - 1;
+
+    return SliverToBoxAdapter(
+      child: FadeInUp(
+        delayMs: 80,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildCalendarHeader(cs, tt, monthLabel, kugou, context),
+                  const SizedBox(height: 8),
+                  _buildWeekdayHeader(cs),
+                  const SizedBox(height: 4),
+                  _buildCalendarGrid(
+                    cs,
+                    curYear,
+                    curMonth,
+                    leading,
+                    daysInMonth,
+                    receivedDays,
+                    now,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildStatFooter(cs, tt, receivedDays.length),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCalendarHeader(
+    ColorScheme cs,
+    TextTheme tt,
+    String monthLabel,
+    KugouProvider kugou,
+    BuildContext context,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        children: [
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: const Icon(Icons.chevron_left),
+            color: cs.onSurfaceVariant,
+            onPressed: () {},
+          ),
+          Expanded(
+            child: Text(
+              monthLabel,
+              textAlign: TextAlign.center,
+              style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+            ),
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: const Icon(Icons.chevron_right),
+            color: cs.onSurfaceVariant,
+            onPressed: () {},
+          ),
+          const SizedBox(width: 4),
+          FilledButton.tonalIcon(
+            style: FilledButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              minimumSize: const Size(0, 32),
+              textStyle: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            onPressed: kugou.manualSignInRunning
+                ? null
+                : () => _handleManualSignIn(context, kugou),
+            icon: kugou.manualSignInRunning
+                ? SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: cs.onPrimaryContainer,
+                    ),
+                  )
+                : const Icon(Icons.check_circle_outline, size: 16),
+            label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleManualSignIn(
+    BuildContext context,
+    KugouProvider kugou,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final (ok, msg) = await kugou.manualSignIn();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: ok
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.errorContainer,
+      ),
+    );
+  }
+
+  Widget _buildWeekdayHeader(ColorScheme cs) {
+    const labels = ['一', '二', '三', '四', '五', '六', '日'];
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: labels.map((l) {
+          return Expanded(
+            child: Center(
+              child: Text(
+                l,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: cs.onSurfaceVariant,
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  Widget _buildStatFooter(ColorScheme cs, TextTheme tt, int receivedCount) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Text(
+            '截至目前，你已坚持打卡',
+            style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                '$receivedCount',
+                style: tt.displaySmall?.copyWith(
+                  color: cs.primary,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                '天',
+                style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            '请再接再厉，继续努力',
+            style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCalendarGrid(
+    ColorScheme cs,
+    int year,
+    int month,
+    int leading,
+    int daysInMonth,
+    Set<int> receivedDays,
+    DateTime now,
+  ) {
+    const cellSize = 40.0;
+    final rows = <Widget>[];
+    var cells = <Widget>[];
+
+    void addCell(Widget w) {
+      cells.add(w);
+      if (cells.length == 7) {
+        rows.add(Row(children: cells));
+        cells = [];
+      }
+    }
+
+    for (var i = 0; i < leading; i++) {
+      addCell(const SizedBox(width: cellSize, height: cellSize));
+    }
+    for (var day = 1; day <= daysInMonth; day++) {
+      final isReceived = receivedDays.contains(day);
+      final isToday = day == now.day;
+      addCell(
+        SizedBox(
+          width: cellSize,
+          height: cellSize,
+          child: Center(
+            child: Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: isReceived ? cs.primary : Colors.transparent,
+                border: isToday && !isReceived
+                    ? Border.all(color: cs.primary, width: 1.5)
+                    : null,
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                '$day',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isToday || isReceived
+                      ? FontWeight.w600
+                      : FontWeight.normal,
+                  color: isReceived ? cs.onPrimary : cs.onSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    while (cells.isNotEmpty && cells.length < 7) {
+      addCell(const SizedBox(width: cellSize, height: cellSize));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: rows,
+    );
+  }
+
+  DateTime? _parseReceivedYearMonthDay(Map<String, dynamic> item) {
+    // 实际返回结构: {"day":"2026-06-07","receive_vip":1,"vip_type":"tvip",...}
+    final day = item['day'];
+    if (day is String) {
+      final m = RegExp(r'^(\d{4})[-/](\d{1,2})[-/](\d{1,2})').firstMatch(day);
+      if (m != null) {
+        return DateTime(
+          int.parse(m.group(1)!),
+          int.parse(m.group(2)!),
+          int.parse(m.group(3)!),
+        );
+      }
+    }
+    if (day is int && day > 1000000000) {
+      final ms = day > 1e12 ? day : day * 1000;
+      return DateTime.fromMillisecondsSinceEpoch(ms);
+    }
+    return null;
   }
 }

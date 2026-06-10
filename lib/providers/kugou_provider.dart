@@ -21,7 +21,7 @@ class KugouProvider extends ChangeNotifier {
       debugPrint('自动连接 API 服务器: ${KugouEndpoints.baseUrl}');
       await _apiClient.registerDevice();
       debugPrint('API 连接成功');
-      
+
       if (_apiClient.isLoggedIn) {
         _isLoggedIn = true;
         debugPrint('检测到已保存的登录状态，自动恢复登录');
@@ -70,6 +70,7 @@ class KugouProvider extends ChangeNotifier {
   Map<String, dynamic>? _topAlbumData;
   Map<String, dynamic>? _topSongData;
   KugouUserVipDetail? _vipInfo;
+  Map<String, dynamic>? _vipMonthRecord;
   Map<String, dynamic>? _userCloudData;
   Map<String, dynamic>? _userHistoryData;
   Map<String, dynamic>? _brushData;
@@ -118,6 +119,7 @@ class KugouProvider extends ChangeNotifier {
   Map<String, dynamic>? get topAlbumData => _topAlbumData;
   Map<String, dynamic>? get topSongData => _topSongData;
   KugouUserVipDetail? get vipInfo => _vipInfo;
+  Map<String, dynamic>? get vipMonthRecord => _vipMonthRecord;
   Map<String, dynamic>? get userCloudData => _userCloudData;
   Map<String, dynamic>? get userHistoryData => _userHistoryData;
   Map<String, dynamic>? get brushData => _brushData;
@@ -144,132 +146,238 @@ class KugouProvider extends ChangeNotifier {
   List<Song> get personalFmAsSongs =>
       _personalFmSongs.map((e) => e.toSong()).toList();
 
-  void _setLoading(bool v) { _isLoading = v; notifyListeners(); }
+  void _setLoading(bool v) {
+    _isLoading = v;
+    notifyListeners();
+  }
 
   Future<void> search(String keywords, {String type = 'song'}) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.search(keywords, type: type);
-      if (result != null) { _searchResults = result; }
-      else { _error = '搜索失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      if (result != null) {
+        _searchResults = result;
+      } else {
+        _error = '搜索失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getHotSearch() async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.getHotSearch();
-      if (result != null) { _hotSearchKeywords = result; }
-      else { _error = '获取热搜失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      if (result != null) {
+        _hotSearchKeywords = result;
+      } else {
+        _error = '获取热搜失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getRankList() async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.getRankList();
-      if (result != null) { _rankList = result; }
-      else { _error = '获取排行榜失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      if (result != null) {
+        _rankList = result;
+      } else {
+        _error = '获取排行榜失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getRecommendDaily() async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.getRecommendDaily();
-      if (result != null) { _recommendSongs = result; }
-      else { _error = '获取每日推荐失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      if (result != null) {
+        _recommendSongs = result;
+      } else {
+        _error = '获取每日推荐失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getSongUrl(String hash, {String quality = '128'}) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.getSongUrl(hash, quality: quality);
-      if (result != null) { _songUrl = result; }
-      else { _error = '获取播放链接失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      if (result != null) {
+        _songUrl = result;
+      } else {
+        _error = '获取播放链接失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getLyric(String hash, {String? songName}) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.getLyric(hash, songName: songName);
-      if (result != null) { _lyric = result; }
-      else { _error = '获取歌词失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      if (result != null) {
+        _lyric = result;
+      } else {
+        _error = '获取歌词失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getPlaylistDetail(String ids) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.getPlaylistDetail(ids);
       if (result != null && result.isNotEmpty) {
-        _playlistDetail = KugouPlaylist(id: result.first.id, name: result.first.name, coverUrl: result.first.coverUrl, songCount: result.first.songCount);
-      } else { _error = '获取歌单详情失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+        _playlistDetail = KugouPlaylist(
+          id: result.first.id,
+          name: result.first.name,
+          coverUrl: result.first.coverUrl,
+          songCount: result.first.songCount,
+        );
+      } else {
+        _error = '获取歌单详情失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getComments(String hash, {String? albumAudioId}) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
-      final result = await _apiClient.getComments(hash, albumAudioId: albumAudioId);
-      if (result != null) { _comments = result; }
-      else { _error = '获取评论失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      final result = await _apiClient.getComments(
+        hash,
+        albumAudioId: albumAudioId,
+      );
+      if (result != null) {
+        _comments = result;
+      } else {
+        _error = '获取评论失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getSongDetail(String hash) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       await _apiClient.getSongDetail(hash);
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getArtistDetail(String artistId) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.getArtistDetail(artistId);
-      if (result != null) { _artistDetail = result; }
-      else { _error = '获取歌手详情失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      if (result != null) {
+        _artistDetail = result;
+      } else {
+        _error = '获取歌手详情失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getAlbumDetail(String albumId) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.getAlbumDetail(albumId);
-      if (result != null) { _albumDetail = result; }
-      else { _error = '获取专辑详情失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      if (result != null) {
+        _albumDetail = result;
+      } else {
+        _error = '获取专辑详情失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getSearchSuggest(String keywords) async {
     try {
       final result = await _apiClient.getSearchSuggest(keywords);
-      if (result != null) { _searchSuggest = result; notifyListeners(); }
+      if (result != null) {
+        _searchSuggest = result;
+        notifyListeners();
+      }
     } catch (_) {}
   }
 
   Future<void> getPlaylistSongs(String globalCollectionId) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.getPlaylistSongs(globalCollectionId);
-      if (result != null) { _playlistSongs = result; }
-      else { _error = '获取歌单歌曲失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      if (result != null) {
+        _playlistSongs = result;
+      } else {
+        _error = '获取歌单歌曲失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getPersonalFm({
@@ -279,7 +387,9 @@ class KugouProvider extends ChangeNotifier {
     String? songId,
     String? action,
   }) async {
-    _isLoading = true; _error = null; notifyListeners();
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
       final result = await _apiClient.getPersonalFm(
         mode: mode,
@@ -288,10 +398,16 @@ class KugouProvider extends ChangeNotifier {
         songId: songId,
         action: action,
       );
-      if (result != null) { _personalFmSongs = result; }
-      else { _error = '获取猜你喜欢失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      if (result != null) {
+        _personalFmSongs = result;
+      } else {
+        _error = '获取猜你喜欢失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   void moveToFirst(KugouSongDetail song) {
@@ -314,23 +430,47 @@ class KugouProvider extends ChangeNotifier {
 
   Future<void> getPlaylist({String? categoryId, int page = 1}) async {
     try {
-      final result = await _apiClient.getPlaylist(categoryId: categoryId, page: page);
-      if (result != null) { _playlistCategory = result; _playlistList = result.playlistList; notifyListeners(); }
+      final result = await _apiClient.getPlaylist(
+        categoryId: categoryId,
+        page: page,
+      );
+      if (result != null) {
+        _playlistCategory = result;
+        _playlistList = result.playlistList;
+        notifyListeners();
+      }
     } catch (_) {}
   }
 
-  void setBaseUrl(String url) { _apiClient.setBaseUrl(url); }
-  void clearError() { _error = null; notifyListeners(); }
-  void clearSearchResults() { _searchResults = null; _searchSuggest = []; notifyListeners(); }
+  void setBaseUrl(String url) {
+    _apiClient.setBaseUrl(url);
+  }
+
+  void clearError() {
+    _error = null;
+    notifyListeners();
+  }
+
+  void clearSearchResults() {
+    _searchResults = null;
+    _searchSuggest = [];
+    notifyListeners();
+  }
 
   Future<void> generateQrCode() async {
     try {
       final qrKey = await _apiClient.getLoginQrKey();
       if (qrKey == null || qrKey.qrcode == null) return;
-      _qrKey = qrKey; notifyListeners();
+      _qrKey = qrKey;
+      notifyListeners();
       final qrData = await _apiClient.createLoginQr(qrKey.qrcode!);
-      if (qrData != null) { _qrData = qrData; notifyListeners(); }
-    } catch (e) { debugPrint('Generate QR code error: $e'); }
+      if (qrData != null) {
+        _qrData = qrData;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Generate QR code error: $e');
+    }
   }
 
   Future<int?> checkQrCode() async {
@@ -345,115 +485,282 @@ class KugouProvider extends ChangeNotifier {
         notifyListeners();
       }
       return result.status;
-    } catch (e) { debugPrint('Check QR code error: $e'); return null; }
+    } catch (e) {
+      debugPrint('Check QR code error: $e');
+      return null;
+    }
   }
 
-  Future<void> _fetchUserInfo() async {
+  // 发送手机验证码
+  Future<bool> sendLoginCaptcha(String mobile) async {
+    if (mobile.length != 11) {
+      _error = '请输入11位手机号';
+      notifyListeners();
+      return false;
+    }
+    try {
+      final res = await _apiClient.sendLoginCaptcha(mobile);
+      debugPrint('sendLoginCaptcha response: $res');
+      // 成功: status=1
+      if (res?['status'] == 1) return true;
+      _error = res?['error_msg']?.toString() ?? '发送验证码失败';
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _error = '发送失败: ${e.toString()}';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // 手机号+验证码登录
+  Future<bool> loginByPhone(String mobile, String code) async {
+    try {
+      final res = await _apiClient.loginByCellphone(mobile, code);
+      debugPrint('loginByPhone response: $res');
+      if (res?['status'] == 1) {
+        final data = res?['data'] as Map?;
+        final token = data?['token']?.toString();
+        final userid = data?['userid']?.toString();
+        if (token != null && userid != null) {
+          await _apiClient.setLoginCookies(token, userid);
+          _isLoggedIn = true;
+          await _fetchUserInfo();
+          notifyListeners();
+          return true;
+        }
+      }
+      _error = res?['error_msg']?.toString() ?? '登录失败';
+      notifyListeners();
+      return false;
+    } catch (e) {
+      _error = '登录失败: ${e.toString()}';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> refreshUserInfo() async {
     try {
       final userInfo = await _apiClient.getUserDetail();
-      if (userInfo != null) { _userInfo = userInfo; notifyListeners(); }
-    } catch (e) { debugPrint('Fetch user info error: $e'); }
+      if (userInfo != null) {
+        _userInfo = userInfo;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('Fetch user info error: $e');
+    }
   }
 
+  // 内部调用, 保留为下划线形式仅在类内使用
+  Future<void> _fetchUserInfo() => refreshUserInfo();
+
   void logout() {
-    _isLoggedIn = false; _userInfo = null; _qrKey = null; _qrData = null;
-    _apiClient.clearCookies(); notifyListeners();
+    _isLoggedIn = false;
+    _userInfo = null;
+    _qrKey = null;
+    _qrData = null;
+    _apiClient.clearCookies();
+    notifyListeners();
   }
 
   Future<void> autoReceiveVipIfNeeded() async {
     if (!_isLoggedIn) return;
-    
+
     final settingsRepo = SettingsRepository();
     final autoReceive = await settingsRepo.getAutoReceiveVip();
     if (!autoReceive) {
       debugPrint('autoReceiveVipIfNeeded: 自动领取VIP已禁用');
       return;
     }
-    
+
     try {
       final serverNow = await _apiClient.getServerNow();
       if (serverNow == null) {
         debugPrint('autoReceiveVipIfNeeded: 获取服务器时间失败');
         return;
       }
-      
-      final timestamp = serverNow['timestamp'] as int?;
+
+      final timestamp =
+          (serverNow['data'] as Map?)?['timestamp'] as int? ??
+          serverNow['timestamp'] as int?;
       if (timestamp == null) {
         debugPrint('autoReceiveVipIfNeeded: 服务器时间为空');
         return;
       }
-      
+
       final date = DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
-      final receiveDay = '${date.year}${date.month.toString().padLeft(2, '0')}${date.day.toString().padLeft(2, '0')}';
-      
+      final receiveDay =
+          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
       debugPrint('autoReceiveVipIfNeeded: 尝试领取每日VIP, date=$receiveDay');
-      
+
       try {
         final claimResult = await _apiClient.claimDayVip(receiveDay);
         debugPrint('autoReceiveVipIfNeeded: claimDayVip result=$claimResult');
       } catch (e) {
         debugPrint('autoReceiveVipIfNeeded: claimDayVip failed: $e');
       }
-      
-      try {
-        final upgradeResult = await _apiClient.upgradeDayVip();
-        debugPrint('autoReceiveVipIfNeeded: upgradeDayVip result=$upgradeResult');
-      } catch (e) {
-        debugPrint('autoReceiveVipIfNeeded: upgradeDayVip failed: $e');
-      }
-      
+
       try {
         await _fetchUserInfo();
       } catch (e) {
         debugPrint('autoReceiveVipIfNeeded: fetchUserInfo failed: $e');
+      }
+
+      try {
+        await getVipMonthRecord();
+      } catch (e) {
+        debugPrint('autoReceiveVipIfNeeded: getVipMonthRecord failed: $e');
       }
     } catch (e) {
       debugPrint('autoReceiveVipIfNeeded error: $e');
     }
   }
 
-  Future<void> getRankSongs({required String rankId, int rankCid = 0, int page = 1, int pagesize = 30}) async {
-    _isLoading = true; _error = null; notifyListeners();
+  bool _manualSignInRunning = false;
+  bool get manualSignInRunning => _manualSignInRunning;
+
+  /// 手动签到/领取: 不依赖 autoReceive 开关，强制调 claim + upgrade
+  /// 返回 (success, message)
+  Future<(bool, String)> manualSignIn() async {
+    if (_manualSignInRunning) return (false, '请求进行中');
+    if (!_isLoggedIn) return (false, '请先登录');
+    _manualSignInRunning = true;
+    notifyListeners();
     try {
-      final songs = await _apiClient.getRankAudio(rankId: rankId, rankCid: rankCid, page: page, pagesize: pagesize);
-      if (songs != null) { _rankSongs = songs; } else { _error = '获取排行榜歌曲失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      final serverNow = await _apiClient.getServerNow();
+      final ts =
+          (serverNow?['data'] as Map?)?['timestamp'] as int? ??
+          serverNow?['timestamp'] as int?;
+      if (ts == null) return (false, '获取服务器时间失败');
+      final date = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+      final receiveDay =
+          '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+      final claim = await _apiClient.claimDayVip(receiveDay);
+
+      try {
+        await _fetchUserInfo();
+        await getVipMonthRecord();
+      } catch (_) {}
+
+      final claimOk = claim?['status'] == 1;
+      if (claimOk) {
+        return (true, '签到成功');
+      } else {
+        final err = claim?['error_msg']?.toString() ?? '签到失败';
+        return (false, err);
+      }
+    } catch (e) {
+      debugPrint('manualSignIn error: $e');
+      return (false, '网络异常: $e');
+    } finally {
+      _manualSignInRunning = false;
+      notifyListeners();
+    }
   }
 
-  Future<void> getPlaylistTrackAll({required String id, int page = 1, int pagesize = 30}) async {
-    _isLoading = true; _error = null; notifyListeners();
+  Future<void> getRankSongs({
+    required String rankId,
+    int rankCid = 0,
+    int page = 1,
+    int pagesize = 30,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
     try {
-      final songs = await _apiClient.getPlaylistTrackAll(id: id, page: page, pagesize: pagesize);
-      if (songs != null) { _currentPlaylistSongs = songs; } else { _error = '获取歌单歌曲失败'; }
-    } catch (e) { _error = e.toString(); }
-    _isLoading = false; notifyListeners();
+      final songs = await _apiClient.getRankAudio(
+        rankId: rankId,
+        rankCid: rankCid,
+        page: page,
+        pagesize: pagesize,
+      );
+      if (songs != null) {
+        _rankSongs = songs;
+      } else {
+        _error = '获取排行榜歌曲失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
+  }
+
+  Future<void> getPlaylistTrackAll({
+    required String id,
+    int page = 1,
+    int pagesize = 30,
+  }) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+    try {
+      final songs = await _apiClient.getPlaylistTrackAll(
+        id: id,
+        page: page,
+        pagesize: pagesize,
+      );
+      if (songs != null) {
+        _currentPlaylistSongs = songs;
+      } else {
+        _error = '获取歌单歌曲失败';
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   // ==================== Yueku (乐库) ====================
 
   Future<void> getYueku() async {
     _setLoading(true);
-    try { final r = await _apiClient.getYueku(); if (r != null) { _yuekuData = r; } } catch (_) {}
+    try {
+      final r = await _apiClient.getYueku();
+      if (r != null) {
+        _yuekuData = r;
+      }
+    } catch (_) {}
     _setLoading(false);
   }
 
   Future<void> getYuekuBanner() async {
-    try { final r = await _apiClient.getYuekuBanner(); if (r != null) { _yuekuBanner = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getYuekuBanner();
+      if (r != null) {
+        _yuekuBanner = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   // ==================== Scene (场景) ====================
 
   Future<void> getSceneMusic() async {
     _setLoading(true);
-    try { final r = await _apiClient.getSceneMusic(); if (r != null) { _sceneData = r; } } catch (_) {}
+    try {
+      final r = await _apiClient.getSceneMusic();
+      if (r != null) {
+        _sceneData = r;
+      }
+    } catch (_) {}
     _setLoading(false);
   }
 
   // ==================== Theme (主题) ====================
 
   Future<void> getThemeMusic() async {
-    try { final r = await _apiClient.getThemeMusic(); if (r != null) { _themeMusicData = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getThemeMusic();
+      if (r != null) {
+        _themeMusicData = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   Future<void> getThemePlaylist() async {
@@ -462,7 +769,9 @@ class KugouProvider extends ChangeNotifier {
       if (r != null) {
         final data = r['data'] as Map<String, dynamic>? ?? r;
         final list = data['list'] ?? data['info'] ?? [];
-        _themePlaylistData = (list as List).map((e) => KugouThemeInfo.fromJson(e as Map<String, dynamic>)).toList();
+        _themePlaylistData = (list as List)
+            .map((e) => KugouThemeInfo.fromJson(e as Map<String, dynamic>))
+            .toList();
         notifyListeners();
       }
     } catch (_) {}
@@ -471,13 +780,25 @@ class KugouProvider extends ChangeNotifier {
   // ==================== IP (编辑精选) ====================
 
   Future<void> getIpHome() async {
-    try { final r = await _apiClient.getIpHome(); if (r != null) { _ipHomeData = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getIpHome();
+      if (r != null) {
+        _ipHomeData = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   // ==================== FM (电台) ====================
 
   Future<void> getFmRecommend() async {
-    try { final r = await _apiClient.getFmRecommend(); if (r != null) { _fmRecommendData = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getFmRecommend();
+      if (r != null) {
+        _fmRecommendData = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   Future<void> getFmClass() async {
@@ -486,7 +807,9 @@ class KugouProvider extends ChangeNotifier {
       if (r != null) {
         final data = r['data'] as Map<String, dynamic>? ?? r;
         final list = data['list'] ?? data['info'] ?? [];
-        _fmClassList = (list as List).map((e) => KugouFmInfo.fromJson(e as Map<String, dynamic>)).toList();
+        _fmClassList = (list as List)
+            .map((e) => KugouFmInfo.fromJson(e as Map<String, dynamic>))
+            .toList();
         notifyListeners();
       }
     } catch (_) {}
@@ -500,7 +823,9 @@ class KugouProvider extends ChangeNotifier {
       if (r != null) {
         final data = r['data'] as Map<String, dynamic>? ?? r;
         final list = data['list'] ?? data['info'] ?? [];
-        _sheetExploreList = (list as List).map((e) => KugouSheetInfo.fromJson(e as Map<String, dynamic>)).toList();
+        _sheetExploreList = (list as List)
+            .map((e) => KugouSheetInfo.fromJson(e as Map<String, dynamic>))
+            .toList();
         notifyListeners();
       }
     } catch (_) {}
@@ -509,17 +834,35 @@ class KugouProvider extends ChangeNotifier {
   // ==================== Everyday (每日) ====================
 
   Future<void> getEverydayHistory() async {
-    try { final r = await _apiClient.getEverydayHistory(); if (r != null) { _everydayHistory = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getEverydayHistory();
+      if (r != null) {
+        _everydayHistory = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   // ==================== Top (排行) ====================
 
   Future<void> getTopAlbum({int page = 1}) async {
-    try { final r = await _apiClient.getTopAlbum(page: page); if (r != null) { _topAlbumData = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getTopAlbum(page: page);
+      if (r != null) {
+        _topAlbumData = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   Future<void> getTopSong({int page = 1}) async {
-    try { final r = await _apiClient.getTopSong(page: page); if (r != null) { _topSongData = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getTopSong(page: page);
+      if (r != null) {
+        _topSongData = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   // ==================== User (用户) ====================
@@ -527,16 +870,44 @@ class KugouProvider extends ChangeNotifier {
   Future<void> getVipDetail() async {
     try {
       final r = await _apiClient.getUserVipDetail();
-      if (r != null) { _vipInfo = r; notifyListeners(); }
+      if (r != null) {
+        _vipInfo = r;
+        notifyListeners();
+      }
     } catch (_) {}
   }
 
+  Future<void> getVipMonthRecord() async {
+    try {
+      final r = await _apiClient.getYouthMonthVipRecord();
+      debugPrint('[VIP-DEBUG] monthVipRecord raw: $r');
+      if (r != null) {
+        _vipMonthRecord = r;
+        notifyListeners();
+      }
+    } catch (e) {
+      debugPrint('[VIP-DEBUG] monthVipRecord error: $e');
+    }
+  }
+
   Future<void> getUserCloud({int page = 1}) async {
-    try { final r = await _apiClient.getUserCloud(page: page); if (r != null) { _userCloudData = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getUserCloud(page: page);
+      if (r != null) {
+        _userCloudData = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   Future<void> getUserHistory() async {
-    try { final r = await _apiClient.getUserHistory(); if (r != null) { _userHistoryData = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getUserHistory();
+      if (r != null) {
+        _userHistoryData = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   // ==================== Youth (频道) ====================
@@ -547,7 +918,9 @@ class KugouProvider extends ChangeNotifier {
       if (r != null) {
         final data = r['data'] as Map<String, dynamic>? ?? r;
         final list = data['list'] ?? data['info'] ?? data['channels'] ?? [];
-        _youthChannels = (list as List).map((e) => KugouYouthChannel.fromJson(e as Map<String, dynamic>)).toList();
+        _youthChannels = (list as List)
+            .map((e) => KugouYouthChannel.fromJson(e as Map<String, dynamic>))
+            .toList();
         notifyListeners();
       }
     } catch (_) {}
@@ -556,7 +929,13 @@ class KugouProvider extends ChangeNotifier {
   // ==================== Long Audio (听书) ====================
 
   Future<void> getLongaudioDaily() async {
-    try { final r = await _apiClient.getLongaudioDaily(); if (r != null) { _longAudioData = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getLongaudioDaily();
+      if (r != null) {
+        _longAudioData = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   Future<void> getLongaudioRank() async {
@@ -565,7 +944,9 @@ class KugouProvider extends ChangeNotifier {
       if (r != null) {
         final data = r['data'] as Map<String, dynamic>? ?? r;
         final list = data['list'] ?? data['info'] ?? [];
-        _longAudioAlbums = (list as List).map((e) => KugouLongAudioAlbum.fromJson(e as Map<String, dynamic>)).toList();
+        _longAudioAlbums = (list as List)
+            .map((e) => KugouLongAudioAlbum.fromJson(e as Map<String, dynamic>))
+            .toList();
         notifyListeners();
       }
     } catch (_) {}
@@ -574,17 +955,35 @@ class KugouProvider extends ChangeNotifier {
   // ==================== Brush & AI ====================
 
   Future<void> getBrush() async {
-    try { final r = await _apiClient.getBrush(); if (r != null) { _brushData = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getBrush();
+      if (r != null) {
+        _brushData = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   Future<void> getAiRecommend() async {
-    try { final r = await _apiClient.getAiRecommend(); if (r != null) { _aiRecommendData = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getAiRecommend();
+      if (r != null) {
+        _aiRecommendData = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   // ==================== Server ====================
 
   Future<void> getServerNow() async {
-    try { final r = await _apiClient.getServerNow(); if (r != null) { _serverNow = r; notifyListeners(); } } catch (_) {}
+    try {
+      final r = await _apiClient.getServerNow();
+      if (r != null) {
+        _serverNow = r;
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   // ==================== Recommend Songs ====================
@@ -593,8 +992,12 @@ class KugouProvider extends ChangeNotifier {
     _setLoading(true);
     try {
       final result = await _apiClient.getRecommendSongs();
-      if (result != null) { _recommendSongs = result; }
-    } catch (e) { _error = e.toString(); }
+      if (result != null) {
+        _recommendSongs = result;
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
     _setLoading(false);
   }
 }

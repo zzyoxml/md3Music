@@ -56,10 +56,12 @@ class KugouApiClient {
     if (_token != null && _userid != null) {
       options.headers['Authorization'] = 'token=$_token;userid=$_userid';
       debugPrint(
-        'Request: ${options.path} with token=$_token, userid=$_userid',
+        'Request: ${options.path} with token=${_token!.substring(0, 10)}..., userid=$_userid',
       );
     } else {
-      debugPrint('Request: ${options.path} without login credentials');
+      debugPrint(
+        'Request: ${options.path} without login credentials (token=${_token == null}, userid=${_userid == null})',
+      );
     }
     if (_dfid != null) {
       options.queryParameters['dfid'] = _dfid;
@@ -1236,6 +1238,38 @@ class KugouApiClient {
     return await _get(KugouEndpoints.loginToken, queryParameters: params);
   }
 
+  // 发送手机验证码
+  Future<Map<String, dynamic>?> sendLoginCaptcha(String mobile) async {
+    return await _get(
+      KugouEndpoints.captchaSent,
+      queryParameters: {'mobile': mobile},
+    );
+  }
+
+  // 开放平台登录 (微信 code 换取酷狗 token)
+  Future<Map<String, dynamic>?> loginByOpenplat(String code) async {
+    return await _get(
+      KugouEndpoints.loginOpenplat,
+      queryParameters: {'code': code},
+    );
+  }
+
+  // 微信扫码 - 生成 uuid + 二维码
+  Future<Map<String, dynamic>?> createLoginWx() async {
+    return await _get(KugouEndpoints.loginWxCreate);
+  }
+
+  // 微信扫码 - 轮询状态
+  Future<Map<String, dynamic>?> checkLoginWx(String uuid) async {
+    return await _get(
+      KugouEndpoints.loginWxCheck,
+      queryParameters: {
+        'uuid': uuid,
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      },
+    );
+  }
+
   Future<bool> _tryRefreshToken() async {
     if (_token == null || _userid == null) return false;
     try {
@@ -1716,6 +1750,9 @@ class KugouApiClient {
   }
 
   Future<Map<String, dynamic>?> claimDayVip(String receiveDay) async {
+    debugPrint(
+      '[VIP-DEBUG] claimDayVip called, _token=${_token?.substring(0, 10) ?? "null"}, _userid=$_userid',
+    );
     return await _post(
       KugouEndpoints.youthDayVip,
       data: {'receive_day': receiveDay},
@@ -1723,6 +1760,9 @@ class KugouApiClient {
   }
 
   Future<Map<String, dynamic>?> upgradeDayVip() async {
+    debugPrint(
+      '[VIP-DEBUG] upgradeDayVip called, _token=${_token?.substring(0, 10) ?? "null"}, _userid=$_userid',
+    );
     return await _post(KugouEndpoints.youthDayVipUpgrade);
   }
 
