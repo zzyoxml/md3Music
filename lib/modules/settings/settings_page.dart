@@ -21,7 +21,6 @@ class _SettingsPageState extends State<SettingsPage> {
   String _defaultQuality = 'hq';
   bool _autoPlay = true;
   bool _showLyrics = true;
-  int _cacheSizeMb = 500;
   bool _isTestingConnection = false;
   String? _connectionResult;
   bool _autoReceiveVip = true;
@@ -43,7 +42,6 @@ class _SettingsPageState extends State<SettingsPage> {
     final quality = await _settingsRepository.getDefaultQuality();
     final autoPlay = await _settingsRepository.getAutoPlay();
     final showLyrics = await _settingsRepository.getShowLyrics();
-    final cacheSize = await _settingsRepository.getCacheSize();
     final autoReceiveVip = await _settingsRepository.getAutoReceiveVip();
     final apiServerUrl = await _settingsRepository.getApiServerUrl();
 
@@ -52,7 +50,6 @@ class _SettingsPageState extends State<SettingsPage> {
       _defaultQuality = quality;
       _autoPlay = autoPlay;
       _showLyrics = showLyrics;
-      _cacheSizeMb = cacheSize;
       _autoReceiveVip = autoReceiveVip;
       _apiServerController.text = apiServerUrl;
     });
@@ -329,7 +326,6 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildCacheSection(ColorScheme colorScheme) {
     return Column(
       children: [
-        ListTile(title: const Text('缓存大小'), subtitle: Text('$_cacheSizeMb MB')),
         ListTile(
           title: const Text('清除缓存'),
           leading: Icon(Icons.delete_outline, color: colorScheme.error),
@@ -432,9 +428,6 @@ class _SettingsPageState extends State<SettingsPage> {
             TextButton(
               onPressed: () {
                 _settingsRepository.setCacheSize(0);
-                setState(() {
-                  _cacheSizeMb = 0;
-                });
                 Navigator.pop(context);
               },
               child: const Text('确定'),

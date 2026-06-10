@@ -87,6 +87,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
               slivers: [
                 _buildUserHeader(cs, tt, kugou),
                 _buildVipCard(cs, tt, kugou),
+                const SliverToBoxAdapter(child: SizedBox(height: 16)),
                 _buildVipCalendar(cs, tt, kugou, context),
                 _buildActionGrid(cs),
                 const SliverToBoxAdapter(child: SizedBox(height: 80)),
