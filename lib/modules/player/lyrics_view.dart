@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 class LyricsView extends StatefulWidget {
@@ -18,17 +20,77 @@ class LyricsView extends StatefulWidget {
 
 class LyricsViewState extends State<LyricsView> {
   final ScrollController _scrollController = ScrollController();
-  final Map<int, GlobalKey> _lineKeys = {};
   List<_LyricLine> _parsedLyrics = [];
   int _currentLineIndex = -1;
-  bool _isUserScrolling = false;
-  DateTime? _userScrollEndTime;
   bool _forceScroll = false;
 
-  void forceScrollToPosition() {
-    _isUserScrolling = false;
+  // 用户是否正在触摸歌词列表（手指按下状态）
+  bool _userTouching = false;
+  // 用户松手后，延迟恢复自动滚动的定时器
+  Timer? _resumeAutoScrollTimer;
+
+  // 每行歌词固定高度
+  static const double _lineHeight = 48.0;
+  // ListView 顶部 padding
+  static const double _topPadding = 100.0;
+
+  void forceScrollToPosition([Duration? target]) {
+    _cancelResumeTimer();
+    _userTouching = false;
     _forceScroll = true;
+    if (target != null) {
+      _scrollToTargetPosition(target);
+      return;
+    }
     _updateCurrentLine();
+  }
+
+  void _scrollToTargetPosition(Duration target) {
+    if (_parsedLyrics.isEmpty) return;
+    final newIndex = _findLineIndex(target);
+    _currentLineIndex = newIndex;
+    if (mounted) {
+      setState(() {});
+      _forceScroll = false;
+      if (newIndex >= 0) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _scrollToLine(newIndex, jump: true);
+        });
+      }
+    }
+  }
+
+  int _findLineIndex(Duration position) {
+    int index = -1;
+    for (int i = 0; i < _parsedLyrics.length; i++) {
+      if (position >= _parsedLyrics[i].timestamp) {
+        index = i;
+      } else {
+        break;
+      }
+    }
+    return index;
+  }
+
+  void _cancelResumeTimer() {
+    _resumeAutoScrollTimer?.cancel();
+    _resumeAutoScrollTimer = null;
+  }
+
+  void _onPointerDown(PointerDownEvent _) {
+    _cancelResumeTimer();
+    _userTouching = true;
+  }
+
+  void _onPointerUp(PointerUpEvent _) {
+    _cancelResumeTimer();
+    _resumeAutoScrollTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) {
+        _userTouching = false;
+        _forceScroll = true;
+        _updateCurrentLine();
+      }
+    });
   }
 
   @override
@@ -51,62 +113,75 @@ class LyricsViewState extends State<LyricsView> {
 
   @override
   void dispose() {
+    _cancelResumeTimer();
     _scrollController.dispose();
     super.dispose();
   }
 
   void _parseLyrics() {
     _parsedLyrics = [];
-    _lineKeys.clear();
     if (widget.lyrics.isEmpty) return;
 
     final lines = widget.lyrics.split('\n');
-    final regex = RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)');
+    // LRC 格式: [mm:ss.fff]text
+    final lrcRegex = RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)');
+    // KRC 行首: [start_ms,duration_ms]  后跟 <offset,duration[,property]>word
+    final krcLineRegex = RegExp(r'^\[(\d+),(\d+)\](.*)$');
+    // KRC 词时间标签：<offset,duration> 或 <offset,duration,property>
+    final krcWordTag = RegExp(r'<(-?\d+),(-?\d+)(?:,-?\d+)?>');
 
-    for (final line in lines) {
-      final match = regex.firstMatch(line.trim());
-      if (match != null) {
-        final minutes = int.parse(match.group(1)!);
-        final seconds = int.parse(match.group(2)!);
-        final millisStr = match.group(3)!;
+    for (final raw in lines) {
+      final line = raw.trim();
+      if (line.isEmpty) continue;
+
+      final lrcMatch = lrcRegex.firstMatch(line);
+      if (lrcMatch != null) {
+        final minutes = int.parse(lrcMatch.group(1)!);
+        final seconds = int.parse(lrcMatch.group(2)!);
+        final millisStr = lrcMatch.group(3)!;
         final millis = millisStr.length == 2
             ? int.parse(millisStr) * 10
             : int.parse(millisStr);
-        final text = match.group(4)?.trim() ?? '';
-        final timestamp = Duration(
-          minutes: minutes,
-          seconds: seconds,
-          milliseconds: millis,
+        final text = lrcMatch.group(4)?.trim() ?? '';
+        _parsedLyrics.add(
+          _LyricLine(
+            timestamp: Duration(
+              milliseconds: minutes * 60000 + seconds * 1000 + millis,
+            ),
+            text: text,
+          ),
         );
-        _parsedLyrics.add(_LyricLine(timestamp: timestamp, text: text));
+        continue;
+      }
+
+      final krcMatch = krcLineRegex.firstMatch(line);
+      if (krcMatch != null) {
+        final startMs = int.parse(krcMatch.group(1)!);
+        final body = krcMatch.group(3) ?? '';
+        final text = body.replaceAll(krcWordTag, '').trim();
+        if (text.isEmpty) continue;
+        _parsedLyrics.add(
+          _LyricLine(
+            timestamp: Duration(milliseconds: startMs),
+            text: text,
+          ),
+        );
       }
     }
 
     _parsedLyrics.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
-    for (int i = 0; i < _parsedLyrics.length; i++) {
-      _lineKeys[i] = GlobalKey();
-    }
   }
 
   void _updateCurrentLine() {
     if (_parsedLyrics.isEmpty) return;
 
-    int newIndex = -1;
-    for (int i = 0; i < _parsedLyrics.length; i++) {
-      if (widget.position >= _parsedLyrics[i].timestamp) {
-        newIndex = i;
-      } else {
-        break;
-      }
-    }
-
+    final newIndex = _findLineIndex(widget.position);
     final shouldScroll = _forceScroll || (newIndex != _currentLineIndex);
     _currentLineIndex = newIndex;
 
     if (mounted) {
       setState(() {});
-      if (shouldScroll && !_isUserScrolling && newIndex >= 0) {
+      if (shouldScroll && !_userTouching && newIndex >= 0) {
         _forceScroll = false;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _scrollToLine(newIndex);
@@ -117,19 +192,23 @@ class LyricsViewState extends State<LyricsView> {
     }
   }
 
-  void _scrollToLine(int index) {
+  /// 用直接偏移量计算滚动，不依赖 Scrollable.ensureVisible
+  /// （ensureVisible 会冒泡到 TabBarView 的 PageView，破坏滚动状态）
+  void _scrollToLine(int index, {bool jump = false}) {
     if (!_scrollController.hasClients) return;
+    final viewportHeight = _scrollController.position.viewportDimension;
+    if (viewportHeight <= 0) return;
 
-    final key = _lineKeys[index];
-    if (key?.currentContext != null) {
-      final RenderBox renderBox =
-          key!.currentContext!.findRenderObject() as RenderBox;
-      final scrollOffset = renderBox.localToGlobal(Offset.zero).dy;
-      final viewportHeight = _scrollController.position.viewportDimension;
-      final targetOffset =
-          _scrollController.offset + scrollOffset - (viewportHeight / 2.5);
+    final targetOffset =
+        _topPadding + index * _lineHeight - viewportHeight * 0.4;
+    final clampedOffset =
+        targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent);
+
+    if (jump) {
+      _scrollController.jumpTo(clampedOffset);
+    } else {
       _scrollController.animateTo(
-        targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+        clampedOffset,
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeOut,
       );
@@ -139,14 +218,9 @@ class LyricsViewState extends State<LyricsView> {
   void _onLineTap(int index) {
     if (index < _parsedLyrics.length) {
       widget.onSeek(_parsedLyrics[index].timestamp);
-      _isUserScrolling = false;
+      _cancelResumeTimer();
+      _userTouching = false;
     }
-  }
-
-  bool get _isUserScrollActive {
-    if (_userScrollEndTime == null) return false;
-    return DateTime.now().difference(_userScrollEndTime!) <
-        const Duration(seconds: 4);
   }
 
   @override
@@ -175,36 +249,22 @@ class LyricsViewState extends State<LyricsView> {
       );
     }
 
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        if (notification is UserScrollNotification) {
-          if (notification.direction.index != 0) {
-            _isUserScrolling = true;
-            _userScrollEndTime = null;
-          } else {
-            _userScrollEndTime = DateTime.now();
-            Future.delayed(const Duration(seconds: 4), () {
-              if (mounted && !_isUserScrollActive) {
-                _isUserScrolling = false;
-              }
-            });
-          }
-        }
-        return false;
-      },
+    return Listener(
+      onPointerDown: _onPointerDown,
+      onPointerUp: _onPointerUp,
+      onPointerCancel: (_) => _onPointerUp(PointerUpEvent()),
       child: ListView.builder(
         controller: _scrollController,
-        padding: const EdgeInsets.symmetric(vertical: 100, horizontal: 24),
+        padding: const EdgeInsets.symmetric(vertical: _topPadding, horizontal: 24),
         itemCount: _parsedLyrics.length,
         itemBuilder: (context, index) {
           final isCurrent = index == _currentLineIndex;
           final line = _parsedLyrics[index];
 
           return GestureDetector(
-            key: _lineKeys[index],
             onTap: () => _onLineTap(index),
             child: Container(
-              height: 48,
+              height: _lineHeight,
               alignment: Alignment.center,
               child: AnimatedDefaultTextStyle(
                 duration: const Duration(milliseconds: 200),

@@ -514,7 +514,7 @@ class KugouApiClient {
     String hash, {
     String? accesskey,
     String? songName,
-    String fmt = 'lrc',
+    String fmt = 'krc',
     bool decode = true,
   }) async {
     String? lyricId;
@@ -558,7 +558,7 @@ class KugouApiClient {
 
     final params = <String, dynamic>{
       'id': lyricId,
-      'fmt': 'lrc',
+      'fmt': fmt,
       'decode': decode.toString(),
     };
     if (lyricAccesskey != null) params['accesskey'] = lyricAccesskey;
