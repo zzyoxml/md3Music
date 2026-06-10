@@ -327,7 +327,8 @@ class KugouSongDetail {
               if (tl != null) return (tl as int) ~/ 1000; // 歌单API的timelen单位为毫秒
               final ai = json['audio_info'] as Map<String, dynamic>?;
               if (ai != null) {
-                final d = ai['duration_flac'] as int? ??
+                final d =
+                    ai['duration_flac'] as int? ??
                     ai['duration_320'] as int? ??
                     ai['duration_high'] as int? ??
                     ai['duration_128'] as int?;
@@ -384,7 +385,9 @@ class KugouSongDetail {
       ),
       privilege: _parseInt(json['privilege'] ?? 0),
       albumAudioId2: _strNull(json['album_audio_id']),
-      songId: _strNull(json['songid'] ?? json['song_id'] ?? json['SongId'] ?? json['SongID']),
+      songId: _strNull(
+        json['songid'] ?? json['song_id'] ?? json['SongId'] ?? json['SongID'],
+      ),
     );
   }
 
@@ -1001,12 +1004,36 @@ class KugouUserVipDetail {
 
   factory KugouUserVipDetail.fromJson(Map<String, dynamic> json) {
     final data = json['data'] as Map<String, dynamic>? ?? json;
-    final vip = data['vip'] as Map<String, dynamic>? ?? data;
+
+    // 实际结构: data.is_vip (总开关), data.busi_vip[] (各业务线, 含 product_type, vip_end_time)
+    final busiList = data['busi_vip'];
+    bool isVip = data['is_vip'] == 1;
+    String? expireTime;
+    if (busiList is List) {
+      DateTime? latest;
+      for (final b in busiList) {
+        if (b is Map<String, dynamic> && b['is_vip'] == 1) {
+          isVip = true;
+          final t = b['vip_end_time']?.toString();
+          if (t != null && t.isNotEmpty) {
+            final dt = DateTime.tryParse(t.replaceFirst(' ', 'T'));
+            if (dt != null && (latest == null || dt.isAfter(latest))) {
+              latest = dt;
+            }
+          }
+        }
+      }
+      if (latest != null) {
+        expireTime =
+            '${latest.year.toString().padLeft(4, '0')}-${latest.month.toString().padLeft(2, '0')}-${latest.day.toString().padLeft(2, '0')}';
+      }
+    }
+
     return KugouUserVipDetail(
       nickname: _strNull(data['nickname']),
-      vipLevel: _parseInt(vip['level'] ?? vip['vip_level']),
-      isVip: (vip['status']?.toString() == '1') || (vip['is_vip'] == true),
-      expireTime: _strNull(vip['expire_time'] ?? vip['expireTime']),
+      vipLevel: _parseInt(data['vip_level'] ?? data['vip_type']),
+      isVip: isVip,
+      expireTime: expireTime,
     );
   }
 }

@@ -30,7 +30,10 @@ const { resolveProxy } = require('./runtime');
 
 const createRequest = (options) => {
   return new Promise(async (resolve, reject) => {
-    const isLite = process.env.platform === 'lite';
+    // 平台类型: 优先用 cookie 里的 KUGOU_API_PLATFORM (来自客户端)
+    // 因为微信登录的 token 必须用 lite appid 才能调 youth 接口
+    // 环境变量 platform 只作为默认值
+    const isLite = (options?.cookie?.KUGOU_API_PLATFORM || process.env.platform) === 'lite';
     const dfid = options?.cookie?.dfid || '-'; // 自定义
     const mid = `${options?.cookie?.KUGOU_API_MID}`;
     const uuid = '-'; //cryptoMd5(`${dfid}${mid}`); // 可以自定义
