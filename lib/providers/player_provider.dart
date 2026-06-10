@@ -5,6 +5,7 @@ import 'package:just_audio/just_audio.dart' as just_audio;
 
 import '../core/services/audio_service.dart';
 import '../data/models/song.dart';
+import '../data/repositories/history_repository.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 
 enum AppLoopMode { off, one, all }
@@ -141,7 +142,8 @@ class PlayerProvider extends ChangeNotifier {
                 if (effectiveIndex >= 0 && effectiveIndex < _playlist.length) {
                   _currentIndex = effectiveIndex;
                   _currentSong = _playlist[effectiveIndex];
-                  if (effectiveIndex >= _playlist.length - 2 && onPlaylistEnd != null) {
+                  if (effectiveIndex >= _playlist.length - 2 &&
+                      onPlaylistEnd != null) {
                     onPlaylistEnd!();
                   }
                   notifyListeners();
@@ -202,6 +204,7 @@ class PlayerProvider extends ChangeNotifier {
     _playlist = [song];
     _currentIndex = 0;
     _resolveError = null;
+    _recordHistory(song);
     notifyListeners();
 
     if (_audioService != null) {
@@ -218,6 +221,7 @@ class PlayerProvider extends ChangeNotifier {
     _currentIndex = 0;
     _isResolvingUrl = true;
     _resolveError = null;
+    _recordHistory(song);
     debugPrint('playOnlineSong: notifyListeners() - set initial state');
     notifyListeners();
 
@@ -277,6 +281,7 @@ class PlayerProvider extends ChangeNotifier {
     _currentIndex = startIndex;
     _currentSong = songs[startIndex];
     _resolveError = null;
+    _recordHistory(songs[startIndex]);
     notifyListeners();
 
     if (_currentSong!.isOnline && _currentSong!.url == null) {
@@ -333,6 +338,7 @@ class PlayerProvider extends ChangeNotifier {
     _currentSong = songs[startIndex];
     _isResolvingUrl = true;
     _resolveError = null;
+    _recordHistory(songs[startIndex]);
     notifyListeners();
 
     try {
@@ -573,6 +579,10 @@ class PlayerProvider extends ChangeNotifier {
   void setAudioQuality(AudioQuality quality) {
     _audioQuality = quality;
     notifyListeners();
+  }
+
+  void _recordHistory(Song song) {
+    HistoryRepository().addHistory(song);
   }
 
   just_audio.UriAudioSource _createAudioSource(Song song) {

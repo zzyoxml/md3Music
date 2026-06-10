@@ -71,7 +71,6 @@ class KugouProvider extends ChangeNotifier {
   Map<String, dynamic>? _topSongData;
   KugouUserVipDetail? _vipInfo;
   Map<String, dynamic>? _vipMonthRecord;
-  Map<String, dynamic>? _userCloudData;
   Map<String, dynamic>? _userHistoryData;
   Map<String, dynamic>? _brushData;
   Map<String, dynamic>? _aiRecommendData;
@@ -120,7 +119,6 @@ class KugouProvider extends ChangeNotifier {
   Map<String, dynamic>? get topSongData => _topSongData;
   KugouUserVipDetail? get vipInfo => _vipInfo;
   Map<String, dynamic>? get vipMonthRecord => _vipMonthRecord;
-  Map<String, dynamic>? get userCloudData => _userCloudData;
   Map<String, dynamic>? get userHistoryData => _userHistoryData;
   Map<String, dynamic>? get brushData => _brushData;
   Map<String, dynamic>? get aiRecommendData => _aiRecommendData;
@@ -888,16 +886,6 @@ class KugouProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('[VIP-DEBUG] monthVipRecord error: $e');
     }
-  }
-
-  Future<void> getUserCloud({int page = 1}) async {
-    try {
-      final r = await _apiClient.getUserCloud(page: page);
-      if (r != null) {
-        _userCloudData = r;
-        notifyListeners();
-      }
-    } catch (_) {}
   }
 
   Future<void> getUserHistory() async {

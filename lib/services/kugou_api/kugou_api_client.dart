@@ -1354,16 +1354,6 @@ class KugouApiClient {
     );
   }
 
-  Future<Map<String, dynamic>?> getUserCloud({
-    int page = 1,
-    int pagesize = 30,
-  }) async {
-    return await _get(
-      KugouEndpoints.userCloud,
-      queryParameters: {'page': page, 'pagesize': pagesize},
-    );
-  }
-
   Future<Map<String, dynamic>?> getUserCloudUrl(
     String hash, {
     String? albumId,
