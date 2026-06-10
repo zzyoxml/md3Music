@@ -115,7 +115,6 @@ class _DiscoverPageState extends State<DiscoverPage> {
             : CustomScrollView(
                 slivers: [
                   _buildBannerSection(colorScheme),
-                  _buildPersonalFmSection(colorScheme),
                   _buildDailySection(colorScheme),
                   _buildThemeMusicSection(colorScheme),
                   _buildSceneSection(colorScheme),
@@ -220,56 +219,10 @@ class _DiscoverPageState extends State<DiscoverPage> {
                         color: cs.onPrimaryContainer.withValues(alpha: 0.8),
                       ),
                     ),
-                    ],
+                  ],
                 ),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPersonalFmSection(ColorScheme cs) {
-    return SliverToBoxAdapter(
-      child: FadeInUp(
-        delayMs: 100,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-          child: InkWell(
-            onTap: () => Navigator.pushNamed(context, '/personal_fm'),
-            borderRadius: BorderRadius.circular(20),
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 6,
-                  ),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(20),
-                    gradient: LinearGradient(colors: [cs.primary, cs.tertiary]),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.favorite, size: 16, color: cs.onPrimary),
-                      const SizedBox(width: 6),
-                      Text(
-                        '私人 FM',
-                        style: TextStyle(
-                          color: cs.onPrimary,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const Spacer(),
-                Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
-              ],
-            ),
           ),
         ),
       ),
@@ -722,7 +675,8 @@ class _DailyRecommendDetailPage extends StatefulWidget {
   const _DailyRecommendDetailPage();
 
   @override
-  State<_DailyRecommendDetailPage> createState() => _DailyRecommendDetailPageState();
+  State<_DailyRecommendDetailPage> createState() =>
+      _DailyRecommendDetailPageState();
 }
 
 class _DailyRecommendDetailPageState extends State<_DailyRecommendDetailPage> {
@@ -753,7 +707,10 @@ class _DailyRecommendDetailPageState extends State<_DailyRecommendDetailPage> {
               return SongListItem(
                 song: song,
                 onTap: () {
-                  context.read<PlayerProvider>().playOnlinePlaylist(songs, index);
+                  context.read<PlayerProvider>().playOnlinePlaylist(
+                    songs,
+                    index,
+                  );
                 },
                 onMoreTap: () {},
               );

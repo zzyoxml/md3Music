@@ -14,43 +14,21 @@ class ChartsPage extends StatefulWidget {
   State<ChartsPage> createState() => _ChartsPageState();
 }
 
-class _ChartsPageState extends State<ChartsPage>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-
+class _ChartsPageState extends State<ChartsPage> {
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<KugouProvider>().getRankList();
     });
   }
 
   @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('排行榜'),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: '排行榜单'),
-            Tab(text: '巅峰榜'),
-          ],
-        ),
-      ),
-      body: TabBarView(
-        controller: _tabController,
-        children: [_buildRankList(context, cs), _buildTopList(context, cs)],
-      ),
+      appBar: AppBar(title: const Text('排行榜')),
+      body: _buildRankList(context, cs),
     );
   }
 
@@ -133,51 +111,6 @@ class _ChartsPageState extends State<ChartsPage>
               );
             },
           ),
-        );
-      },
-    );
-  }
-
-  Widget _buildTopList(BuildContext context, ColorScheme cs) {
-    return Consumer<KugouProvider>(
-      builder: (context, kugou, _) {
-        return ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Card(
-              child: ListTile(
-                leading: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    color: cs.primaryContainer,
-                  ),
-                  child: Icon(Icons.album, color: cs.onPrimaryContainer),
-                ),
-                title: const Text('新歌榜'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => kugou.getTopSong(),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Card(
-              child: ListTile(
-                leading: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(12),
-                    color: cs.tertiaryContainer,
-                  ),
-                  child: Icon(Icons.album, color: cs.onTertiaryContainer),
-                ),
-                title: const Text('专辑榜'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => kugou.getTopAlbum(),
-              ),
-            ),
-          ],
         );
       },
     );
