@@ -42,6 +42,7 @@ class KugouApiClient {
   late final Dio _dio;
   String? _token;
   String? _userid;
+  String? _vipToken;
   String? _dfid;
   bool _isInitialized = false;
   Completer<void>? _initCompleter;
@@ -54,9 +55,15 @@ class KugouApiClient {
       await _initCompleter?.future;
     }
     if (_token != null && _userid != null) {
-      options.headers['Authorization'] = 'token=$_token;userid=$_userid';
+      // 把 vip_token 一并写入 Authorization，服务端的 cookieToJson
+      // 会按 ; 切成 cookie 对象，song_url_new 等模块可直接读取。
+      final authParts = <String>['token=$_token', 'userid=$_userid'];
+      if (_vipToken != null && _vipToken!.isNotEmpty) {
+        authParts.add('vip_token=$_vipToken');
+      }
+      options.headers['Authorization'] = authParts.join(';');
       debugPrint(
-        'Request: ${options.path} with token=${_token!.substring(0, 10)}..., userid=$_userid',
+        'Request: ${options.path} with token=${_token!.substring(0, 10)}..., userid=$_userid, vip=${_vipToken != null}',
       );
     } else {
       debugPrint(
@@ -132,10 +139,11 @@ class KugouApiClient {
       final prefs = await SharedPreferences.getInstance();
       _token = prefs.getString('kugou_token');
       _userid = prefs.getString('kugou_userid');
+      _vipToken = prefs.getString('kugou_vip_token');
       _dfid = prefs.getString('kugou_dfid');
       if (_token != null && _userid != null) {
         debugPrint(
-          'Loaded login state from storage: token=${_token?.substring(0, 10)}..., userid=$_userid',
+          'Loaded login state from storage: token=${_token?.substring(0, 10)}..., userid=$_userid, vip=${_vipToken != null}',
         );
       }
     } catch (e) {
@@ -146,14 +154,26 @@ class KugouApiClient {
     }
   }
 
-  Future<void> setLoginCookies(String token, String userid) async {
+  Future<void> setLoginCookies(
+    String token,
+    String userid, {
+    String? vipToken,
+  }) async {
     _token = token;
     _userid = userid;
-    debugPrint('Login cookies saved: token=$token, userid=$userid');
+    _vipToken = vipToken;
+    debugPrint(
+      'Login cookies saved: token=$token, userid=$userid, vip=${vipToken != null && vipToken.isNotEmpty}',
+    );
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('kugou_token', token);
       await prefs.setString('kugou_userid', userid);
+      if (vipToken != null && vipToken.isNotEmpty) {
+        await prefs.setString('kugou_vip_token', vipToken);
+      } else {
+        await prefs.remove('kugou_vip_token');
+      }
       debugPrint('Login state saved to storage');
     } catch (e) {
       debugPrint('Failed to save login state to storage: $e');
@@ -163,10 +183,12 @@ class KugouApiClient {
   Future<void> clearCookies() async {
     _token = null;
     _userid = null;
+    _vipToken = null;
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove('kugou_token');
       await prefs.remove('kugou_userid');
+      await prefs.remove('kugou_vip_token');
       debugPrint('Login state cleared from storage');
     } catch (e) {
       debugPrint('Failed to clear login state from storage: $e');
@@ -175,8 +197,10 @@ class KugouApiClient {
 
   String? get token => _token;
   String? get userid => _userid;
+  String? get vipToken => _vipToken;
   String? get dfid => _dfid;
   bool get isLoggedIn => _token != null && _userid != null;
+  bool get hasVipToken => _vipToken != null && _vipToken!.isNotEmpty;
 
   Future<void> registerDevice() async {
     try {
@@ -344,6 +368,21 @@ class KugouApiClient {
     if (albumId != null) params['album_id'] = albumId;
     if (albumAudioId != null) params['album_audio_id'] = albumAudioId;
 
+    // VIP 用户优先用 /song/url/new（→ /v6/priv_url），它会读取
+    // Authorization 头里的 vip_token，能拿到完整音质。
+    if (hasVipToken) {
+      final vipUrl = await _getSongUrlNew(
+        hash,
+        quality: quality,
+        albumId: albumId,
+        albumAudioId: albumAudioId,
+      );
+      if (vipUrl != null) return vipUrl;
+      debugPrint(
+        'getSongUrl: /song/url/new failed, falling back to /song/url...',
+      );
+    }
+
     var json = await _get(KugouEndpoints.songUrl, queryParameters: params);
     if (json == null) return null;
 
@@ -369,6 +408,16 @@ class KugouApiClient {
       debugPrint('getSongUrl: token may be expired, trying refresh...');
       final refreshed = await _tryRefreshToken();
       if (refreshed) {
+        // refresh 后 vip_token 也会更新，重试 /song/url/new 一次
+        if (hasVipToken) {
+          final vipUrl = await _getSongUrlNew(
+            hash,
+            quality: quality,
+            albumId: albumId,
+            albumAudioId: albumAudioId,
+          );
+          if (vipUrl != null) return vipUrl;
+        }
         json = await _get(KugouEndpoints.songUrl, queryParameters: params);
         if (json == null) return null;
         data = _extractData(json['data'] ?? json);
@@ -398,6 +447,15 @@ class KugouApiClient {
         }
       }
 
+      // VIP 用户不要再走 free_part=1 主动拉 30 秒试听。
+      // 试听只对未登录 / 没有 VIP 凭证的人兜底。
+      if (hasVipToken) {
+        debugPrint(
+          'getSongUrl: VIP user with no full url, skip free_part trial.',
+        );
+        return null;
+      }
+
       debugPrint('getSongUrl: trying free_part for trial...');
       final freeParams = Map<String, dynamic>.from(params);
       freeParams['free_part'] = 1;
@@ -417,6 +475,46 @@ class KugouApiClient {
       );
     } catch (e) {
       debugPrint('getSongUrl parse error: $e');
+    }
+    return null;
+  }
+
+  /// /song/url/new 走的是 /v6/priv_url，服务端会读 cookie 里的 vip_token
+  /// 并作为 tracker_param.viptoken 上传给酷狗。返回结构通常为：
+  ///   { data: { url: [...], bitRate, ... } }
+  Future<KugouPlayUrl?> _getSongUrlNew(
+    String hash, {
+    String quality = KugouQuality.standard,
+    String? albumId,
+    String? albumAudioId,
+  }) async {
+    final query = <String, dynamic>{
+      'hash': hash.toLowerCase(),
+      'quality': quality,
+    };
+    if (albumId != null) query['album_id'] = albumId;
+    if (albumAudioId != null) query['album_audio_id'] = albumAudioId;
+    try {
+      final json = await _get(
+        KugouEndpoints.songUrlNew,
+        queryParameters: query,
+      );
+      if (json == null) {
+        debugPrint('_getSongUrlNew: empty response');
+        return null;
+      }
+      final data = _extractData(json['data'] ?? json);
+      if (data['url'] != null) {
+        debugPrint(
+          '_getSongUrlNew: got url via /song/url/new, quality=$quality',
+        );
+        return KugouPlayUrl.fromJson({...data, 'quality': quality});
+      }
+      debugPrint(
+        '_getSongUrlNew: no url, status=${data['status']}, err=${data['error']}',
+      );
+    } catch (e) {
+      debugPrint('_getSongUrlNew error: $e');
     }
     return null;
   }
@@ -1286,8 +1384,9 @@ class KugouApiClient {
       if (status == 1 && data != null) {
         final newToken = data['token']?.toString();
         final newUserid = data['userid']?.toString();
+        final newVipToken = data['vip_token']?.toString();
         if (newToken != null && newUserid != null) {
-          await setLoginCookies(newToken, newUserid);
+          await setLoginCookies(newToken, newUserid, vipToken: newVipToken);
           debugPrint('_tryRefreshToken: token refreshed successfully');
           return true;
         }

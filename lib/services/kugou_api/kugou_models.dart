@@ -938,9 +938,16 @@ class KugouQrCheck {
   final int? status;
   final String? token;
   final String? userid;
+  final String? vipToken;
   final Map<String, dynamic>? data;
 
-  const KugouQrCheck({this.status, this.token, this.userid, this.data});
+  const KugouQrCheck({
+    this.status,
+    this.token,
+    this.userid,
+    this.vipToken,
+    this.data,
+  });
 
   factory KugouQrCheck.fromJson(Map<String, dynamic> json) {
     final data = json['data'] as Map<String, dynamic>? ?? json;
@@ -948,6 +955,7 @@ class KugouQrCheck {
       status: _parseInt(data['status']),
       token: _strNull(data['token']),
       userid: _strNull(data['userid']),
+      vipToken: _strNull(data['vip_token']),
       data: data,
     );
   }

@@ -1,5 +1,6 @@
 const { cryptoMd5 } = require('./crypto');
 const { appid: useAppid, liteAppid, clientver: useClientver, liteClientver } = require('./config.json');
+const { isPlatformLite } = require('./platform');
 
 /**
  * web版本 signature 加密
@@ -19,10 +20,11 @@ const signatureWebParams = (params) => {
  * Android版本 signature 加密
  * @param {HelperParams} params
  * @param {string?} data
+ * @param {object?} cookie 可选，请求 cookie，用于动态判断是否走 lite
  * @returns {string} 加密后的signature
  */
-const signatureAndroidParams = (params, data) => {
-  const isLite = process.env.platform === 'lite';
+const signatureAndroidParams = (params, data, cookie) => {
+  const isLite = isPlatformLite(cookie);
   const str = isLite ? 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA' : `OIlwieks28dk2k092lksi2UIkp`;
   const paramsString = Object.keys(params)
     .sort()
@@ -68,8 +70,8 @@ const signParams = (params, data) => {
  * @returns {string} 加密后的sign
  */
 const signKey = (hash, mid, userid, appid) => {
-  const isLite = process.env.platform === 'lite';
-  const str = isLite ? '185672dd44712f60bb1736df5a377e82' : '57ae12eb6890223e355ccfcb74edf70d';
+  // 强制走 lite 协议
+  const str = '185672dd44712f60bb1736df5a377e82';
   return cryptoMd5(`${hash}${str}${appid || useAppid}${mid}${userid || 0}`);
 };
 
@@ -93,12 +95,12 @@ const signCloudKey = (hash, pid) => {
  */
 
 const signParamsKey = (data, appid, clientver) => {
-  const isLite = process.env.platform === 'lite';
-  const str = isLite ? 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA' : 'OIlwieks28dk2k092lksi2UIkp';
+  // 强制走 lite 协议
+  const str = 'LnT6xpN3khm36zse0QzvmgTZ3waWdRSA';
 
-  appid = appid || (isLite ? liteAppid : useAppid);
+  appid = appid || liteAppid;
 
-  clientver = clientver || (isLite ? liteClientver : useClientver);
+  clientver = clientver || liteClientver;
 
   return cryptoMd5(`${appid}${str}${clientver}${data}`);
 };

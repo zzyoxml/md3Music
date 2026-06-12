@@ -1,3 +1,6 @@
+import 'dart:html' as html;
+
+import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 
 class AudioService {
@@ -51,16 +54,28 @@ class AudioService {
   }
 
   Future<void> setUrl(String url) async {
-    await _player.setUrl(
-      url,
-      headers: const {},
-    );
+    final blobUrl = await _fetchAudioBlob(url);
+    await _player.setUrl(blobUrl);
   }
 
   Future<void> setPlaylist(List<UriAudioSource> sources, {int startIndex = 0}) async {
     _playlistSource.clear();
     if (sources.isNotEmpty) {
-      _playlistSource.addAll(sources);
+      final List<AudioSource> blobSources = [];
+      for (final source in sources) {
+        try {
+          final originalUrl = source.uri.toString();
+          final blobUrl = await _fetchAudioBlob(originalUrl);
+          blobSources.add(AudioSource.uri(
+            Uri.parse(blobUrl),
+            tag: source.tag,
+          ));
+        } catch (e) {
+          debugPrint('Blob fetch failed for ${source.uri}, using original: $e');
+          blobSources.add(source);
+        }
+      }
+      _playlistSource.addAll(blobSources);
     }
     final safeStartIndex = startIndex.clamp(0, sources.isEmpty ? 0 : sources.length - 1);
     await _player.setAudioSource(
@@ -71,11 +86,28 @@ class AudioService {
   }
 
   Future<void> addAudioSource(UriAudioSource source) async {
-    await _playlistSource.add(source);
+    final blobUrl = await _fetchAudioBlob(source.uri.toString());
+    await _playlistSource.add(AudioSource.uri(
+      Uri.parse(blobUrl),
+      tag: source.tag,
+    ));
   }
 
   Future<void> addAllAudioSources(List<UriAudioSource> sources) async {
-    await _playlistSource.addAll(sources);
+    final List<AudioSource> blobSources = [];
+    for (final source in sources) {
+      try {
+        final blobUrl = await _fetchAudioBlob(source.uri.toString());
+        blobSources.add(AudioSource.uri(
+          Uri.parse(blobUrl),
+          tag: source.tag,
+        ));
+      } catch (e) {
+        debugPrint('Blob fetch failed for ${source.uri}, using original: $e');
+        blobSources.add(source);
+      }
+    }
+    await _playlistSource.addAll(blobSources);
   }
 
   Future<void> setSpeed(double speed) async {
@@ -100,6 +132,26 @@ class AudioService {
 
   Future<void> dispose() async {
     await _player.dispose();
+  }
+
+  /// Fetch audio as blob via XMLHttpRequest to bypass ORB (Opaque Response Blocking).
+  /// ORB blocks cross-origin audio loaded directly by <audio> elements,
+  /// but XMLHttpRequest uses CORS mode, so the response is not opaque.
+  Future<String> _fetchAudioBlob(String url) async {
+    if (url.isEmpty) return url;
+    try {
+      final request = await html.HttpRequest.request(
+        url,
+        method: 'GET',
+        responseType: 'blob',
+      );
+      final blob = request.response as html.Blob;
+      final blobUrl = html.Url.createObjectUrlFromBlob(blob);
+      return blobUrl;
+    } catch (e) {
+      debugPrint('Audio blob fetch failed: $e');
+      return url;
+    }
   }
 }
 

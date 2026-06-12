@@ -245,9 +245,9 @@ function cryptoAesDecrypt(data, key, iv) {
  * @returns {string} hex
  */
 function cryptoRSAEncrypt(data, publicKey) {
-  const isLite = process.env.platform === 'lite';
+  // 强制走概念版（lite）协议
   const buffer = normalizeBuffer(data);
-  const pem = publicKey || (isLite ? publicLiteRasKey : publicRasKey);
+  const pem = publicKey || publicLiteRasKey;
   const key = getForgePublicKey(pem);
   const keyLength = Math.ceil(key.n.bitLength() / 8);
 
@@ -262,9 +262,9 @@ function cryptoRSAEncrypt(data, publicKey) {
 }
 
 function rsaEncrypt2(data) {
-  const isLite = process.env.platform === 'lite';
+  // 强制走概念版（lite）协议
   const buffer = normalizeBuffer(data);
-  const key = getForgePublicKey(isLite ? publicLiteRasKey : publicRasKey);
+  const key = getForgePublicKey(publicLiteRasKey);
   const encrypted = key.encrypt(bufferToBinaryString(buffer), 'RSAES-PKCS1-V1_5');
   return forge.util.bytesToHex(encrypted);
 }

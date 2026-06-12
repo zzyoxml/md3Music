@@ -77,25 +77,33 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         context,
         listen: false,
       ).getPersonalFm(mode: _selectedMode, songPoolId: _selectedSongPoolId);
+      if (!mounted) return;
       final kugou = Provider.of<KugouProvider>(context, listen: false);
       if (kugou.personalFmSongs.isNotEmpty) {
         final player = Provider.of<PlayerProvider>(context, listen: false);
         player.onPlaylistEnd = _onPlaylistEnd;
         await player.playOnlinePlaylist(kugou.personalFmAsSongs, 0);
+        if (!mounted) return;
         _updateVinylAnimation(player.isPlaying);
       }
     } catch (e) {
       debugPrint('load personal fm error: $e');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
-    _appendFmSongs();
+    if (mounted) {
+      _appendFmSongs();
+    }
   }
 
   Future<void> _onPlaylistEnd() async {
     await _appendFmSongs();
+    if (!mounted) return;
     final player = Provider.of<PlayerProvider>(context, listen: false);
     await player.next();
+    if (!mounted) return;
     _updateVinylAnimation(player.isPlaying);
   }
 
@@ -114,6 +122,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         songId: lastSong?.songId,
         action: 'play',
       );
+      if (!mounted) return;
 
       if (result != null && result.isNotEmpty) {
         final newSongs = result
@@ -129,7 +138,9 @@ class _PersonalFmPageState extends State<PersonalFmPage>
     } catch (e) {
       debugPrint('append fm songs error: $e');
     } finally {
-      setState(() => _isAppending = false);
+      if (mounted) {
+        setState(() => _isAppending = false);
+      }
     }
   }
 
@@ -142,12 +153,15 @@ class _PersonalFmPageState extends State<PersonalFmPage>
     if (index == -1) return;
 
     _slideController.forward(from: 0).then((_) async {
+      if (!mounted) return;
       kugou.moveToFirst(song);
       _slideController.reset();
 
       await _appendFmSongs();
+      if (!mounted) return;
 
       await player.playOnlinePlaylist(kugou.personalFmAsSongs, 0);
+      if (!mounted) return;
       _updateVinylAnimation(player.isPlaying);
     });
   }
@@ -192,7 +206,9 @@ class _PersonalFmPageState extends State<PersonalFmPage>
     } catch (e) {
       debugPrint('dislike error: $e');
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -330,7 +346,9 @@ class _PersonalFmPageState extends State<PersonalFmPage>
           ),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: cs.onSurfaceVariant.withValues(alpha: 0.06)),
+            border: Border.all(
+              color: cs.onSurfaceVariant.withValues(alpha: 0.06),
+            ),
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
@@ -388,7 +406,10 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [cs.onSurfaceVariant.withValues(alpha: 0.018), Colors.transparent],
+          colors: [
+            cs.onSurfaceVariant.withValues(alpha: 0.018),
+            Colors.transparent,
+          ],
         ),
       ),
       child: Row(
@@ -414,7 +435,9 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFF0d8fff).withValues(alpha: 0.22),
+                          color: const Color(
+                            0xFF0d8fff,
+                          ).withValues(alpha: 0.22),
                           blurRadius: 10,
                           offset: const Offset(0, 10),
                         ),
@@ -937,7 +960,9 @@ class _PersonalFmPageState extends State<PersonalFmPage>
           padding: EdgeInsets.all(isSmallScreen ? 14 : 18),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: cs.onSurfaceVariant.withValues(alpha: 0.07)),
+            border: Border.all(
+              color: cs.onSurfaceVariant.withValues(alpha: 0.07),
+            ),
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
@@ -1104,7 +1129,9 @@ class _PersonalFmPageState extends State<PersonalFmPage>
           ),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
-            border: Border.all(color: cs.onSurfaceVariant.withValues(alpha: 0.06)),
+            border: Border.all(
+              color: cs.onSurfaceVariant.withValues(alpha: 0.06),
+            ),
             color: cs.onSurfaceVariant.withValues(alpha: 0.022),
           ),
           child: Text(

@@ -47,6 +47,9 @@ function applyCliOverrides(args) {
     process.env.platform = parsed.platform;
   }
 
+  // 强制走概念版（lite）协议
+  process.env.platform = 'lite';
+
   if (parsed.guid) {
     process.env.KUGOU_API_GUID = parsed.guid;
   }

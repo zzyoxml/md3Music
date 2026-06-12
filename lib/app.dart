@@ -14,6 +14,7 @@ import 'modules/playlist/playlist_page.dart';
 import 'modules/search/search_page.dart';
 import 'modules/settings/settings_page.dart';
 import 'modules/library/library_page.dart';
+import 'modules/login/login_page.dart';
 import 'modules/personal_fm/personal_fm_page.dart';
 import 'providers/kugou_provider.dart';
 import 'providers/library_provider.dart';
@@ -91,6 +92,40 @@ class _MainLayoutState extends State<_MainLayout> {
     PersonalFmPage(),
     UserCenterPage(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    // 未登录时尝试播放联网歌曲,弹出登录提示
+    context.read<PlayerProvider>().onLoginRequired = _showLoginRequiredDialog;
+  }
+
+  void _showLoginRequiredDialog() {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (messenger == null) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('请先登录'),
+        content: const Text('播放音乐需要登录账号,是否前往登录?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const LoginPage()));
+            },
+            child: const Text('去登录'),
+          ),
+        ],
+      ),
+    );
+  }
 
   static const List<NavigationDestination> _destinations = [
     NavigationDestination(

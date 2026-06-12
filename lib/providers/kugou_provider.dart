@@ -488,7 +488,11 @@ class KugouProvider extends ChangeNotifier {
       if (result == null) return null;
       if (result.status == 4 && result.token != null && result.userid != null) {
         _isLoggedIn = true;
-        await _apiClient.setLoginCookies(result.token!, result.userid!);
+        await _apiClient.setLoginCookies(
+          result.token!,
+          result.userid!,
+          vipToken: result.vipToken,
+        );
         await _fetchUserInfo();
         notifyListeners();
       }
@@ -530,8 +534,9 @@ class KugouProvider extends ChangeNotifier {
         final data = res?['data'] as Map?;
         final token = data?['token']?.toString();
         final userid = data?['userid']?.toString();
+        final vipToken = data?['vip_token']?.toString();
         if (token != null && userid != null) {
-          await _apiClient.setLoginCookies(token, userid);
+          await _apiClient.setLoginCookies(token, userid, vipToken: vipToken);
           _isLoggedIn = true;
           await _fetchUserInfo();
           notifyListeners();
