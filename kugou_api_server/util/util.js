@@ -112,5 +112,5 @@ module.exports = {
   randomString,
   randomNumber,
   calculateMid,
-  getGuid
+  getGuid,
 };

@@ -2,11 +2,10 @@ const deviceConfig = require('../device_config');
 
 module.exports = (params, useAxios) => {
   const hash = (params?.hash || '').toLowerCase();
-  const isLite = process.env.platform === 'lite';
-  const page_id = isLite ? 967177915 : 151369488;
-  const ppage_id = isLite
-    ? (params.ppage_id || '356753938,823673182,967485191')
-    : '463467626,350369493,788954147';
+  // 强制走概念版（lite）协议
+  const isLite = true;
+  const page_id = 967177915;
+  const ppage_id = params.ppage_id || '356753938,823673182,967485191';
   const quality = params.quality || 128;
 
   const deviceInfo = deviceConfig.getDeviceInfo();

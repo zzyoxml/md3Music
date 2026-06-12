@@ -60,6 +60,8 @@ class PlayerProvider extends ChangeNotifier {
   dynamic _audioService;
   bool _audioInitialized = false;
   Future<void> Function()? onPlaylistEnd;
+  // 未登录时尝试播放需联网歌曲,通知 UI 弹窗
+  void Function()? onLoginRequired;
 
   PlayerProvider() {
     _initAudioService();
@@ -134,20 +136,12 @@ class PlayerProvider extends ChangeNotifier {
         (sequenceState) {
           try {
             if (sequenceState != null && sequenceState.currentSource != null) {
-              final tag = sequenceState.currentSource!.tag;
-              if (tag != null) {
-                final effectiveIndex = sequenceState.effectiveSequence.indexOf(
-                  sequenceState.currentSource!,
-                );
-                if (effectiveIndex >= 0 && effectiveIndex < _playlist.length) {
-                  _currentIndex = effectiveIndex;
-                  _currentSong = _playlist[effectiveIndex];
-                  if (effectiveIndex >= _playlist.length - 2 &&
-                      onPlaylistEnd != null) {
-                    onPlaylistEnd!();
-                  }
-                  notifyListeners();
-                }
+              final effectiveIndex = sequenceState.effectiveSequence.indexOf(
+                sequenceState.currentSource!,
+              );
+              if (effectiveIndex >= _playlist.length - 2 &&
+                  onPlaylistEnd != null) {
+                onPlaylistEnd!();
               }
             }
           } catch (e) {
@@ -216,6 +210,11 @@ class PlayerProvider extends ChangeNotifier {
 
   Future<void> playOnlineSong(Song song) async {
     debugPrint('playOnlineSong: START - ${song.title} by ${song.artist}');
+    final apiClient = KugouApiClient();
+    if (!apiClient.isLoggedIn) {
+      onLoginRequired?.call();
+      return;
+    }
     _currentSong = song;
     _playlist = [song];
     _currentIndex = 0;
@@ -305,11 +304,7 @@ class PlayerProvider extends ChangeNotifier {
           notifyListeners();
 
           if (_audioService != null) {
-            final sources = _playlist
-                .map((song) => _createAudioSource(song))
-                .toList();
-            await _audioService.setPlaylist(sources, startIndex: startIndex);
-            await _audioService.play();
+            await _setUrlAndPlay(result.url);
           }
         } else {
           _isResolvingUrl = false;
@@ -324,14 +319,22 @@ class PlayerProvider extends ChangeNotifier {
 
       _prefetchNextSongs(startIndex);
     } else if (_audioService != null) {
-      final sources = songs.map((song) => _createAudioSource(song)).toList();
-      await _audioService.setPlaylist(sources, startIndex: startIndex);
-      await _audioService.play();
+      final playbackUrl = _currentSong!.isOnline
+          ? _currentSong!.url
+          : _currentSong!.localPath;
+      if (playbackUrl != null && playbackUrl.isNotEmpty) {
+        await _setUrlAndPlay(playbackUrl);
+      }
     }
   }
 
   Future<void> playOnlinePlaylist(List<Song> songs, int startIndex) async {
     if (songs.isEmpty) return;
+
+    if (!KugouApiClient().isLoggedIn) {
+      onLoginRequired?.call();
+      return;
+    }
 
     _playlist = List.from(songs);
     _currentIndex = startIndex;
@@ -358,11 +361,7 @@ class PlayerProvider extends ChangeNotifier {
         notifyListeners();
 
         if (_audioService != null) {
-          final sources = _playlist
-              .map((song) => _createAudioSource(song))
-              .toList();
-          await _audioService.setPlaylist(sources, startIndex: startIndex);
-          await _audioService.play();
+          await _setUrlAndPlay(result.url);
         }
       } else {
         _isResolvingUrl = false;
@@ -403,6 +402,43 @@ class PlayerProvider extends ChangeNotifier {
     }
   }
 
+  /// 设置音频源并等待就绪后播放。
+  ///
+  /// 不直接使用 [playerStateStream.firstWhere] 等待 ready 状态,因为
+  /// `setUrl` 期间可能已经发出过 ready 事件,而 broadcast stream 的
+  /// `firstWhere` 只能捕获订阅之后的事件,会一直等不到下一次 ready,
+  /// 直到超时才走到 play(),表现为"暂停"。
+  /// 这里采用轮询同步状态 [AudioPlayer.playerState] 的方式,避免漏掉。
+  Future<void> _setUrlAndPlay(
+    String url, {
+    Duration? seekTo,
+    bool playAfter = true,
+  }) async {
+    if (_audioService == null) return;
+    await _audioService.setUrl(url);
+    final deadline = DateTime.now().add(const Duration(seconds: 10));
+    while (DateTime.now().isBefore(deadline)) {
+      final state = _audioService.player.playerState;
+      if (state.processingState == just_audio.ProcessingState.ready) {
+        if (seekTo != null && seekTo > Duration.zero) {
+          await _audioService.seek(seekTo);
+        }
+        if (playAfter) {
+          await _audioService.play();
+        }
+        return;
+      }
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+    // 超时仍尝试 seek/play,避免完全卡住
+    if (seekTo != null && seekTo > Duration.zero) {
+      await _audioService.seek(seekTo);
+    }
+    if (playAfter) {
+      await _audioService.play();
+    }
+  }
+
   Future<void> pause() async {
     await _audioService?.pause();
   }
@@ -426,6 +462,10 @@ class PlayerProvider extends ChangeNotifier {
     if (_currentSong == null) return false;
 
     if (_currentSong!.isOnline && _currentSong!.url == null) {
+      if (!KugouApiClient().isLoggedIn) {
+        onLoginRequired?.call();
+        return false;
+      }
       _isResolvingUrl = true;
       notifyListeners();
 
@@ -455,11 +495,12 @@ class PlayerProvider extends ChangeNotifier {
     notifyListeners();
 
     if (_audioService != null) {
-      final sources = _playlist
-          .map((song) => _createAudioSource(song))
-          .toList();
-      await _audioService.setPlaylist(sources, startIndex: _currentIndex);
-      await _audioService.play();
+      final playbackUrl = _currentSong!.isOnline
+          ? _currentSong!.url
+          : _currentSong!.localPath;
+      if (playbackUrl != null && playbackUrl.isNotEmpty) {
+        await _setUrlAndPlay(playbackUrl);
+      }
     }
     return true;
   }
@@ -473,20 +514,19 @@ class PlayerProvider extends ChangeNotifier {
       return;
     }
 
-    final startIndex = _currentIndex;
-    int nextIndex = _currentIndex;
-    for (int i = 0; i < _playlist.length; i++) {
-      nextIndex = (nextIndex + 1) % _playlist.length;
-      if (nextIndex == startIndex) {
-        if (_loopMode == AppLoopMode.all) break;
-        return;
-      }
+    // 已到末尾且非列表循环,停止播放(不静默跳到下一首)
+    if (_currentIndex >= _playlist.length - 1 && _loopMode != AppLoopMode.all) {
+      await _audioService?.pause();
+      return;
+    }
 
-      _currentIndex = nextIndex;
-      _currentSong = _playlist[nextIndex];
-      _resolveError = null;
+    final nextIndex = (_currentIndex + 1) % _playlist.length;
+    _currentIndex = nextIndex;
+    _currentSong = _playlist[nextIndex];
+    _resolveError = null;
 
-      if (await _resolveAndPlayCurrentSong()) return;
+    final ok = await _resolveAndPlayCurrentSong();
+    if (!ok) {
       _resolveError = '无法获取播放链接';
     }
     notifyListeners();
@@ -630,14 +670,14 @@ class PlayerProvider extends ChangeNotifier {
       _isResolvingUrl = false;
       notifyListeners();
 
-      // 重建整个播放队列，仅替换当前歌曲的源，保留其他歌曲的位置
-      final sources = _playlist.map(_createAudioSource).toList();
-      await _audioService!.setPlaylist(sources, startIndex: _currentIndex);
-      if (savedPosition > Duration.zero) {
-        await _audioService!.seek(savedPosition);
-      }
-      if (wasPlaying) {
-        await _audioService!.play();
+      if (_audioService != null) {
+        // 同 playOnlinePlaylist:_playlist 中其他歌曲 url 仍为 null,
+        // 用 setUrl 只切当前歌曲,避免 just_audio_web 的 null check 异常
+        await _setUrlAndPlay(
+          result.url,
+          seekTo: savedPosition,
+          playAfter: wasPlaying,
+        );
       }
     } catch (e) {
       _isResolvingUrl = false;

@@ -123,8 +123,13 @@ class _LoginPageState extends State<LoginPage> {
           final data = loginRes?['data'] as Map?;
           final token = data?['token']?.toString();
           final userid = data?['userid']?.toString();
+          final vipToken = data?['vip_token']?.toString();
           if (token != null && userid != null) {
-            await kugouProvider.apiClient.setLoginCookies(token, userid);
+            await kugouProvider.apiClient.setLoginCookies(
+              token,
+              userid,
+              vipToken: vipToken,
+            );
             // 触发 provider 拉用户信息
             await kugouProvider.refreshUserInfo();
             if (mounted) {
