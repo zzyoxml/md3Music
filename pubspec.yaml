@@ -35,3 +35,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+  fonts:
+    - family: SimHei
+      fonts:
+        - asset: assets/fonts/simhei.ttf

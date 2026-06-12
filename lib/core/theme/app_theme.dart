@@ -5,6 +5,28 @@ class AppTheme {
 
   static const Color _seedColor = Color(0xFF6750A4);
 
+  // CJK 字体回退链 - 按平台优先级排序:
+  // 1) Web 浏览器(Windows + Edge) 优先用系统自带的 "Microsoft YaHei" (无需下载)
+  // 2) macOS / iOS: PingFang SC
+  // 3) Linux: WenQuanYi Micro Hei
+  // 4) 打包的 SimHei (assets/fonts/simhei.ttf) 兜底
+  // 5) 通用 sans-serif
+  // 注意: fontFamilyFallback 在 Flutter Web 里会映射为 CSS font-family 链,
+  // 浏览器会按顺序查找已安装的字体, 命中即用. 所以系统字体优先能避免走 Google CDN.
+  static const List<String> _cjkFontFallback = [
+    'Microsoft YaHei',
+    'Microsoft YaHei UI',
+    'PingFang SC',
+    'Hiragino Sans GB',
+    'WenQuanYi Micro Hei',
+    'Source Han Sans CN',
+    'Source Han Sans SC',
+    'Noto Sans CJK SC',
+    'Noto Sans SC',
+    'SimHei',
+    'sans-serif',
+  ];
+
   static ThemeData get lightTheme {
     final colorScheme = ColorScheme.fromSeed(
       seedColor: _seedColor,
@@ -28,12 +50,12 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       brightness: brightness,
+      fontFamily: 'SimHei',
+      fontFamilyFallback: _cjkFontFallback,
       scaffoldBackgroundColor: colorScheme.surface,
       cardTheme: CardThemeData(
         elevation: isLight ? 1 : 0,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         color: colorScheme.surfaceContainerLow,
         surfaceTintColor: colorScheme.surfaceTint,
       ),
@@ -85,7 +107,9 @@ class AppTheme {
         minWidth: 80,
         minExtendedWidth: 256,
         labelType: NavigationRailLabelType.all,
-        selectedIconTheme: IconThemeData(color: colorScheme.onSecondaryContainer),
+        selectedIconTheme: IconThemeData(
+          color: colorScheme.onSecondaryContainer,
+        ),
         unselectedIconTheme: IconThemeData(color: colorScheme.onSurfaceVariant),
         selectedLabelTextStyle: _buildTextStyle(
           colorScheme.onSecondaryContainer,
@@ -113,9 +137,7 @@ class AppTheme {
         backgroundColor: colorScheme.primaryContainer,
         foregroundColor: colorScheme.onPrimaryContainer,
         elevation: 3,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       ),
       chipTheme: ChipThemeData(
         backgroundColor: colorScheme.surfaceContainerLow,
@@ -126,9 +148,7 @@ class AppTheme {
           14,
           FontWeight.w500,
         ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
         side: BorderSide(color: colorScheme.outlineVariant),
       ),
       sliderTheme: SliderThemeData(
@@ -155,7 +175,11 @@ class AppTheme {
     );
   }
 
-  static TextStyle _buildTextStyle(Color color, double size, FontWeight weight) {
+  static TextStyle _buildTextStyle(
+    Color color,
+    double size,
+    FontWeight weight,
+  ) {
     return TextStyle(
       color: color,
       fontSize: size,
