@@ -370,6 +370,10 @@ class KugouApiClient {
 
     // VIP 用户优先用 /song/url/new（→ /v6/priv_url），它会读取
     // Authorization 头里的 vip_token，能拿到完整音质。
+    // 注意：如果 _getSongUrlNew 因为 priv_status=0 / fail_process 等
+    // 原因返回 null，说明酷狗没认 VIP。这种情况继续走 /song/url
+    // 也只会拿到 30s 试听片段，必须直接返回 null，让上层提示
+    // 用户 VIP 不生效或登录失效。
     if (hasVipToken) {
       final vipUrl = await _getSongUrlNew(
         hash,
@@ -379,8 +383,9 @@ class KugouApiClient {
       );
       if (vipUrl != null) return vipUrl;
       debugPrint(
-        'getSongUrl: /song/url/new failed, falling back to /song/url...',
+        'getSongUrl: VIP /song/url/new rejected, NOT falling back to free /song/url.',
       );
+      return null;
     }
 
     var json = await _get(KugouEndpoints.songUrl, queryParameters: params);
@@ -481,7 +486,11 @@ class KugouApiClient {
 
   /// /song/url/new 走的是 /v6/priv_url，服务端会读 cookie 里的 vip_token
   /// 并作为 tracker_param.viptoken 上传给酷狗。返回结构通常为：
-  ///   { data: { url: [...], bitRate, ... } }
+  ///   { data: { url: [...], bitRate, priv_status, fail_process, ... } }
+  ///
+  /// 关键：必须检查 `priv_status`，0 表示酷狗没认 VIP，返回的是 30s/1min
+  /// 试听片段；`fail_process` 含 `buy` 时也是同样情况。这两种情况下
+  /// 即便 url 字段非空也不能直接拿来用，否则会播放到片段末尾就跳结束。
   Future<KugouPlayUrl?> _getSongUrlNew(
     String hash, {
     String quality = KugouQuality.standard,
@@ -504,9 +513,44 @@ class KugouApiClient {
         return null;
       }
       final data = _extractData(json['data'] ?? json);
-      if (data['url'] != null) {
+      final rawUrl = data['url'];
+      final hasUrl = rawUrl is List
+          ? rawUrl.isNotEmpty
+          : (rawUrl is String && rawUrl.isNotEmpty);
+
+      if (hasUrl) {
+        // 1) priv_status 显式标记 VIP 是否生效。
+        //    酷狗约定：1 = VIP 验证通过给完整音源，0 = 走试听/包月/购买。
+        final privStatus = _parseInt(data['priv_status']);
+        if (privStatus == 0) {
+          debugPrint(
+            '_getSongUrlNew: priv_status=0, returned url is a sample, ignored.',
+          );
+          return null;
+        }
+
+        // 2) fail_process 含 buy/pkg 时也是试听兜底，丢弃。
+        final failProcess = data['fail_process'];
+        if (failProcess is List && failProcess.isNotEmpty) {
+          debugPrint(
+            '_getSongUrlNew: fail_process=$failProcess, returned url is a sample, ignored.',
+          );
+          return null;
+        }
+
+        // 3) 用 fileSize 兜底识别：3~5 分钟的普通歌曲通常 > 2MB，
+        //    如果不到 200KB 几乎一定是 30s 试听片段。
+        final fileSize = _parseInt(data['fileSize'] ?? data['file_size']);
+        if (fileSize > 0 && fileSize < 200 * 1024) {
+          debugPrint(
+            '_getSongUrlNew: fileSize=$fileSize looks like a sample, ignored.',
+          );
+          return null;
+        }
+
         debugPrint(
-          '_getSongUrlNew: got url via /song/url/new, quality=$quality',
+          '_getSongUrlNew: got full url via /song/url/new, '
+          'quality=$quality, priv_status=$privStatus, fileSize=$fileSize',
         );
         return KugouPlayUrl.fromJson({...data, 'quality': quality});
       }
@@ -517,6 +561,13 @@ class KugouApiClient {
       debugPrint('_getSongUrlNew error: $e');
     }
     return null;
+  }
+
+  int _parseInt(dynamic v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v) ?? 0;
+    return 0;
   }
 
   Future<List<KugouSongDetail>?> getRecommendSongs() async {

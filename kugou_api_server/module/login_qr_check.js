@@ -17,6 +17,15 @@ module.exports = (params, useAxios) => {
         resp.cookie.push(`userid=${resp.body?.data?.userid}`);
         if (!resp.body.token) resp.body.token = resp.body.data.token;
         if (!resp.body.userid) resp.body.userid = resp.body.data.userid;
+        // 概念版 VIP 必须带 vip_token，否则 /v6/priv_url 会降级为试听。
+        if (resp.body?.data?.vip_token) {
+          resp.cookie.push(`vip_token=${resp.body.data.vip_token}`);
+          if (!resp.body.vip_token) resp.body.vip_token = resp.body.data.vip_token;
+        }
+        if (resp.body?.data?.vip_type != null) {
+          resp.cookie.push(`vip_type=${resp.body.data.vip_type}`);
+          if (resp.body.vip_type == null) resp.body.vip_type = resp.body.data.vip_type;
+        }
       }
       resolve(resp);
     }).catch(e => reject(e));

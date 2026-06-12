@@ -31,6 +31,36 @@ const dotenv = require('dotenv');
 const cache = require('./util/apicache').middleware;
 const deviceConfig = require('./device_config');
 
+// 将所有 console.log/info/warn/error 同步写入 server.log，
+// 这样即便启动服务的终端被关掉，也能从文件里看到日志。
+const __logFile = path.join(__dirname, 'server.log');
+try {
+  fs.truncateSync(__logFile, 0);
+} catch (_) {}
+const __writeLog = (level, args) => {
+  const line = `[${new Date().toISOString()}] [${level}] ` +
+    args.map((a) => {
+      if (typeof a === 'string') return a;
+      try {
+        return JSON.stringify(a);
+      } catch (_) {
+        return String(a);
+      }
+    }).join(' ') + '\n';
+  try {
+    fs.appendFileSync(__logFile, line);
+  } catch (_) {}
+};
+const __origLog = console.log.bind(console);
+const __origInfo = console.info.bind(console);
+const __origWarn = console.warn.bind(console);
+const __origErr = console.error.bind(console);
+console.log = (...a) => { __writeLog('LOG', a); __origLog(...a); };
+console.info = (...a) => { __writeLog('INFO', a); __origInfo(...a); };
+console.warn = (...a) => { __writeLog('WARN', a); __origWarn(...a); };
+console.error = (...a) => { __writeLog('ERROR', a); __origErr(...a); };
+console.log(`📄 server log file: ${__logFile}`);
+
 let registeredDfid = null;
 let registeredMid = null;
 
