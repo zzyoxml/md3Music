@@ -68,6 +68,16 @@ module.exports = (params, useAxios) => {
           response.cookie.push(`userid=${response.body.data?.userid || 0}`);
           response.cookie.push(`vip_type=${response.body.data?.vip_type || 0}`);
           response.cookie.push(`vip_token=${response.body.data?.vip_token || ''}`);
+          console.log(
+            `[LOGIN_OPENPLAT] status=1 userid=${response.body.data?.userid} ` +
+              `vip_type=${response.body.data?.vip_type} ` +
+              `vip_token=${response.body.data?.vip_token ? 'YES(len=' + String(response.body.data.vip_token).length + ')' : 'MISSING'} ` +
+              `decryptedKeys=${Object.keys(getToken || {}).join(',')}`,
+          );
+        } else {
+          console.log(
+            `[LOGIN_OPENPLAT] status=${response.body?.status} err=${JSON.stringify(response.body?.data || {}).substring(0, 200)}`,
+          );
         }
         resolve(response);
       } else {
