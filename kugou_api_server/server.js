@@ -68,7 +68,7 @@ async function registerDeviceAndGetDfid() {
   try {
     const axios = require('axios');
     
-    const response = await axios.get('http://localhost:3000/register/dev', {
+    const response = await axios.get('http://127.0.0.1:3000/register/dev', {
       timeout: 10000,
       headers: {
         'User-Agent': 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi'

@@ -12,7 +12,16 @@ module.exports = (params, useAxios) => {
       encryptType: 'web',
       cookie: params?.cookie || {},
     }).then(resp => {
-      if (resp.body?.data?.status == 4) {
+      const status = resp.body?.data?.status;
+      const dataKeys = resp.body?.data ? Object.keys(resp.body.data).join(',') : 'none';
+      console.log(
+        `[LOGIN_QR_CHECK] status=${status} ` +
+          `hasToken=${!!resp.body?.data?.token} ` +
+          `hasVipToken=${!!resp.body?.data?.vip_token} ` +
+          `vipType=${resp.body?.data?.vip_type} ` +
+          `dataKeys=${dataKeys}`,
+      );
+      if (status == 4) {
         resp.cookie.push(`token=${resp.body?.data?.token}`);
         resp.cookie.push(`userid=${resp.body?.data?.userid}`);
         if (!resp.body.token) resp.body.token = resp.body.data.token;
@@ -21,6 +30,9 @@ module.exports = (params, useAxios) => {
         if (resp.body?.data?.vip_token) {
           resp.cookie.push(`vip_token=${resp.body.data.vip_token}`);
           if (!resp.body.vip_token) resp.body.vip_token = resp.body.data.vip_token;
+          console.log(`[LOGIN_QR_CHECK] vip_token captured, len=${String(resp.body.data.vip_token).length}`);
+        } else {
+          console.log(`[LOGIN_QR_CHECK] vip_token NOT in response, full data: ${JSON.stringify(resp.body?.data).substring(0, 500)}`);
         }
         if (resp.body?.data?.vip_type != null) {
           resp.cookie.push(`vip_type=${resp.body.data.vip_type}`);
