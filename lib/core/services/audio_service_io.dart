@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:just_audio_background/just_audio_background.dart';
 import 'package:audio_session/audio_session.dart';
 
 class AudioService {
@@ -159,12 +158,12 @@ UriAudioSource createAudioSource({
 }) {
   return AudioSource.uri(
     Uri.parse(url),
-    tag: MediaItem(
-      id: id,
-      title: title,
-      artist: artist,
-      album: album,
-      artUri: artUri,
-    ),
+    tag: {
+      'id': id,
+      'title': title,
+      'artist': artist,
+      'album': album,
+      'artUri': artUri?.toString(),
+    },
   );
 }

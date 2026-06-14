@@ -378,10 +378,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _showQualityDialog() {
     final qualities = [
-      ('standard', '标准 128k'),
-      ('hq', '高品质 320k'),
+      ('128', '标准 128k'),
+      ('320', '高品质 320k'),
       ('flac', '无损 FLAC'),
-      ('hires', 'Hi-Res'),
     ];
 
     showDialog(

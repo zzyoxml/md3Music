@@ -16,6 +16,8 @@ import 'modules/settings/settings_page.dart';
 import 'modules/library/library_page.dart';
 import 'modules/login/login_page.dart';
 import 'modules/personal_fm/personal_fm_page.dart';
+import 'providers/downloads_provider.dart';
+import 'providers/favorites_provider.dart';
 import 'providers/kugou_provider.dart';
 import 'providers/library_provider.dart';
 import 'providers/player_provider.dart';
@@ -32,6 +34,8 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => PlayerProvider()),
         ChangeNotifierProvider(create: (_) => LibraryProvider()),
         ChangeNotifierProvider(create: (_) => KugouProvider()),
+        ChangeNotifierProvider(create: (_) => FavoritesProvider()),
+        ChangeNotifierProvider(create: (_) => DownloadsProvider()),
       ],
       child: const _AppView(),
     );

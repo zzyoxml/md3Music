@@ -4,8 +4,10 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart' as just_audio;
 
 import '../core/services/audio_service.dart';
+import '../core/services/media_notification_service.dart';
 import '../data/models/song.dart';
 import '../data/repositories/history_repository.dart';
+import '../data/repositories/settings_repository.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 
 enum AppLoopMode { off, one, all }
@@ -26,6 +28,7 @@ class PlayerProvider extends ChangeNotifier {
   Duration _position = Duration.zero;
   Duration? _duration;
   List<Song> _playlist = [];
+  List<Song> _originalPlaylist = [];
   int _currentIndex = -1;
   AppLoopMode _loopMode = AppLoopMode.off;
   bool _shuffleEnabled = false;
@@ -73,8 +76,28 @@ class PlayerProvider extends ChangeNotifier {
       _audioService = audioServiceModule;
       _audioInitialized = true;
       _initStreams();
+      await _loadDefaultQuality();
     } catch (e) {
       debugPrint('Failed to initialize audio service: $e');
+    }
+  }
+
+  Future<void> _loadDefaultQuality() async {
+    try {
+      final settings = SettingsRepository();
+      final qualityValue = await settings.getDefaultQuality();
+      debugPrint('Loading default quality from settings: "$qualityValue"');
+      _audioQuality = AudioQuality.values.firstWhere(
+        (q) => q.value == qualityValue,
+        orElse: () {
+          debugPrint('Quality "$qualityValue" not found, defaulting to standard');
+          return AudioQuality.standard;
+        },
+      );
+      debugPrint('Audio quality set to: ${_audioQuality.value} (${_audioQuality.label})');
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Failed to load default quality: $e');
     }
   }
 
@@ -175,12 +198,22 @@ class PlayerProvider extends ChangeNotifier {
       if (onPlaylistEnd != null) {
         await onPlaylistEnd!();
       } else if (_loopMode == AppLoopMode.all) {
-        _currentIndex = 0;
-        if (_playlist.isNotEmpty) {
-          _currentSong = _playlist[0];
+        if (_shuffleEnabled) {
+          final currentSong = _currentSong;
+          final remaining = _playlist.where((s) => s.id != currentSong?.id).toList();
+          remaining.shuffle();
+          _playlist = [?currentSong, ...remaining];
+          _currentIndex = 0;
+        } else {
+          _currentIndex = 0;
         }
-        seek(Duration.zero);
-        _audioService?.play();
+        if (_playlist.isNotEmpty) {
+          _currentSong = _playlist[_currentIndex];
+        }
+        final ok = await _resolveAndPlayCurrentSong();
+        if (!ok) {
+          _resolveError = '无法获取播放链接';
+        }
         notifyListeners();
       }
     } else {
@@ -196,6 +229,7 @@ class PlayerProvider extends ChangeNotifier {
 
     _currentSong = song;
     _playlist = [song];
+    _originalPlaylist = [song];
     _currentIndex = 0;
     _resolveError = null;
     _recordHistory(song);
@@ -217,6 +251,7 @@ class PlayerProvider extends ChangeNotifier {
     }
     _currentSong = song;
     _playlist = [song];
+    _originalPlaylist = [song];
     _currentIndex = 0;
     _isResolvingUrl = true;
     _resolveError = null;
@@ -277,6 +312,7 @@ class PlayerProvider extends ChangeNotifier {
     if (songs.isEmpty) return;
 
     _playlist = List.from(songs);
+    _originalPlaylist = List.from(songs);
     _currentIndex = startIndex;
     _currentSong = songs[startIndex];
     _resolveError = null;
@@ -337,6 +373,7 @@ class PlayerProvider extends ChangeNotifier {
     }
 
     _playlist = List.from(songs);
+    _originalPlaylist = List.from(songs);
     _currentIndex = startIndex;
     _currentSong = songs[startIndex];
     _isResolvingUrl = true;
@@ -346,12 +383,14 @@ class PlayerProvider extends ChangeNotifier {
 
     try {
       final apiClient = KugouApiClient();
+      debugPrint('playOnlinePlaylist: requesting URL for "${_currentSong!.title}" with quality=${_audioQuality.value}');
       final result = await apiClient.getSongUrl(
         _currentSong!.id,
         quality: _audioQuality.value,
         albumId: _currentSong!.albumId,
         albumAudioId: _currentSong!.albumAudioId,
       );
+      debugPrint('playOnlinePlaylist: URL result: ${result?.url.substring(0, 50)}...');
 
       if (result != null && result.url.isNotEmpty) {
         final resolvedSong = _currentSong!.copyWith(url: result.url);
@@ -607,7 +646,20 @@ class PlayerProvider extends ChangeNotifier {
 
   Future<void> toggleShuffle() async {
     _shuffleEnabled = !_shuffleEnabled;
-    await _audioService?.setShuffleModeEnabled(_shuffleEnabled);
+    if (_shuffleEnabled) {
+      final currentSong = _currentSong;
+      final remaining = _playlist.where((s) => s.id != currentSong?.id).toList();
+      remaining.shuffle();
+      _playlist = [?currentSong, ...remaining];
+      _currentIndex = 0;
+    } else {
+      final currentSong = _currentSong;
+      _playlist = List.from(_originalPlaylist);
+      if (currentSong != null) {
+        _currentIndex = _playlist.indexWhere((s) => s.id == currentSong.id);
+        if (_currentIndex < 0) _currentIndex = 0;
+      }
+    }
     notifyListeners();
   }
 
@@ -626,6 +678,7 @@ class PlayerProvider extends ChangeNotifier {
   void setAudioQuality(AudioQuality quality) {
     if (_audioQuality == quality) return;
     _audioQuality = quality;
+    SettingsRepository().setDefaultQuality(quality.value);
     notifyListeners();
     _applyQualityToCurrent();
   }

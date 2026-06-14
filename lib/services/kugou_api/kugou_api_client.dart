@@ -1560,39 +1560,56 @@ class KugouApiClient {
     );
   }
 
-  // ==================== Collection ====================
+  // ==================== Playlist Management ====================
+
+  Future<Map<String, dynamic>?> createPlaylist(
+    String name, {
+    int type = 0,
+    int isPri = 0,
+    String? listCreateUserid,
+    String? listCreateListid,
+  }) async {
+    final data = <String, dynamic>{
+      'name': name,
+      'type': type,
+      'is_pri': isPri,
+    };
+    if (listCreateUserid != null) data['list_create_userid'] = listCreateUserid;
+    if (listCreateListid != null) data['list_create_listid'] = listCreateListid;
+    return await _post(KugouEndpoints.playlistAdd, data: data);
+  }
+
+  Future<Map<String, dynamic>?> deletePlaylist(String listid) async {
+    return await _post(
+      KugouEndpoints.playlistDel,
+      data: {'listid': listid},
+    );
+  }
+
+  Future<Map<String, dynamic>?> addPlaylistTracks(
+    String listid,
+    String data,
+  ) async {
+    return await _post(
+      KugouEndpoints.playlistTracksAdd,
+      data: {'listid': listid, 'data': data},
+    );
+  }
+
+  Future<Map<String, dynamic>?> deletePlaylistTracks(
+    String listid,
+    String fileids,
+  ) async {
+    return await _post(
+      KugouEndpoints.playlistTracksDel,
+      data: {'listid': listid, 'fileids': fileids},
+    );
+  }
 
   Future<Map<String, dynamic>?> collectSheet(String specialId) async {
     return await _post(
       KugouEndpoints.sheetCollection,
       data: {'specialid': specialId},
-    );
-  }
-
-  Future<Map<String, dynamic>?> uncollectSheet(String specialId) async {
-    return await _post(
-      KugouEndpoints.playlistDel,
-      data: {'specialid': specialId},
-    );
-  }
-
-  Future<Map<String, dynamic>?> addSheetTracks(
-    String specialId,
-    String audioIds,
-  ) async {
-    return await _post(
-      KugouEndpoints.playlistTracksAdd,
-      data: {'specialid': specialId, 'audio_ids': audioIds},
-    );
-  }
-
-  Future<Map<String, dynamic>?> delSheetTracks(
-    String specialId,
-    String audioIds,
-  ) async {
-    return await _post(
-      KugouEndpoints.playlistTracksDel,
-      data: {'specialid': specialId, 'audio_ids': audioIds},
     );
   }
 
