@@ -1568,21 +1568,33 @@ class KugouApiClient {
     int isPri = 0,
     String? listCreateUserid,
     String? listCreateListid,
+    String? globalCollectionId,
   }) async {
-    final data = <String, dynamic>{
+    String userid = listCreateUserid ?? _userid ?? '0';
+    String listid = listCreateListid ?? '0';
+
+    if (globalCollectionId != null && globalCollectionId.isNotEmpty) {
+      final parts = globalCollectionId.split('_');
+      if (parts.length >= 4) {
+        userid = parts[2];
+        listid = parts[3];
+      }
+    }
+
+    final params = <String, dynamic>{
       'name': name,
       'type': type,
       'is_pri': isPri,
+      'list_create_userid': userid,
+      'list_create_listid': listid,
     };
-    if (listCreateUserid != null) data['list_create_userid'] = listCreateUserid;
-    if (listCreateListid != null) data['list_create_listid'] = listCreateListid;
-    return await _post(KugouEndpoints.playlistAdd, data: data);
+    return await _get(KugouEndpoints.playlistAdd, queryParameters: params);
   }
 
   Future<Map<String, dynamic>?> deletePlaylist(String listid) async {
-    return await _post(
+    return await _get(
       KugouEndpoints.playlistDel,
-      data: {'listid': listid},
+      queryParameters: {'listid': listid},
     );
   }
 
@@ -1590,9 +1602,9 @@ class KugouApiClient {
     String listid,
     String data,
   ) async {
-    return await _post(
+    return await _get(
       KugouEndpoints.playlistTracksAdd,
-      data: {'listid': listid, 'data': data},
+      queryParameters: {'listid': listid, 'data': data},
     );
   }
 
@@ -1600,9 +1612,9 @@ class KugouApiClient {
     String listid,
     String fileids,
   ) async {
-    return await _post(
+    return await _get(
       KugouEndpoints.playlistTracksDel,
-      data: {'listid': listid, 'fileids': fileids},
+      queryParameters: {'listid': listid, 'fileids': fileids},
     );
   }
 

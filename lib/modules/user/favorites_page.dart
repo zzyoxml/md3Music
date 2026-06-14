@@ -96,17 +96,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
 
       if (result != null && result.songs.isNotEmpty) {
         setState(() {
-          _currentPlaylistSongs = result.songs.map((s) => Song(
-            id: s.hash,
-            title: s.songName,
-            artist: s.artistName ?? '未知歌手',
-            album: s.albumName ?? '未知专辑',
-            duration: Duration(milliseconds: s.duration),
-            artworkUri: s.artworkUri,
-            isOnline: true,
-            albumId: s.albumId,
-            albumAudioId: s.albumAudioId,
-          )).toList();
+          _currentPlaylistSongs = result.songs.map((s) => s.toSong()).toList();
           _isLoadingSongs = false;
         });
       } else {

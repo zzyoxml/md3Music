@@ -9,6 +9,8 @@ class Playlist {
   final String? creator;
   final List<Song> songs;
   final bool isLocal;
+  final String? listCreateUserid;
+  final String? listCreateListid;
 
   const Playlist({
     required this.id,
@@ -19,6 +21,8 @@ class Playlist {
     this.creator,
     required this.songs,
     this.isLocal = false,
+    this.listCreateUserid,
+    this.listCreateListid,
   });
 
   factory Playlist.fromJson(Map<String, dynamic> json) {
@@ -58,6 +62,8 @@ class Playlist {
     String? creator,
     List<Song>? songs,
     bool? isLocal,
+    String? listCreateUserid,
+    String? listCreateListid,
   }) {
     return Playlist(
       id: id ?? this.id,
@@ -68,6 +74,8 @@ class Playlist {
       creator: creator ?? this.creator,
       songs: songs ?? this.songs,
       isLocal: isLocal ?? this.isLocal,
+      listCreateUserid: listCreateUserid ?? this.listCreateUserid,
+      listCreateListid: listCreateListid ?? this.listCreateListid,
     );
   }
 

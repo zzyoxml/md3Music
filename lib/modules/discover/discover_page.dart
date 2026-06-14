@@ -526,7 +526,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
                               songCount: plist[i].songCount,
                             ),
                             onTap: () {
-                              final playlist = plist[i].toPlaylist();
+                              final brief = plist[i];
+                              debugPrint('Collect: name=${brief.name}, specialId=${brief.id}, listId=${brief.listId}');
+                              final playlist = brief.toPlaylist();
                               Navigator.of(context).push(
                                 MaterialPageRoute(
                                   builder: (_) =>

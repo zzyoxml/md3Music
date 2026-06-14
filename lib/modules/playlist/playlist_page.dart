@@ -6,6 +6,7 @@ import '../../data/models/playlist.dart';
 import '../../data/models/song.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../services/kugou_api/kugou_api_client.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
 
@@ -22,11 +23,42 @@ class _PlaylistPageState extends State<PlaylistPage> {
   bool _isLoading = true;
   List<Song> _songs = [];
   String? _error;
+  bool _isCollected = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) => _fetchSongs());
+  }
+
+  Future<void> _collectPlaylist() async {
+    final api = KugouApiClient();
+    if (!api.isLoggedIn) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请先登录'), behavior: SnackBarBehavior.floating),
+        );
+      }
+      return;
+    }
+    try {
+      debugPrint('Collect playlist: name=${widget.playlist.name}, id=${widget.playlist.id}');
+      final result = await api.createPlaylist(
+        widget.playlist.name,
+        type: 1,
+        listCreateUserid: widget.playlist.listCreateUserid,
+        listCreateListid: widget.playlist.listCreateListid,
+        globalCollectionId: widget.playlist.id,
+      );
+      if (result != null && mounted) {
+        setState(() => _isCollected = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('收藏成功'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    } catch (e) {
+      debugPrint('Collect playlist error: $e');
+    }
   }
 
   Future<void> _fetchSongs() async {
@@ -196,6 +228,14 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                       },
                                       icon: const Icon(Icons.shuffle),
                                       label: const Text('随机播放'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  IconButton.filledTonal(
+                                    onPressed: _isCollected ? null : _collectPlaylist,
+                                    icon: Icon(
+                                      _isCollected ? Icons.favorite : Icons.favorite_border,
+                                      color: _isCollected ? colorScheme.error : null,
                                     ),
                                   ),
                                 ],
