@@ -1,11 +1,8 @@
-import 'dart:async';
-
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/layout/responsive_layout.dart';
-import '../../core/services/floating_lyric_service.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
@@ -32,7 +29,6 @@ class _FullPlayerState extends State<FullPlayer>
   String _lyrics = '';
   bool _isLoadingLyrics = false;
   String? _lastSongId;
-  Timer? _floatingLyricTimer;
 
   @override
   void initState() {
@@ -45,18 +41,6 @@ class _FullPlayerState extends State<FullPlayer>
         _fetchLyrics(song);
       }
       context.read<PlayerProvider>().addListener(_onPlayerSongChanged);
-      _startFloatingLyricTimer();
-    });
-  }
-
-  void _startFloatingLyricTimer() {
-    _floatingLyricTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!mounted || !FloatingLyricService.isRunning) return;
-      final player = context.read<PlayerProvider>();
-      final currentLyric = _getCurrentLyric(player.position);
-      if (currentLyric.isNotEmpty) {
-        FloatingLyricService.updateLyric(currentLyric);
-      }
     });
   }
 
@@ -65,9 +49,6 @@ class _FullPlayerState extends State<FullPlayer>
     final song = context.read<PlayerProvider>().currentSong;
     if (song != null && song.id != _lastSongId) {
       _fetchLyrics(song);
-      if (FloatingLyricService.isRunning) {
-        FloatingLyricService.updateTitle('${song.title} - ${song.artist}');
-      }
     }
   }
 
@@ -84,7 +65,6 @@ class _FullPlayerState extends State<FullPlayer>
 
   @override
   void dispose() {
-    _floatingLyricTimer?.cancel();
     try {
       context.read<PlayerProvider>().removeListener(_onPlayerSongChanged);
     } catch (_) {}
@@ -123,29 +103,6 @@ class _FullPlayerState extends State<FullPlayer>
         });
       }
     }
-  }
-
-  String _getCurrentLyric(Duration position) {
-    if (_lyrics.isEmpty) return '';
-    final lines = _lyrics.split('\n');
-    String currentLine = '';
-    for (final line in lines) {
-      final match = RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\]').firstMatch(line);
-      if (match != null) {
-        final minutes = int.parse(match.group(1)!);
-        final seconds = int.parse(match.group(2)!);
-        final ms = int.parse(match.group(3)!.padRight(3, '0'));
-        final lineTime = Duration(
-          minutes: minutes,
-          seconds: seconds,
-          milliseconds: ms,
-        );
-        if (position >= lineTime) {
-          currentLine = line.replaceAll(RegExp(r'\[\d{2}:\d{2}\.\d{2,3}\]'), '').trim();
-        }
-      }
-    }
-    return currentLine;
   }
 
   @override
@@ -288,25 +245,6 @@ class _FullPlayerState extends State<FullPlayer>
               labelStyle: Theme.of(context).textTheme.labelMedium,
               indicatorSize: TabBarIndicatorSize.label,
             ),
-          ),
-          IconButton(
-            icon: Icon(
-              FloatingLyricService.isRunning
-                  ? Icons.picture_in_picture
-                  : Icons.picture_in_picture_alt,
-              size: 20,
-            ),
-            onPressed: () async {
-              final player = context.read<PlayerProvider>();
-              final song = player.currentSong;
-              if (song == null) return;
-              final currentLyric = _getCurrentLyric(player.position);
-              await FloatingLyricService.toggle(
-                currentLyric,
-                title: '${song.title} - ${song.artist}',
-              );
-              if (mounted) setState(() {});
-            },
           ),
           IconButton(icon: const Icon(Icons.more_vert), onPressed: () {}),
         ],

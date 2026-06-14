@@ -72,9 +72,23 @@ class PlayerProvider extends ChangeNotifier {
 
   Future<void> _initAudioService() async {
     try {
+      MediaNotificationService.initCallbacks();
+      MediaNotificationService.onPrevious = () => previous();
+      MediaNotificationService.onNext = () => next();
+      MediaNotificationService.onTogglePlayPause = () {
+        if (_isPlaying) {
+          pause();
+        } else {
+          resume();
+        }
+      };
+      MediaNotificationService.onSeekTo = (pos) {
+        seek(Duration(milliseconds: pos));
+      };
       final audioServiceModule = await _loadAudioService();
       _audioService = audioServiceModule;
       _audioInitialized = true;
+      await _audioService.init();
       _initStreams();
       await _loadDefaultQuality();
     } catch (e) {
@@ -112,6 +126,7 @@ class PlayerProvider extends ChangeNotifier {
       _positionSubscription = _audioService.positionStream.listen(
         (position) {
           _position = position;
+          _updateNotificationPosition();
           notifyListeners();
         },
         onError: (e) {
@@ -132,6 +147,7 @@ class PlayerProvider extends ChangeNotifier {
       _playingSubscription = _audioService.playingStream.listen(
         (isPlaying) {
           _isPlaying = isPlaying;
+          _updateNotification();
           notifyListeners();
         },
         onError: (e) {
@@ -233,6 +249,7 @@ class PlayerProvider extends ChangeNotifier {
     _currentIndex = 0;
     _resolveError = null;
     _recordHistory(song);
+    _updateNotification();
     notifyListeners();
 
     if (_audioService != null) {
@@ -256,6 +273,7 @@ class PlayerProvider extends ChangeNotifier {
     _isResolvingUrl = true;
     _resolveError = null;
     _recordHistory(song);
+    _updateNotification();
     debugPrint('playOnlineSong: notifyListeners() - set initial state');
     notifyListeners();
 
@@ -379,6 +397,7 @@ class PlayerProvider extends ChangeNotifier {
     _isResolvingUrl = true;
     _resolveError = null;
     _recordHistory(songs[startIndex]);
+    _updateNotification();
     notifyListeners();
 
     try {
@@ -563,6 +582,7 @@ class PlayerProvider extends ChangeNotifier {
     _currentIndex = nextIndex;
     _currentSong = _playlist[nextIndex];
     _resolveError = null;
+    _updateNotification();
 
     final ok = await _resolveAndPlayCurrentSong();
     if (!ok) {
@@ -737,6 +757,29 @@ class PlayerProvider extends ChangeNotifier {
       _resolveError = e.toString();
       notifyListeners();
     }
+  }
+
+  DateTime? _lastNotificationUpdate;
+
+  void _updateNotificationPosition() {
+    final now = DateTime.now();
+    if (_lastNotificationUpdate != null &&
+        now.difference(_lastNotificationUpdate!).inSeconds < 1) return;
+    _lastNotificationUpdate = now;
+    _updateNotification();
+  }
+
+  void _updateNotification() {
+    final song = _currentSong;
+    if (song == null) return;
+    MediaNotificationService.updateNotification(
+      title: song.title,
+      artist: song.artist,
+      artUrl: song.artworkUri,
+      isPlaying: _isPlaying,
+      position: _position,
+      duration: _duration ?? Duration.zero,
+    );
   }
 
   void _recordHistory(Song song) {
