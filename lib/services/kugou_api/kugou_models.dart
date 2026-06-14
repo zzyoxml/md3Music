@@ -186,6 +186,9 @@ class KugouPlaylistBrief {
   final String? coverUrl;
   final int songCount;
   final String? globalCollectionId;
+  final String listId;
+  final String? listCreateUserid;
+  final String? listCreateListid;
 
   const KugouPlaylistBrief({
     required this.id,
@@ -193,6 +196,9 @@ class KugouPlaylistBrief {
     this.coverUrl,
     this.songCount = 0,
     this.globalCollectionId,
+    this.listId = '',
+    this.listCreateUserid,
+    this.listCreateListid,
   });
 
   factory KugouPlaylistBrief.fromJson(Map<String, dynamic> json) {
@@ -208,6 +214,9 @@ class KugouPlaylistBrief {
         json['songcount'] ?? json['song_count'] ?? json['count'] ?? 0,
       ),
       globalCollectionId: _strNull(json['global_collection_id']),
+      listId: _str(json['listid'] ?? ''),
+      listCreateUserid: _strNull(json['list_create_userid']),
+      listCreateListid: _strNull(json['list_create_listid']),
     );
   }
 
@@ -218,6 +227,8 @@ class KugouPlaylistBrief {
       artworkUri: coverUrl,
       songCount: songCount,
       songs: [],
+      listCreateUserid: listCreateUserid,
+      listCreateListid: listCreateListid,
     );
   }
 }

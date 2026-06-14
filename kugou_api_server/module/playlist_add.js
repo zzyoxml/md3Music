@@ -12,8 +12,8 @@ module.exports = (params, useAxios) => {
     type: params.type || 0,
     source: params.source === 0 ? 0 : params.source || 1,
     is_pri: 0,
-    list_create_userid: params.list_create_userid,
-    list_create_listid: params.list_create_listid,
+    list_create_userid: params.list_create_userid || 0,
+    list_create_listid: params.list_create_listid || 0,
     list_create_gid: params.list_create_gid || '',
     from_shupinmv: 0,
   };
