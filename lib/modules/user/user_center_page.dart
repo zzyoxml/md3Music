@@ -7,6 +7,8 @@ import '../../providers/kugou_provider.dart';
 import '../../widgets/app_animation.dart';
 import '../login/login_page.dart';
 import '../settings/settings_page.dart';
+import 'downloads_page.dart';
+import 'favorites_page.dart';
 import 'play_history_page.dart';
 
 class UserCenterPage extends StatefulWidget {
@@ -264,8 +266,16 @@ class _UserCenterPageState extends State<UserCenterPage> {
                   MaterialPageRoute(builder: (_) => const PlayHistoryPage()),
                 );
               }),
-              _actionItem(cs, Icons.favorite, '收藏', () {}),
-              _actionItem(cs, Icons.download, '下载', () {}),
+              _actionItem(cs, Icons.favorite, '收藏', () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const FavoritesPage()),
+                );
+              }),
+              _actionItem(cs, Icons.download, '下载', () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DownloadsPage()),
+                );
+              }),
             ],
           ),
         ),

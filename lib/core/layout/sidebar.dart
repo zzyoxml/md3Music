@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../modules/user/favorites_page.dart';
 import '../../providers/kugou_provider.dart';
 
 class Sidebar extends StatelessWidget {
@@ -181,6 +182,13 @@ class Sidebar extends StatelessWidget {
                         Navigator.pushNamed(context, '/personal_fm');
                       } else if (item['path'] == '/') {
                         onDestinationSelected(0);
+                      } else if (item['path'] == '/favorites') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const FavoritesPage(),
+                          ),
+                        );
                       }
                     },
                     borderRadius: BorderRadius.circular(14),
