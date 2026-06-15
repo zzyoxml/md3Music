@@ -12,7 +12,7 @@ module.exports = (params, useAxios) => {
       const dataMap = {
         listid: Number(params.listid),
         total_ver: 0,
-        type: 1,
+        type: params.type ?? 1, // 1=删除自己歌单, 0=取消收藏别人歌单
       };
 
       const aesEncrypt = playlistAesEncrypt(dataMap);
