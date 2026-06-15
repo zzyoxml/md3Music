@@ -8,7 +8,8 @@ module.exports = (params, useAxios) => {
     userid,
     token,
     total_ver: 979,
-    type: 2,
+    // type: 0=歌单, 1=专辑, 2=全部(默认)
+    type: params?.type ?? 2,
     page: params?.page || 1,
     pagesize: params?.pagesize || 30,
   };

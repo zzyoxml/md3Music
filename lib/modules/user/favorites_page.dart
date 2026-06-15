@@ -23,6 +23,14 @@ class _FavoritesPageState extends State<FavoritesPage> {
   bool _isLoadingPlaylists = true;
   bool _isLoadingSongs = false;
 
+  // 分组折叠状态
+  bool _createdExpanded = true;
+  bool _collectedExpanded = true;
+
+  // 管理模式（批量选择）
+  bool _isManaging = false;
+  final Set<int> _selectedIndices = {};
+
   @override
   void initState() {
     super.initState();
@@ -38,13 +46,30 @@ class _FavoritesPageState extends State<FavoritesPage> {
     super.dispose();
   }
 
+  String? get _currentUserId => KugouApiClient().userid;
+
+  /// 判断歌单是否为用户自己创建的
+  bool _isCreated(KugouPlaylistBrief p) {
+    if (_currentUserId == null) return false;
+    return p.listCreateUserid == _currentUserId;
+  }
+
+  List<KugouPlaylistBrief> get _createdPlaylists =>
+      _playlists.where(_isCreated).toList();
+
+  List<KugouPlaylistBrief> get _collectedPlaylists =>
+      _playlists.where((p) => !_isCreated(p)).toList();
+
   void _onFavoritesChanged() {
-    if (_selectedPlaylist != null && mounted) {
-      final gid = _selectedPlaylist!.globalCollectionId ?? _selectedPlaylist!.id;
-      final isMyFavorite = gid.contains('_2_') || _selectedPlaylist!.name == '我喜欢';
-      if (isMyFavorite) {
-        _loadPlaylistSongs(_selectedPlaylist!, noCache: true);
+    if (!mounted) return;
+    final selected = _selectedPlaylist;
+    if (selected != null) {
+      if (_isMyFavoritePlaylist(selected)) {
+        final favs = context.read<FavoritesProvider>().favorites;
+        setState(() => _currentPlaylistSongs = List.from(favs));
+        return;
       }
+      _loadPlaylistSongs(selected, noCache: true);
     }
   }
 
@@ -57,12 +82,8 @@ class _FavoritesPageState extends State<FavoritesPage> {
       final result = await api.getUserPlaylist(pagesize: 50);
       if (!mounted) return;
 
-      debugPrint('getUserPlaylist result: $result');
-
       if (result != null) {
         final data = result['data'];
-        debugPrint('getUserPlaylist data: $data');
-
         List<dynamic>? list;
         if (data is List) {
           list = data;
@@ -72,12 +93,18 @@ class _FavoritesPageState extends State<FavoritesPage> {
         }
 
         if (list != null && list.isNotEmpty) {
+          final uid = _currentUserId;
           setState(() {
             _playlists = list!
-                .map((e) {
-                  debugPrint('Playlist item: $e');
-                  return KugouPlaylistBrief.fromJson(e as Map<String, dynamic>);
+                .where((e) {
+                  // 过滤掉收藏的专辑：type=1 && source=2
+                  final json = e as Map<String, dynamic>;
+                  final type = json['type'] as int? ?? 0;
+                  final source = json['source'] as int? ?? 0;
+                  if (type == 1 && source == 2) return false;
+                  return true;
                 })
+                .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
                 .toList();
             _isLoadingPlaylists = false;
           });
@@ -91,6 +118,11 @@ class _FavoritesPageState extends State<FavoritesPage> {
     }
   }
 
+  bool _isMyFavoritePlaylist(KugouPlaylistBrief playlist) {
+    final gid = playlist.globalCollectionId ?? playlist.id;
+    return gid.contains('_2_') || playlist.name == '我喜欢';
+  }
+
   Future<void> _loadPlaylistSongs(KugouPlaylistBrief playlist, {bool noCache = false}) async {
     if (!mounted) return;
     setState(() {
@@ -99,21 +131,34 @@ class _FavoritesPageState extends State<FavoritesPage> {
       _currentPlaylistSongs = [];
     });
 
+    // "我喜欢"歌单：优先使用本地数据
+    if (_isMyFavoritePlaylist(playlist)) {
+      final favs = context.read<FavoritesProvider>().favorites;
+      if (favs.isNotEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _currentPlaylistSongs = List.from(favs);
+          _isLoadingSongs = false;
+        });
+        return;
+      }
+    }
+
     try {
       final api = KugouApiClient();
       final globalId = playlist.globalCollectionId ?? playlist.id;
-      debugPrint('Loading playlist songs for: ${playlist.name}, globalId: $globalId');
+      debugPrint('Loading songs for: ${playlist.name}, gid=$globalId, listId=${playlist.listId}');
 
       KugouPlaylistSongs? result;
-      if (globalId.startsWith('collection_3_')) {
-        final listid = playlist.listId.isNotEmpty ? playlist.listId : playlist.id;
-        debugPrint('Using new endpoint (listid=$listid) for user playlist');
+      // 用户自己创建的歌单：用 listid 接口
+      if (_isCreated(playlist) && playlist.listId.isNotEmpty) {
         result = await api.getPlaylistSongsByListid(
-          listid: listid,
+          listid: playlist.listId,
           pagesize: 200,
           noCache: noCache,
         );
       } else {
+        // 收藏的别人歌单：用 globalCollectionId 接口
         result = await api.getPlaylistSongs(
           globalId,
           pagesize: 200,
@@ -122,8 +167,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
       }
       if (!mounted) return;
 
-      debugPrint('getPlaylistSongs result: $result');
-
       if (result != null && result.songs.isNotEmpty) {
         final songs = result.songs.map((s) => s.toSong()).toList();
         setState(() {
@@ -131,7 +174,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
           _isLoadingSongs = false;
         });
       } else {
-        debugPrint('No songs found in playlist');
         setState(() => _isLoadingSongs = false);
       }
     } catch (e) {
@@ -149,20 +191,11 @@ class _FavoritesPageState extends State<FavoritesPage> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(
-            hintText: '输入歌单名称',
-            border: OutlineInputBorder(),
-          ),
+          decoration: const InputDecoration(hintText: '输入歌单名称', border: OutlineInputBorder()),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('确定'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('确定')),
         ],
       ),
     );
@@ -170,16 +203,77 @@ class _FavoritesPageState extends State<FavoritesPage> {
       final fav = context.read<FavoritesProvider>();
       final resp = await fav.createPlaylist(result);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(resp != null ? '歌单创建成功' : '创建失败，请重试'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(resp != null ? '创建成功' : '创建失败，请重试'),
+          behavior: SnackBarBehavior.floating,
+        ));
         _loadPlaylists();
       }
     }
     controller.dispose();
+  }
+
+  // ---- 批量管理 ----
+
+  void _toggleManageMode(bool value) {
+    setState(() {
+      _isManaging = value;
+      _selectedIndices.clear();
+    });
+  }
+
+  void _toggleSelection(int index, int totalCreatedCount) {
+    setState(() {
+      if (_selectedIndices.contains(index)) {
+        _selectedIndices.remove(index);
+      } else {
+        _selectedIndices.add(index);
+      }
+    });
+  }
+
+  Future<void> _batchDeleteSelected(List<KugouPlaylistBrief> targetList) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定删除选中的 ${_selectedIndices.length} 个歌单？\n（收藏的歌单将取消收藏）'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+
+    final fav = context.read<FavoritesProvider>();
+    final sortedIndices = _selectedIndices.toList()..sort((a, b) => b.compareTo(a));
+
+    for (final idx in sortedIndices) {
+      if (idx < targetList.length) {
+        final p = targetList[idx];
+        try {
+          if (_isCreated(p)) {
+            await fav.deletePlaylist(p.listId);
+          } else {
+            // 收藏的歌单：取消收藏，传 type=0
+            await fav.deletePlaylist(p.listId, type: 0);
+          }
+        } catch (e) {
+          debugPrint('Delete playlist ${p.name} failed: $e');
+        }
+      }
+    }
+
+    _toggleManageMode(false);
+    _loadPlaylists();
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('操作完成'),
+        behavior: SnackBarBehavior.floating,
+      ));
+    }
   }
 
   @override
@@ -191,66 +285,185 @@ class _FavoritesPageState extends State<FavoritesPage> {
           if (_selectedPlaylist != null)
             IconButton(
               icon: const Icon(Icons.arrow_back),
-              tooltip: '返回歌单列表',
-              onPressed: () {
-                setState(() {
-                  _selectedPlaylist = null;
-                  _currentPlaylistSongs = [];
-                });
-              },
+              tooltip: '返回',
+              onPressed: () => setState(() => _selectedPlaylist = null),
             ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: '新建歌单',
-            onPressed: _showCreatePlaylistDialog,
-          ),
+          if (_selectedPlaylist == null && !_isManaging)
+            IconButton(
+              icon: const Icon(Icons.add),
+              tooltip: '新建歌单',
+              onPressed: _showCreatePlaylistDialog,
+            ),
+          if (_selectedPlaylist == null && _isManaging) ...[
+            IconButton(
+              icon: const Icon(Icons.delete_outline),
+              tooltip: '批量删除',
+              onPressed: _selectedIndices.isEmpty ? null : () => _batchDeleteSelected([..._createdPlaylists, ..._collectedPlaylists]),
+            ),
+            TextButton(
+              onPressed: () => _toggleManageMode(false),
+              child: const Text('取消'),
+            ),
+          ],
         ],
       ),
-      body: _selectedPlaylist != null ? _buildSongList() : _buildPlaylistList(),
+      body: _selectedPlaylist != null ? _buildSongList() : _buildGroupedPlaylistList(),
       bottomNavigationBar: const MiniPlayer(),
     );
   }
 
-  Widget _buildPlaylistList() {
+  // ==================== 歌单列表（分组折叠式）====================
+
+  Widget _buildGroupedPlaylistList() {
     if (_isLoadingPlaylists) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_playlists.isEmpty) {
-      return _buildEmpty();
-    }
+    if (_playlists.isEmpty) return _buildEmpty();
+
+    final created = _createdPlaylists;
+    final collected = _collectedPlaylists;
+
     return RefreshIndicator(
       onRefresh: _loadPlaylists,
-      child: ListView.builder(
-        itemCount: _playlists.length,
-        itemBuilder: (context, index) {
-          final playlist = _playlists[index];
-          return ListTile(
-            leading: ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                width: 48,
-                height: 48,
-                color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                child: playlist.coverUrl != null
-                    ? Image.network(playlist.coverUrl!, fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Icon(Icons.queue_music,
-                            color: Theme.of(context).colorScheme.onSurfaceVariant))
-                    : Icon(Icons.queue_music,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
-              ),
+      child: ListView(
+        children: [
+          // 我创建的歌单
+          if (created.isNotEmpty)
+            _buildGroupSection(
+              title: '我创建的歌单',
+              count: created.length,
+              isExpanded: _createdExpanded,
+              onToggle: (v) => setState(() => _createdExpanded = v),
+              playlists: created,
+              baseIndex: 0,
+              showAdd: true,
             ),
-            title: Text(playlist.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-            subtitle: Text(
-              '${playlist.songCount} 首',
-              style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+
+          // 我收藏的歌单
+          if (collected.isNotEmpty)
+            _buildGroupSection(
+              title: '我收藏的歌单',
+              count: collected.length,
+              isExpanded: _collectedExpanded,
+              onToggle: (v) => setState(() => _collectedExpanded = v),
+              playlists: collected,
+              baseIndex: created.length,
+              showAdd: false,
             ),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _loadPlaylistSongs(playlist),
-          );
-        },
+        ],
       ),
     );
   }
+
+  Widget _buildGroupSection({
+    required String title,
+    required int count,
+    required bool isExpanded,
+    required ValueChanged<bool> onToggle,
+    required List<KugouPlaylistBrief> playlists,
+    required int baseIndex,
+    required bool showAdd,
+  }) {
+    final displayCount = isExpanded ? playlists.length : (count > 5 ? 5 : count);
+
+    return Column(
+      children: [
+        // 分组头部
+        InkWell(
+          onTap: () => onToggle(!isExpanded),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Icon(isExpanded ? Icons.expand_less : Icons.expand_more, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+                ),
+                Text('$count', style: TextStyle(
+                  fontSize: 13,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                )),
+                const SizedBox(width: 8),
+                if (showAdd)
+                  IconButton(icon: const Icon(Icons.add, size: 20), onPressed: _showCreatePlaylistDialog)
+                else if (_isManaging)
+                  IconButton(
+                    icon: const Icon(Icons.sort, size: 20),
+                    tooltip: '管理模式',
+                    onPressed: () {}, // 已在管理中，无额外操作
+                  )
+                else
+                  IconButton(
+                    icon: const Icon(Icons.sort, size: 20),
+                    tooltip: '管理歌单',
+                    onPressed: () => _toggleManageMode(true),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        Divider(height: 1, indent: 44, color: Theme.of(context).colorScheme.outlineVariant),
+
+        // 展开时显示列表
+        if (isExpanded)
+          ...List.generate(displayCount, (i) {
+            final playlist = playlists[i];
+            final idx = baseIndex + i;
+            final isSelected = _selectedIndices.contains(idx);
+            return _buildPlaylistTile(playlist, isSelected, idx, baseIndex);
+          }),
+
+        // 折叠且超过显示数量时，底部展开按钮
+        if (!isExpanded && count > 5)
+          Center(
+            child: TextButton.icon(
+              onPressed: () => onToggle(true),
+              icon: const Icon(Icons.keyboard_arrow_down, size: 18),
+              label: const Text('展开', style: TextStyle(fontSize: 13)),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildPlaylistTile(KugouPlaylistBrief playlist, bool isSelected, int index, int baseIndex) {
+    return ListTile(
+      leading: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_isManaging)
+            Checkbox(
+              value: isSelected,
+              onChanged: (_) => _toggleSelection(index, baseIndex),
+            )
+          else
+            const SizedBox(width: 0),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: 48,
+              height: 48,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              child: playlist.coverUrl != null
+                  ? Image.network(playlist.coverUrl!, fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => Icon(Icons.queue_music,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant))
+                  : Icon(Icons.queue_music,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
+      title: Text(playlist.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text('${playlist.songCount} 首', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+      trailing: _isManaging ? null : const Icon(Icons.chevron_right),
+      onTap: _isManaging ? () => _toggleSelection(index, baseIndex) : () => _loadPlaylistSongs(playlist),
+      onLongPress: _isManaging ? null : () => _toggleManageMode(true),
+    );
+  }
+
+  // ==================== 歌曲列表 ====================
 
   Widget _buildSongList() {
     if (_isLoadingSongs) {
@@ -264,9 +477,8 @@ class _FavoritesPageState extends State<FavoritesPage> {
             Icon(Icons.music_note, size: 64,
                 color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.4)),
             const SizedBox(height: 12),
-            Text('歌单暂无歌曲',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+            Text('歌单暂无歌曲', style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant)),
           ],
         ),
       );
@@ -282,9 +494,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
                       color: Theme.of(context).colorScheme.onSurfaceVariant)),
               const Spacer(),
               TextButton.icon(
-                onPressed: () {
-                  context.read<PlayerProvider>().playOnlinePlaylist(_currentPlaylistSongs, 0);
-                },
+                onPressed: () => context.read<PlayerProvider>().playOnlinePlaylist(_currentPlaylistSongs, 0),
                 icon: const Icon(Icons.play_arrow),
                 label: const Text('播放全部'),
               ),
@@ -298,9 +508,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
               final song = _currentPlaylistSongs[index];
               return SongListItem(
                 song: song,
-                onTap: () {
-                  context.read<PlayerProvider>().playOnlinePlaylist(_currentPlaylistSongs, index);
-                },
+                onTap: () => context.read<PlayerProvider>().playOnlinePlaylist(_currentPlaylistSongs, index),
               );
             },
           ),
@@ -315,15 +523,12 @@ class _FavoritesPageState extends State<FavoritesPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.favorite_border, size: 64,
-              color: cs.onSurfaceVariant.withValues(alpha: 0.4)),
+          Icon(Icons.favorite_border, size: 64, color: cs.onSurfaceVariant.withValues(alpha: 0.4)),
           const SizedBox(height: 12),
-          Text('暂无歌单', style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              color: cs.onSurfaceVariant)),
+          Text('暂无歌单', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: cs.onSurfaceVariant)),
           const SizedBox(height: 8),
           Text('点击右上角 + 创建新歌单',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: cs.onSurfaceVariant.withValues(alpha: 0.6))),
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant.withValues(alpha: 0.6))),
         ],
       ),
     );

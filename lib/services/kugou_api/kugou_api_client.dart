@@ -1563,10 +1563,13 @@ class KugouApiClient {
   Future<Map<String, dynamic>?> getUserPlaylist({
     int page = 1,
     int pagesize = 30,
+    int? type, // 0=歌单, 1=专辑
   }) async {
+    final params = <String, dynamic>{'page': page, 'pagesize': pagesize};
+    if (type != null) params['type'] = type;
     return await _get(
       KugouEndpoints.userPlaylist,
-      queryParameters: {'page': page, 'pagesize': pagesize},
+      queryParameters: params,
     );
   }
 
@@ -1671,10 +1674,10 @@ class KugouApiClient {
     return await _get(KugouEndpoints.playlistAdd, queryParameters: params);
   }
 
-  Future<Map<String, dynamic>?> deletePlaylist(String listid) async {
+  Future<Map<String, dynamic>?> deletePlaylist(String listid, {int type = 1}) async {
     return await _get(
       KugouEndpoints.playlistDel,
-      queryParameters: {'listid': listid},
+      queryParameters: {'listid': listid, 'type': type},
     );
   }
 

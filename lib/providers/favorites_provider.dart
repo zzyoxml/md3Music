@@ -83,7 +83,10 @@ class FavoritesProvider extends ChangeNotifier {
   Future<void> toggleFavorite(Song song) async {
     final api = KugouApiClient();
     final isLoggedIn = api.isLoggedIn;
-    const favoriteListId = '2';
+
+    // 动态获取"我喜欢"歌单的 listId
+    final playlist = await _getMyFavoritePlaylist();
+    final listid = playlist?.listId ?? '2';
 
     if (_favoriteIds.contains(song.id)) {
       _favoriteIds.remove(song.id);
@@ -91,9 +94,9 @@ class FavoritesProvider extends ChangeNotifier {
       await _repository.removeFavorite(song.id);
 
       if (isLoggedIn) {
-        final fileidStr = song.fileId?.toString() ?? song.id;
         try {
-          await api.deletePlaylistTracks(favoriteListId, fileidStr);
+          // 服务端支持传 hash 删除，无需 fileId
+          await api.deletePlaylistTracks(listid, song.id);
         } catch (e) {
           debugPrint('Remove from Kugou favorite failed: $e');
         }
@@ -106,7 +109,7 @@ class FavoritesProvider extends ChangeNotifier {
       if (isLoggedIn) {
         try {
           final data = '${song.title}|${song.id}';
-          await api.addPlaylistTracks(favoriteListId, data);
+          await api.addPlaylistTracks(listid, data);
         } catch (e) {
           debugPrint('Add to Kugou favorite failed: $e');
         }
@@ -149,9 +152,9 @@ class FavoritesProvider extends ChangeNotifier {
     return await api.deletePlaylistTracks(listid, fileid);
   }
 
-  Future<Map<String, dynamic>?> deletePlaylist(String listid) async {
+  Future<Map<String, dynamic>?> deletePlaylist(String listid, {int type = 1}) async {
     final api = KugouApiClient();
-    return await api.deletePlaylist(listid);
+    return await api.deletePlaylist(listid, type: type);
   }
 
   Future<Map<String, dynamic>?> getUserPlaylists({
