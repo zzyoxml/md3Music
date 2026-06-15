@@ -32,6 +32,18 @@ class FavoritesProvider extends ChangeNotifier {
 
   bool isFavorite(String songId) => _favoriteIds.contains(songId);
 
+  /// 同步收藏 ID 集合（用于"我喜欢"歌单加载后同步本地状态）
+  void syncFavoriteIds(Set<String> ids) {
+    _favoriteIds = ids;
+    notifyListeners();
+  }
+
+  /// 批量添加收藏 ID（用于"我喜欢"歌单加载时同步）
+  void addFavoriteIds(List<String> ids) {
+    _favoriteIds.addAll(ids);
+    notifyListeners();
+  }
+
   Future<KugouPlaylistBrief?> _getMyFavoritePlaylist() async {
     if (_myFavoritePlaylist != null) return _myFavoritePlaylist;
     try {
@@ -89,18 +101,23 @@ class FavoritesProvider extends ChangeNotifier {
     final listid = playlist?.listId ?? '2';
 
     if (_favoriteIds.contains(song.id)) {
+      // 先调 API，成功后再更新本地状态
+      if (isLoggedIn) {
+        try {
+          // 优先用 fileId（歌单里的记录ID），没有再用 hash 兜底
+          final fileIds = song.fileId != null && song.fileId! > 0
+              ? song.fileId.toString()
+              : song.id;
+          await api.deletePlaylistTracks(listid, fileIds);
+        } catch (e) {
+          debugPrint('Remove from Kugou favorite failed: $e');
+          notifyListeners();
+          return;
+        }
+      }
       _favoriteIds.remove(song.id);
       _favorites.removeWhere((s) => s.id == song.id);
       await _repository.removeFavorite(song.id);
-
-      if (isLoggedIn) {
-        try {
-          // 服务端支持传 hash 删除，无需 fileId
-          await api.deletePlaylistTracks(listid, song.id);
-        } catch (e) {
-          debugPrint('Remove from Kugou favorite failed: $e');
-        }
-      }
     } else {
       _favoriteIds.add(song.id);
       _favorites.insert(0, song);
@@ -108,7 +125,8 @@ class FavoritesProvider extends ChangeNotifier {
 
       if (isLoggedIn) {
         try {
-          final data = '${song.title}|${song.id}';
+          final data =
+              '${song.title}|${song.id}|${song.albumId ?? 0}|${int.tryParse(song.albumAudioId ?? '') ?? 0}';
           await api.addPlaylistTracks(listid, data);
         } catch (e) {
           debugPrint('Add to Kugou favorite failed: $e');

@@ -13,6 +13,7 @@ class SongListItem extends StatelessWidget {
   final VoidCallback? onTap;
   final VoidCallback? onMoreTap;
   final bool showDuration;
+  final bool forceFavorited;
 
   const SongListItem({
     super.key,
@@ -20,6 +21,7 @@ class SongListItem extends StatelessWidget {
     this.onTap,
     this.onMoreTap,
     this.showDuration = true,
+    this.forceFavorited = false,
   });
 
   void _showDownloadDialog(BuildContext context) {
@@ -77,7 +79,7 @@ class SongListItem extends StatelessWidget {
     final favoritesProvider = context.watch<FavoritesProvider>();
     final downloadsProvider = context.watch<DownloadsProvider>();
     final isCurrentSong = playerProvider.currentSong?.id == song.id;
-    final isFavorited = favoritesProvider.isFavorite(song.id);
+    final isFavorited = forceFavorited || favoritesProvider.isFavorite(song.id);
     final isDownloaded = downloadsProvider.isDownloaded(song.id);
     final isDownloading = downloadsProvider.isDownloading(song.id);
     final colorScheme = Theme.of(context).colorScheme;
