@@ -11,6 +11,7 @@ class Playlist {
   final bool isLocal;
   final String? listCreateUserid;
   final String? listCreateListid;
+  final String? listCreateGid;
 
   const Playlist({
     required this.id,
@@ -23,6 +24,7 @@ class Playlist {
     this.isLocal = false,
     this.listCreateUserid,
     this.listCreateListid,
+    this.listCreateGid,
   });
 
   factory Playlist.fromJson(Map<String, dynamic> json) {
@@ -37,6 +39,7 @@ class Playlist {
           .map((e) => Song.fromJson(e as Map<String, dynamic>))
           .toList(),
       isLocal: (json['isLocal'] as bool?) ?? false,
+      listCreateGid: json['listCreateGid'] as String?,
     );
   }
 
@@ -50,6 +53,7 @@ class Playlist {
       'creator': creator,
       'songs': songs.map((e) => e.toJson()).toList(),
       'isLocal': isLocal,
+      'listCreateGid': listCreateGid,
     };
   }
 
@@ -64,6 +68,7 @@ class Playlist {
     bool? isLocal,
     String? listCreateUserid,
     String? listCreateListid,
+    String? listCreateGid,
   }) {
     return Playlist(
       id: id ?? this.id,
@@ -76,6 +81,7 @@ class Playlist {
       isLocal: isLocal ?? this.isLocal,
       listCreateUserid: listCreateUserid ?? this.listCreateUserid,
       listCreateListid: listCreateListid ?? this.listCreateListid,
+      listCreateGid: listCreateGid ?? this.listCreateGid,
     );
   }
 

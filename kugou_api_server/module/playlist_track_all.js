@@ -14,7 +14,6 @@ module.exports = (params, useAxios) => {
     pagesize ,
     global_collection_id: params?.global_collection_id || params?.id,
   };
-
   return useAxios({
     url: '/pubsongs/v2/get_other_list_file_nofilt',
     method: 'GET',
