@@ -64,11 +64,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
     if (!mounted) return;
     final selected = _selectedPlaylist;
     if (selected != null) {
-      if (_isMyFavoritePlaylist(selected)) {
-        final favs = context.read<FavoritesProvider>().favorites;
-        setState(() => _currentPlaylistSongs = List.from(favs));
-        return;
-      }
+      // 统一重新加载，让 _loadPlaylistSongs 内部处理"我喜欢"的逻辑
       _loadPlaylistSongs(selected, noCache: true);
     }
   }
@@ -131,18 +127,8 @@ class _FavoritesPageState extends State<FavoritesPage> {
       _currentPlaylistSongs = [];
     });
 
-    // "我喜欢"歌单：优先使用本地数据
-    if (_isMyFavoritePlaylist(playlist)) {
-      final favs = context.read<FavoritesProvider>().favorites;
-      if (favs.isNotEmpty) {
-        if (!mounted) return;
-        setState(() {
-          _currentPlaylistSongs = List.from(favs);
-          _isLoadingSongs = false;
-        });
-        return;
-      }
-    }
+    // "我喜欢"歌单：始终从 API 加载完整列表，本地 favorites 只用于红心状态
+    final isMyFav = _isMyFavoritePlaylist(playlist);
 
     try {
       final api = KugouApiClient();
@@ -169,6 +155,11 @@ class _FavoritesPageState extends State<FavoritesPage> {
 
       if (result != null && result.songs.isNotEmpty) {
         final songs = result.songs.map((s) => s.toSong()).toList();
+        // 同步"我喜欢"歌单的歌曲 ID 到 FavoritesProvider
+        if (isMyFav && mounted) {
+          final favProvider = context.read<FavoritesProvider>();
+          favProvider.syncFavoriteIds(songs.map((s) => s.id).toSet());
+        }
         setState(() {
           _currentPlaylistSongs = songs;
           _isLoadingSongs = false;
@@ -508,6 +499,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
               final song = _currentPlaylistSongs[index];
               return SongListItem(
                 song: song,
+                forceFavorited: _isMyFavoritePlaylist(_selectedPlaylist!),
                 onTap: () => context.read<PlayerProvider>().playOnlinePlaylist(_currentPlaylistSongs, index),
               );
             },

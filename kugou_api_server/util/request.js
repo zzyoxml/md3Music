@@ -40,7 +40,20 @@ const createRequest = (options) => {
     const userid = Number(options?.cookie?.userid || 0);
     const clienttime = Math.floor(Date.now() / 1000);
     const ip = options?.realIP || options?.ip || '';
-    const headers = { dfid, clienttime, mid, 'kg-rc': '1', 'kg-thash': '5d816a0', 'kg-rec': 1, 'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F' };
+    const cookieStr = options?.cookie
+      ? Object.entries(options.cookie)
+          .filter(([k, v]) => k && v !== undefined)
+          .map(([k, v]) => `${k}=${v}`)
+          .join('; ')
+      : '';
+    const headers = {
+      dfid, clienttime, mid,
+      'kg-rc': '1',
+      'kg-thash': '5d816a0',
+      'kg-rec': 1,
+      'kg-rf': 'B9EDA08A64250DEFFBCADDEE00F8F25F',
+    };
+    if (cookieStr) headers['Cookie'] = cookieStr;
 
     console.log(`[REQUEST] token=${token ? token.substring(0, 10) + '...' : 'empty'}, userid=${userid}`);
 
