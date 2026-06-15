@@ -24,11 +24,50 @@ class _PlaylistPageState extends State<PlaylistPage> {
   List<Song> _songs = [];
   String? _error;
   bool _isCollected = false;
+  String? _collectedListId;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _fetchSongs());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchSongs();
+      _checkCollected();
+    });
+  }
+
+  Future<void> _checkCollected() async {
+    final api = KugouApiClient();
+    if (!api.isLoggedIn) return;
+    try {
+      final result = await api.getUserPlaylist(pagesize: 50);
+      if (result == null || !mounted) return;
+      final data = result['data'];
+      List<dynamic>? list;
+      if (data is List) {
+        list = data;
+      } else if (data is Map<String, dynamic>) {
+        list = data['info'] as List<dynamic>?;
+        list ??= data['list'] as List<dynamic>?;
+      }
+      if (list == null) return;
+      for (final item in list) {
+        if (item is Map<String, dynamic>) {
+          final gid = item['global_collection_id']?.toString() ?? '';
+          final name = item['name']?.toString() ?? '';
+          if (gid == widget.playlist.id || name == widget.playlist.name) {
+            if (mounted) {
+              setState(() {
+                _isCollected = true;
+                _collectedListId = item['listid']?.toString();
+              });
+            }
+            return;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Check collected error: $e');
+    }
   }
 
   Future<void> _collectPlaylist() async {
@@ -42,22 +81,54 @@ class _PlaylistPageState extends State<PlaylistPage> {
       return;
     }
     try {
-      debugPrint('Collect playlist: name=${widget.playlist.name}, id=${widget.playlist.id}');
+      String? listCreateUserid = widget.playlist.listCreateUserid;
+      String? listCreateListid = widget.playlist.listCreateListid;
+      if ((listCreateUserid == null || listCreateListid == null) && widget.playlist.id.contains('_')) {
+        final parts = widget.playlist.id.split('_');
+        if (parts.length >= 4) {
+          listCreateUserid ??= parts[2];
+          listCreateListid ??= parts[3];
+        }
+      }
+      debugPrint('Collect playlist: name=${widget.playlist.name}, id=${widget.playlist.id}, userid=$listCreateUserid, listid=$listCreateListid');
       final result = await api.createPlaylist(
         widget.playlist.name,
         type: 1,
-        listCreateUserid: widget.playlist.listCreateUserid,
-        listCreateListid: widget.playlist.listCreateListid,
+        listCreateUserid: listCreateUserid,
+        listCreateListid: listCreateListid,
         globalCollectionId: widget.playlist.id,
       );
       if (result != null && mounted) {
-        setState(() => _isCollected = true);
+        final newId = result['data']?['listid']?.toString();
+        setState(() {
+          _isCollected = true;
+          _collectedListId = newId;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('收藏成功'), behavior: SnackBarBehavior.floating),
         );
       }
     } catch (e) {
       debugPrint('Collect playlist error: $e');
+    }
+  }
+
+  Future<void> _uncollectPlaylist() async {
+    final api = KugouApiClient();
+    if (!api.isLoggedIn || _collectedListId == null) return;
+    try {
+      final result = await api.deletePlaylist(_collectedListId!);
+      if (result != null && mounted) {
+        setState(() {
+          _isCollected = false;
+          _collectedListId = null;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已取消收藏'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    } catch (e) {
+      debugPrint('Uncollect playlist error: $e');
     }
   }
 
@@ -232,7 +303,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                   ),
                                   const SizedBox(width: 12),
                                   IconButton.filledTonal(
-                                    onPressed: _isCollected ? null : _collectPlaylist,
+                                    onPressed: _isCollected ? _uncollectPlaylist : _collectPlaylist,
                                     icon: Icon(
                                       _isCollected ? Icons.favorite : Icons.favorite_border,
                                       color: _isCollected ? colorScheme.error : null,

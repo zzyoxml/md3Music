@@ -155,11 +155,27 @@ class KugouProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
-      final result = await _apiClient.search(keywords, type: type);
-      if (result != null) {
-        _searchResults = result;
+      if (type == 'album') {
+        final albums = await _apiClient.searchAlbums(keywords);
+        if (albums != null) {
+          _searchResults = KugouSearchResult(albums: albums);
+        } else {
+          _error = '搜索失败';
+        }
+      } else if (type == 'special') {
+        final playlists = await _apiClient.searchPlaylists(keywords);
+        if (playlists != null) {
+          _searchResults = KugouSearchResult(playlists: playlists);
+        } else {
+          _error = '搜索失败';
+        }
       } else {
-        _error = '搜索失败';
+        final result = await _apiClient.search(keywords, type: type);
+        if (result != null) {
+          _searchResults = result;
+        } else {
+          _error = '搜索失败';
+        }
       }
     } catch (e) {
       _error = e.toString();

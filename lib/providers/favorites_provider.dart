@@ -83,36 +83,32 @@ class FavoritesProvider extends ChangeNotifier {
   Future<void> toggleFavorite(Song song) async {
     final api = KugouApiClient();
     final isLoggedIn = api.isLoggedIn;
+    const favoriteListId = '2';
 
     if (_favoriteIds.contains(song.id)) {
-      await _repository.removeFavorite(song.id);
       _favoriteIds.remove(song.id);
       _favorites.removeWhere((s) => s.id == song.id);
+      await _repository.removeFavorite(song.id);
 
       if (isLoggedIn) {
-        final playlist = await _getMyFavoritePlaylist();
-        if (playlist != null) {
-          try {
-            await api.deletePlaylistTracks(playlist.listId, song.id);
-          } catch (e) {
-            debugPrint('Remove from Kugou favorite failed: $e');
-          }
+        final fileidStr = song.fileId?.toString() ?? song.id;
+        try {
+          await api.deletePlaylistTracks(favoriteListId, fileidStr);
+        } catch (e) {
+          debugPrint('Remove from Kugou favorite failed: $e');
         }
       }
     } else {
-      await _repository.addFavorite(song);
       _favoriteIds.add(song.id);
       _favorites.insert(0, song);
+      await _repository.addFavorite(song);
 
       if (isLoggedIn) {
-        final playlist = await _getMyFavoritePlaylist();
-        if (playlist != null) {
-          try {
-            final data = '${song.title}|${song.id}';
-            await api.addPlaylistTracks(playlist.listId, data);
-          } catch (e) {
-            debugPrint('Add to Kugou favorite failed: $e');
-          }
+        try {
+          final data = '${song.title}|${song.id}';
+          await api.addPlaylistTracks(favoriteListId, data);
+        } catch (e) {
+          debugPrint('Add to Kugou favorite failed: $e');
         }
       }
     }

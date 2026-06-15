@@ -4,7 +4,14 @@ module.exports = (params, useAxios) => {
   const userid = params?.userid || params?.cookie?.userid || 0;
   const token = params?.token || params.cookie?.token || '';
 
-  const resource = (params.fileids || '').split(',').map((s) => ({ fileid: Number(s) }));
+  const fileids = params.fileids || '';
+  const resource = fileids.split(',').filter(Boolean).map((s) => {
+    const num = Number(s);
+    if (!isNaN(num) && num > 0) {
+      return { fileid: num };
+    }
+    return { fileid: 0, hash: s };
+  });
 
   const dataMap = {
     listid: params.listid,
