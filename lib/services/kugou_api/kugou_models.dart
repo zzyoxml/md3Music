@@ -189,6 +189,7 @@ class KugouPlaylistBrief {
   final String listId;
   final String? listCreateUserid;
   final String? listCreateListid;
+  final String? listCreateGid;
 
   const KugouPlaylistBrief({
     required this.id,
@@ -199,6 +200,7 @@ class KugouPlaylistBrief {
     this.listId = '',
     this.listCreateUserid,
     this.listCreateListid,
+    this.listCreateGid,
   });
 
   factory KugouPlaylistBrief.fromJson(Map<String, dynamic> json) {
@@ -217,6 +219,7 @@ class KugouPlaylistBrief {
       listId: _str(json['listid'] ?? ''),
       listCreateUserid: _strNull(json['list_create_userid']),
       listCreateListid: _strNull(json['list_create_listid']),
+      listCreateGid: _strNull(json['list_create_gid'] ?? json['list_create_gid']),
     );
   }
 
@@ -229,6 +232,7 @@ class KugouPlaylistBrief {
       songs: [],
       listCreateUserid: listCreateUserid,
       listCreateListid: listCreateListid,
+      listCreateGid: listCreateGid,
     );
   }
 }
@@ -879,12 +883,24 @@ class KugouPlaylistSongs {
 
   factory KugouPlaylistSongs.fromJson(Map<String, dynamic> json) {
     final data = json['data'] as Map<String, dynamic>? ?? json;
-    final list = data['list'] ?? data['songs'] ?? data['info'] ?? [];
+    final rawInfo = data['info'];
+    final rawSongs = data['songs'];
+    final rawList = data['list'];
+    final List<dynamic> list;
+    if (rawInfo is List && rawInfo.isNotEmpty) {
+      list = rawInfo;
+    } else if (rawSongs is List && rawSongs.isNotEmpty) {
+      list = rawSongs;
+    } else if (rawList is List && rawList.isNotEmpty) {
+      list = rawList;
+    } else {
+      list = (data['tracks'] as List<dynamic>?) ?? [];
+    }
     return KugouPlaylistSongs(
-      songs: (list as List<dynamic>)
+      songs: list
           .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
           .toList(),
-      total: _parseInt(data['total'] ?? data['total_count'] ?? 0),
+      total: _parseInt(data['total'] ?? data['total_count'] ?? data['count'] ?? 0),
     );
   }
 }

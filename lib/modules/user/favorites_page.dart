@@ -136,17 +136,22 @@ class _FavoritesPageState extends State<FavoritesPage> {
       debugPrint('Loading songs for: ${playlist.name}, gid=$globalId, listId=${playlist.listId}');
 
       KugouPlaylistSongs? result;
-      // 用户自己创建的歌单：用 listid 接口
-      if (_isCreated(playlist) && playlist.listId.isNotEmpty) {
+      // 自己创建的歌单（包括"我喜欢"）：用 listid 接口（返回 data.info）
+      // 收藏的别人歌单：用 globalCollectionId 接口（返回 data.songs）
+      final isCreated = _isCreated(playlist);
+      if (isCreated && playlist.listId.isNotEmpty) {
         result = await api.getPlaylistSongsByListid(
           listid: playlist.listId,
           pagesize: 200,
           noCache: noCache,
         );
       } else {
-        // 收藏的别人歌单：用 globalCollectionId 接口
+        // 收藏的歌单：用原歌单的 globalCollectionId（listCreateGid）
+        // 因为用户的订阅版本（globalId）可能 count=0，需要用原歌单 ID
+        final targetGid = playlist.listCreateGid ?? globalId;
+        debugPrint('Loading collected playlist with gid: $targetGid (listCreateGid=${playlist.listCreateGid})');
         result = await api.getPlaylistSongs(
-          globalId,
+          targetGid,
           pagesize: 200,
           noCache: noCache,
         );

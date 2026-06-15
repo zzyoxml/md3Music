@@ -55,8 +55,6 @@ const createRequest = (options) => {
     };
     if (cookieStr) headers['Cookie'] = cookieStr;
 
-    console.log(`[REQUEST] token=${token ? token.substring(0, 10) + '...' : 'empty'}, userid=${userid}`);
-
     if (ip) {
       headers['X-Real-IP'] = ip;
       headers['X-Forwarded-For'] = ip;
