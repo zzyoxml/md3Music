@@ -17,6 +17,8 @@ class KugouEndpoints {
   static const String searchSuggest = '/search/suggest';
   static const String searchLyric = '/search/lyric';
   static const String searchMixed = '/search/mixed';
+  static const String searchAlbum = '/search/album';
+  static const String searchSpecial = '/search/special';
 
   // Song
   static const String songUrl = '/song/url';

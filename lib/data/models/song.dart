@@ -12,6 +12,7 @@ class Song {
   final String? artistId;
   final String? quality;
   final String? albumAudioId;
+  final int? fileId;
 
   const Song({
     required this.id,
@@ -27,6 +28,7 @@ class Song {
     this.artistId,
     this.quality,
     this.albumAudioId,
+    this.fileId,
   });
 
   String get displayDuration {
@@ -50,6 +52,7 @@ class Song {
       artistId: json['artistId'] as String?,
       quality: json['quality'] as String?,
       albumAudioId: json['albumAudioId'] as String?,
+      fileId: json['fileId'] as int?,
     );
   }
 
@@ -68,6 +71,7 @@ class Song {
       'artistId': artistId,
       'quality': quality,
       'albumAudioId': albumAudioId,
+      'fileId': fileId,
     };
   }
 
@@ -85,6 +89,7 @@ class Song {
     String? artistId,
     String? quality,
     String? albumAudioId,
+    int? fileId,
   }) {
     return Song(
       id: id ?? this.id,
@@ -100,6 +105,7 @@ class Song {
       artistId: artistId ?? this.artistId,
       quality: quality ?? this.quality,
       albumAudioId: albumAudioId ?? this.albumAudioId,
+      fileId: fileId ?? this.fileId,
     );
   }
 

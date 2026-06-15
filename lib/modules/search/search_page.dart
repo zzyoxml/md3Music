@@ -4,14 +4,13 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/models/album.dart';
-import '../../data/models/artist.dart';
 import '../../data/models/song.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/album_card.dart';
-import '../../widgets/artist_tile.dart';
 import '../../widgets/song_list_item.dart';
+import '../album/album_detail_page.dart';
+import '../playlist/playlist_page.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key});
@@ -34,7 +33,7 @@ class _SearchPageState extends State<SearchPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _tabController.addListener(_onTabChanged);
     _loadSearchHistory();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -52,7 +51,7 @@ class _SearchPageState extends State<SearchPage>
 
   void _onTabChanged() {
     if (_tabController.indexIsChanging) return;
-    final types = ['song', 'author', 'album', 'special'];
+    final types = ['song', 'album', 'special'];
     final newType = types[_tabController.index];
     if (newType != _currentSearchType && _query.isNotEmpty) {
       _currentSearchType = newType;
@@ -177,7 +176,6 @@ class _SearchPageState extends State<SearchPage>
                     controller: _tabController,
                     tabs: const [
                       Tab(text: '歌曲'),
-                      Tab(text: '歌手'),
                       Tab(text: '专辑'),
                       Tab(text: '歌单'),
                     ],
@@ -186,7 +184,11 @@ class _SearchPageState extends State<SearchPage>
               ),
           ];
         },
-        body: _hasSearched ? _buildSearchResults() : _buildEmptyState(),
+        body: _hasSearched
+            ? _buildSearchResults()
+            : _searchController.text.trim().isNotEmpty
+                ? _buildSuggestions()
+                : _buildEmptyState(),
       ),
     );
   }
@@ -285,10 +287,44 @@ class _SearchPageState extends State<SearchPage>
       controller: _tabController,
       children: [
         _buildSongResults(),
-        _buildArtistResults(),
         _buildAlbumResults(),
         _buildPlaylistResults(),
       ],
+    );
+  }
+
+  Widget _buildSuggestions() {
+    final colorScheme = Theme.of(context).colorScheme;
+    final kugouProvider = context.watch<KugouProvider>();
+    final suggestions = kugouProvider.searchSuggest;
+
+    if (suggestions.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: suggestions.length,
+      itemBuilder: (context, index) {
+        final suggestion = suggestions[index];
+        return ListTile(
+          leading: Icon(
+            Icons.search,
+            size: 20,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          title: Text(
+            suggestion,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          dense: true,
+          onTap: () {
+            _searchController.text = suggestion;
+            _performSearch(suggestion);
+          },
+        );
+      },
     );
   }
 
@@ -330,42 +366,16 @@ class _SearchPageState extends State<SearchPage>
     );
   }
 
-  Widget _buildArtistResults() {
-    final kugouProvider = context.watch<KugouProvider>();
-
-    if (kugouProvider.isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (kugouProvider.error != null) {
-      return _buildErrorState(kugouProvider.error!, () {
-        kugouProvider.clearError();
-        _performSearchByType(_query, 'author');
-      });
-    }
-
-    final searchResults = kugouProvider.searchResults;
-    List<Artist> results = [];
-
-    if (searchResults != null && searchResults.artists.isNotEmpty) {
-      results = searchResults.artists.map((e) => e.toArtist()).toList();
-    }
-
-    if (results.isEmpty) {
-      return _buildNoResult();
-    }
-    return ListView.builder(
-      itemCount: results.length,
-      itemBuilder: (context, index) {
-        return ArtistTile(
-          artist: results[index],
-          onTap: () {},
-        );
-      },
+  void _showAlbumDetail(Album album) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => AlbumDetailPage(album: album),
+      ),
     );
   }
 
   Widget _buildAlbumResults() {
+    final colorScheme = Theme.of(context).colorScheme;
     final kugouProvider = context.watch<KugouProvider>();
 
     if (kugouProvider.isLoading) {
@@ -389,19 +399,68 @@ class _SearchPageState extends State<SearchPage>
     if (results.isEmpty) {
       return _buildNoResult();
     }
-    return GridView.builder(
-      padding: const EdgeInsets.all(16),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.72,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-      ),
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       itemCount: results.length,
       itemBuilder: (context, index) {
-        return AlbumCard(
-          album: results[index],
-          onTap: () {},
+        final album = results[index];
+        return InkWell(
+          onTap: () => _showAlbumDetail(album),
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: album.artworkUri != null
+                        ? CachedNetworkImage(
+                            imageUrl: album.artworkUri!,
+                            fit: BoxFit.cover,
+                            placeholder: (_, _) => Container(
+                              color: colorScheme.surfaceContainerHighest,
+                              child: Icon(Icons.album, size: 20, color: colorScheme.onSurfaceVariant),
+                            ),
+                            errorWidget: (_, _, _) => Container(
+                              color: colorScheme.surfaceContainerHighest,
+                              child: Icon(Icons.album, size: 20, color: colorScheme.onSurfaceVariant),
+                            ),
+                          )
+                        : Container(
+                            color: colorScheme.surfaceContainerHighest,
+                            child: Icon(Icons.album, size: 20, color: colorScheme.onSurfaceVariant),
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        album.name.replaceAll(RegExp(r'<[^>]*>'), ''),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        album.artist.replaceAll(RegExp(r'<[^>]*>'), ''),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );
@@ -432,34 +491,75 @@ class _SearchPageState extends State<SearchPage>
       return _buildNoResult();
     }
     return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       itemCount: results.length,
       itemBuilder: (context, index) {
         final pl = results[index];
-        return ListTile(
-          leading: pl.coverUrl != null
-              ? ClipRRect(
+        return InkWell(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => PlaylistPage(playlist: pl.toPlaylist()),
+              ),
+            );
+          },
+          borderRadius: BorderRadius.circular(8),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+            child: Row(
+              children: [
+                ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: CachedNetworkImage(
-                    imageUrl: pl.coverUrl!,
-                    width: 56,
-                    height: 56,
-                    fit: BoxFit.cover,
-                  ),
-                )
-              : Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    Icons.queue_music,
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  child: SizedBox(
+                    width: 48,
+                    height: 48,
+                    child: pl.coverUrl != null
+                        ? CachedNetworkImage(
+                            imageUrl: pl.coverUrl!,
+                            fit: BoxFit.cover,
+                            placeholder: (_, _) => Container(
+                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                              child: Icon(Icons.queue_music, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            ),
+                            errorWidget: (_, _, _) => Container(
+                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                              child: Icon(Icons.queue_music, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                            ),
+                          )
+                        : Container(
+                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                            child: Icon(Icons.queue_music, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                          ),
                   ),
                 ),
-          title: Text(pl.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-          onTap: () {},
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        pl.name.replaceAll(RegExp(r'<[^>]*>'), ''),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                      if (pl.songCount > 0) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          '${pl.songCount} 首歌曲',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                              ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
         );
       },
     );

@@ -248,6 +248,52 @@ class KugouApiClient {
     }
   }
 
+  Future<List<KugouAlbumBrief>?> searchAlbums(String keywords, {int page = 1, int pagesize = 20}) async {
+    final json = await _get(
+      KugouEndpoints.searchAlbum,
+      queryParameters: {'keyword': keywords, 'page': page, 'pagesize': pagesize},
+    );
+    if (json == null) return null;
+    try {
+      final data = json['data'];
+      List<dynamic> list = [];
+      if (data is List) {
+        list = data;
+      } else if (data is Map) {
+        list = data['info'] ?? data['list'] ?? [];
+      }
+      return list
+          .map((e) => KugouAlbumBrief.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('searchAlbums parse error: $e');
+      return null;
+    }
+  }
+
+  Future<List<KugouPlaylistBrief>?> searchPlaylists(String keywords, {int page = 1, int pagesize = 20}) async {
+    final json = await _get(
+      KugouEndpoints.searchSpecial,
+      queryParameters: {'keyword': keywords, 'page': page, 'pagesize': pagesize},
+    );
+    if (json == null) return null;
+    try {
+      final data = json['data'];
+      List<dynamic> list = [];
+      if (data is List) {
+        list = data;
+      } else if (data is Map) {
+        list = data['info'] ?? data['list'] ?? [];
+      }
+      return list
+          .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('searchPlaylists parse error: $e');
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> searchComplex(String keywords) async {
     return await _get(
       KugouEndpoints.searchComplex,
@@ -312,7 +358,9 @@ class KugouApiClient {
               for (final record in recordDatas) {
                 if (record is Map<String, dynamic>) {
                   final hintInfo = record['HintInfo'];
-                  if (hintInfo is Map<String, dynamic>) {
+                  if (hintInfo is String && hintInfo.isNotEmpty) {
+                    items.add(hintInfo);
+                  } else if (hintInfo is Map<String, dynamic>) {
                     final word =
                         hintInfo['HintWords'] ?? hintInfo['keyword'] ?? '';
                     if (word.toString().isNotEmpty) {
@@ -884,20 +932,52 @@ class KugouApiClient {
     String globalCollectionId, {
     int page = 1,
     int pagesize = 30,
+    bool noCache = false,
   }) async {
+    final params = <String, dynamic>{
+      'global_collection_id': globalCollectionId,
+      'page': page,
+      'pagesize': pagesize,
+    };
+    if (noCache) {
+      params['t'] = DateTime.now().millisecondsSinceEpoch;
+    }
     final json = await _get(
       KugouEndpoints.playlistTrackAll,
-      queryParameters: {
-        'global_collection_id': globalCollectionId,
-        'page': page,
-        'pagesize': pagesize,
-      },
+      queryParameters: params,
     );
     if (json == null) return null;
     try {
       return KugouPlaylistSongs.fromJson(json);
     } catch (e) {
       debugPrint('getPlaylistSongs parse error: $e');
+      return null;
+    }
+  }
+
+  Future<KugouPlaylistSongs?> getPlaylistSongsByListid({
+    required String listid,
+    int page = 1,
+    int pagesize = 30,
+    bool noCache = false,
+  }) async {
+    final params = <String, dynamic>{
+      'listid': listid,
+      'page': page,
+      'pagesize': pagesize,
+    };
+    if (noCache) {
+      params['t'] = DateTime.now().millisecondsSinceEpoch;
+    }
+    final json = await _get(
+      KugouEndpoints.playlistTrackAllNew,
+      queryParameters: params,
+    );
+    if (json == null) return null;
+    try {
+      return KugouPlaylistSongs.fromJson(json);
+    } catch (e) {
+      debugPrint('getPlaylistSongsByListid parse error: $e');
       return null;
     }
   }
@@ -1788,7 +1868,7 @@ class KugouApiClient {
     int pagesize = 30,
   }) async {
     final params = <String, dynamic>{
-      'id': id,
+      'global_collection_id': id,
       'page': page,
       'pagesize': pagesize,
     };
@@ -1805,6 +1885,32 @@ class KugouApiClient {
           .toList();
     } catch (e) {
       debugPrint('getPlaylistTrackAll parse error: $e');
+      return null;
+    }
+  }
+
+  Future<List<KugouSongDetail>?> getPlaylistTrackAllNew({
+    required String listid,
+    int page = 1,
+    int pagesize = 30,
+  }) async {
+    final json = await _get(
+      KugouEndpoints.playlistTrackAllNew,
+      queryParameters: {
+        'listid': listid,
+        'page': page,
+        'pagesize': pagesize,
+      },
+    );
+    if (json == null) return null;
+    try {
+      final data = json['data'] as Map<String, dynamic>? ?? json;
+      final list = data['list'] ?? data['songs'] ?? data['info'] ?? [];
+      return (list as List<dynamic>)
+          .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      debugPrint('getPlaylistTrackAllNew parse error: $e');
       return null;
     }
   }

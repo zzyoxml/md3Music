@@ -28,7 +28,24 @@ class _FavoritesPageState extends State<FavoritesPage> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadPlaylists();
+      context.read<FavoritesProvider>().addListener(_onFavoritesChanged);
     });
+  }
+
+  @override
+  void dispose() {
+    context.read<FavoritesProvider>().removeListener(_onFavoritesChanged);
+    super.dispose();
+  }
+
+  void _onFavoritesChanged() {
+    if (_selectedPlaylist != null && mounted) {
+      final gid = _selectedPlaylist!.globalCollectionId ?? _selectedPlaylist!.id;
+      final isMyFavorite = gid.contains('_2_') || _selectedPlaylist!.name == '我喜欢';
+      if (isMyFavorite) {
+        _loadPlaylistSongs(_selectedPlaylist!, noCache: true);
+      }
+    }
   }
 
   Future<void> _loadPlaylists() async {
@@ -74,7 +91,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
     }
   }
 
-  Future<void> _loadPlaylistSongs(KugouPlaylistBrief playlist) async {
+  Future<void> _loadPlaylistSongs(KugouPlaylistBrief playlist, {bool noCache = false}) async {
     if (!mounted) return;
     setState(() {
       _isLoadingSongs = true;
@@ -86,17 +103,31 @@ class _FavoritesPageState extends State<FavoritesPage> {
       final api = KugouApiClient();
       final globalId = playlist.globalCollectionId ?? playlist.id;
       debugPrint('Loading playlist songs for: ${playlist.name}, globalId: $globalId');
-      final result = await api.getPlaylistSongs(
-        globalId,
-        pagesize: 200,
-      );
+
+      KugouPlaylistSongs? result;
+      if (globalId.startsWith('collection_3_')) {
+        final listid = playlist.listId.isNotEmpty ? playlist.listId : playlist.id;
+        debugPrint('Using new endpoint (listid=$listid) for user playlist');
+        result = await api.getPlaylistSongsByListid(
+          listid: listid,
+          pagesize: 200,
+          noCache: noCache,
+        );
+      } else {
+        result = await api.getPlaylistSongs(
+          globalId,
+          pagesize: 200,
+          noCache: noCache,
+        );
+      }
       if (!mounted) return;
 
       debugPrint('getPlaylistSongs result: $result');
 
       if (result != null && result.songs.isNotEmpty) {
+        final songs = result.songs.map((s) => s.toSong()).toList();
         setState(() {
-          _currentPlaylistSongs = result.songs.map((s) => s.toSong()).toList();
+          _currentPlaylistSongs = songs;
           _isLoadingSongs = false;
         });
       } else {

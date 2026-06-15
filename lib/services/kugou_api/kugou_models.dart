@@ -146,7 +146,7 @@ class KugouAlbumBrief {
             json['id'] ??
             '',
       ),
-      name: _str(
+      name: _cleanName(
         json['album_name'] ??
             json['AlbumName'] ??
             json['albumname'] ??
@@ -160,7 +160,7 @@ class KugouAlbumBrief {
             json['pic'] ??
             json['ImgUrl'],
       ),
-      artistName: _strNull(
+      artistName: _cleanName(
         json['singername'] ??
             json['artist_name'] ??
             json['SingerName'] ??
@@ -206,14 +206,14 @@ class KugouPlaylistBrief {
       id: _str(
         json['specialid'] ?? json['id'] ?? json['global_collection_id'] ?? '',
       ),
-      name: _str(json['specialname'] ?? json['name'] ?? ''),
+      name: _cleanName(json['specialname'] ?? json['name'] ?? ''),
       coverUrl: _resolveArtworkUri(
         json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['cover_url'],
       ),
       songCount: _parseInt(
         json['songcount'] ?? json['song_count'] ?? json['count'] ?? 0,
       ),
-      globalCollectionId: _strNull(json['global_collection_id']),
+      globalCollectionId: _strNull(json['global_collection_id'] ?? json['gid']),
       listId: _str(json['listid'] ?? ''),
       listCreateUserid: _strNull(json['list_create_userid']),
       listCreateListid: _strNull(json['list_create_listid']),
@@ -252,6 +252,7 @@ class KugouSongDetail {
   final int privilege;
   final String? albumAudioId2;
   final String? songId;
+  final int? fileId;
 
   const KugouSongDetail({
     required this.hash,
@@ -272,6 +273,7 @@ class KugouSongDetail {
     this.privilege = 0,
     this.albumAudioId2,
     this.songId,
+    this.fileId,
   });
 
   factory KugouSongDetail.fromJson(Map<String, dynamic> json) {
@@ -399,6 +401,7 @@ class KugouSongDetail {
       songId: _strNull(
         json['songid'] ?? json['song_id'] ?? json['SongId'] ?? json['SongID'],
       ),
+      fileId: _parseInt(json['fileid'] ?? json['file_id']),
     );
   }
 
@@ -414,6 +417,7 @@ class KugouSongDetail {
       artistId: artistId,
       artworkUri: artworkUri,
       albumAudioId: albumAudioId,
+      fileId: fileId,
     );
   }
 }
@@ -886,6 +890,14 @@ class KugouPlaylistSongs {
 }
 
 String _str(dynamic v) => v?.toString() ?? '';
+
+String _cleanName(dynamic v) {
+  final raw = v?.toString() ?? '';
+  return raw.replaceAll(RegExp(r'<[^>]*>'), '')
+            .replaceAll('&lt;', '<')
+            .replaceAll('&gt;', '>')
+            .replaceAll('&#\d+;', '');
+}
 String? _strNull(dynamic v) => v?.toString();
 int _parseInt(dynamic v) {
   if (v == null) return 0;
