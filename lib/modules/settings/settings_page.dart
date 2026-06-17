@@ -260,39 +260,6 @@ class _SettingsPageState extends State<SettingsPage> {
           )
         else
           const SizedBox(height: 8),
-        const Padding(
-          padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Card(
-            color: Colors.amber,
-            child: Padding(
-              padding: EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '⚠️ Android设备配置说明',
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'Android设备上的"localhost"指向设备本身，不是电脑！\n\n'
-                    '解决方案：\n'
-                    '1. 确保API服务器在电脑上运行\n'
-                    '2. 获取电脑的局域网IP（如 192.168.1.100）\n'
-                    '   Windows: 运行 ipconfig 查找IPv4地址\n'
-                    '3. 在下方输入: http://192.168.1.100:3000\n'
-                    '4. 确保Android和电脑在同一WiFi下',
-                    style: TextStyle(fontSize: 13, color: Colors.black87),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: SizedBox(
