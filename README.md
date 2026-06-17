@@ -2,7 +2,7 @@
 
 <div align="center">
 
-一个基于 Material Design 3 设计规范的跨平台音乐播放器
+一个基于 KuGouMusicApi NodeJS 版 API代理服务，基于 Flutter 框架的 Material Design 3 设计规范的音乐播放器
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.12+-02569B?logo=flutter)](https://flutter.dev)
 [![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20Web-green)]()
@@ -21,11 +21,9 @@
 - **热门排行榜** - 多种排行榜实时更新
 - **私人 FM** - 猜你喜欢，无限畅听
 - **歌单广场** - 主题歌单、场景音乐推荐
-- **歌手详情** - 歌手信息、专辑作品
 
 ### 🎧 播放体验
 - **多音质选择** - 标准(128k)、高质(320k)、无损(FLAC)
-- **播放速度调节** - 0.25x ~ 4x 自由调节
 - **循环模式** - 单曲循环、列表循环、随机播放
 - **歌词同步** - 实时滚动歌词显示
 - **后台播放** - Android 后台播放通知
@@ -45,13 +43,6 @@
 
 ---
 
-## 📸 应用截图
-
-| 发现页面 | 播放器 | 用户中心 |
-|:---:|:---:|:---:|
-| 待添加 | 待添加 | 待添加 |
-
----
 
 ## 🚀 快速开始
 
@@ -87,7 +78,6 @@ cd kugou_api_server
 node app.js
 ```
 
-服务器将在 **http://localhost:8080** 启动。
 
 ### 4. 运行应用
 
@@ -181,7 +171,7 @@ md3Music/
 
 ### Q: 看不到任何音乐内容？
 
-**A:** 确保 API 服务器已正常启动并运行在 `http://localhost:8080`。可以在设置页面测试连接。
+**A:** 确保 API 服务器已正常启动并运行在配置的地址。
 
 ### Q: 音乐无法播放？
 
