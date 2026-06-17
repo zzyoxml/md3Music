@@ -3,7 +3,7 @@ class KugouEndpoints {
 
   /// 默认 API 服务地址。
   /// 启动时 KugouProvider 会从 SharedPreferences 读取用户配置的地址覆盖此值。
-  static String baseUrl = 'http://115.29.236.96:3000';
+  static String baseUrl = 'http://musicplayer.ccwu.cc';
 
   // Device
   static const String registerDev = '/register/dev';

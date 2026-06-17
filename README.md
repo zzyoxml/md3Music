@@ -153,9 +153,7 @@ md3Music/
 
 ### API 服务器地址
 
-在应用设置页面可以配置 API 服务器地址，默认为 `http://localhost:8080`。
-
-支持部署到云服务器或 Vercel，详见 [kugou_api_server/DEPLOY.md](kugou_api_server/DEPLOY.md)。
+在应用设置页面可以配置 API 服务器地址，默认为 `http://musicplayer.ccwu.cc`。
 
 ### 音质设置
 
