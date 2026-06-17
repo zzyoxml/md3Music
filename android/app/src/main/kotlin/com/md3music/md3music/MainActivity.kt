@@ -65,6 +65,10 @@ class MainActivity : FlutterActivity() {
                     "hasOverlayPermission" -> {
                         result.success(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true)
                     }
+                    "seekTo" -> {
+                        // seekTo 由 MediaSession 直接调用，无需额外处理
+                        result.success(true)
+                    }
                     "showNotification", "updateNotification" -> {
                         val intent = Intent(this, AudioPlaybackService::class.java).apply {
                             putExtra(AudioPlaybackService.EXTRA_TITLE, call.argument<String>("title") ?: "")

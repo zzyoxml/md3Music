@@ -153,7 +153,7 @@ class AudioPlaybackService : Service() {
                 override fun onSkipToPrevious() = handleAction(ACTION_PREV)
                 override fun onStop() = handleAction(ACTION_STOP)
                 override fun onSeekTo(pos: Long) {
-                    val engine = flutterEngine ?: return
+                    val engine = flutterEngine ?: staticFlutterEngine ?: return
                     MethodChannel(engine.dartExecutor.binaryMessenger, "com.md3music.md3music/floating_lyric")
                         .invokeMethod("seekTo", pos.toInt())
                 }
