@@ -1,156 +1,229 @@
-# Echo Music Player - md3Music
+# MD3Music - Material Design 3 音乐播放器
 
-一个 Material Design 3 风格的音乐播放器
+<div align="center">
 
-## 🚀 项目状态
+一个基于 Material Design 3 设计规范的跨平台音乐播放器
 
-本项目已成功修复以下问题:
+[![Flutter](https://img.shields.io/badge/Flutter-3.12+-02569B?logo=flutter)](https://flutter.dev)
+[![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20Web-green)]()
+[![Version](https://img.shields.io/badge/Version-1.0.0-blue)]()
+[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-✅ **Web 平台兼容性**
-- 移除 `just_audio_background` 在 Web 上的初始化错误
-- 修复 `Platform.isAndroid` 在 Web 上的不兼容问题
-- 添加对 `on_audio_query` 在 Web 上的安全跳过
-- 添加 `kIsWeb` 标记和 try-catch 保护
+</div>
 
-✅ **API 服务器集成**
-- 从 EchoMusic 项目获取完整的 KuGou 音乐 API 服务器
-- 所有模块已完整复制到项目中
-- 依赖已安装成功
+---
 
-✅ **应用可以正常启动!**
+## ✨ 功能特性
 
-## 📦 项目结构
+### 🎵 在线音乐
+- **音乐搜索** - 支持歌曲、专辑、歌单多维度搜索
+- **每日推荐** - 个性化歌曲推荐
+- **热门排行榜** - 多种排行榜实时更新
+- **私人 FM** - 猜你喜欢，无限畅听
+- **歌单广场** - 主题歌单、场景音乐推荐
+- **歌手详情** - 歌手信息、专辑作品
 
-```
-md3Music/
-├── lib/                   # Flutter 应用代码
-│   ├── main.dart          # 应用入口
-│   ├── app.dart           # 应用主组件
-│   ├── providers/         # 状态管理
-│   ├── services/          # API 服务
-│   └── ...
-├── kugou_api_server/      # KuGou API 代理服务器
-│   ├── app.js            # 服务器入口
-│   ├── server.js         # 服务器核心
-│   ├── module/           # API 模块
-│   └── ...
-└── pubspec.yaml
-```
+### 🎧 播放体验
+- **多音质选择** - 标准(128k)、高质(320k)、无损(FLAC)
+- **播放速度调节** - 0.25x ~ 4x 自由调节
+- **循环模式** - 单曲循环、列表循环、随机播放
+- **歌词同步** - 实时滚动歌词显示
+- **后台播放** - Android 后台播放通知
+- **预加载优化** - 自动预加载下一首歌曲
 
-## 🛠️ 运行项目
+### 📱 用户中心
+- **VIP 签到** - 自动领取 VIP 特权
+- **我的收藏** - 本地收藏 + 云端同步
+- **播放历史** - 自动记录播放记录
+- **下载管理** - 后台下载，离线播放
+
+### 🎨 设计风格
+- **Material Design 3** - 最新 MD3 设计规范
+- **动态颜色主题** - 基于 Seed Color 动态配色
+- **响应式布局** - 手机/平板/桌面自适应
+- **深色模式** - 浅色/深色/跟随系统
+
+---
+
+## 📸 应用截图
+
+| 发现页面 | 播放器 | 用户中心 |
+|:---:|:---:|:---:|
+| 待添加 | 待添加 | 待添加 |
+
+---
+
+## 🚀 快速开始
 
 ### 前置要求
 
-1. **Node.js** 14.0 或更高版本
-2. **Flutter** 3.0 或更高版本
-3. **Chrome/Edge** 浏览器(Web 平台测试)
+- **Flutter SDK** 3.12.0 或更高版本
+- **Node.js** 14.0 或更高版本（用于 API 服务器）
+- **Android Studio** / VS Code
 
-### 1. 启动 API 服务器
+### 1. 克隆项目
 
 ```bash
-# 进入 API 服务器目录
+git clone https://github.com/zzyoxml/md3Music.git
+cd md3Music
+```
+
+### 2. 安装依赖
+
+```bash
+# Flutter 依赖
+flutter pub get
+
+# API 服务器依赖
 cd kugou_api_server
-
-# 安装依赖(首次运行需要)
 npm install
+cd ..
+```
 
-# 启动服务器
+### 3. 启动 API 服务器
+
+```bash
+cd kugou_api_server
 node app.js
 ```
 
-服务器将在 **http://localhost:8080** 启动!
+服务器将在 **http://localhost:8080** 启动。
 
-### 2. 启动 Flutter 应用
-
-打开一个新的终端窗口,在项目根目录运行:
+### 4. 运行应用
 
 ```bash
-# 同时启动 API 服务器和 Flutter 应用
-npm run start:all
+# Android
+flutter run
 
-# 或者分别启动
-npm run start:api    # 只启动 API 服务器
-npm run start:flutter  # 只启动 Flutter 应用
+# Web
+flutter run -d chrome
 ```
 
-### 3. 访问应用
+---
 
-浏览器会自动打开,或手动访问 **http://localhost:XXXX**
+## 📦 下载安装
 
-## 📋 功能说明
+从 [Releases](https://github.com/zzyoxml/md3Music/releases) 页面下载最新版本的 APK 安装包。
 
-### 在线音乐功能
+---
 
-- ✅ 在线音乐搜索
-- ✅ 每日推荐
-- ✅ 歌单列表
-- ✅ 热门音乐榜
-- ✅ 在线播放
+## 📁 项目结构
 
-### 本地音乐功能
+```
+md3Music/
+├── lib/                        # Flutter 应用代码
+│   ├── main.dart               # 应用入口
+│   ├── app.dart                # 主应用组件
+│   ├── core/                   # 核心模块
+│   │   ├── layout/             # 响应式布局
+│   │   ├── services/           # 平台服务
+│   │   ├── theme/              # 主题配置
+│   │   └── utils/              # 工具类
+│   ├── data/                   # 数据层
+│   │   ├── models/             # 数据模型
+│   │   └── repositories/       # 数据仓库
+│   ├── modules/                # 功能模块
+│   │   ├── discover/           # 发现页
+│   │   ├── charts/             # 排行榜
+│   │   ├── player/             # 播放器
+│   │   ├── search/             # 搜索
+│   │   ├── user/               # 用户中心
+│   │   └── settings/           # 设置
+│   ├── providers/              # 状态管理
+│   ├── services/               # API 服务
+│   └── widgets/                # 公共组件
+├── kugou_api_server/           # API 代理服务器
+│   ├── app.js                  # 服务器入口
+│   ├── server.js               # 服务器核心
+│   └── module/                 # API 模块
+├── assets/                     # 资源文件
+│   ├── images/                 # 图片资源
+│   └── fonts/                  # 字体文件
+└── pubspec.yaml                # Flutter 配置
+```
 
-- ✅ 本地音乐扫描(仅限 Android/Windows 原生平台)
-- ✅ 本地音乐播放
-- ✅ 本地专辑/歌手分类
+---
 
-### 播放功能
+## 🛠️ 技术栈
 
-- ✅ 音频播放控制
-- ✅ 播放队列管理
-- ✅ 歌词显示
-- ✅ 播放历史记录
+| 类别 | 技术 |
+|------|------|
+| **UI 框架** | Flutter 3.12+ |
+| **状态管理** | Provider |
+| **音频播放** | just_audio |
+| **网络请求** | Dio |
+| **本地存储** | SharedPreferences + SQLite |
+| **图片缓存** | cached_network_image |
+| **API 服务** | Express.js |
+| **音乐源** | 酷狗音乐 API |
 
-### 设计与布局
+---
 
-- ✅ Material Design 3
-- ✅ 响应式布局
-- ✅ 手机/平板/桌面自适应
+## ⚙️ 配置说明
+
+### API 服务器地址
+
+在应用设置页面可以配置 API 服务器地址，默认为 `http://localhost:8080`。
+
+支持部署到云服务器或 Vercel，详见 [kugou_api_server/DEPLOY.md](kugou_api_server/DEPLOY.md)。
+
+### 音质设置
+
+| 音质 | 格式 | 比特率 |
+|------|------|--------|
+| 标准 | MP3 | 128 kbps |
+| 高质 | MP3 | 320 kbps |
+| 无损 | FLAC | ~1000 kbps |
+
+---
 
 ## 🔧 常见问题
 
-### 1. 看不到任何音乐
+### Q: 看不到任何音乐内容？
 
-**解决:** 确保 API 服务器已在 **http://localhost:8080** 正常运行
+**A:** 确保 API 服务器已正常启动并运行在 `http://localhost:8080`。可以在设置页面测试连接。
 
-### 2. 音乐无法播放
+### Q: 音乐无法播放？
 
-**解决:** 
+**A:** 
 - 检查网络连接
-- 查看 API 服务器日志是否有错误
-- 可能是版权限制导致特定歌曲无法获取
+- 查看 API 服务器日志
+- 部分歌曲可能因版权限制无法获取
 
-### 3. Web 上本地音乐不显示
+### Q: Web 平台本地音乐不显示？
 
-**正常!** Web 平台不支持本地文件访问,这是安全限制。请在 Android 或 Windows 原生平台上使用本地音乐功能。
+**A:** Web 平台受安全限制无法访问本地文件，请在 Android 平台使用本地音乐功能。
 
-## 📄 API 服务器文档
+---
 
-访问 **http://localhost:8080/docs** 查看完整的 API 文档!
+## 📝 开发计划
 
-## 🎯 下一步开发计划
+- [ ] 播放列表管理
+- [ ] 歌单创建与编辑
+- [ ] 更多排行榜类型
+- [ ] 桌面平台支持
+- [ ] 国际化支持
+- [ ] 播放统计与可视化
 
-1. 添加更多音质选择
-2. 优化 UI 动画效果
-3. 添加更多排行榜
-4. 实现歌曲收藏功能
-5. 添加设置页面
-6. 完善播放器功能
+---
 
-## 📝 技术栈
+## 🙏 致谢
 
-- **Flutter** - 跨平台 UI 框架
-- **Provider** - 状态管理
-- **just_audio** - 音频播放
-- **on_audio_query** - 本地音乐扫描
-- **Express** - API 代理服务器
-- **KuGou Music API** - 音乐数据源
+感谢以下项目的支持：
 
-## 🙏 感谢
+- [EchoMusic](https://github.com/hoowhoami/EchoMusic) - UI 设计和架构参考
+- [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) - API 代理服务
 
-感谢以下项目的支持:
-- [EchoMusic](https://github.com/hoowhoami/EchoMusic) - 提供了 UI 设计和架构参考
-- [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) - 提供了完整的 API 代理服务
+---
 
 ## 📄 许可证
 
-MIT License
+本项目采用 [MIT License](LICENSE) 许可证。
+
+---
+
+<div align="center">
+
+**Made with ❤️ by zzyoxml**
+
+</div>
