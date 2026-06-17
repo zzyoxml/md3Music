@@ -35,7 +35,13 @@ class AudioPlaybackService : Service() {
         const val EXTRA_POSITION = "position"
         const val EXTRA_DURATION = "duration"
 
+        // 静态变量用于跨组件传递 FlutterEngine
+        private var staticFlutterEngine: FlutterEngine? = null
         private var wakeLock: PowerManager.WakeLock? = null
+
+        fun setFlutterEngine(engine: FlutterEngine) {
+            staticFlutterEngine = engine
+        }
 
         fun acquireWakeLock(context: Context) {
             if (wakeLock == null || !wakeLock!!.isHeld) {
@@ -102,7 +108,7 @@ class AudioPlaybackService : Service() {
     }
 
     private fun handleAction(action: String) {
-        val engine = flutterEngine
+        val engine = flutterEngine ?: staticFlutterEngine
         if (engine != null) {
             val method = when (action) {
                 ACTION_PREV -> "previous"
@@ -176,23 +182,14 @@ class AudioPlaybackService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val importance = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                NotificationManager.IMPORTANCE_HIGH
-            } else {
-                NotificationManager.IMPORTANCE_LOW
-            }
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "音乐播放",
-                importance
+                NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "音乐播放控制"
                 setShowBadge(false)
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
-                // Android 14+ 需要设置此标志以支持媒体通知
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    setAllowBubbles(false)
-                }
             }
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
@@ -264,7 +261,6 @@ class AudioPlaybackService : Service() {
                     if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
                     position, 1f
                 )
-                .setBufferedPosition(duration)
                 .setActions(
                     PlaybackStateCompat.ACTION_PLAY or
                             PlaybackStateCompat.ACTION_PAUSE or

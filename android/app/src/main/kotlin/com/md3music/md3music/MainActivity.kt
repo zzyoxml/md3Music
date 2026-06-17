@@ -11,13 +11,17 @@ import android.support.v4.media.session.MediaSessionCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import com.md3music.md3music.AudioPlaybackService
+import com.md3music.md3music.FloatingLyricService
 
 class MainActivity : FlutterActivity() {
     private val FLOATING_CHANNEL = "com.md3music.md3music/floating_lyric"
-    private var audioPlaybackService: AudioPlaybackService? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // 将 FlutterEngine 传递给 AudioPlaybackService
+        AudioPlaybackService.setFlutterEngine(flutterEngine)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FLOATING_CHANNEL)
             .setMethodCallHandler { call, result ->
