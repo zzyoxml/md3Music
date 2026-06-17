@@ -54,3 +54,11 @@ _tmp2.json
 .trae/
 .workbuddy/
 .vscode/
+
+# Dev/test scripts (not for production)
+Run/
+start.bat
+stop.bat
+test_api.html
+package.json
+package-lock.json
