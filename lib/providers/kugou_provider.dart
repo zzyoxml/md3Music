@@ -678,7 +678,7 @@ class KugouProvider extends ChangeNotifier {
       if (claimOk) {
         return (true, '签到成功');
       } else {
-        final err = claim?['error_msg']?.toString() ?? '签到失败';
+        final err = claim?['error_msg']?.toString() ?? '今日已签到';
         return (false, err);
       }
     } catch (e) {

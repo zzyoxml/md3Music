@@ -375,7 +375,6 @@ class _SearchPageState extends State<SearchPage>
   }
 
   Widget _buildAlbumResults() {
-    final colorScheme = Theme.of(context).colorScheme;
     final kugouProvider = context.watch<KugouProvider>();
 
     if (kugouProvider.isLoading) {
@@ -399,68 +398,25 @@ class _SearchPageState extends State<SearchPage>
     if (results.isEmpty) {
       return _buildNoResult();
     }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    return GridView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        childAspectRatio: 0.75,
+      ),
       itemCount: results.length,
       itemBuilder: (context, index) {
         final album = results[index];
-        return InkWell(
+        final cleanName = album.name.replaceAll(RegExp(r'<[^>]*>'), '');
+        final cleanArtist = album.artist.replaceAll(RegExp(r'<[^>]*>'), '');
+        return _SearchAlbumCard(
+          name: cleanName,
+          artist: cleanArtist,
+          artworkUri: album.artworkUri,
+          icon: Icons.album,
           onTap: () => _showAlbumDetail(album),
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: album.artworkUri != null
-                        ? CachedNetworkImage(
-                            imageUrl: album.artworkUri!,
-                            fit: BoxFit.cover,
-                            placeholder: (_, _) => Container(
-                              color: colorScheme.surfaceContainerHighest,
-                              child: Icon(Icons.album, size: 20, color: colorScheme.onSurfaceVariant),
-                            ),
-                            errorWidget: (_, _, _) => Container(
-                              color: colorScheme.surfaceContainerHighest,
-                              child: Icon(Icons.album, size: 20, color: colorScheme.onSurfaceVariant),
-                            ),
-                          )
-                        : Container(
-                            color: colorScheme.surfaceContainerHighest,
-                            child: Icon(Icons.album, size: 20, color: colorScheme.onSurfaceVariant),
-                          ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        album.name.replaceAll(RegExp(r'<[^>]*>'), ''),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        album.artist.replaceAll(RegExp(r'<[^>]*>'), ''),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
         );
       },
     );
@@ -490,12 +446,23 @@ class _SearchPageState extends State<SearchPage>
     if (results.isEmpty) {
       return _buildNoResult();
     }
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    return GridView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 2,
+        mainAxisSpacing: 12,
+        crossAxisSpacing: 12,
+        childAspectRatio: 0.75,
+      ),
       itemCount: results.length,
       itemBuilder: (context, index) {
         final pl = results[index];
-        return InkWell(
+        final cleanName = pl.name.replaceAll(RegExp(r'<[^>]*>'), '');
+        return _SearchAlbumCard(
+          name: cleanName,
+          artist: pl.songCount > 0 ? '${pl.songCount} 首歌曲' : '',
+          artworkUri: pl.coverUrl,
+          icon: Icons.queue_music,
           onTap: () {
             Navigator.of(context).push(
               MaterialPageRoute(
@@ -503,63 +470,6 @@ class _SearchPageState extends State<SearchPage>
               ),
             );
           },
-          borderRadius: BorderRadius.circular(8),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-            child: Row(
-              children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: SizedBox(
-                    width: 48,
-                    height: 48,
-                    child: pl.coverUrl != null
-                        ? CachedNetworkImage(
-                            imageUrl: pl.coverUrl!,
-                            fit: BoxFit.cover,
-                            placeholder: (_, _) => Container(
-                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                              child: Icon(Icons.queue_music, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            ),
-                            errorWidget: (_, _, _) => Container(
-                              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                              child: Icon(Icons.queue_music, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                            ),
-                          )
-                        : Container(
-                            color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                            child: Icon(Icons.queue_music, size: 20, color: Theme.of(context).colorScheme.onSurfaceVariant),
-                          ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        pl.name.replaceAll(RegExp(r'<[^>]*>'), ''),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodyMedium,
-                      ),
-                      if (pl.songCount > 0) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          '${pl.songCount} 首歌曲',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                              ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
         );
       },
     );
@@ -624,6 +534,92 @@ class _SearchPageState extends State<SearchPage>
           ),
         ],
       ),
+    );
+  }
+}
+
+class _SearchAlbumCard extends StatelessWidget {
+  final String name;
+  final String artist;
+  final String? artworkUri;
+  final IconData icon;
+  final VoidCallback? onTap;
+
+  const _SearchAlbumCard({
+    required this.name,
+    required this.artist,
+    this.artworkUri,
+    this.icon = Icons.album,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        color: colorScheme.surfaceContainerLow,
+        child: InkWell(
+          onTap: onTap,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: artworkUri != null
+                    ? CachedNetworkImage(
+                        imageUrl: artworkUri!,
+                        fit: BoxFit.cover,
+                        width: double.infinity,
+                        placeholder: (_, _) => _buildPlaceholder(colorScheme),
+                        errorWidget: (_, _, _) => _buildPlaceholder(colorScheme),
+                      )
+                    : _buildPlaceholder(colorScheme),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: colorScheme.onSurface,
+                      ),
+                    ),
+                    if (artist.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholder(ColorScheme colorScheme) {
+    return Container(
+      width: double.infinity,
+      color: colorScheme.surfaceContainerHighest,
+      child: Icon(icon, size: 40, color: colorScheme.onSurfaceVariant),
     );
   }
 }

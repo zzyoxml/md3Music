@@ -6,6 +6,7 @@ import '../../core/layout/responsive_layout.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../providers/downloads_provider.dart';
 import 'comments_view.dart';
 import 'lyrics_view.dart';
 
@@ -589,6 +590,12 @@ class _FullPlayerState extends State<FullPlayer>
               : null,
         ),
         IconButton(
+          icon: const Icon(Icons.download),
+          onPressed: song != null
+              ? () => _downloadSong(song)
+              : null,
+        ),
+        IconButton(
           icon: const Icon(Icons.volume_up),
           onPressed: () => _showVolumeDialog(playerProvider),
         ),
@@ -730,6 +737,41 @@ class _FullPlayerState extends State<FullPlayer>
     final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
+  }
+
+  void _downloadSong(dynamic song) {
+    final downloadsProvider = context.read<DownloadsProvider>();
+    final isDownloaded = downloadsProvider.isDownloaded(song.id);
+    final isDownloading = downloadsProvider.isDownloading(song.id);
+
+    if (isDownloaded) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('已下载: ${song.title}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    if (isDownloading) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('正在下载: ${song.title}'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('开始下载: ${song.title}'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+    // 触发下载
+    downloadsProvider.downloadSong(song);
   }
 
   void _showPlaylist(PlayerProvider playerProvider) {

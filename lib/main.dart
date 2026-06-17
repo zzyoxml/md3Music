@@ -12,9 +12,15 @@ Future<void> main() async {
 }
 
 Future<void> _requestPermissions() async {
+  // Android 13+ 通知权限
   if (await Permission.notification.isDenied) {
     await Permission.notification.request();
   }
+  // Android 14+ 媒体权限
+  if (await Permission.audio.isDenied) {
+    await Permission.audio.request();
+  }
+  // 忽略电池优化
   try {
     if (await Permission.ignoreBatteryOptimizations.isDenied) {
       await Permission.ignoreBatteryOptimizations.request();
