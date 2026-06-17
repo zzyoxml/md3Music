@@ -48,3 +48,9 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 _tmp2.json
+
+# IDE/AI tool configs
+.mimicode/
+.trae/
+.workbuddy/
+.vscode/
