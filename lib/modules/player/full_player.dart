@@ -618,25 +618,40 @@ class _FullPlayerState extends State<FullPlayer>
     showDialog(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: const Text('音量'),
-          content: StatefulBuilder(
-            builder: (context, setState) {
-              return Slider(
-                value: playerProvider.volume,
-                onChanged: (value) {
-                  playerProvider.setVolume(value);
-                  setState(() {});
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 280),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+              child: StatefulBuilder(
+                builder: (context, setState) {
+                  final volume = playerProvider.volume;
+                  final percent = (volume * 100).round();
+                  final icon = volume <= 0
+                      ? Icons.volume_off
+                      : volume < 0.5
+                          ? Icons.volume_down
+                          : Icons.volume_up;
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(icon, size: 32, color: Theme.of(context).colorScheme.primary),
+                      const SizedBox(height: 8),
+                      Slider(
+                        value: volume,
+                        onChanged: (value) {
+                          playerProvider.setVolume(value);
+                          setState(() {});
+                        },
+                      ),
+                      Text('$percent%', style: Theme.of(context).textTheme.labelMedium),
+                    ],
+                  );
                 },
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('完成'),
+              ),
             ),
-          ],
+          ),
         );
       },
     );

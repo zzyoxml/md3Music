@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <application
         android:label="md3music"
         android:name="${applicationName}"
@@ -52,6 +53,11 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON" />
             </intent-filter>
         </receiver>
+        <service
+            android:name=".AudioPlaybackService"
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false"
+            android:exported="false" />
         <service
             android:name=".FloatingLyricService"
             android:foregroundServiceType="specialUse"

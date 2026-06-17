@@ -52,10 +52,24 @@ class _PersonalFmPageState extends State<PersonalFmPage>
     });
   }
 
+  int _lastPrefetchIndex = -1;
+
   void _onPlayerChanged() {
     if (!mounted) return;
     final player = Provider.of<PlayerProvider>(context, listen: false);
     _syncFmListToPlayer(player);
+    _proactivePrefetch(player);
+  }
+
+  void _proactivePrefetch(PlayerProvider player) {
+    if (player.playlist.isEmpty) return;
+    final idx = player.currentIndex;
+    if (idx < 0) return;
+    final remaining = player.playlist.length - idx;
+    if (remaining <= 3 && idx != _lastPrefetchIndex) {
+      _lastPrefetchIndex = idx;
+      _appendFmSongs();
+    }
   }
 
   @override
@@ -99,10 +113,23 @@ class _PersonalFmPageState extends State<PersonalFmPage>
   }
 
   Future<void> _onPlaylistEnd() async {
+    final prevLength = Provider.of<PlayerProvider>(context, listen: false).playlist.length;
     await _appendFmSongs();
     if (!mounted) return;
     final player = Provider.of<PlayerProvider>(context, listen: false);
-    await player.next();
+    if (player.playlist.length > prevLength) {
+      await player.next();
+    } else {
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (!mounted) return;
+      final p2 = Provider.of<PlayerProvider>(context, listen: false);
+      final retryPrev = p2.playlist.length;
+      _isAppending = false;
+      await _appendFmSongs();
+      if (mounted && p2.playlist.length > retryPrev) {
+        await p2.next();
+      }
+    }
     if (!mounted) return;
     _updateVinylAnimation(player.isPlaying);
   }
@@ -115,13 +142,22 @@ class _PersonalFmPageState extends State<PersonalFmPage>
       final currentSongs = kugou.personalFmSongs;
       final lastSong = currentSongs.isNotEmpty ? currentSongs.last : null;
 
-      final result = await kugou.apiClient.getPersonalFm(
-        mode: _selectedMode,
-        songPoolId: _selectedSongPoolId,
-        hash: lastSong?.hash,
-        songId: lastSong?.songId,
-        action: 'play',
-      );
+      List<KugouSongDetail>? result;
+      try {
+        result = await kugou.apiClient.getPersonalFm(
+          mode: _selectedMode,
+          songPoolId: _selectedSongPoolId,
+          hash: lastSong?.hash,
+          songId: lastSong?.songId,
+          action: 'play',
+        );
+      } catch (_) {
+        result = await kugou.apiClient.getPersonalFm(
+          mode: _selectedMode,
+          songPoolId: _selectedSongPoolId,
+          action: 'play',
+        );
+      }
       if (!mounted) return;
 
       if (result != null && result.isNotEmpty) {

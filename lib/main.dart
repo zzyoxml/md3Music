@@ -15,4 +15,9 @@ Future<void> _requestPermissions() async {
   if (await Permission.notification.isDenied) {
     await Permission.notification.request();
   }
+  try {
+    if (await Permission.ignoreBatteryOptimizations.isDenied) {
+      await Permission.ignoreBatteryOptimizations.request();
+    }
+  } catch (_) {}
 }

@@ -206,34 +206,42 @@ class PlayerProvider extends ChangeNotifier {
     }
   }
 
+  bool _handlingCompletion = false;
+
   Future<void> _handlePlaybackCompleted() async {
-    if (_loopMode == AppLoopMode.one) {
-      seek(Duration.zero);
-      _audioService?.play();
-    } else if (_currentIndex >= _playlist.length - 1) {
-      if (onPlaylistEnd != null) {
-        await onPlaylistEnd!();
-      } else if (_loopMode == AppLoopMode.all) {
-        if (_shuffleEnabled) {
-          final currentSong = _currentSong;
-          final remaining = _playlist.where((s) => s.id != currentSong?.id).toList();
-          remaining.shuffle();
-          _playlist = [?currentSong, ...remaining];
-          _currentIndex = 0;
-        } else {
-          _currentIndex = 0;
+    if (_handlingCompletion) return;
+    _handlingCompletion = true;
+    try {
+      if (_loopMode == AppLoopMode.one) {
+        seek(Duration.zero);
+        _audioService?.play();
+      } else if (_currentIndex >= _playlist.length - 1) {
+        if (onPlaylistEnd != null) {
+          await onPlaylistEnd!();
+        } else if (_loopMode == AppLoopMode.all) {
+          if (_shuffleEnabled) {
+            final currentSong = _currentSong;
+            final remaining = _playlist.where((s) => s.id != currentSong?.id).toList();
+            remaining.shuffle();
+            _playlist = [?currentSong, ...remaining];
+            _currentIndex = 0;
+          } else {
+            _currentIndex = 0;
+          }
+          if (_playlist.isNotEmpty) {
+            _currentSong = _playlist[_currentIndex];
+          }
+          final ok = await _resolveAndPlayCurrentSong();
+          if (!ok) {
+            _resolveError = '无法获取播放链接';
+          }
+          notifyListeners();
         }
-        if (_playlist.isNotEmpty) {
-          _currentSong = _playlist[_currentIndex];
-        }
-        final ok = await _resolveAndPlayCurrentSong();
-        if (!ok) {
-          _resolveError = '无法获取播放链接';
-        }
-        notifyListeners();
+      } else {
+        next();
       }
-    } else {
-      next();
+    } finally {
+      _handlingCompletion = false;
     }
   }
 
@@ -640,9 +648,12 @@ class PlayerProvider extends ChangeNotifier {
     }
     notifyListeners();
 
-    if (newSongs.isNotEmpty && _audioService != null) {
-      final sources = newSongs.map((song) => _createAudioSource(song)).toList();
-      await _audioService.addAllAudioSources(sources);
+    if (newSongs.isNotEmpty) {
+      if (_audioService != null) {
+        final sources = newSongs.map((song) => _createAudioSource(song)).toList();
+        await _audioService.addAllAudioSources(sources);
+      }
+      _prefetchNextSongs(_currentIndex);
     }
   }
 
@@ -764,7 +775,9 @@ class PlayerProvider extends ChangeNotifier {
   void _updateNotificationPosition() {
     final now = DateTime.now();
     if (_lastNotificationUpdate != null &&
-        now.difference(_lastNotificationUpdate!).inSeconds < 1) return;
+        now.difference(_lastNotificationUpdate!).inSeconds < 1) {
+      return;
+    }
     _lastNotificationUpdate = now;
     _updateNotification();
   }
