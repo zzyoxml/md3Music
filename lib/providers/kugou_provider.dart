@@ -700,16 +700,38 @@ class KugouProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
-      final songs = await _apiClient.getRankAudio(
-        rankId: rankId,
-        rankCid: rankCid,
-        page: page,
-        pagesize: pagesize,
-      );
-      if (songs != null) {
-        _rankSongs = songs;
+      if (page == 1) {
+        // 自动拉全部：分页循环
+        const batchSize = 30;
+        const maxPages = 100;
+        final all = <KugouSongDetail>[];
+        for (int p = 1; p <= maxPages; p++) {
+          final songs = await _apiClient.getRankAudio(
+            rankId: rankId,
+            rankCid: rankCid,
+            page: p,
+            pagesize: batchSize,
+          );
+          if (songs == null) {
+            if (all.isEmpty) _error = '获取排行榜歌曲失败';
+            break;
+          }
+          all.addAll(songs);
+          if (songs.length < batchSize) break;
+        }
+        _rankSongs = all;
       } else {
-        _error = '获取排行榜歌曲失败';
+        final songs = await _apiClient.getRankAudio(
+          rankId: rankId,
+          rankCid: rankCid,
+          page: page,
+          pagesize: pagesize,
+        );
+        if (songs != null) {
+          _rankSongs = songs;
+        } else {
+          _error = '获取排行榜歌曲失败';
+        }
       }
     } catch (e) {
       _error = e.toString();
@@ -727,15 +749,36 @@ class KugouProvider extends ChangeNotifier {
     _error = null;
     notifyListeners();
     try {
-      final songs = await _apiClient.getPlaylistTrackAll(
-        id: id,
-        page: page,
-        pagesize: pagesize,
-      );
-      if (songs != null) {
-        _currentPlaylistSongs = songs;
+      if (page == 1) {
+        // 自动拉全部：分页循环
+        const batchSize = 30;
+        const maxPages = 100;
+        final all = <KugouSongDetail>[];
+        for (int p = 1; p <= maxPages; p++) {
+          final songs = await _apiClient.getPlaylistTrackAll(
+            id: id,
+            page: p,
+            pagesize: batchSize,
+          );
+          if (songs == null) {
+            if (all.isEmpty) _error = '获取歌单歌曲失败';
+            break;
+          }
+          all.addAll(songs);
+          if (songs.length < batchSize) break;
+        }
+        _currentPlaylistSongs = all;
       } else {
-        _error = '获取歌单歌曲失败';
+        final songs = await _apiClient.getPlaylistTrackAll(
+          id: id,
+          page: page,
+          pagesize: pagesize,
+        );
+        if (songs != null) {
+          _currentPlaylistSongs = songs;
+        } else {
+          _error = '获取歌单歌曲失败';
+        }
       }
     } catch (e) {
       _error = e.toString();
