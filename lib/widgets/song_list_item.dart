@@ -24,13 +24,68 @@ class SongListItem extends StatelessWidget {
     this.forceFavorited = false,
   });
 
+  void _showMoreMenu(BuildContext context) {
+    final downloadsProvider = context.read<DownloadsProvider>();
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.music_note),
+              title: Text(song.title, style: const TextStyle(fontSize: 14)),
+              subtitle: Text(song.artist, style: const TextStyle(fontSize: 12)),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.download),
+              title: const Text('下载', style: TextStyle(fontSize: 14)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showDownloadDialog(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.playlist_add),
+              title: const Text('下一首播放', style: TextStyle(fontSize: 14)),
+              onTap: () {
+                Navigator.pop(ctx);
+                final player = context.read<PlayerProvider>();
+                player.appendPlaylist([song]);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('已加入下一首'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+            ),
+            if (downloadsProvider.isDownloaded(song.id))
+              ListTile(
+                leading: const Icon(Icons.delete_outline),
+                title: const Text('删除下载', style: TextStyle(fontSize: 14)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  downloadsProvider.removeTask(song.id);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showDownloadDialog(BuildContext context) {
     final downloadsProvider = context.read<DownloadsProvider>();
     final api = KugouApiClient();
 
     if (!api.isLoggedIn) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请先登录'), behavior: SnackBarBehavior.floating),
+        const SnackBar(
+          content: Text('请先登录'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
       return;
     }
@@ -46,7 +101,12 @@ class SongListItem extends StatelessWidget {
             const SizedBox(height: 16),
             Text('选择音质', style: Theme.of(ctx).textTheme.titleSmall),
             const SizedBox(height: 8),
-            _buildQualityOption(ctx, '标准音质 (128kbps)', '128', downloadsProvider),
+            _buildQualityOption(
+              ctx,
+              '标准音质 (128kbps)',
+              '128',
+              downloadsProvider,
+            ),
             _buildQualityOption(ctx, '高音质 (320kbps)', '320', downloadsProvider),
             _buildQualityOption(ctx, '无损音质 (FLAC)', 'flac', downloadsProvider),
           ],
@@ -61,7 +121,12 @@ class SongListItem extends StatelessWidget {
     );
   }
 
-  Widget _buildQualityOption(BuildContext context, String label, String quality, DownloadsProvider provider) {
+  Widget _buildQualityOption(
+    BuildContext context,
+    String label,
+    String quality,
+    DownloadsProvider provider,
+  ) {
     return ListTile(
       dense: true,
       leading: const Icon(Icons.music_note, size: 20),
@@ -77,11 +142,9 @@ class SongListItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final playerProvider = context.watch<PlayerProvider>();
     final favoritesProvider = context.watch<FavoritesProvider>();
-    final downloadsProvider = context.watch<DownloadsProvider>();
+    context.watch<DownloadsProvider>();
     final isCurrentSong = playerProvider.currentSong?.id == song.id;
     final isFavorited = forceFavorited || favoritesProvider.isFavorite(song.id);
-    final isDownloaded = downloadsProvider.isDownloaded(song.id);
-    final isDownloading = downloadsProvider.isDownloading(song.id);
     final colorScheme = Theme.of(context).colorScheme;
 
     return ListTile(
@@ -129,17 +192,22 @@ class SongListItem extends StatelessWidget {
         song.title,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: isCurrentSong
-            ? TextStyle(color: colorScheme.primary, fontWeight: FontWeight.w600)
-            : null,
+        style: TextStyle(
+          fontSize: 14,
+          fontWeight: FontWeight.w500,
+          color: isCurrentSong ? colorScheme.primary : null,
+        ),
       ),
       subtitle: Text(
         '${song.artist} - ${song.album}',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: isCurrentSong
-            ? TextStyle(color: colorScheme.primary.withValues(alpha: 0.7))
-            : null,
+        style: TextStyle(
+          fontSize: 12,
+          color: isCurrentSong
+              ? colorScheme.primary.withValues(alpha: 0.7)
+              : colorScheme.onSurfaceVariant,
+        ),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -174,31 +242,20 @@ class SongListItem extends StatelessWidget {
             icon: Icon(
               isFavorited ? Icons.favorite : Icons.favorite_border,
               size: 20,
-              color: isFavorited ? colorScheme.error : colorScheme.onSurfaceVariant,
+              color: isFavorited
+                  ? colorScheme.error
+                  : colorScheme.onSurfaceVariant,
             ),
             onPressed: () => favoritesProvider.toggleFavorite(song),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
           IconButton(
-            icon: Icon(
-              isDownloaded ? Icons.download_done : (isDownloading ? Icons.downloading : Icons.download),
-              size: 20,
-              color: isDownloaded ? colorScheme.primary : colorScheme.onSurfaceVariant,
-            ),
-            onPressed: isDownloaded || isDownloading
-                ? null
-                : () => _showDownloadDialog(context),
+            icon: const Icon(Icons.more_vert, size: 20),
+            onPressed: () => _showMoreMenu(context),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
           ),
-          if (onMoreTap != null)
-            IconButton(
-              icon: const Icon(Icons.more_vert, size: 20),
-              onPressed: onMoreTap,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            ),
         ],
       ),
       onTap: onTap,

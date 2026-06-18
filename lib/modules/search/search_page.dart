@@ -358,7 +358,9 @@ class _SearchPageState extends State<SearchPage>
         return SongListItem(
           song: results[index],
           onTap: () {
-            context.read<PlayerProvider>().playSong(results[index]);
+            context
+                .read<PlayerProvider>()
+                .playOnlinePlaylist(results, index);
           },
           onMoreTap: () {},
         );
