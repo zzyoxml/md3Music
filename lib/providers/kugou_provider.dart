@@ -157,6 +157,20 @@ class KugouProvider extends ChangeNotifier {
     _hasLoadedDiscoverData = false;
   }
 
+  /// 清除发现页相关内存缓存（保留登录态、当前播放、用户主动进入过的详情）
+  void clearMemoryCache() {
+    _rankList = null;
+    _recommendSongs = [];
+    _yuekuBanner = null;
+    _themeMusicData = null;
+    _sceneData = null;
+    _themePlaylistData = [];
+    _ipHomeData = null;
+    _personalFmSongs = [];
+    _hasLoadedDiscoverData = false;
+    notifyListeners();
+  }
+
   void _setLoading(bool v) {
     _isLoading = v;
     notifyListeners();

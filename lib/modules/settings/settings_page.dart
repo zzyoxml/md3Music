@@ -1,5 +1,11 @@
+import 'dart:io';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/repositories/settings_repository.dart';
 import '../../providers/kugou_provider.dart';
@@ -392,9 +398,9 @@ class _SettingsPageState extends State<SettingsPage> {
               child: const Text('取消'),
             ),
             TextButton(
-              onPressed: () {
-                _settingsRepository.setCacheSize(0);
+              onPressed: () async {
                 Navigator.pop(context);
+                await _doClearCache();
               },
               child: const Text('确定'),
             ),
@@ -402,5 +408,46 @@ class _SettingsPageState extends State<SettingsPage> {
         );
       },
     );
+  }
+
+  Future<void> _doClearCache() async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      // 1. 清图片缓存
+      await DefaultCacheManager().emptyCache();
+      // 2. 清 app 临时目录（Android 系统设置里的"清除缓存"也指这个）
+      try {
+        final dir = await getTemporaryDirectory();
+        if (dir.existsSync()) {
+          for (final entity in dir.listSync()) {
+            try {
+              if (entity is Directory) {
+                entity.deleteSync(recursive: true);
+              } else {
+                entity.deleteSync();
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+      // 3. 清 KugouProvider 内存
+      if (mounted) {
+        context.read<KugouProvider>().clearMemoryCache();
+      }
+      // 4. 重置发现页日期标志
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('discover_last_date');
+      _settingsRepository.setCacheSize(0);
+    } catch (e) {
+      debugPrint('Clear cache error: $e');
+    }
+    if (mounted) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('已清除缓存'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 }
