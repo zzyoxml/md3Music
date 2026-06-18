@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -12,6 +13,9 @@ Future<void> main() async {
 }
 
 Future<void> _requestPermissions() async {
+  // Web 平台不支持 permission_handler，跳过所有权限请求
+  if (kIsWeb) return;
+
   // Android 13+ 通知权限
   if (await Permission.notification.isDenied) {
     await Permission.notification.request();

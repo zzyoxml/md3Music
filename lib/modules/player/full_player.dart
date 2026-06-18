@@ -144,17 +144,30 @@ class _FullPlayerState extends State<FullPlayer>
             child: TabBarView(
               controller: _tabController,
               children: [
-                _buildArtworkView(playerProvider, currentSong, colorScheme),
-                _isLoadingLyrics
-                    ? const Center(child: CircularProgressIndicator())
-                    : LyricsView(
-                        key: _lyricsKey,
-                        lyrics: _lyrics,
-                        position: playerProvider.position,
-                        onSeek: (position) {
-                          playerProvider.seek(position);
-                        },
-                      ),
+                GestureDetector(
+                  onTap: () => _tabController.animateTo(1),
+                  behavior: HitTestBehavior.opaque,
+                  child: _buildArtworkView(
+                    playerProvider,
+                    currentSong,
+                    colorScheme,
+                    isExpanded: true,
+                  ),
+                ),
+                GestureDetector(
+                  onTap: () => _tabController.animateTo(0),
+                  behavior: HitTestBehavior.translucent,
+                  child: _isLoadingLyrics
+                      ? const Center(child: CircularProgressIndicator())
+                      : LyricsView(
+                          key: _lyricsKey,
+                          lyrics: _lyrics,
+                          position: playerProvider.position,
+                          onSeek: (position) {
+                            playerProvider.seek(position);
+                          },
+                        ),
+                ),
                 CommentsView(
                   songHash: currentSong.id,
                   albumAudioId: currentSong.albumAudioId,
@@ -273,49 +286,59 @@ class _FullPlayerState extends State<FullPlayer>
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           if (!isExpanded) const Spacer(),
-          if (isExpanded)
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400, maxHeight: 400),
-              child: AspectRatio(
-                aspectRatio: 1,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: currentSong.artworkUri != null
-                      ? CachedNetworkImage(
-                          imageUrl: currentSong.artworkUri!,
-                          fit: BoxFit.cover,
-                          placeholder: (_, _) => Container(
-                            color: colorScheme.surfaceContainerHighest,
-                            child: Icon(
-                              Icons.music_note,
-                              size: iconSize,
-                              color: colorScheme.onSurfaceVariant,
+          if (isExpanded) ...[
+            const Spacer(),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final maxSize = (constraints.maxWidth - 32).clamp(0.0, 380.0);
+                return ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: maxSize,
+                    maxHeight: maxSize,
+                  ),
+                  child: AspectRatio(
+                    aspectRatio: 1,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(16),
+                      child: currentSong.artworkUri != null
+                          ? CachedNetworkImage(
+                              imageUrl: currentSong.artworkUri!,
+                              fit: BoxFit.cover,
+                              placeholder: (_, _) => Container(
+                                color: colorScheme.surfaceContainerHighest,
+                                child: Icon(
+                                  Icons.music_note,
+                                  size: iconSize,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              errorWidget: (_, _, _) => Container(
+                                color: colorScheme.surfaceContainerHighest,
+                                child: Icon(
+                                  Icons.music_note,
+                                  size: iconSize,
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            )
+                          : Container(
+                              decoration: BoxDecoration(
+                                color: colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Icon(
+                                Icons.music_note,
+                                size: iconSize,
+                                color: colorScheme.onSurfaceVariant,
+                              ),
                             ),
-                          ),
-                          errorWidget: (_, _, _) => Container(
-                            color: colorScheme.surfaceContainerHighest,
-                            child: Icon(
-                              Icons.music_note,
-                              size: iconSize,
-                              color: colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        )
-                      : Container(
-                          decoration: BoxDecoration(
-                            color: colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Icon(
-                            Icons.music_note,
-                            size: iconSize,
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                ),
-              ),
-            )
-          else
+                    ),
+                  ),
+                );
+              },
+            ),
+            const Spacer(),
+          ] else
             Expanded(
               child: AspectRatio(
                 aspectRatio: 1,
@@ -583,7 +606,9 @@ class _FullPlayerState extends State<FullPlayer>
         IconButton(
           icon: Icon(
             isFavorited ? Icons.favorite : Icons.favorite_border,
-            color: isFavorited ? colorScheme.error : colorScheme.onSurfaceVariant,
+            color: isFavorited
+                ? colorScheme.error
+                : colorScheme.onSurfaceVariant,
           ),
           onPressed: song != null
               ? () => context.read<FavoritesProvider>().toggleFavorite(song)
@@ -591,9 +616,7 @@ class _FullPlayerState extends State<FullPlayer>
         ),
         IconButton(
           icon: const Icon(Icons.download),
-          onPressed: song != null
-              ? () => _downloadSong(song)
-              : null,
+          onPressed: song != null ? () => _downloadSong(song) : null,
         ),
         IconButton(
           icon: const Icon(Icons.volume_up),
@@ -626,7 +649,9 @@ class _FullPlayerState extends State<FullPlayer>
       context: context,
       builder: (context) {
         return Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 280),
             child: Padding(
@@ -638,12 +663,16 @@ class _FullPlayerState extends State<FullPlayer>
                   final icon = volume <= 0
                       ? Icons.volume_off
                       : volume < 0.5
-                          ? Icons.volume_down
-                          : Icons.volume_up;
+                      ? Icons.volume_down
+                      : Icons.volume_up;
                   return Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(icon, size: 32, color: Theme.of(context).colorScheme.primary),
+                      Icon(
+                        icon,
+                        size: 32,
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
                       const SizedBox(height: 8),
                       Slider(
                         value: volume,
@@ -652,7 +681,10 @@ class _FullPlayerState extends State<FullPlayer>
                           setState(() {});
                         },
                       ),
-                      Text('$percent%', style: Theme.of(context).textTheme.labelMedium),
+                      Text(
+                        '$percent%',
+                        style: Theme.of(context).textTheme.labelMedium,
+                      ),
                     ],
                   );
                 },

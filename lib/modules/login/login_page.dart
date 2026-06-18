@@ -264,11 +264,6 @@ class _LoginPageState extends State<LoginPage> {
                       icon: Icon(Icons.phone_android),
                       label: Text('手机'),
                     ),
-                    ButtonSegment(
-                      value: 2,
-                      icon: Icon(Icons.wechat),
-                      label: Text('微信'),
-                    ),
                   ],
                   selected: {_tabIndex},
                   onSelectionChanged: (s) => _switchTab(s.first),
@@ -277,7 +272,6 @@ class _LoginPageState extends State<LoginPage> {
               const SizedBox(height: 16),
               if (_tabIndex == 0) _buildQrTab(colorScheme, textTheme),
               if (_tabIndex == 1) _buildPhoneTab(colorScheme, textTheme),
-              if (_tabIndex == 2) _buildWxTab(colorScheme, textTheme),
               const SizedBox(height: 16),
               Text(
                 _statusText,

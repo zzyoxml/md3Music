@@ -8,7 +8,6 @@ import '../../providers/player_provider.dart';
 import '../../widgets/album_card.dart';
 import '../../widgets/app_animation.dart';
 import '../../widgets/song_list_item.dart';
-import '../login/login_page.dart';
 import '../charts/charts_page.dart';
 import '../playlist/playlist_page.dart';
 import '../search/search_page.dart';
@@ -79,29 +78,22 @@ class _DiscoverPageState extends State<DiscoverPage> {
           Consumer<KugouProvider>(
             builder: (context, kugou, _) => Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: IconButton(
-                icon: kugou.userInfo?.avatar != null
-                    ? CircleAvatar(
-                        backgroundImage: CachedNetworkImageProvider(
-                          kugou.userInfo!.avatar!,
-                        ),
-                        radius: 16,
-                      )
-                    : CircleAvatar(
-                        backgroundColor: colorScheme.primaryContainer,
-                        radius: 16,
-                        child: Icon(
-                          kugou.isLoggedIn
-                              ? Icons.person
-                              : Icons.person_outline,
-                          size: 18,
-                          color: colorScheme.onPrimaryContainer,
-                        ),
+              child: kugou.userInfo?.avatar != null
+                  ? CircleAvatar(
+                      backgroundImage: CachedNetworkImageProvider(
+                        kugou.userInfo!.avatar!,
                       ),
-                onPressed: () => Navigator.of(
-                  context,
-                ).push(MaterialPageRoute(builder: (_) => const LoginPage())),
-              ),
+                      radius: 16,
+                    )
+                  : CircleAvatar(
+                      backgroundColor: colorScheme.primaryContainer,
+                      radius: 16,
+                      child: Icon(
+                        kugou.isLoggedIn ? Icons.person : Icons.person_outline,
+                        size: 18,
+                        color: colorScheme.onPrimaryContainer,
+                      ),
+                    ),
             ),
           ),
         ],
@@ -527,7 +519,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
                             ),
                             onTap: () {
                               final brief = plist[i];
-                              debugPrint('Collect: name=${brief.name}, specialId=${brief.id}, listId=${brief.listId}');
+                              debugPrint(
+                                'Collect: name=${brief.name}, specialId=${brief.id}, listId=${brief.listId}',
+                              );
                               final playlist = brief.toPlaylist();
                               Navigator.of(context).push(
                                 MaterialPageRoute(
