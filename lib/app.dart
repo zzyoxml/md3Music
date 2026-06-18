@@ -1,4 +1,8 @@
+import 'dart:io' show exit;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show SystemNavigator;
 import 'package:provider/provider.dart';
 
 import 'core/layout/responsive_layout.dart';
@@ -202,40 +206,74 @@ class _MainLayoutState extends State<_MainLayout> {
 
   @override
   Widget build(BuildContext context) {
-    return ResponsiveScaffold(
-      destinations: _destinations,
-      railDestinations: _railDestinations,
-      drawerDestinations: _drawerDestinations,
-      selectedIndex: _selectedIndex,
-      onDestinationSelected: (index) {
-        setState(() {
-          _selectedIndex = index;
-        });
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _showExitDialog();
       },
-      body: Column(
-        children: [
-          Expanded(child: _pages[_selectedIndex]),
-          const MiniPlayer(),
-        ],
+      child: ResponsiveScaffold(
+        destinations: _destinations,
+        railDestinations: _railDestinations,
+        drawerDestinations: _drawerDestinations,
+        selectedIndex: _selectedIndex,
+        onDestinationSelected: (index) {
+          setState(() {
+            _selectedIndex = index;
+          });
+        },
+        body: Column(
+          children: [
+            Expanded(child: _pages[_selectedIndex]),
+            const MiniPlayer(),
+          ],
+        ),
+        compactBody: Column(
+          children: [
+            Expanded(child: _pages[_selectedIndex]),
+            const MiniPlayer(),
+          ],
+        ),
+        mediumBody: Column(
+          children: [
+            Expanded(child: _pages[_selectedIndex]),
+            const MiniPlayer(),
+          ],
+        ),
+        expandedBody: Column(
+          children: [
+            Expanded(child: _pages[_selectedIndex]),
+            const MiniPlayer(),
+          ],
+        ),
       ),
-      compactBody: Column(
-        children: [
-          Expanded(child: _pages[_selectedIndex]),
-          const MiniPlayer(),
-        ],
-      ),
-      mediumBody: Column(
-        children: [
-          Expanded(child: _pages[_selectedIndex]),
-          const MiniPlayer(),
-        ],
-      ),
-      expandedBody: Column(
-        children: [
-          Expanded(child: _pages[_selectedIndex]),
-          const MiniPlayer(),
+    );
+  }
+
+  Future<void> _showExitDialog() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出应用'),
+        content: const Text('确定要退出 MD3Music 吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确定'),
+          ),
         ],
       ),
     );
+    if (ok != true) return;
+    if (kIsWeb) {
+      SystemNavigator.pop();
+    } else {
+      // 立即杀进程，关闭所有后台服务（如 audio_service）
+      exit(0);
+    }
   }
 }

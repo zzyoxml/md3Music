@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/models/album.dart';
 import '../../providers/kugou_provider.dart';
@@ -20,13 +21,37 @@ class DiscoverPage extends StatefulWidget {
 }
 
 class _DiscoverPageState extends State<DiscoverPage> {
+  static const String _kDiscoverLastDateKey = 'discover_last_date';
+
   bool _isLoading = true;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _loadAllData());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _initIfNeeded());
+  }
+
+  /// 每天只自动加载一次：内存有数据且是同一天则跳过，否则拉取
+  Future<void> _initIfNeeded() async {
+    final kugou = context.read<KugouProvider>();
+    final prefs = await SharedPreferences.getInstance();
+    final lastDate = prefs.getString(_kDiscoverLastDateKey);
+    final today = _todayString();
+    if (kugou.hasLoadedDiscoverData && lastDate == today) {
+      if (mounted) setState(() => _isLoading = false);
+      return;
+    }
+    if (lastDate != null && lastDate != today) {
+      // 跨天：重置标志，让 _loadAllData 重新拉
+      kugou.resetDiscoverLoadedFlag();
+    }
+    await _loadAllData();
+  }
+
+  String _todayString() {
+    final d = DateTime.now();
+    return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
 
   Future<void> _loadAllData() async {
@@ -47,6 +72,10 @@ class _DiscoverPageState extends State<DiscoverPage> {
         kugou.getIpHome(),
         kugou.getPersonalFm(),
       ]);
+      kugou.markDiscoverLoaded();
+      // 任何一次加载成功都把日期标记为今天
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kDiscoverLastDateKey, _todayString());
     } catch (e) {
       _error = e.toString();
     }

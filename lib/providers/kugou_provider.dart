@@ -145,6 +145,18 @@ class KugouProvider extends ChangeNotifier {
   List<Song> get personalFmAsSongs =>
       _personalFmSongs.map((e) => e.toSong()).toList();
 
+  /// 发现页数据是否已加载过（用于避免每次进入都请求）
+  bool _hasLoadedDiscoverData = false;
+  bool get hasLoadedDiscoverData => _hasLoadedDiscoverData;
+
+  void markDiscoverLoaded() {
+    _hasLoadedDiscoverData = true;
+  }
+
+  void resetDiscoverLoadedFlag() {
+    _hasLoadedDiscoverData = false;
+  }
+
   void _setLoading(bool v) {
     _isLoading = v;
     notifyListeners();
