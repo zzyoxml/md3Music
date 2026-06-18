@@ -809,52 +809,79 @@ class _FullPlayerState extends State<FullPlayer>
   void _showPlaylist(PlayerProvider playerProvider) {
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         final playlist = playerProvider.playlist;
         return AlertDialog(
           title: const Text('播放列表'),
-          content: playlist.isEmpty
-              ? const Text('播放列表为空')
-              : SizedBox(
-                  width: 300,
-                  height: 400,
-                  child: ListView.builder(
-                    itemCount: playlist.length,
-                    itemBuilder: (context, index) {
-                      final song = playlist[index];
-                      final isCurrent = index == playerProvider.currentIndex;
-                      return ListTile(
-                        leading: isCurrent
-                            ? const Icon(Icons.play_arrow, color: Colors.blue)
-                            : Text('${index + 1}'),
-                        title: Text(
-                          song.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: isCurrent ? FontWeight.bold : null,
-                            color: isCurrent ? Colors.blue : null,
-                          ),
-                        ),
-                        subtitle: Text(
-                          song.artist,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        onTap: () {
-                          playerProvider.playSongAt(index);
-                          Navigator.pop(context);
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              playlist.isEmpty
+                  ? const Text('播放列表为空')
+                  : SizedBox(
+                      width: 300,
+                      height: 400,
+                      child: ListView.builder(
+                        itemCount: playlist.length,
+                        itemBuilder: (context, index) {
+                          final song = playlist[index];
+                          final isCurrent =
+                              index == playerProvider.currentIndex;
+                          return ListTile(
+                            leading: isCurrent
+                                ? const Icon(
+                                    Icons.play_arrow,
+                                    color: Colors.blue,
+                                  )
+                                : Text('${index + 1}'),
+                            title: Text(
+                              song.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: isCurrent ? FontWeight.bold : null,
+                                color: isCurrent ? Colors.blue : null,
+                              ),
+                            ),
+                            subtitle: Text(
+                              song.artist,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: () {
+                              playerProvider.playSongAt(index);
+                              Navigator.pop(dialogContext);
+                            },
+                          );
                         },
-                      );
-                    },
+                      ),
+                    ),
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: SizedBox(
+                  width: 300,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      TextButton(
+                        onPressed: playlist.isEmpty
+                            ? null
+                            : () {
+                                playerProvider.clearPlaylist();
+                                Navigator.pop(dialogContext);
+                              },
+                        child: const Text('清空'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        child: const Text('关闭'),
+                      ),
+                    ],
                   ),
                 ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('关闭'),
-            ),
-          ],
+              ),
+            ],
+          ),
         );
       },
     );

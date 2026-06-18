@@ -104,11 +104,15 @@ class PlayerProvider extends ChangeNotifier {
       _audioQuality = AudioQuality.values.firstWhere(
         (q) => q.value == qualityValue,
         orElse: () {
-          debugPrint('Quality "$qualityValue" not found, defaulting to standard');
+          debugPrint(
+            'Quality "$qualityValue" not found, defaulting to standard',
+          );
           return AudioQuality.standard;
         },
       );
-      debugPrint('Audio quality set to: ${_audioQuality.value} (${_audioQuality.label})');
+      debugPrint(
+        'Audio quality set to: ${_audioQuality.value} (${_audioQuality.label})',
+      );
       notifyListeners();
     } catch (e) {
       debugPrint('Failed to load default quality: $e');
@@ -218,10 +222,13 @@ class PlayerProvider extends ChangeNotifier {
       } else if (_currentIndex >= _playlist.length - 1) {
         if (onPlaylistEnd != null) {
           await onPlaylistEnd!();
-        } else if (_loopMode == AppLoopMode.all) {
+        } else {
+          // 非 FM：最后一曲播完回到第一曲
           if (_shuffleEnabled) {
             final currentSong = _currentSong;
-            final remaining = _playlist.where((s) => s.id != currentSong?.id).toList();
+            final remaining = _playlist
+                .where((s) => s.id != currentSong?.id)
+                .toList();
             remaining.shuffle();
             _playlist = [?currentSong, ...remaining];
             _currentIndex = 0;
@@ -410,14 +417,18 @@ class PlayerProvider extends ChangeNotifier {
 
     try {
       final apiClient = KugouApiClient();
-      debugPrint('playOnlinePlaylist: requesting URL for "${_currentSong!.title}" with quality=${_audioQuality.value}');
+      debugPrint(
+        'playOnlinePlaylist: requesting URL for "${_currentSong!.title}" with quality=${_audioQuality.value}',
+      );
       final result = await apiClient.getSongUrl(
         _currentSong!.id,
         quality: _audioQuality.value,
         albumId: _currentSong!.albumId,
         albumAudioId: _currentSong!.albumAudioId,
       );
-      debugPrint('playOnlinePlaylist: URL result: ${result?.url.substring(0, 50)}...');
+      debugPrint(
+        'playOnlinePlaylist: URL result: ${result?.url.substring(0, 50)}...',
+      );
 
       if (result != null && result.url.isNotEmpty) {
         final resolvedSong = _currentSong!.copyWith(url: result.url);
@@ -638,6 +649,20 @@ class PlayerProvider extends ChangeNotifier {
     await _resolveAndPlayCurrentSong();
   }
 
+  Future<void> clearPlaylist() async {
+    await _audioService?.stop();
+    _playlist = [];
+    _originalPlaylist = [];
+    _currentIndex = -1;
+    _currentSong = null;
+    _isPlaying = false;
+    _position = Duration.zero;
+    _duration = null;
+    _resolveError = null;
+    _updateNotification();
+    notifyListeners();
+  }
+
   Future<void> appendPlaylist(List<Song> songs) async {
     final newSongs = <Song>[];
     for (final song in songs) {
@@ -650,7 +675,9 @@ class PlayerProvider extends ChangeNotifier {
 
     if (newSongs.isNotEmpty) {
       if (_audioService != null) {
-        final sources = newSongs.map((song) => _createAudioSource(song)).toList();
+        final sources = newSongs
+            .map((song) => _createAudioSource(song))
+            .toList();
         await _audioService.addAllAudioSources(sources);
       }
       _prefetchNextSongs(_currentIndex);
@@ -679,7 +706,9 @@ class PlayerProvider extends ChangeNotifier {
     _shuffleEnabled = !_shuffleEnabled;
     if (_shuffleEnabled) {
       final currentSong = _currentSong;
-      final remaining = _playlist.where((s) => s.id != currentSong?.id).toList();
+      final remaining = _playlist
+          .where((s) => s.id != currentSong?.id)
+          .toList();
       remaining.shuffle();
       _playlist = [?currentSong, ...remaining];
       _currentIndex = 0;
