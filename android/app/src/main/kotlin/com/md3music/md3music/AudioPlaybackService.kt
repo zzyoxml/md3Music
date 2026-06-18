@@ -242,7 +242,7 @@ class AudioPlaybackService : Service() {
         )
 
         val playPauseIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val lyricIcon = createWordIcon(desktopLyricEnabled)
+        val lyricIcon = if (desktopLyricEnabled) android.R.drawable.ic_menu_view else android.R.drawable.ic_menu_close_clear_cancel
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
@@ -255,13 +255,7 @@ class AudioPlaybackService : Service() {
             .addAction(android.R.drawable.ic_media_previous, "上一首", prevIntent)
             .addAction(playPauseIcon, if (isPlaying) "暂停" else "播放", playPauseIntent)
             .addAction(android.R.drawable.ic_media_next, "下一首", nextIntent)
-            .addAction(
-                NotificationCompat.Action.Builder(
-                    IconCompat.createWithBitmap(lyricIcon),
-                    "桌面歌词",
-                    toggleLyricIntent
-                ).build()
-            )
+            .addAction(lyricIcon, "桌面歌词", toggleLyricIntent)
             .setLargeIcon(BitmapFactory.decodeResource(resources, android.R.drawable.ic_menu_myplaces))
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()

@@ -27,7 +27,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
@@ -37,7 +36,7 @@ import io.flutter.embedding.engine.FlutterEngineCache
 
 class FloatingLyricService : Service() {
     private var windowManager: WindowManager? = null
-    private var rootView: FrameLayout? = null
+    private var rootView: LinearLayout? = null
     private var collapsedPanel: View? = null
     private var expandedPanel: View? = null
     private var lyricText1: GradientTextView? = null
@@ -232,37 +231,42 @@ class FloatingLyricService : Service() {
     private fun createFloatingView() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        rootView = FrameLayout(this).apply {
+        rootView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             background = GradientDrawable().apply {
                 cornerRadius = dp(16).toFloat()
                 setColor(0xCC000000.toInt())
             }
             setPadding(dp(20), dp(12), dp(20), dp(12))
+            gravity = Gravity.CENTER_HORIZONTAL
             setOnClickListener { toggleExpanded() }
         }
+        val root = rootView as LinearLayout
 
         // ===== 收起面板：只显示歌词 =====
         collapsedPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
         }
+        val col = collapsedPanel as LinearLayout
 
         lyricText1 = GradientTextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
             gravity = Gravity.CENTER
             maxLines = 1
             typeface = Typeface.DEFAULT_BOLD
-            setPadding(dp(8), dp(4), dp(8), dp(4))
+            setPadding(dp(8), dp(6), dp(8), dp(4))
         }
         lyricText2 = GradientTextView(this).apply {
             setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
             gravity = Gravity.CENTER
             maxLines = 1
-            setPadding(dp(8), dp(2), dp(8), dp(4))
+            setPadding(dp(8), dp(2), dp(8), dp(6))
             visibility = View.GONE
         }
-        (collapsedPanel as LinearLayout).addView(lyricText1)
-        (collapsedPanel as LinearLayout).addView(lyricText2)
+        col.addView(lyricText1)
+        col.addView(lyricText2)
+        root.addView(col)
 
         // ===== 展开面板：控制栏 + 进度条 + 设置 =====
         expandedPanel = LinearLayout(this).apply {
@@ -306,10 +310,9 @@ class FloatingLyricService : Service() {
         settingsPanel = createSettingsPanel()
         exp.addView(settingsPanel)
 
-        rootView?.addView(collapsedPanel)
-        rootView?.addView(expandedPanel)
+        root.addView(expandedPanel)
 
-        setupTouchListener(rootView!!)
+        setupTouchListener(root)
 
         val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY

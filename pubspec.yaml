@@ -1,7 +1,7 @@
 name: md3music
 description: "MD3Music - Music player with Material Design 3"
 publish_to: 'none'
-version: 1.0.0+1
+version: 2.0.0+2
 
 environment:
   sdk: ^3.12.0
@@ -25,6 +25,7 @@ dependencies:
   dio: ^5.4.0
   dio_cookie_manager: ^3.1.1
   cookie_jar: ^4.0.8
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:

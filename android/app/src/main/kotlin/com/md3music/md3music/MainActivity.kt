@@ -99,8 +99,8 @@ class MainActivity : FlutterActivity() {
                 "setDesktopLyricConfig" -> {
                     val intent = Intent(this, FloatingLyricService::class.java).apply {
                         action = FloatingLyricService.ACTION_SET_CONFIG
-                        call.argument<Float>(FloatingLyricService.EXTRA_FONT_SIZE)?.let {
-                            putExtra(FloatingLyricService.EXTRA_FONT_SIZE, it)
+                        call.argument<Double>(FloatingLyricService.EXTRA_FONT_SIZE)?.let {
+                            putExtra(FloatingLyricService.EXTRA_FONT_SIZE, it.toFloat())
                         }
                         call.argument<Boolean>(FloatingLyricService.EXTRA_DOUBLE_LINE)?.let {
                             putExtra(FloatingLyricService.EXTRA_DOUBLE_LINE, it)

@@ -282,7 +282,11 @@ class KugouProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> getLyric(String hash, {String? songName}) async {
+  Future<void> getLyric(
+    String hash, {
+    String? songName,
+    String fmt = 'krc',
+  }) async {
     _isLoading = true;
     _error = null;
     // 先清空旧歌词，避免切换歌曲时残留上首歌的歌词
@@ -290,7 +294,11 @@ class KugouProvider extends ChangeNotifier {
     _lyricSongId = hash;
     notifyListeners();
     try {
-      final result = await _apiClient.getLyric(hash, songName: songName);
+      final result = await _apiClient.getLyric(
+        hash,
+        songName: songName,
+        fmt: fmt,
+      );
       if (_lyricSongId != hash) {
         // 期间切换了歌曲，丢弃旧结果
         return;

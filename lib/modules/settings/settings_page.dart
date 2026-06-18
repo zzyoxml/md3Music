@@ -6,6 +6,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/repositories/settings_repository.dart';
 import '../../providers/kugou_provider.dart';
@@ -25,7 +26,6 @@ class _SettingsPageState extends State<SettingsPage> {
   );
   ThemeMode _themeMode = ThemeMode.system;
   String _defaultQuality = 'hq';
-  bool _showLyrics = true;
   bool _isTestingConnection = false;
   String? _connectionResult;
   bool _autoReceiveVip = true;
@@ -45,14 +45,12 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadSettings() async {
     final themeMode = await _settingsRepository.getThemeMode();
     final quality = await _settingsRepository.getDefaultQuality();
-    final showLyrics = await _settingsRepository.getShowLyrics();
     final autoReceiveVip = await _settingsRepository.getAutoReceiveVip();
     final apiServerUrl = await _settingsRepository.getApiServerUrl();
 
     setState(() {
       _themeMode = themeMode;
       _defaultQuality = quality;
-      _showLyrics = showLyrics;
       _autoReceiveVip = autoReceiveVip;
       _apiServerController.text = apiServerUrl;
     });
@@ -107,9 +105,6 @@ class _SettingsPageState extends State<SettingsPage> {
           const Divider(),
           _buildSectionHeader('在线音乐'),
           _buildOnlineMusicSection(colorScheme),
-          const Divider(),
-          _buildSectionHeader('歌词'),
-          _buildLyricsSection(colorScheme),
           const Divider(),
           _buildSectionHeader('缓存'),
           _buildCacheSection(colorScheme),
@@ -268,20 +263,6 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  Widget _buildLyricsSection(ColorScheme colorScheme) {
-    return SwitchListTile(
-      title: const Text('显示歌词'),
-      subtitle: const Text('播放时显示歌词'),
-      value: _showLyrics,
-      onChanged: (value) {
-        setState(() {
-          _showLyrics = value;
-        });
-        _settingsRepository.setShowLyrics(value);
-      },
-    );
-  }
-
   Widget _buildCacheSection(ColorScheme colorScheme) {
     return Column(
       children: [
@@ -303,6 +284,13 @@ class _SettingsPageState extends State<SettingsPage> {
           leading: const Icon(Icons.info_outline),
         ),
         ListTile(
+          title: const Text('更新最新版本'),
+          subtitle: const Text('https://github.com/zzyoxml/md3Music/releases'),
+          leading: const Icon(Icons.system_update_outlined),
+          trailing: const Icon(Icons.open_in_new, size: 18),
+          onTap: () => _openReleasesUrl(),
+        ),
+        ListTile(
           title: const Text('开源许可'),
           leading: const Icon(Icons.description_outlined),
           onTap: () {
@@ -315,6 +303,14 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
       ],
     );
+  }
+
+  Future<void> _openReleasesUrl() async {
+    const url = 'https://github.com/zzyoxml/md3Music/releases';
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
   }
 
   String _getQualityLabel(String quality) {

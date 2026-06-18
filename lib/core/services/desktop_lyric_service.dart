@@ -282,25 +282,28 @@ class DesktopLyricService {
       _lines = const [];
       _currentLineIndex = -1;
       _awaitingLyric = false;
+      _lastPushedPosMs = null;
       _pushPlaying(_player!.isPlaying);
+      _pushLyric('歌词加载中...', '');
+      _fetchLyricFor(song);
+      return;
     }
 
-    // 拉取歌词
-    if (!_awaitingLyric) {
+    // 拉取/解析歌词
+    if (!_awaitingLyric && _lines.isEmpty) {
       final lyric = _kugou!.lyric;
-      if (lyric != null &&
-          (lyric.decodedContent != null || lyric.content.isNotEmpty)) {
-        final lrc = lyric.decodedContent ?? lyric.content;
+      if (lyric != null && lyric.displayLyric.isNotEmpty) {
+        final lrc = lyric.displayLyric;
         if (lrc != _currentLrcText) {
           _currentLrcText = lrc;
           _lines = _parseLrc(lrc);
+          debugPrint('desktop lyric parsed: ${_lines.length} lines');
+          if (_lines.isEmpty) {
+            _pushLyric('暂无歌词', '');
+          }
         }
       } else if (song.id.isNotEmpty) {
-        _awaitingLyric = true;
-        _kugou!
-            .getLyric(song.id, songName: song.title)
-            .then((_) => _awaitingLyric = false)
-            .catchError((_) => _awaitingLyric = false);
+        _fetchLyricFor(song);
         return;
       }
     }
@@ -324,6 +327,20 @@ class DesktopLyricService {
           ? _lines[newIndex + 1].text
           : '';
       _pushLyric(current, next);
+    }
+  }
+
+  Future<void> _fetchLyricFor(dynamic song) async {
+    if (_awaitingLyric || song == null) return;
+    _awaitingLyric = true;
+    try {
+      debugPrint('desktop lyric fetching for id=${song.id}, title=${song.title}');
+      await _kugou!.getLyric(song.id, songName: song.title, fmt: 'lrc');
+    } catch (e) {
+      debugPrint('desktop lyric fetch error: $e');
+      _pushLyric('歌词加载失败', '');
+    } finally {
+      _awaitingLyric = false;
     }
   }
 
