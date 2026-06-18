@@ -48,7 +48,6 @@ class _PersonalFmPageState extends State<PersonalFmPage>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final player = Provider.of<PlayerProvider>(context, listen: false);
       player.addListener(_onPlayerChanged);
-      _loadPersonalFm();
     });
   }
 
@@ -113,7 +112,10 @@ class _PersonalFmPageState extends State<PersonalFmPage>
   }
 
   Future<void> _onPlaylistEnd() async {
-    final prevLength = Provider.of<PlayerProvider>(context, listen: false).playlist.length;
+    final prevLength = Provider.of<PlayerProvider>(
+      context,
+      listen: false,
+    ).playlist.length;
     await _appendFmSongs();
     if (!mounted) return;
     final player = Provider.of<PlayerProvider>(context, listen: false);
@@ -811,9 +813,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         ),
         SizedBox(width: spacing),
         InkWell(
-          onTap: currentTrack != null
-              ? () => _handlePlayPersonalFm(currentTrack, isPlaying)
-              : null,
+          onTap: () => _handlePlayPersonalFm(currentTrack, isPlaying),
           borderRadius: BorderRadius.circular(999),
           child: Container(
             width: playButtonSize,
@@ -848,14 +848,22 @@ class _PersonalFmPageState extends State<PersonalFmPage>
   }
 
   Future<void> _handlePlayPersonalFm(
-    KugouSongDetail track,
+    KugouSongDetail? track,
     bool isPlaying,
   ) async {
     if (_isLoading) return;
+    final kugou = Provider.of<KugouProvider>(context, listen: false);
+
+    // 首次进入：列表为空，点击触发首次加载
+    if (kugou.personalFmSongs.isEmpty) {
+      await _loadPersonalFm();
+      return;
+    }
 
     if (isPlaying) {
       await _togglePlay();
     } else {
+      if (track == null) return;
       await _playSong(track);
     }
   }
@@ -866,8 +874,6 @@ class _PersonalFmPageState extends State<PersonalFmPage>
     bool isPlaying,
     double size,
   ) {
-    if (track == null) return const SizedBox();
-
     final borderWidth = size * 0.05;
     return InkWell(
       onTap: () => _handlePlayPersonalFm(track, isPlaying),
@@ -894,7 +900,18 @@ class _PersonalFmPageState extends State<PersonalFmPage>
           builder: (context, child) {
             return Transform.rotate(
               angle: _vinylRotationController.value * 2 * 3.14159,
-              child: ClipOval(child: _buildVinylCover(track, cs)),
+              child: ClipOval(
+                child: track != null
+                    ? _buildVinylCover(track, cs)
+                    : Container(
+                        color: cs.surfaceContainerHighest,
+                        child: Icon(
+                          Icons.music_note,
+                          size: size * 0.4,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+              ),
             );
           },
         ),

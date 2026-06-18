@@ -2,8 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+
+const String _kBatteryPromptShownKey = 'battery_prompt_shown';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -24,10 +27,15 @@ Future<void> _requestPermissions() async {
   if (await Permission.audio.isDenied) {
     await Permission.audio.request();
   }
-  // 忽略电池优化
+  // 忽略电池优化：只弹一次（不管用户选什么都标记为已弹）
   try {
-    if (await Permission.ignoreBatteryOptimizations.isDenied) {
-      await Permission.ignoreBatteryOptimizations.request();
+    final prefs = await SharedPreferences.getInstance();
+    final alreadyShown = prefs.getBool(_kBatteryPromptShownKey) ?? false;
+    if (!alreadyShown) {
+      if (await Permission.ignoreBatteryOptimizations.isDenied) {
+        await Permission.ignoreBatteryOptimizations.request();
+      }
+      await prefs.setBool(_kBatteryPromptShownKey, true);
     }
   } catch (_) {}
 }
