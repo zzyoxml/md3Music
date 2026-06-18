@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart' as just_audio;
 
 import '../core/services/audio_service.dart';
+import '../core/services/desktop_lyric_service.dart';
 import '../core/services/media_notification_service.dart';
 import '../data/models/song.dart';
 import '../data/repositories/history_repository.dart';
@@ -821,6 +822,7 @@ class PlayerProvider extends ChangeNotifier {
       isPlaying: _isPlaying,
       position: _position,
       duration: _duration ?? Duration.zero,
+      desktopLyricEnabled: DesktopLyricService.instance.enabled,
     );
   }
 

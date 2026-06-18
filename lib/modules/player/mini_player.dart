@@ -2,6 +2,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/services/desktop_lyric_service.dart';
+import '../../core/services/media_notification_service.dart';
 import '../../providers/player_provider.dart';
 import 'full_player.dart';
 
@@ -30,13 +32,16 @@ class MiniPlayer extends StatelessWidget {
             pageBuilder: (_, _, _) => const FullPlayer(),
             transitionsBuilder: (_, animation, _, child) {
               return SlideTransition(
-                position: Tween<Offset>(
-                  begin: const Offset(0, 1),
-                  end: Offset.zero,
-                ).animate(CurvedAnimation(
-                  parent: animation,
-                  curve: Curves.easeOutCubic,
-                )),
+                position:
+                    Tween<Offset>(
+                      begin: const Offset(0, 1),
+                      end: Offset.zero,
+                    ).animate(
+                      CurvedAnimation(
+                        parent: animation,
+                        curve: Curves.easeOutCubic,
+                      ),
+                    ),
                 child: child,
               );
             },
@@ -47,10 +52,7 @@ class MiniPlayer extends StatelessWidget {
         decoration: BoxDecoration(
           color: colorScheme.surfaceContainerLow,
           border: Border(
-            top: BorderSide(
-              color: colorScheme.outlineVariant,
-              width: 0.5,
-            ),
+            top: BorderSide(color: colorScheme.outlineVariant, width: 0.5),
           ),
         ),
         child: Column(
@@ -118,24 +120,53 @@ class MiniPlayer extends StatelessWidget {
                           currentSong.artist,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
-                              ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colorScheme.onSurfaceVariant),
                         ),
                       ],
                     ),
                   ),
                   IconButton(
                     icon: Icon(
-                      playerProvider.isPlaying
-                          ? Icons.pause
-                          : Icons.play_arrow,
+                      playerProvider.isPlaying ? Icons.pause : Icons.play_arrow,
                     ),
                     onPressed: () {
                       if (playerProvider.isPlaying) {
                         playerProvider.pause();
                       } else {
                         playerProvider.resume();
+                      }
+                    },
+                  ),
+                  IconButton(
+                    tooltip: DesktopLyricService.instance.enabled
+                        ? '关闭桌面歌词'
+                        : '开启桌面歌词',
+                    icon: Icon(
+                      DesktopLyricService.instance.enabled
+                          ? Icons.lyrics
+                          : Icons.lyrics_outlined,
+                      color: DesktopLyricService.instance.enabled
+                          ? colorScheme.primary
+                          : null,
+                    ),
+                    onPressed: () async {
+                      await DesktopLyricService.instance.toggle();
+                      if (context.mounted) {
+                        (context as Element).markNeedsBuild();
+                        // 同步通知栏"桌面歌词"按钮状态
+                        final player = context.read<PlayerProvider>();
+                        final song = player.currentSong;
+                        await MediaNotificationService.updateNotification(
+                          title: song?.title ?? '',
+                          artist: song?.artist ?? '',
+                          artUrl: song?.artworkUri,
+                          isPlaying: player.isPlaying,
+                          position: player.position,
+                          duration: player.duration ?? Duration.zero,
+                          desktopLyricEnabled:
+                              DesktopLyricService.instance.enabled,
+                        );
                       }
                     },
                   ),

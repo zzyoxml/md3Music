@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import 'core/layout/responsive_layout.dart';
 import 'core/theme/app_theme.dart';
 import 'data/models/playlist.dart';
+import 'main.dart' show appNavigatorKey;
 import 'modules/charts/charts_page.dart';
 import 'modules/discover/discover_page.dart';
 import 'modules/user/user_center_page.dart';
@@ -58,6 +59,7 @@ class _AppView extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeProvider.themeMode,
+      navigatorKey: appNavigatorKey,
       initialRoute: '/',
       routes: {
         '/': (_) => const _MainLayout(),

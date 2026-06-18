@@ -83,4 +83,76 @@ class SettingsRepository {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyAutoReceiveVip, autoReceive);
   }
+
+  // ===== 桌面歌词配置 =====
+
+  Future<double> getDesktopLyricFontSize() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble('settings_dl_font_size') ?? 18.0;
+  }
+
+  Future<void> setDesktopLyricFontSize(double size) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble('settings_dl_font_size', size);
+  }
+
+  Future<bool> getDesktopLyricDoubleLine() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('settings_dl_double_line') ?? false;
+  }
+
+  Future<void> setDesktopLyricDoubleLine(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('settings_dl_double_line', v);
+  }
+
+  Future<int> getDesktopLyricOpacity() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('settings_dl_opacity') ?? 80;
+  }
+
+  Future<void> setDesktopLyricOpacity(int v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('settings_dl_opacity', v);
+  }
+
+  Future<int> getDesktopLyricGradientStart() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('settings_dl_grad_start') ?? 0xFF00E5FF;
+  }
+
+  Future<void> setDesktopLyricGradientStart(int v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('settings_dl_grad_start', v);
+  }
+
+  Future<int> getDesktopLyricGradientEnd() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('settings_dl_grad_end') ?? 0xFFFF00FF;
+  }
+
+  Future<void> setDesktopLyricGradientEnd(int v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('settings_dl_grad_end', v);
+  }
+
+  Future<int> getDesktopLyricUnplayedColor() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt('settings_dl_unplayed_color') ?? 0xFF666666;
+  }
+
+  Future<void> setDesktopLyricUnplayedColor(int v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('settings_dl_unplayed_color', v);
+  }
+
+  Future<bool> getDesktopLyricLocked() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('settings_dl_locked') ?? false;
+  }
+
+  Future<void> setDesktopLyricLocked(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('settings_dl_locked', v);
+  }
 }

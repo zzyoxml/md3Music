@@ -5,6 +5,8 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'core/services/desktop_lyric_service.dart';
+import 'core/services/media_notification_service.dart';
 
 const String _kBatteryPromptShownKey = 'battery_prompt_shown';
 
@@ -14,6 +16,9 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('zh_CN');
+  // 注册通知栏/悬浮窗回调（悬浮窗内按钮 → DesktopLyricService；通知栏桌面歌词按钮 → toggle）
+  MediaNotificationService.initCallbacks();
+  DesktopLyricService.instance.registerNativeCallbacks();
   await _requestPermissions();
   runApp(const MyApp());
   // 自动续播已禁用：用户重启 app 不再自动继续播放。
