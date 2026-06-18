@@ -8,11 +8,15 @@ import 'app.dart';
 
 const String _kBatteryPromptShownKey = 'battery_prompt_shown';
 
+/// 顶级 Navigator 的 GlobalKey，预留供后续扩展使用。
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('zh_CN');
   await _requestPermissions();
   runApp(const MyApp());
+  // 自动续播已禁用：用户重启 app 不再自动继续播放。
 }
 
 Future<void> _requestPermissions() async {

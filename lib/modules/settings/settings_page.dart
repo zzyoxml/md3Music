@@ -25,7 +25,6 @@ class _SettingsPageState extends State<SettingsPage> {
   );
   ThemeMode _themeMode = ThemeMode.system;
   String _defaultQuality = 'hq';
-  bool _autoPlay = true;
   bool _showLyrics = true;
   bool _isTestingConnection = false;
   String? _connectionResult;
@@ -46,7 +45,6 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _loadSettings() async {
     final themeMode = await _settingsRepository.getThemeMode();
     final quality = await _settingsRepository.getDefaultQuality();
-    final autoPlay = await _settingsRepository.getAutoPlay();
     final showLyrics = await _settingsRepository.getShowLyrics();
     final autoReceiveVip = await _settingsRepository.getAutoReceiveVip();
     final apiServerUrl = await _settingsRepository.getApiServerUrl();
@@ -54,7 +52,6 @@ class _SettingsPageState extends State<SettingsPage> {
     setState(() {
       _themeMode = themeMode;
       _defaultQuality = quality;
-      _autoPlay = autoPlay;
       _showLyrics = showLyrics;
       _autoReceiveVip = autoReceiveVip;
       _apiServerController.text = apiServerUrl;
@@ -197,17 +194,6 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: Text(_getQualityLabel(_defaultQuality)),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _showQualityDialog(),
-        ),
-        SwitchListTile(
-          title: const Text('自动播放'),
-          subtitle: const Text('打开应用时自动继续播放'),
-          value: _autoPlay,
-          onChanged: (value) {
-            setState(() {
-              _autoPlay = value;
-            });
-            _settingsRepository.setAutoPlay(value);
-          },
         ),
         SwitchListTile(
           title: const Text('自动领取VIP'),

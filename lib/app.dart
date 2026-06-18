@@ -8,8 +8,8 @@ import 'package:provider/provider.dart';
 import 'core/layout/responsive_layout.dart';
 import 'core/theme/app_theme.dart';
 import 'data/models/playlist.dart';
-import 'modules/discover/discover_page.dart';
 import 'modules/charts/charts_page.dart';
+import 'modules/discover/discover_page.dart';
 import 'modules/user/user_center_page.dart';
 
 import 'modules/player/full_player.dart';
@@ -56,7 +56,6 @@ class _AppView extends StatelessWidget {
     return MaterialApp(
       title: 'MD3Music',
       debugShowCheckedModeBanner: false,
-      theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeProvider.themeMode,
       initialRoute: '/',
