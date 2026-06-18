@@ -21,7 +21,6 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
-import androidx.core.graphics.drawable.IconCompat
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
@@ -197,7 +196,7 @@ class AudioPlaybackService : Service() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "音乐播放",
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = "音乐播放控制"
                 setShowBadge(false)
@@ -242,7 +241,7 @@ class AudioPlaybackService : Service() {
         )
 
         val playPauseIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val lyricIcon = if (desktopLyricEnabled) android.R.drawable.ic_menu_view else android.R.drawable.ic_menu_close_clear_cancel
+        val lyricIconRes = if (desktopLyricEnabled) R.drawable.ic_lyric_on else R.drawable.ic_lyric_off
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
@@ -251,16 +250,16 @@ class AudioPlaybackService : Service() {
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .addAction(android.R.drawable.ic_media_previous, "上一首", prevIntent)
             .addAction(playPauseIcon, if (isPlaying) "暂停" else "播放", playPauseIntent)
             .addAction(android.R.drawable.ic_media_next, "下一首", nextIntent)
-            .addAction(lyricIcon, "桌面歌词", toggleLyricIntent)
+            .addAction(lyricIconRes, "桌面歌词", toggleLyricIntent)
             .setLargeIcon(BitmapFactory.decodeResource(resources, android.R.drawable.ic_menu_myplaces))
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(mediaSession?.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2, 3)
+                    .setShowActionsInCompactView(0, 1, 3)
             )
 
         if (!artUrl.isNullOrEmpty()) {
@@ -310,22 +309,5 @@ class AudioPlaybackService : Service() {
         mediaSession?.release()
         releaseWakeLock()
         super.onDestroy()
-    }
-
-    /** 生成带“词”字的通知栏图标 Bitmap */
-    private fun createWordIcon(enabled: Boolean): Bitmap {
-        val size = (resources.displayMetrics.density * 24).toInt()
-        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (enabled) 0xFF00E5FF.toInt() else 0xFFCCCCCC.toInt()
-            textSize = size * 0.55f
-            typeface = Typeface.DEFAULT_BOLD
-            textAlign = Paint.Align.CENTER
-        }
-        val x = size / 2f
-        val y = size / 2f - (paint.descent() + paint.ascent()) / 2f
-        canvas.drawText("词", x, y, paint)
-        return bitmap
     }
 }
