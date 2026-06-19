@@ -26,8 +26,6 @@
 ## 📱 兼容性
 
 - Android 6.0+
-- iOS 12.0+
-- Windows/macOS/Linux
 
 ---
 **下载说明**

@@ -6,7 +6,7 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.12+-02569B?logo=flutter)](https://flutter.dev)
 [![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20Web-green)]()
-[![Version](https://img.shields.io/badge/Version-1.0.0-blue)]()
+[![Version](https://img.shields.io/badge/Version-2.0.0-blue)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 </div>
@@ -20,14 +20,14 @@
 - **每日推荐** - 个性化歌曲推荐
 - **热门排行榜** - 多种排行榜实时更新
 - **私人 FM** - 猜你喜欢，无限畅听
-- **歌单广场** - 主题歌单、场景音乐推荐
 
 ### 🎧 播放体验
 - **多音质选择** - 标准(128k)、高质(320k)、无损(FLAC)
 - **循环模式** - 单曲循环、列表循环、随机播放
 - **歌词同步** - 实时滚动歌词显示
+- **桌面歌词** - 桌面歌词展示功能
 - **后台播放** - Android 后台播放通知
-- **预加载优化** - 自动预加载下一首歌曲
+- **状态栏控制** - 上一曲/下一曲/播放暂停/进度拖动
 
 ### 📱 用户中心
 - **VIP 签到** - 自动领取 VIP 特权
@@ -35,11 +35,14 @@
 - **播放历史** - 自动记录播放记录
 - **下载管理** - 后台下载，离线播放
 
+### ⚙️ 设置功能
+- **一键清理缓存** - 快速清理应用缓存
+- **深色模式** - 浅色/深色/跟随系统
+
 ### 🎨 设计风格
 - **Material Design 3** - 最新 MD3 设计规范
 - **动态颜色主题** - 基于 Seed Color 动态配色
 - **响应式布局** - 手机/平板/桌面自适应
-- **深色模式** - 浅色/深色/跟随系统
 
 ---
 
