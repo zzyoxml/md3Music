@@ -140,6 +140,43 @@ class _UserCenterPageState extends State<UserCenterPage> {
     );
   }
 
+  Widget _buildUserAvatar(KugouProvider kugou, ColorScheme cs) {
+    final avatarUrl = kugou.userInfo?.avatar;
+    final userId = kugou.userInfo?.userid ?? 'default';
+    
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return CircleAvatar(
+        radius: 32,
+        backgroundColor: cs.primary.withValues(alpha: 0.2),
+        child: Icon(Icons.person, size: 32, color: cs.onPrimaryContainer),
+      );
+    }
+    
+    return CircleAvatar(
+      radius: 32,
+      backgroundColor: cs.primary.withValues(alpha: 0.2),
+      child: ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: avatarUrl,
+          cacheKey: 'avatar_$userId',
+          width: 64,
+          height: 64,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Icon(
+            Icons.person,
+            size: 32,
+            color: cs.onPrimaryContainer,
+          ),
+          errorWidget: (context, url, error) => Icon(
+            Icons.person,
+            size: 32,
+            color: cs.onPrimaryContainer,
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildUserHeader(ColorScheme cs, TextTheme tt, KugouProvider kugou) {
     return SliverToBoxAdapter(
       child: FadeInUp(
@@ -154,15 +191,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
           ),
           child: Row(
             children: [
-              CircleAvatar(
-                radius: 32,
-                backgroundImage: kugou.userInfo?.avatar != null
-                    ? CachedNetworkImageProvider(kugou.userInfo!.avatar!)
-                    : null,
-                child: kugou.userInfo?.avatar == null
-                    ? Icon(Icons.person, size: 32, color: cs.onPrimaryContainer)
-                    : null,
-              ),
+              _buildUserAvatar(kugou, cs),
               const SizedBox(width: 16),
               Expanded(
                 child: Column(

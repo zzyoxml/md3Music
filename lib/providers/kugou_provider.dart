@@ -1,4 +1,6 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 import '../data/models/album.dart';
 import '../data/models/artist.dart';
@@ -624,7 +626,18 @@ class KugouProvider extends ChangeNotifier {
     _qrKey = null;
     _qrData = null;
     _apiClient.clearCookies();
+    // 清除头像缓存
+    _clearAvatarCache();
     notifyListeners();
+  }
+
+  void _clearAvatarCache() {
+    try {
+      DefaultCacheManager().emptyCache();
+      debugPrint('已清除图片缓存');
+    } catch (e) {
+      debugPrint('清除图片缓存失败: $e');
+    }
   }
 
   Future<void> autoReceiveVipIfNeeded() async {
