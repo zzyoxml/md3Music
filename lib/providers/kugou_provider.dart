@@ -539,6 +539,8 @@ class KugouProvider extends ChangeNotifier {
       final result = await _apiClient.checkLoginQr(_qrKey!.qrcode!);
       if (result == null) return null;
       if (result.status == 4 && result.token != null && result.userid != null) {
+        // 登录新用户前，清除旧用户的头像缓存
+        await _clearAvatarCacheIfUserChanged(result.userid!);
         _isLoggedIn = true;
         await _apiClient.setLoginCookies(
           result.token!,
@@ -588,6 +590,8 @@ class KugouProvider extends ChangeNotifier {
         final userid = data?['userid']?.toString();
         final vipToken = data?['vip_token']?.toString();
         if (token != null && userid != null) {
+          // 登录新用户前，清除旧用户的头像缓存
+          await _clearAvatarCacheIfUserChanged(userid);
           await _apiClient.setLoginCookies(token, userid, vipToken: vipToken);
           _isLoggedIn = true;
           await _fetchUserInfo();
@@ -637,6 +641,14 @@ class KugouProvider extends ChangeNotifier {
       debugPrint('已清除图片缓存');
     } catch (e) {
       debugPrint('清除图片缓存失败: $e');
+    }
+  }
+
+  Future<void> _clearAvatarCacheIfUserChanged(String newUserId) async {
+    final currentUserId = _userInfo?.userid;
+    if (currentUserId != null && currentUserId != newUserId) {
+      debugPrint('用户切换: $currentUserId -> $newUserId，清除头像缓存');
+      _clearAvatarCache();
     }
   }
 

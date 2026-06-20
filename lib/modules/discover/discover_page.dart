@@ -107,22 +107,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
           Consumer<KugouProvider>(
             builder: (context, kugou, _) => Padding(
               padding: const EdgeInsets.only(right: 8),
-              child: kugou.userInfo?.avatar != null
-                  ? CircleAvatar(
-                      backgroundImage: CachedNetworkImageProvider(
-                        kugou.userInfo!.avatar!,
-                      ),
-                      radius: 16,
-                    )
-                  : CircleAvatar(
-                      backgroundColor: colorScheme.primaryContainer,
-                      radius: 16,
-                      child: Icon(
-                        kugou.isLoggedIn ? Icons.person : Icons.person_outline,
-                        size: 18,
-                        color: colorScheme.onPrimaryContainer,
-                      ),
-                    ),
+              child: _buildAvatar(kugou, colorScheme),
             ),
           ),
         ],
@@ -155,6 +140,47 @@ class _DiscoverPageState extends State<DiscoverPage> {
     if (h < 14) return '中午好';
     if (h < 18) return '下午好';
     return '晚上好';
+  }
+
+  Widget _buildAvatar(KugouProvider kugou, ColorScheme colorScheme) {
+    final avatarUrl = kugou.userInfo?.avatar;
+    final userId = kugou.userInfo?.userid ?? 'default';
+
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return CircleAvatar(
+        backgroundColor: colorScheme.primaryContainer,
+        radius: 16,
+        child: Icon(
+          kugou.isLoggedIn ? Icons.person : Icons.person_outline,
+          size: 18,
+          color: colorScheme.onPrimaryContainer,
+        ),
+      );
+    }
+
+    return CircleAvatar(
+      radius: 16,
+      backgroundColor: colorScheme.primaryContainer,
+      child: ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: avatarUrl,
+          cacheKey: 'avatar_$userId',
+          width: 32,
+          height: 32,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Icon(
+            kugou.isLoggedIn ? Icons.person : Icons.person_outline,
+            size: 18,
+            color: colorScheme.onPrimaryContainer,
+          ),
+          errorWidget: (context, url, error) => Icon(
+            kugou.isLoggedIn ? Icons.person : Icons.person_outline,
+            size: 18,
+            color: colorScheme.onPrimaryContainer,
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildError(ColorScheme cs) {

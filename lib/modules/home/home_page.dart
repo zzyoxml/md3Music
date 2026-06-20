@@ -94,19 +94,7 @@ class _HomePageState extends State<HomePage> {
                 child: Tooltip(
                   message: isLoggedIn ? (userInfo?.nickname ?? '用户') : '登录',
                   child: IconButton(
-                    icon: userInfo?.avatar != null
-                        ? CircleAvatar(
-                            backgroundImage: CachedNetworkImageProvider(
-                              userInfo!.avatar!,
-                            ),
-                          )
-                        : CircleAvatar(
-                            backgroundColor: colorScheme.primaryContainer,
-                            child: Icon(
-                              isLoggedIn ? Icons.person : Icons.person_outline,
-                              color: colorScheme.onPrimaryContainer,
-                            ),
-                          ),
+                    icon: _buildUserAvatar(userInfo, isLoggedIn, colorScheme),
                     onPressed: _navigateToLogin,
                   ),
                 ),
@@ -178,6 +166,46 @@ class _HomePageState extends State<HomePage> {
               child: SizedBox(height: 80),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUserAvatar(
+    KugouUserDetail? userInfo,
+    bool isLoggedIn,
+    ColorScheme colorScheme,
+  ) {
+    final avatarUrl = userInfo?.avatar;
+    final userId = userInfo?.userid ?? 'default';
+
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return CircleAvatar(
+        backgroundColor: colorScheme.primaryContainer,
+        child: Icon(
+          isLoggedIn ? Icons.person : Icons.person_outline,
+          color: colorScheme.onPrimaryContainer,
+        ),
+      );
+    }
+
+    return CircleAvatar(
+      backgroundColor: colorScheme.primaryContainer,
+      child: ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: avatarUrl,
+          cacheKey: 'avatar_$userId',
+          width: 40,
+          height: 40,
+          fit: BoxFit.cover,
+          placeholder: (context, url) => Icon(
+            isLoggedIn ? Icons.person : Icons.person_outline,
+            color: colorScheme.onPrimaryContainer,
+          ),
+          errorWidget: (context, url, error) => Icon(
+            isLoggedIn ? Icons.person : Icons.person_outline,
+            color: colorScheme.onPrimaryContainer,
+          ),
         ),
       ),
     );
