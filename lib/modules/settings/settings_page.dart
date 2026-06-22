@@ -280,7 +280,7 @@ class _SettingsPageState extends State<SettingsPage> {
       children: [
         ListTile(
           title: const Text('应用版本'),
-          subtitle: const Text('2.0.0'),
+          subtitle: const Text('2.1.0'),
           leading: const Icon(Icons.info_outline),
         ),
         ListTile(

@@ -151,6 +151,10 @@ class MainActivity : FlutterActivity() {
                             AudioPlaybackService.EXTRA_DESKTOP_LYRIC_ENABLED,
                             call.argument<Boolean>(AudioPlaybackService.EXTRA_DESKTOP_LYRIC_ENABLED) ?: false
                         )
+                        putExtra(
+                            AudioPlaybackService.EXTRA_IS_FAVORITED,
+                            call.argument<Boolean>(AudioPlaybackService.EXTRA_IS_FAVORITED) ?: false
+                        )
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         startForegroundService(intent)

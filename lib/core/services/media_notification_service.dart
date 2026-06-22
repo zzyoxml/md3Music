@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class MediaNotificationService {
@@ -12,6 +11,7 @@ class MediaNotificationService {
   static void Function(int)? onSeekTo;
   // 来自通知栏桌面歌词按钮
   static void Function()? onToggleDesktopLyric;
+  static void Function()? onToggleFavorite;
   // 来自悬浮窗内按钮：参数为 "lock" / "previous" / "play" / "next" / "settings"
   static void Function(String)? onDesktopLyricAction;
   // 来自悬浮窗内修改配置后回传
@@ -36,6 +36,9 @@ class MediaNotificationService {
         case 'toggleDesktopLyric':
           onToggleDesktopLyric?.call();
           break;
+        case 'toggleFavorite':
+          onToggleFavorite?.call();
+          break;
         case 'desktopLyricAction':
           final action = call.arguments as String?;
           if (action != null) onDesktopLyricAction?.call(action);
@@ -57,6 +60,7 @@ class MediaNotificationService {
     Duration position = Duration.zero,
     Duration duration = Duration.zero,
     bool desktopLyricEnabled = false,
+    bool isFavorited = false,
   }) async {
     try {
       await _channel.invokeMethod('updateNotification', {
@@ -67,18 +71,15 @@ class MediaNotificationService {
         'position': position.inMilliseconds,
         'duration': duration.inMilliseconds,
         'desktopLyricEnabled': desktopLyricEnabled,
+        'isFavorited': isFavorited,
       });
-    } catch (e) {
-      debugPrint('MediaNotification update error: $e');
-    }
+    } catch (_) {}
   }
 
   static Future<void> hideNotification() async {
     try {
       await _channel.invokeMethod('hideNotification');
-    } catch (e) {
-      // ignore
-    }
+    } catch (_) {}
   }
 
   // 桌面歌词（悬浮窗）相关
@@ -101,8 +102,7 @@ class MediaNotificationService {
         'title': title,
       });
       return r ?? false;
-    } catch (e) {
-      debugPrint('startFloatingLyric error: $e');
+    } catch (_) {
       return false;
     }
   }

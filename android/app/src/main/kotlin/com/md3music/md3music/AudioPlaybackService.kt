@@ -33,6 +33,7 @@ class AudioPlaybackService : Service() {
         const val ACTION_NEXT = "com.md3music.md3music.ACTION_NEXT"
         const val ACTION_STOP = "com.md3music.md3music.ACTION_STOP"
         const val ACTION_TOGGLE_DESKTOP_LYRIC = "com.md3music.md3music.ACTION_TOGGLE_DESKTOP_LYRIC"
+        const val ACTION_TOGGLE_FAVORITE = "com.md3music.md3music.ACTION_TOGGLE_FAVORITE"
         const val EXTRA_TITLE = "title"
         const val EXTRA_ARTIST = "artist"
         const val EXTRA_ART_URL = "artUrl"
@@ -40,6 +41,7 @@ class AudioPlaybackService : Service() {
         const val EXTRA_POSITION = "position"
         const val EXTRA_DURATION = "duration"
         const val EXTRA_DESKTOP_LYRIC_ENABLED = "desktopLyricEnabled"
+        const val EXTRA_IS_FAVORITED = "isFavorited"
 
         // 静态变量用于跨组件传递 FlutterEngine
         private var staticFlutterEngine: FlutterEngine? = null
@@ -92,8 +94,9 @@ class AudioPlaybackService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            ACTION_PREV, ACTION_PLAY_PAUSE, ACTION_NEXT, ACTION_TOGGLE_DESKTOP_LYRIC -> {
+            ACTION_PREV, ACTION_PLAY_PAUSE, ACTION_NEXT, ACTION_TOGGLE_DESKTOP_LYRIC, ACTION_TOGGLE_FAVORITE -> {
                 handleAction(intent.action!!)
+                return START_STICKY
             }
         }
 
@@ -105,8 +108,10 @@ class AudioPlaybackService : Service() {
         val duration = intent?.getLongExtra(EXTRA_DURATION, 0L) ?: 0L
         val desktopLyricEnabled =
             intent?.getBooleanExtra(EXTRA_DESKTOP_LYRIC_ENABLED, false) ?: false
+        val isFavorited =
+            intent?.getBooleanExtra(EXTRA_IS_FAVORITED, false) ?: false
 
-        showNotification(title, artist, artUrl, isPlaying, position, duration, desktopLyricEnabled)
+        showNotification(title, artist, artUrl, isPlaying, position, duration, desktopLyricEnabled, isFavorited)
 
         if (isPlaying) {
             acquireWakeLock(this)
@@ -123,6 +128,7 @@ class AudioPlaybackService : Service() {
                 ACTION_PLAY_PAUSE -> "togglePlayPause"
                 ACTION_NEXT -> "next"
                 ACTION_TOGGLE_DESKTOP_LYRIC -> "toggleDesktopLyric"
+                ACTION_TOGGLE_FAVORITE -> "toggleFavorite"
                 else -> return
             }
             MethodChannel(engine.dartExecutor.binaryMessenger, "com.md3music.md3music/floating_lyric")
@@ -138,6 +144,7 @@ class AudioPlaybackService : Service() {
             ACTION_PLAY_PAUSE -> "togglePlayPause"
             ACTION_NEXT -> "next"
             ACTION_TOGGLE_DESKTOP_LYRIC -> "toggleDesktopLyric"
+            ACTION_TOGGLE_FAVORITE -> "toggleFavorite"
             else -> return
         }
         val intent = Intent("com.md3music.md3music.FLUTTER_COMMAND").apply {
@@ -151,11 +158,17 @@ class AudioPlaybackService : Service() {
     }
 
     private fun initMediaSession() {
+        val sessionIntent = packageManager.getLaunchIntentForPackage(packageName)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, sessionIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         mediaSession = MediaSessionCompat(this, "MD3MusicPlayback").apply {
             setFlags(
                 MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
                         MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
             )
+            setSessionActivity(pendingIntent)
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() = handleAction(ACTION_PLAY_PAUSE)
                 override fun onPause() = handleAction(ACTION_PLAY_PAUSE)
@@ -166,6 +179,13 @@ class AudioPlaybackService : Service() {
                     val engine = flutterEngine ?: staticFlutterEngine ?: return
                     MethodChannel(engine.dartExecutor.binaryMessenger, "com.md3music.md3music/floating_lyric")
                         .invokeMethod("seekTo", pos.toInt())
+                }
+                override fun onCustomAction(action: String?, extras: android.os.Bundle?) {
+                    if (action == ACTION_TOGGLE_DESKTOP_LYRIC) {
+                        handleAction(ACTION_TOGGLE_DESKTOP_LYRIC)
+                    } else if (action == ACTION_TOGGLE_FAVORITE) {
+                        handleAction(ACTION_TOGGLE_FAVORITE)
+                    }
                 }
             })
             isActive = true
@@ -183,6 +203,7 @@ class AudioPlaybackService : Service() {
             addAction(ACTION_PLAY_PAUSE)
             addAction(ACTION_NEXT)
             addAction(ACTION_TOGGLE_DESKTOP_LYRIC)
+            addAction(ACTION_TOGGLE_FAVORITE)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, RECEIVER_NOT_EXPORTED)
@@ -214,7 +235,8 @@ class AudioPlaybackService : Service() {
         isPlaying: Boolean,
         position: Long,
         duration: Long,
-        desktopLyricEnabled: Boolean = false
+        desktopLyricEnabled: Boolean = false,
+        isFavorited: Boolean = false
     ) {
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
         val pendingIntent = PendingIntent.getActivity(
@@ -239,9 +261,14 @@ class AudioPlaybackService : Service() {
             this, 4, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_TOGGLE_DESKTOP_LYRIC },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val toggleFavoriteIntent = PendingIntent.getService(
+            this, 5, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_TOGGLE_FAVORITE },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         val playPauseIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
         val lyricIconRes = if (desktopLyricEnabled) R.drawable.ic_lyric_on else R.drawable.ic_lyric_off
+        val favoriteIconRes = if (isFavorited) R.drawable.ic_favorite_on else R.drawable.ic_favorite_off
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
@@ -250,9 +277,11 @@ class AudioPlaybackService : Service() {
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setShowWhen(false)
             .addAction(android.R.drawable.ic_media_previous, "上一首", prevIntent)
             .addAction(playPauseIcon, if (isPlaying) "暂停" else "播放", playPauseIntent)
+            .addAction(favoriteIconRes, "收藏", toggleFavoriteIntent)
             .addAction(android.R.drawable.ic_media_next, "下一首", nextIntent)
             .addAction(lyricIconRes, "桌面歌词", toggleLyricIntent)
             .setLargeIcon(BitmapFactory.decodeResource(resources, android.R.drawable.ic_menu_myplaces))
@@ -283,10 +312,25 @@ class AudioPlaybackService : Service() {
                 .setActions(
                     PlaybackStateCompat.ACTION_PLAY or
                             PlaybackStateCompat.ACTION_PAUSE or
+                            PlaybackStateCompat.ACTION_PLAY_PAUSE or
                             PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
                             PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
                             PlaybackStateCompat.ACTION_STOP or
                             PlaybackStateCompat.ACTION_SEEK_TO
+                )
+                .addCustomAction(
+                    PlaybackStateCompat.CustomAction.Builder(
+                        ACTION_TOGGLE_DESKTOP_LYRIC,
+                        "桌面歌词",
+                        if (desktopLyricEnabled) R.drawable.ic_lyric_on else R.drawable.ic_lyric_off
+                    ).build()
+                )
+                .addCustomAction(
+                    PlaybackStateCompat.CustomAction.Builder(
+                        ACTION_TOGGLE_FAVORITE,
+                        "收藏",
+                        if (isFavorited) R.drawable.ic_favorite_on else R.drawable.ic_favorite_off
+                    ).build()
                 )
                 .build()
         )
@@ -296,6 +340,17 @@ class AudioPlaybackService : Service() {
                 .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
                 .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
                 .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
+                .also { builder ->
+                    if (!artUrl.isNullOrEmpty()) {
+                        try {
+                            val bitmap = BitmapFactory.decodeStream(java.net.URL(artUrl).openStream())
+                            if (bitmap != null) {
+                                builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, bitmap)
+                                builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bitmap)
+                            }
+                        } catch (_: Exception) {}
+                    }
+                }
                 .build()
         )
     }

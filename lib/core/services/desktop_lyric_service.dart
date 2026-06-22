@@ -1,11 +1,11 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/repositories/settings_repository.dart';
 import '../../main.dart';
+import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import 'media_notification_service.dart';
@@ -73,9 +73,27 @@ class DesktopLyricService {
         _player!.resume();
       }
     };
+    MediaNotificationService.onToggleFavorite = () {
+      _handleToggleFavorite();
+    };
     MediaNotificationService.onConfigChanged = (config) {
       _onNativeConfigChanged(config);
     };
+  }
+
+  Future<void> _handleToggleFavorite() async {
+    final ctx = appNavigatorKey.currentContext;
+    if (ctx == null) return;
+    try {
+      final player = ctx.read<PlayerProvider>();
+      final favorites = ctx.read<FavoritesProvider>();
+      final song = player.currentSong;
+      if (song != null) {
+        await favorites.toggleFavorite(song);
+        // Refresh notification after toggle completes to update heart icon
+        player.refreshNotification();
+      }
+    } catch (_) {}
   }
 
   void _handleFloatingAction(String action) {
@@ -160,7 +178,6 @@ class DesktopLyricService {
     if (_enabled) return;
     _bindProvidersFromContext();
     if (_player == null || _kugou == null) {
-      debugPrint('DesktopLyricService.enable: providers not bound');
       return;
     }
     _enabled = true;
@@ -169,15 +186,11 @@ class DesktopLyricService {
     if (!ok) {
       try {
         await MediaNotificationService.startFloatingLyric(lyric: '', title: '');
-      } catch (e) {
-        debugPrint('startFloatingLyric permission request: $e');
-      }
+      } catch (_) {}
     } else {
       try {
         await MediaNotificationService.startFloatingLyric(lyric: '', title: '');
-      } catch (e) {
-        debugPrint('startFloatingLyric: $e');
-      }
+      } catch (_) {}
     }
     await _pushConfig();
     _syncCurrentFromPlayer();
@@ -206,9 +219,7 @@ class DesktopLyricService {
     try {
       _player = ctx.read<PlayerProvider>();
       _kugou = ctx.read<KugouProvider>();
-    } catch (e) {
-      debugPrint('bindProviders error: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _loadConfig() async {
@@ -232,9 +243,7 @@ class DesktopLyricService {
         'gradientEnd': _gradientEnd,
         'unplayedColor': _unplayedColor,
       });
-    } catch (e) {
-      debugPrint('setDesktopLyricConfig: $e');
-    }
+    } catch (_) {}
   }
 
   static const _channel = MethodChannel('com.md3music.md3music/floating_lyric');
@@ -297,7 +306,6 @@ class DesktopLyricService {
         if (lrc != _currentLrcText) {
           _currentLrcText = lrc;
           _lines = _parseLrc(lrc);
-          debugPrint('desktop lyric parsed: ${_lines.length} lines');
           if (_lines.isEmpty) {
             _pushLyric('暂无歌词', '');
           }
@@ -308,7 +316,7 @@ class DesktopLyricService {
       }
     }
 
-    // 同步进度（500ms 节流）
+    // Sync progress (500ms throttle)
     final pos = _player!.position;
     final dur = _player!.duration ?? Duration.zero;
     final posMs = pos.inMilliseconds;
@@ -317,7 +325,7 @@ class DesktopLyricService {
       _pushProgress(pos, dur);
     }
 
-    // 找当前行
+    // Find current line
     if (_lines.isEmpty) return;
     final newIndex = _findLineIndex(pos);
     if (newIndex != _currentLineIndex) {
@@ -334,10 +342,8 @@ class DesktopLyricService {
     if (_awaitingLyric || song == null) return;
     _awaitingLyric = true;
     try {
-      debugPrint('desktop lyric fetching for id=${song.id}, title=${song.title}');
       await _kugou!.getLyric(song.id, songName: song.title, fmt: 'lrc');
-    } catch (e) {
-      debugPrint('desktop lyric fetch error: $e');
+    } catch (_) {
       _pushLyric('歌词加载失败', '');
     } finally {
       _awaitingLyric = false;

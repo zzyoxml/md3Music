@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
@@ -16,9 +15,7 @@ import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.LayerDrawable
 import android.os.Build
 import android.os.IBinder
 import android.util.TypedValue
@@ -32,7 +29,6 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
-import io.flutter.embedding.engine.FlutterEngineCache
 
 class FloatingLyricService : Service() {
     private var windowManager: WindowManager? = null
@@ -43,10 +39,8 @@ class FloatingLyricService : Service() {
     private var lyricText2: GradientTextView? = null
     private var params: WindowManager.LayoutParams? = null
 
-    // touch/drag
-    private var initialX = 0
+    // touch/drag — vertical only
     private var initialY = 0
-    private var initialTouchX = 0f
     private var initialTouchY = 0f
     private var isDragging = false
     private var dragStartTime = 0L
@@ -68,7 +62,7 @@ class FloatingLyricService : Service() {
     private var progressBar: LyricProgressBar? = null
     private var settingsPanel: View? = null
     private var colorPanel: View? = null
-    private var colorMode = 0 // 0=预设, 1=自调
+    private var colorMode = 0
 
     companion object {
         const val CHANNEL_ID = "floating_lyric_channel"
@@ -79,6 +73,7 @@ class FloatingLyricService : Service() {
         const val ACTION_SET_CONFIG = "com.md3music.md3music.SET_CONFIG"
         const val ACTION_SET_PLAYING = "com.md3music.md3music.SET_PLAYING"
         const val ACTION_STOP = "com.md3music.md3music.STOP_LYRIC"
+        const val ACTION_TOGGLE_LOCK = "com.md3music.md3music.TOGGLE_LOCK"
         const val EXTRA_LYRIC = "lyric"
         const val EXTRA_NEXT_LYRIC = "nextLyric"
         const val EXTRA_TITLE = "title"
@@ -93,7 +88,6 @@ class FloatingLyricService : Service() {
         const val EXTRA_UNPLAYED_COLOR = "unplayedColor"
         const val EXTRA_IS_PLAYING = "isPlaying"
 
-        // 预设配色
         val PRESETS = listOf(
             0xFF00E5FF.toInt() to 0xFFFF00FF.toInt(),
             0xFFFF4081.toInt() to 0xFFFFC400.toInt(),
@@ -118,9 +112,7 @@ class FloatingLyricService : Service() {
                 val next = intent.getStringExtra(EXTRA_NEXT_LYRIC)
                 updateLyric(lyric, next)
             }
-            ACTION_UPDATE_TITLE -> {
-                // 标题不常驻显示，忽略即可
-            }
+            ACTION_UPDATE_TITLE -> {}
             ACTION_UPDATE_PROGRESS -> {
                 val pos = intent.getLongExtra(EXTRA_POSITION, 0L)
                 val dur = intent.getLongExtra(EXTRA_DURATION, 0L)
@@ -130,7 +122,12 @@ class FloatingLyricService : Service() {
                 intent.getFloatExtra(EXTRA_FONT_SIZE, fontSizeSp).let { fontSizeSp = it }
                 intent.getBooleanExtra(EXTRA_DOUBLE_LINE, doubleLine).let { doubleLine = it }
                 intent.getIntExtra(EXTRA_OPACITY, opacity).let { opacity = it }
-                intent.getBooleanExtra(EXTRA_LOCKED, locked).let { locked = it }
+                intent.getBooleanExtra(EXTRA_LOCKED, locked).let {
+                    if (it != locked) {
+                        locked = it
+                        applyLockState()
+                    }
+                }
                 intent.getIntExtra(EXTRA_GRADIENT_START, gradientStart).let { gradientStart = it }
                 intent.getIntExtra(EXTRA_GRADIENT_END, gradientEnd).let { gradientEnd = it }
                 intent.getIntExtra(EXTRA_UNPLAYED_COLOR, unplayedColor).let { unplayedColor = it }
@@ -147,16 +144,48 @@ class FloatingLyricService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
+            ACTION_TOGGLE_LOCK -> {
+                setLocked(!locked)
+            }
         }
         return START_STICKY
     }
 
     private fun setLocked(value: Boolean) {
+        if (locked == value) return
         locked = value
         lockButton?.setImageResource(
             if (locked) android.R.drawable.ic_lock_lock
             else android.R.drawable.ic_lock_idle_lock
         )
+        applyLockState()
+        sendConfigUpdate()
+        updateNotification()
+    }
+
+    /// Apply lock state: toggle click-through
+    private fun applyLockState() {
+        val wm = windowManager ?: return
+        val p = params ?: return
+        val root = rootView ?: return
+
+        if (locked) {
+            // Collapse expanded panel when locking
+            expanded = false
+            expandedPanel?.visibility = View.GONE
+
+            // Add FLAG_NOT_TOUCHABLE for click-through
+            p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            try {
+                wm.updateViewLayout(root, p)
+            } catch (_: Exception) {}
+        } else {
+            // Remove FLAG_NOT_TOUCHABLE
+            p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            try {
+                wm.updateViewLayout(root, p)
+            } catch (_: Exception) {}
+        }
     }
 
     private fun applyConfig() {
@@ -167,12 +196,16 @@ class FloatingLyricService : Service() {
         lyricText1?.setGradient(gradientStart, gradientEnd)
         lyricText2?.setGradient(gradientStart, gradientEnd)
 
-        // 背景透明度
+        // Background opacity
         val bgAlpha = (opacity * 255 / 100).coerceIn(0, 255)
         val bgColor = (bgAlpha shl 24) or 0x000000
         (rootView?.background as? GradientDrawable)?.apply {
             setColor(bgColor)
         }
+
+        // Contrast optimization: pass opacity to text views for shadow adjustment
+        lyricText1?.setOpacityForContrast(opacity)
+        lyricText2?.setOpacityForContrast(opacity)
 
         progressBar?.setGradient(gradientStart, gradientEnd, unplayedColor)
         updateLyric(lyricText1?.text?.toString() ?: "", lyricText2?.text?.toString())
@@ -213,13 +246,32 @@ class FloatingLyricService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        val lockIntent = Intent(this, FloatingLyricService::class.java).apply {
+            action = ACTION_TOGGLE_LOCK
+        }
+        val lockPendingIntent = PendingIntent.getService(
+            this, 1, lockIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val lockIcon = if (locked) android.R.drawable.ic_lock_lock
+                       else android.R.drawable.ic_lock_idle_lock
+        val lockText = if (locked) "解锁歌词" else "锁定歌词"
+
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("MD3Music")
-            .setContentText("桌面歌词已开启")
+            .setContentTitle("MD3Music 桌面歌词")
+            .setContentText(if (locked) "已锁定 · 点击穿透" else "已开启 · 可拖动")
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
+            .addAction(lockIcon, lockText, lockPendingIntent)
             .addAction(android.R.drawable.ic_media_pause, "关闭", stopPendingIntent)
             .build()
+    }
+
+    /// Update notification when lock state changes
+    private fun updateNotification() {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm?.notify(NOTIFICATION_ID, createNotification())
     }
 
     private fun dp(v: Int): Int =
@@ -243,7 +295,7 @@ class FloatingLyricService : Service() {
         }
         val root = rootView as LinearLayout
 
-        // ===== 收起面板：只显示歌词 =====
+        // ===== collapsed panel: lyric only =====
         collapsedPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -268,7 +320,7 @@ class FloatingLyricService : Service() {
         col.addView(lyricText2)
         root.addView(col)
 
-        // ===== 展开面板：控制栏 + 进度条 + 设置 =====
+        // ===== expanded panel =====
         expandedPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -276,7 +328,6 @@ class FloatingLyricService : Service() {
         }
         val exp = expandedPanel as LinearLayout
 
-        // 控制按钮行
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -284,7 +335,7 @@ class FloatingLyricService : Service() {
         }
         val iconSize = dp(20)
         val iconPad = dp(10)
-        lockButton = makeIconButton(android.R.drawable.ic_lock_idle_lock) { sendAction("lock"); setLocked(!locked) }
+        lockButton = makeIconButton(android.R.drawable.ic_lock_idle_lock) { setLocked(!locked) }
         val prevButton = makeIconButton(android.R.drawable.ic_media_previous) { sendAction("previous") }
         playPauseButton = makeIconButton(android.R.drawable.ic_media_play) { sendAction("play") }
         val nextButton = makeIconButton(android.R.drawable.ic_media_next) { sendAction("next") }
@@ -297,7 +348,6 @@ class FloatingLyricService : Service() {
         }
         exp.addView(buttonRow)
 
-        // 进度条
         progressBar = LyricProgressBar(this).apply {
             setGradient(gradientStart, gradientEnd, unplayedColor)
         }
@@ -306,7 +356,6 @@ class FloatingLyricService : Service() {
         progressBar?.layoutParams = pbLp
         exp.addView(progressBar)
 
-        // 设置面板
         settingsPanel = createSettingsPanel()
         exp.addView(settingsPanel)
 
@@ -329,7 +378,9 @@ class FloatingLyricService : Service() {
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
             PixelFormat.TRANSLUCENT
         ).apply {
+            // Centered horizontally, vertical position adjustable
             gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            x = 0  // Always centered: X locked to 0
             y = dp(80)
         }
 
@@ -338,6 +389,7 @@ class FloatingLyricService : Service() {
 
     private fun toggleExpanded() {
         if (isDragging) return
+        if (locked) return  // Can't expand when locked
         expanded = !expanded
         expandedPanel?.visibility = if (expanded) View.VISIBLE else View.GONE
     }
@@ -353,7 +405,6 @@ class FloatingLyricService : Service() {
             visibility = View.GONE
         }
 
-        // 预设/自调 切换
         val modeRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -364,7 +415,6 @@ class FloatingLyricService : Service() {
         modeRow.addView(customBtn)
         root.addView(modeRow)
 
-        // 预设色块
         val presetRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -379,7 +429,6 @@ class FloatingLyricService : Service() {
                 background = GradientDrawable().apply {
                     cornerRadius = dp(6).toFloat()
                     setColor(start)
-                    // 简单双色：用 layer 或 gradient
                     val g = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(start, end))
                     g.cornerRadius = dp(6).toFloat()
                     background = g
@@ -395,7 +444,6 @@ class FloatingLyricService : Service() {
         }
         root.addView(presetRow)
 
-        // 自调颜色面板（已唱/未唱）
         colorPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(0, dp(8), 0, dp(8))
@@ -418,7 +466,7 @@ class FloatingLyricService : Service() {
         cp.addView(unsungRow)
         root.addView(cp)
 
-        // 透明度
+        // Opacity slider
         val opacityRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -454,7 +502,7 @@ class FloatingLyricService : Service() {
         opacityRow.addView(opacitySeek)
         root.addView(opacityRow)
 
-        // 字号 + 双行
+        // Font size + double line
         val bottomRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
@@ -534,7 +582,7 @@ class FloatingLyricService : Service() {
             val gd = GradientDrawable().apply {
                 cornerRadius = dp(16).toFloat()
                 setColor(0x33FFFFFF)
-                setStroke(1, 0x55FFFFFF)
+                setStroke(1, android.content.res.ColorStateList.valueOf(0x55FFFFFF))
             }
             background = gd
             val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -554,7 +602,7 @@ class FloatingLyricService : Service() {
     }
 
     private fun sendAction(action: String) {
-        val engine = FlutterEngineCache.getInstance().get("md3music_engine")
+        val engine = io.flutter.embedding.engine.FlutterEngineCache.getInstance().get("md3music_engine")
         if (engine != null) {
             io.flutter.plugin.common.MethodChannel(
                 engine.dartExecutor.binaryMessenger,
@@ -566,7 +614,7 @@ class FloatingLyricService : Service() {
     }
 
     private fun sendConfigUpdate() {
-        val engine = FlutterEngineCache.getInstance().get("md3music_engine")
+        val engine = io.flutter.embedding.engine.FlutterEngineCache.getInstance().get("md3music_engine")
         val args = hashMapOf(
             "fontSize" to fontSizeSp,
             "doubleLine" to doubleLine,
@@ -584,27 +632,26 @@ class FloatingLyricService : Service() {
         }
     }
 
+    /// Touch listener: vertical-only drag (X locked at center)
     private fun setupTouchListener(view: View) {
         view.setOnTouchListener { _, event ->
+            if (locked) return@setOnTouchListener false
+
             when (event.action) {
                 MotionEvent.ACTION_DOWN -> {
-                    initialX = params?.x ?: 0
                     initialY = params?.y ?: 0
-                    initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     isDragging = false
                     dragStartTime = System.currentTimeMillis()
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if (locked) return@setOnTouchListener true
-                    val dx = event.rawX - initialTouchX
                     val dy = event.rawY - initialTouchY
-                    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+                    if (Math.abs(dy) > 10) {
                         isDragging = true
                     }
                     if (isDragging) {
-                        params?.x = initialX + dx.toInt()
+                        // Only move vertically — X stays at 0 (centered)
                         params?.y = initialY + dy.toInt()
                         windowManager?.updateViewLayout(rootView, params)
                     }
@@ -632,13 +679,13 @@ class FloatingLyricService : Service() {
     }
 }
 
-/** 渐变文字 TextView */
+/// Gradient text view with contrast optimization for low opacity
 class GradientTextView(context: Context) : TextView(context) {
     private var startColor = 0xFF00E5FF.toInt()
     private var endColor = 0xFFFF00FF.toInt()
+    private var bgOpacity = 80
 
     init {
-        // 先设置默认白色，防止渐变 shader 未生效时文字不可见
         setTextColor(Color.WHITE)
     }
 
@@ -648,8 +695,43 @@ class GradientTextView(context: Context) : TextView(context) {
         invalidate()
     }
 
+    fun setOpacityForContrast(opacity: Int) {
+        bgOpacity = opacity
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         val width = measuredWidth.toFloat()
+
+        // Contrast optimization: add dark shadow/stroke when background opacity is low
+        // This ensures text remains readable even on light backgrounds
+        val shadowEnabled: Boolean
+        val shadowRadius: Float
+        val shadowColor: Int
+
+        if (bgOpacity < 30) {
+            // Very transparent background — strong shadow for readability
+            shadowEnabled = true
+            shadowRadius = 4f * resources.displayMetrics.density
+            shadowColor = 0xCC000000.toInt()
+        } else if (bgOpacity < 60) {
+            // Semi-transparent — moderate shadow
+            shadowEnabled = true
+            shadowRadius = 2.5f * resources.displayMetrics.density
+            shadowColor = 0x99000000.toInt()
+        } else {
+            // Opaque enough — subtle shadow for depth
+            shadowEnabled = true
+            shadowRadius = 1.5f * resources.displayMetrics.density
+            shadowColor = 0x66000000.toInt()
+        }
+
+        if (shadowEnabled) {
+            paint.setShadowLayer(shadowRadius, 0f, 1f * resources.displayMetrics.density, shadowColor)
+        } else {
+            paint.clearShadowLayer()
+        }
+
         if (width > 0) {
             paint.shader = LinearGradient(
                 0f, 0f, width, 0f,
@@ -657,10 +739,13 @@ class GradientTextView(context: Context) : TextView(context) {
             )
         }
         super.onDraw(canvas)
+
+        // Reset shadow after draw to avoid affecting other draws
+        paint.clearShadowLayer()
     }
 }
 
-/** 进度条：已唱渐变 + 未唱单色 */
+/// Progress bar: gradient played + unplayed color
 class LyricProgressBar(context: Context) : View(context) {
     private var position = 0L
     private var duration = 0L
@@ -694,7 +779,6 @@ class LyricProgressBar(context: Context) : View(context) {
         val radius = barHeight / 2f
         val rect = RectF(0f, cy - radius, w, cy + radius)
 
-        // 未唱背景
         bgPaint.color = unplayedColor
         canvas.drawRoundRect(rect, radius, radius, bgPaint)
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart' as just_audio;
+import 'package:provider/provider.dart';
 
 import '../core/services/audio_service.dart';
 import '../core/services/desktop_lyric_service.dart';
@@ -9,6 +10,8 @@ import '../core/services/media_notification_service.dart';
 import '../data/models/song.dart';
 import '../data/repositories/history_repository.dart';
 import '../data/repositories/settings_repository.dart';
+import '../main.dart';
+import 'favorites_provider.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 
 enum AppLoopMode { off, one, all }
@@ -775,6 +778,14 @@ class PlayerProvider extends ChangeNotifier {
   void _updateNotification() {
     final song = _currentSong;
     if (song == null) return;
+    // Check favorite status from FavoritesProvider via global context
+    bool isFavorited = false;
+    try {
+      final ctx = appNavigatorKey?.currentContext;
+      if (ctx != null) {
+        isFavorited = ctx.read<FavoritesProvider>().isFavorite(song.id);
+      }
+    } catch (_) {}
     MediaNotificationService.updateNotification(
       title: song.title,
       artist: song.artist,
@@ -783,7 +794,13 @@ class PlayerProvider extends ChangeNotifier {
       position: _position,
       duration: _duration ?? Duration.zero,
       desktopLyricEnabled: DesktopLyricService.instance.enabled,
+      isFavorited: isFavorited,
     );
+  }
+
+  /// Public method to refresh notification (called when favorite state changes)
+  void refreshNotification() {
+    _updateNotification();
   }
 
   void _recordHistory(Song song) {
