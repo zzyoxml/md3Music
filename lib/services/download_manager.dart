@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../data/models/download_task.dart';
@@ -41,13 +40,10 @@ class DownloadManager {
 
   Future<void> download(DownloadTask task) async {
     if (_cancelTokens.containsKey(task.songId)) {
-      debugPrint('Download already in progress for: ${task.songId}');
-      return;
+            return;
     }
 
-    debugPrint('DownloadManager: Starting download for ${task.title}');
-    debugPrint('DownloadManager: URL: ${task.downloadUrl}');
-
+        
     final cancelToken = CancelToken();
     _cancelTokens[task.songId] = cancelToken;
 
@@ -59,8 +55,7 @@ class DownloadManager {
       final ext = _getExtFromUrl(task.downloadUrl);
       final fileName = '${task.songId}.$ext';
       final filePath = '$dir/$fileName';
-      debugPrint('DownloadManager: Saving to $filePath');
-
+      
       await _dio.download(
         task.downloadUrl,
         filePath,
@@ -68,24 +63,21 @@ class DownloadManager {
         onReceiveProgress: (received, total) {
           if (total > 0) {
             final progress = received / total;
-            debugPrint('DownloadManager: Progress ${(progress * 100).toStringAsFixed(1)}%');
-            _taskUpdateController.add(
+                        _taskUpdateController.add(
               updatingTask.copyWith(progress: progress),
             );
           }
         },
       );
 
-      debugPrint('DownloadManager: Download complete');
-      final completedTask = task.copyWith(
+            final completedTask = task.copyWith(
         localPath: filePath,
         status: DownloadStatus.completed,
         progress: 1.0,
       );
       _taskUpdateController.add(completedTask);
     } on DioException catch (e) {
-      debugPrint('DownloadManager: DioException: ${e.message}');
-      if (e.type == DioExceptionType.cancel) {
+            if (e.type == DioExceptionType.cancel) {
         _taskUpdateController.add(
           task.copyWith(status: DownloadStatus.waiting, progress: 0.0),
         );
@@ -98,8 +90,7 @@ class DownloadManager {
         );
       }
     } catch (e) {
-      debugPrint('DownloadManager: Error: $e');
-      _taskUpdateController.add(
+            _taskUpdateController.add(
         task.copyWith(
           status: DownloadStatus.failed,
           error: e.toString(),
@@ -126,8 +117,7 @@ class DownloadManager {
         }
       }
     } catch (e) {
-      debugPrint('Delete file error: $e');
-    }
+          }
   }
 
   String _getExtFromUrl(String url) {

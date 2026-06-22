@@ -76,8 +76,7 @@ class AudioService {
         }
       });
     } catch (e) {
-      debugPrint('AudioSession configure error: $e');
-    }
+          }
   }
 
   Future<void> play() async {

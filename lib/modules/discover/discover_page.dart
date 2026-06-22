@@ -55,22 +55,26 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Future<void> _loadAllData() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
     final kugou = context.read<KugouProvider>();
+    final hasExistingData = kugou.hasLoadedDiscoverData;
+    // 已有数据时直接展示，后台静默刷新
+    if (!hasExistingData) {
+      setState(() {
+        _isLoading = true;
+        _error = null;
+      });
+    }
     try {
       await Future.wait([
-        kugou.getPlaylist(),
-        kugou.getRankList(),
-        kugou.getRecommendDaily(),
-        kugou.getYuekuBanner(),
-        kugou.getSceneMusic(),
-        kugou.getThemeMusic(),
-        kugou.getThemePlaylist(),
-        kugou.getIpHome(),
-        kugou.getPersonalFm(),
+        kugou.getPlaylist(forceRefresh: hasExistingData),
+        kugou.getRankList(forceRefresh: hasExistingData),
+        kugou.getRecommendDaily(forceRefresh: hasExistingData),
+        kugou.getYuekuBanner(forceRefresh: hasExistingData),
+        kugou.getSceneMusic(forceRefresh: hasExistingData),
+        kugou.getThemeMusic(forceRefresh: hasExistingData),
+        kugou.getThemePlaylist(forceRefresh: hasExistingData),
+        kugou.getIpHome(forceRefresh: hasExistingData),
+        kugou.getPersonalFm(forceRefresh: hasExistingData),
       ]);
       kugou.markDiscoverLoaded();
       // 任何一次加载成功都把日期标记为今天
@@ -574,10 +578,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                             ),
                             onTap: () {
                               final brief = plist[i];
-                              debugPrint(
-                                'Collect: name=${brief.name}, specialId=${brief.id}, listId=${brief.listId}',
-                              );
-                              final playlist = brief.toPlaylist();
+                                                            final playlist = brief.toPlaylist();
                               Navigator.of(context).push(
                                 MaterialPageRoute(
                                   builder: (_) =>
@@ -807,7 +808,10 @@ class _RankDetailPageState extends State<_RankDetailPage> {
                 children: [
                   const Text('暂无数据'),
                   ElevatedButton(
-                    onPressed: () => kugou.getRankSongs(rankId: widget.rankId),
+                    onPressed: () => kugou.getRankSongs(
+                      rankId: widget.rankId,
+                      forceRefresh: true,
+                    ),
                     child: const Text('重试'),
                   ),
                 ],

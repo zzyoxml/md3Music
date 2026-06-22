@@ -93,31 +93,22 @@ class PlayerProvider extends ChangeNotifier {
       _initStreams();
       await _loadDefaultQuality();
     } catch (e) {
-      debugPrint('Failed to initialize audio service: $e');
-    }
+          }
   }
 
   Future<void> _loadDefaultQuality() async {
     try {
       final settings = SettingsRepository();
       final qualityValue = await settings.getDefaultQuality();
-      debugPrint('Loading default quality from settings: "$qualityValue"');
-      _audioQuality = AudioQuality.values.firstWhere(
+            _audioQuality = AudioQuality.values.firstWhere(
         (q) => q.value == qualityValue,
         orElse: () {
-          debugPrint(
-            'Quality "$qualityValue" not found, defaulting to standard',
-          );
-          return AudioQuality.standard;
+                    return AudioQuality.standard;
         },
       );
-      debugPrint(
-        'Audio quality set to: ${_audioQuality.value} (${_audioQuality.label})',
-      );
-      notifyListeners();
+            notifyListeners();
     } catch (e) {
-      debugPrint('Failed to load default quality: $e');
-    }
+          }
   }
 
   Future<dynamic> _loadAudioService() async {
@@ -135,8 +126,7 @@ class PlayerProvider extends ChangeNotifier {
           notifyListeners();
         },
         onError: (e) {
-          debugPrint('positionStream error: $e');
-        },
+                  },
       );
 
       _durationSubscription = _audioService.durationStream.listen(
@@ -145,8 +135,7 @@ class PlayerProvider extends ChangeNotifier {
           notifyListeners();
         },
         onError: (e) {
-          debugPrint('durationStream error: $e');
-        },
+                  },
       );
 
       _playingSubscription = _audioService.playingStream.listen(
@@ -156,8 +145,7 @@ class PlayerProvider extends ChangeNotifier {
           notifyListeners();
         },
         onError: (e) {
-          debugPrint('playingStream error: $e');
-        },
+                  },
       );
 
       _playerStateSubscription = _audioService.playerStateStream.listen(
@@ -168,12 +156,10 @@ class PlayerProvider extends ChangeNotifier {
               _handlePlaybackCompleted();
             }
           } catch (e) {
-            debugPrint('playerState handler error: $e');
-          }
+                      }
         },
         onError: (e) {
-          debugPrint('playerStateStream error: $e');
-        },
+                  },
       );
 
       _sequenceStateSubscription = _audioService.sequenceStateStream.listen(
@@ -189,12 +175,10 @@ class PlayerProvider extends ChangeNotifier {
               }
             }
           } catch (e) {
-            debugPrint('sequenceState handler error: $e');
-          }
+                      }
         },
         onError: (e) {
-          debugPrint('sequenceStateStream error: $e');
-        },
+                  },
       );
 
       _speedSubscription = _audioService.speedStream.listen(
@@ -203,12 +187,10 @@ class PlayerProvider extends ChangeNotifier {
           notifyListeners();
         },
         onError: (e) {
-          debugPrint('speedStream error: $e');
-        },
+                  },
       );
     } catch (e) {
-      debugPrint('PlayerProvider _initStreams error: $e');
-    }
+          }
   }
 
   bool _handlingCompletion = false;
@@ -276,8 +258,7 @@ class PlayerProvider extends ChangeNotifier {
   }
 
   Future<void> playOnlineSong(Song song) async {
-    debugPrint('playOnlineSong: START - ${song.title} by ${song.artist}');
-    final apiClient = KugouApiClient();
+        final apiClient = KugouApiClient();
     if (!apiClient.isLoggedIn) {
       onLoginRequired?.call();
       return;
@@ -290,15 +271,11 @@ class PlayerProvider extends ChangeNotifier {
     _resolveError = null;
     _recordHistory(song);
     _updateNotification();
-    debugPrint('playOnlineSong: notifyListeners() - set initial state');
-    notifyListeners();
+        notifyListeners();
 
     try {
       final apiClient = KugouApiClient();
-      debugPrint(
-        'playOnlineSong: song=${song.title}, isLoggedIn=${apiClient.isLoggedIn}, token=${apiClient.token?.substring(0, 10) ?? 'null'}, userid=${apiClient.userid}',
-      );
-
+      
       final result = await apiClient.getSongUrl(
         song.id,
         quality: _audioQuality.value,
@@ -307,36 +284,25 @@ class PlayerProvider extends ChangeNotifier {
       );
 
       if (result != null && result.url.isNotEmpty) {
-        debugPrint(
-          'playOnlineSong: got URL: ${result.url.substring(0, 50)}...',
-        );
-        final resolvedSong = song.copyWith(url: result.url);
+                final resolvedSong = song.copyWith(url: result.url);
         _currentSong = resolvedSong;
         _playlist = [resolvedSong];
         _isResolvingUrl = false;
-        debugPrint(
-          'playOnlineSong: notifyListeners() - update with resolved song',
-        );
-        notifyListeners();
+                notifyListeners();
 
         if (_audioService != null) {
-          debugPrint('playOnlineSong: setting playlist and playing');
-          final source = _createAudioSource(resolvedSong);
+                    final source = _createAudioSource(resolvedSong);
           await _audioService.setPlaylist([source], startIndex: 0);
           await _audioService.play();
-          debugPrint('playOnlineSong: audio playback started');
-        } else {
-          debugPrint('playOnlineSong: audioService is null');
-        }
+                  } else {
+                  }
       } else {
-        debugPrint('playOnlineSong: no URL received');
-        _isResolvingUrl = false;
+                _isResolvingUrl = false;
         _resolveError = '无法获取播放链接';
         notifyListeners();
       }
     } catch (e) {
-      debugPrint('playOnlineSong error: $e');
-      _isResolvingUrl = false;
+            _isResolvingUrl = false;
       _resolveError = e.toString();
       notifyListeners();
     }
@@ -418,19 +384,13 @@ class PlayerProvider extends ChangeNotifier {
 
     try {
       final apiClient = KugouApiClient();
-      debugPrint(
-        'playOnlinePlaylist: requesting URL for "${_currentSong!.title}" with quality=${_audioQuality.value}',
-      );
-      final result = await apiClient.getSongUrl(
+            final result = await apiClient.getSongUrl(
         _currentSong!.id,
         quality: _audioQuality.value,
         albumId: _currentSong!.albumId,
         albumAudioId: _currentSong!.albumAudioId,
       );
-      debugPrint(
-        'playOnlinePlaylist: URL result: ${result?.url.substring(0, 50)}...',
-      );
-
+      
       if (result != null && result.url.isNotEmpty) {
         final resolvedSong = _currentSong!.copyWith(url: result.url);
         _currentSong = resolvedSong;

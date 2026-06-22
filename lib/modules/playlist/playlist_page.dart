@@ -66,8 +66,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
         }
       }
     } catch (e) {
-      debugPrint('Check collected error: $e');
-    }
+          }
   }
 
   Future<void> _collectPlaylist() async {
@@ -90,8 +89,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
           listCreateListid ??= parts[3];
         }
       }
-      debugPrint('Collect playlist: name=${widget.playlist.name}, id=${widget.playlist.id}, userid=$listCreateUserid, listid=$listCreateListid');
-      final result = await api.createPlaylist(
+            final result = await api.createPlaylist(
         widget.playlist.name,
         type: 1,
         listCreateUserid: listCreateUserid,
@@ -109,8 +107,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
         );
       }
     } catch (e) {
-      debugPrint('Collect playlist error: $e');
-    }
+          }
   }
 
   Future<void> _uncollectPlaylist() async {
@@ -128,8 +125,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
         );
       }
     } catch (e) {
-      debugPrint('Uncollect playlist error: $e');
-    }
+          }
   }
 
   Future<void> _fetchSongs() async {

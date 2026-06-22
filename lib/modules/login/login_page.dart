@@ -152,8 +152,7 @@ class _LoginPageState extends State<LoginPage> {
           setState(() => _statusText = '已拒绝登录');
         }
       } catch (e) {
-        debugPrint('wx check error: $e');
-      }
+              }
     });
   }
 
@@ -229,8 +228,7 @@ class _LoginPageState extends State<LoginPage> {
       }
       return base64Decode(data);
     } catch (e) {
-      debugPrint('Base64 decode error: $e');
-      return null;
+            return null;
     }
   }
 

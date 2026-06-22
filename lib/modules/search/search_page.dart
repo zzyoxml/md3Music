@@ -55,7 +55,12 @@ class _SearchPageState extends State<SearchPage>
     final newType = types[_tabController.index];
     if (newType != _currentSearchType && _query.isNotEmpty) {
       _currentSearchType = newType;
-      _performSearchByType(_query, newType);
+      final kugouProvider = context.read<KugouProvider>();
+      if (kugouProvider.hasSearchResultForType(_query, newType)) {
+        kugouProvider.restoreSearchResultFromCache(_query, newType);
+      } else {
+        _performSearchByType(_query, newType);
+      }
     }
   }
 

@@ -71,8 +71,7 @@ class AudioService {
             tag: source.tag,
           ));
         } catch (e) {
-          debugPrint('Blob fetch failed for ${source.uri}, using original: $e');
-          blobSources.add(source);
+                    blobSources.add(source);
         }
       }
       _playlistSource.addAll(blobSources);
@@ -103,8 +102,7 @@ class AudioService {
           tag: source.tag,
         ));
       } catch (e) {
-        debugPrint('Blob fetch failed for ${source.uri}, using original: $e');
-        blobSources.add(source);
+                blobSources.add(source);
       }
     }
     await _playlistSource.addAll(blobSources);
@@ -149,8 +147,7 @@ class AudioService {
       final blobUrl = html.Url.createObjectUrlFromBlob(blob);
       return blobUrl;
     } catch (e) {
-      debugPrint('Audio blob fetch failed: $e');
-      return url;
+            return url;
     }
   }
 }

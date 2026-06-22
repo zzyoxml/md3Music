@@ -67,8 +67,7 @@ class FavoritesProvider extends ChangeNotifier {
         }
       }
     } catch (e) {
-      debugPrint('Failed to get favorite playlist: $e');
-    }
+          }
     return null;
   }
 
@@ -88,8 +87,7 @@ class FavoritesProvider extends ChangeNotifier {
         notifyListeners();
       }
     } catch (e) {
-      debugPrint('Failed to sync favorites from Kugou: $e');
-    }
+          }
   }
 
   Future<void> toggleFavorite(Song song) async {
@@ -110,8 +108,7 @@ class FavoritesProvider extends ChangeNotifier {
               : song.id;
           await api.deletePlaylistTracks(listid, fileIds);
         } catch (e) {
-          debugPrint('Remove from Kugou favorite failed: $e');
-          notifyListeners();
+                    notifyListeners();
           return;
         }
       }
@@ -129,8 +126,7 @@ class FavoritesProvider extends ChangeNotifier {
               '${song.title}|${song.id}|${song.albumId ?? 0}|${int.tryParse(song.albumAudioId ?? '') ?? 0}';
           await api.addPlaylistTracks(listid, data);
         } catch (e) {
-          debugPrint('Add to Kugou favorite failed: $e');
-        }
+                  }
       }
     }
     notifyListeners();

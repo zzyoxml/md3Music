@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'kugou_endpoints.dart';
@@ -24,17 +23,6 @@ class KugouApiClient {
     );
 
     _dio.interceptors.add(InterceptorsWrapper(onRequest: _onRequest));
-
-    _dio.interceptors.add(
-      LogInterceptor(
-        request: false,
-        requestHeader: false,
-        requestBody: false,
-        responseHeader: false,
-        responseBody: kDebugMode,
-        error: true,
-      ),
-    );
 
     _initFromStorage();
   }
@@ -62,14 +50,8 @@ class KugouApiClient {
         authParts.add('vip_token=$_vipToken');
       }
       options.headers['Authorization'] = authParts.join(';');
-      debugPrint(
-        'Request: ${options.path} with token=${_token!.substring(0, 10)}..., userid=$_userid, vip=${_vipToken != null}',
-      );
-    } else {
-      debugPrint(
-        'Request: ${options.path} without login credentials (token=${_token == null}, userid=${_userid == null})',
-      );
-    }
+          } else {
+          }
     if (_dfid != null) {
       options.queryParameters['dfid'] = _dfid;
     }
@@ -95,13 +77,10 @@ class KugouApiClient {
           return response.data as Map<String, dynamic>;
         }
       }
-      debugPrint('GET $path => ${response.statusCode}');
       return null;
-    } on DioException catch (e) {
-      debugPrint('GET $path error: ${e.message}');
+    } on DioException catch (_) {
       return null;
-    } catch (e) {
-      debugPrint('GET $path error: $e');
+    } catch (_) {
       return null;
     }
   }
@@ -122,13 +101,10 @@ class KugouApiClient {
           return response.data as Map<String, dynamic>;
         }
       }
-      debugPrint('POST $path => ${response.statusCode}');
       return null;
-    } on DioException catch (e) {
-      debugPrint('POST $path error: ${e.message}');
+    } on DioException catch (_) {
       return null;
-    } catch (e) {
-      debugPrint('POST $path error: $e');
+    } catch (_) {
       return null;
     }
   }
@@ -142,13 +118,9 @@ class KugouApiClient {
       _vipToken = prefs.getString('kugou_vip_token');
       _dfid = prefs.getString('kugou_dfid');
       if (_token != null && _userid != null) {
-        debugPrint(
-          'Loaded login state from storage: token=${_token?.substring(0, 10)}..., userid=$_userid, vip=${_vipToken != null}',
-        );
-      }
+              }
     } catch (e) {
-      debugPrint('Failed to load login state from storage: $e');
-    } finally {
+          } finally {
       _isInitialized = true;
       _initCompleter?.complete();
     }
@@ -162,10 +134,7 @@ class KugouApiClient {
     _token = token;
     _userid = userid;
     _vipToken = vipToken;
-    debugPrint(
-      'Login cookies saved: token=$token, userid=$userid, vip=${vipToken != null && vipToken.isNotEmpty}',
-    );
-    try {
+        try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('kugou_token', token);
       await prefs.setString('kugou_userid', userid);
@@ -174,10 +143,8 @@ class KugouApiClient {
       } else {
         await prefs.remove('kugou_vip_token');
       }
-      debugPrint('Login state saved to storage');
-    } catch (e) {
-      debugPrint('Failed to save login state to storage: $e');
-    }
+          } catch (e) {
+          }
   }
 
   Future<void> clearCookies() async {
@@ -189,10 +156,8 @@ class KugouApiClient {
       await prefs.remove('kugou_token');
       await prefs.remove('kugou_userid');
       await prefs.remove('kugou_vip_token');
-      debugPrint('Login state cleared from storage');
-    } catch (e) {
-      debugPrint('Failed to clear login state from storage: $e');
-    }
+          } catch (e) {
+          }
   }
 
   String? get token => _token;
@@ -209,12 +174,10 @@ class KugouApiClient {
         final data = json['data'] as Map<String, dynamic>?;
         if (data != null && data['dfid'] != null) {
           _dfid = data['dfid'].toString();
-          debugPrint('Device registered: dfid=$_dfid');
-        }
+                  }
       }
     } catch (e) {
-      debugPrint('registerDevice error: $e');
-    }
+          }
   }
 
   bool _hasCandidates(Map<String, dynamic> json) {
@@ -243,8 +206,7 @@ class KugouApiClient {
     try {
       return KugouSearchResult.fromJson(json);
     } catch (e) {
-      debugPrint('search parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -266,8 +228,7 @@ class KugouApiClient {
           .map((e) => KugouAlbumBrief.fromJson(e as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      debugPrint('searchAlbums parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -289,8 +250,7 @@ class KugouApiClient {
           .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      debugPrint('searchPlaylists parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -336,8 +296,7 @@ class KugouApiClient {
           .cast<String>()
           .toList();
     } catch (e) {
-      debugPrint('getHotSearch parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -387,8 +346,7 @@ class KugouApiClient {
       }
       return items.cast<String>().toList();
     } catch (e) {
-      debugPrint('getSearchSuggest parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -430,10 +388,7 @@ class KugouApiClient {
         albumAudioId: albumAudioId,
       );
       if (vipUrl != null) return vipUrl;
-      debugPrint(
-        'getSongUrl: VIP /song/url/new rejected, NOT falling back to free /song/url.',
-      );
-      return null;
+            return null;
     }
 
     var json = await _get(KugouEndpoints.songUrl, queryParameters: params);
@@ -443,8 +398,7 @@ class KugouApiClient {
     final errcode = data['errcode'];
 
     if (errcode != null && errcode == 20028) {
-      debugPrint('getSongUrl: dfid invalid, re-registering device...');
-      await registerDevice();
+            await registerDevice();
       if (_dfid == null) return null;
 
       json = await _get(KugouEndpoints.songUrl, queryParameters: params);
@@ -458,8 +412,7 @@ class KugouApiClient {
         errorCode == 20018 &&
         _token != null &&
         _userid != null) {
-      debugPrint('getSongUrl: token may be expired, trying refresh...');
-      final refreshed = await _tryRefreshToken();
+            final refreshed = await _tryRefreshToken();
       if (refreshed) {
         // refresh 后 vip_token 也会更新，重试 /song/url/new 一次
         if (hasVipToken) {
@@ -489,8 +442,7 @@ class KugouApiClient {
       if (failProcess is List &&
           failProcess.contains('buy') &&
           quality != KugouQuality.standard) {
-        debugPrint('getSongUrl: VIP song, retrying with standard quality...');
-        params['quality'] = KugouQuality.standard;
+                params['quality'] = KugouQuality.standard;
         json = await _get(KugouEndpoints.songUrl, queryParameters: params);
         if (json != null) {
           final fallbackData = _extractData(json['data'] ?? json);
@@ -503,14 +455,10 @@ class KugouApiClient {
       // VIP 用户不要再走 free_part=1 主动拉 30 秒试听。
       // 试听只对未登录 / 没有 VIP 凭证的人兜底。
       if (hasVipToken) {
-        debugPrint(
-          'getSongUrl: VIP user with no full url, skip free_part trial.',
-        );
-        return null;
+                return null;
       }
 
-      debugPrint('getSongUrl: trying free_part for trial...');
-      final freeParams = Map<String, dynamic>.from(params);
+            final freeParams = Map<String, dynamic>.from(params);
       freeParams['free_part'] = 1;
       final freeJson = await _get(
         KugouEndpoints.songUrl,
@@ -523,12 +471,8 @@ class KugouApiClient {
         }
       }
 
-      debugPrint(
-        'getSongUrl: no url in response, status=${data['status']}, fail_process=${data['fail_process']}',
-      );
-    } catch (e) {
-      debugPrint('getSongUrl parse error: $e');
-    }
+          } catch (e) {
+          }
     return null;
   }
 
@@ -557,8 +501,7 @@ class KugouApiClient {
         queryParameters: query,
       );
       if (json == null) {
-        debugPrint('_getSongUrlNew: empty response');
-        return null;
+                return null;
       }
       final data = _extractData(json['data'] ?? json);
       final rawUrl = data['url'];
@@ -571,43 +514,26 @@ class KugouApiClient {
         //    酷狗约定：1 = VIP 验证通过给完整音源，0 = 走试听/包月/购买。
         final privStatus = _parseInt(data['priv_status']);
         if (privStatus == 0) {
-          debugPrint(
-            '_getSongUrlNew: priv_status=0, returned url is a sample, ignored.',
-          );
-          return null;
+                    return null;
         }
 
         // 2) fail_process 含 buy/pkg 时也是试听兜底，丢弃。
         final failProcess = data['fail_process'];
         if (failProcess is List && failProcess.isNotEmpty) {
-          debugPrint(
-            '_getSongUrlNew: fail_process=$failProcess, returned url is a sample, ignored.',
-          );
-          return null;
+                    return null;
         }
 
         // 3) 用 fileSize 兜底识别：3~5 分钟的普通歌曲通常 > 2MB，
         //    如果不到 200KB 几乎一定是 30s 试听片段。
         final fileSize = _parseInt(data['fileSize'] ?? data['file_size']);
         if (fileSize > 0 && fileSize < 200 * 1024) {
-          debugPrint(
-            '_getSongUrlNew: fileSize=$fileSize looks like a sample, ignored.',
-          );
-          return null;
+                    return null;
         }
 
-        debugPrint(
-          '_getSongUrlNew: got full url via /song/url/new, '
-          'quality=$quality, priv_status=$privStatus, fileSize=$fileSize',
-        );
-        return KugouPlayUrl.fromJson({...data, 'quality': quality});
+                return KugouPlayUrl.fromJson({...data, 'quality': quality});
       }
-      debugPrint(
-        '_getSongUrlNew: no url, status=${data['status']}, err=${data['error']}',
-      );
-    } catch (e) {
-      debugPrint('_getSongUrlNew error: $e');
-    }
+          } catch (e) {
+          }
     return null;
   }
 
@@ -655,8 +581,7 @@ class KugouApiClient {
       }
       return KugouSongDetail.fromJson(data);
     } catch (e) {
-      debugPrint('getSongDetail parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -726,10 +651,7 @@ class KugouApiClient {
         !_hasCandidates(searchResult) &&
         songName != null &&
         songName.isNotEmpty) {
-      debugPrint(
-        'getLyric: hash search empty, retrying with keywords=$songName',
-      );
-      searchResult = await _get(
+            searchResult = await _get(
         KugouEndpoints.searchLyric,
         queryParameters: {'keywords': songName, 'hash': hash.toLowerCase()},
       );
@@ -744,13 +666,11 @@ class KugouApiClient {
           lyricAccesskey = first['accesskey']?.toString();
         }
       } catch (e) {
-        debugPrint('search lyric parse error: $e');
-      }
+              }
     }
 
     if (lyricId == null) {
-      debugPrint('getLyric: no lyric found for hash=$hash');
-      return null;
+            return null;
     }
 
     final params = <String, dynamic>{
@@ -766,8 +686,7 @@ class KugouApiClient {
       final data = json['data'] as Map<String, dynamic>? ?? json;
       return KugouLyric.fromJson(data);
     } catch (e) {
-      debugPrint('getLyric parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -793,8 +712,7 @@ class KugouApiClient {
     try {
       return KugouCommentList.fromJson(json);
     } catch (e) {
-      debugPrint('getComments parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -906,8 +824,7 @@ class KugouApiClient {
     try {
       return KugouPlaylistCategory.fromJson(json);
     } catch (e) {
-      debugPrint('getPlaylist parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -923,8 +840,7 @@ class KugouApiClient {
       }
       return [];
     } catch (e) {
-      debugPrint('getPlaylistDetail parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -950,8 +866,7 @@ class KugouApiClient {
     try {
       return KugouPlaylistSongs.fromJson(json);
     } catch (e) {
-      debugPrint('getPlaylistSongs parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -977,8 +892,7 @@ class KugouApiClient {
     try {
       return KugouPlaylistSongs.fromJson(json);
     } catch (e) {
-      debugPrint('getPlaylistSongsByListid parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1053,8 +967,7 @@ class KugouApiClient {
     try {
       return KugouRankList.fromJson(json);
     } catch (e) {
-      debugPrint('getRankList parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1104,8 +1017,7 @@ class KugouApiClient {
           .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      debugPrint('getRankAudio parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1126,8 +1038,7 @@ class KugouApiClient {
           .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      debugPrint('getRecommendDaily parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1236,8 +1147,7 @@ class KugouApiClient {
           .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      debugPrint('getPersonalFm parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1307,8 +1217,7 @@ class KugouApiClient {
       final data = json['data'] as Map<String, dynamic>? ?? json;
       return KugouArtistDetail.fromJson(data);
     } catch (e) {
-      debugPrint('getArtistDetail parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1329,8 +1238,7 @@ class KugouApiClient {
     try {
       return KugouArtistAlbums.fromJson(json);
     } catch (e) {
-      debugPrint('getArtistAlbums parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1351,8 +1259,7 @@ class KugouApiClient {
     try {
       return KugouArtistAudios.fromJson(json);
     } catch (e) {
-      debugPrint('getArtistAudios parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1415,8 +1322,7 @@ class KugouApiClient {
       final data = json['data'] as Map<String, dynamic>? ?? json;
       return KugouQrKey.fromJson(data);
     } catch (e) {
-      debugPrint('getLoginQrKey parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1434,8 +1340,7 @@ class KugouApiClient {
       final data = json['data'] as Map<String, dynamic>? ?? json;
       return KugouQrCreate.fromJson(data);
     } catch (e) {
-      debugPrint('createLoginQr parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1449,11 +1354,9 @@ class KugouApiClient {
     );
     if (json == null) return null;
     try {
-      debugPrint('checkLoginQr response: $json');
-      return KugouQrCheck.fromJson(json);
+            return KugouQrCheck.fromJson(json);
     } catch (e) {
-      debugPrint('checkLoginQr parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1502,13 +1405,9 @@ class KugouApiClient {
   Future<bool> _tryRefreshToken() async {
     if (_token == null || _userid == null) return false;
     try {
-      debugPrint(
-        '_tryRefreshToken: attempting with token=${_token!.substring(0, 10)}..., userid=$_userid',
-      );
-      final result = await refreshLogin(token: _token, userid: _userid);
+            final result = await refreshLogin(token: _token, userid: _userid);
       if (result == null) {
-        debugPrint('_tryRefreshToken: refresh returned null');
-        return false;
+                return false;
       }
       final status = result['status'];
       final data = result['data'] as Map<String, dynamic>?;
@@ -1518,15 +1417,12 @@ class KugouApiClient {
         final newVipToken = data['vip_token']?.toString();
         if (newToken != null && newUserid != null) {
           await setLoginCookies(newToken, newUserid, vipToken: newVipToken);
-          debugPrint('_tryRefreshToken: token refreshed successfully');
-          return true;
+                    return true;
         }
       }
-      debugPrint('_tryRefreshToken: refresh failed, status=$status');
-      return false;
+            return false;
     } catch (e) {
-      debugPrint('_tryRefreshToken error: $e');
-      return false;
+            return false;
     }
   }
 
@@ -1545,8 +1441,7 @@ class KugouApiClient {
     try {
       return KugouUserDetail.fromJson(json);
     } catch (e) {
-      debugPrint('getUserDetail parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1838,8 +1733,7 @@ class KugouApiClient {
       final data = json['data'] as Map<String, dynamic>? ?? json;
       return KugouAlbumDetail.fromJson(data);
     } catch (e) {
-      debugPrint('getAlbumDetail parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1860,8 +1754,7 @@ class KugouApiClient {
     try {
       return KugouAlbumSongs.fromJson(json);
     } catch (e) {
-      debugPrint('getAlbumSongs parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1887,8 +1780,7 @@ class KugouApiClient {
           .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      debugPrint('getPlaylistTrackAll parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -1913,8 +1805,7 @@ class KugouApiClient {
           .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
           .toList();
     } catch (e) {
-      debugPrint('getPlaylistTrackAllNew parse error: $e');
-      return null;
+            return null;
     }
   }
 
@@ -2028,20 +1919,14 @@ class KugouApiClient {
   }
 
   Future<Map<String, dynamic>?> claimDayVip(String receiveDay) async {
-    debugPrint(
-      '[VIP-DEBUG] claimDayVip called, _token=${_token?.substring(0, 10) ?? "null"}, _userid=$_userid',
-    );
-    return await _post(
+        return await _post(
       KugouEndpoints.youthDayVip,
       data: {'receive_day': receiveDay},
     );
   }
 
   Future<Map<String, dynamic>?> upgradeDayVip() async {
-    debugPrint(
-      '[VIP-DEBUG] upgradeDayVip called, _token=${_token?.substring(0, 10) ?? "null"}, _userid=$_userid',
-    );
-    return await _post(KugouEndpoints.youthDayVipUpgrade);
+        return await _post(KugouEndpoints.youthDayVipUpgrade);
   }
 
   Future<Map<String, dynamic>?> getYouthMonthVipRecord() async {

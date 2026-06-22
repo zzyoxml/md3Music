@@ -96,8 +96,7 @@ class _FullPlayerState extends State<FullPlayer>
         });
       }
     } catch (e) {
-      debugPrint('_fetchLyrics error: $e');
-      if (mounted) {
+            if (mounted) {
         setState(() {
           _isLoadingLyrics = false;
           _lyrics = '';

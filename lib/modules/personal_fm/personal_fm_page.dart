@@ -100,8 +100,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         _updateVinylAnimation(player.isPlaying);
       }
     } catch (e) {
-      debugPrint('load personal fm error: $e');
-    } finally {
+          } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }
@@ -174,8 +173,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         }
       }
     } catch (e) {
-      debugPrint('append fm songs error: $e');
-    } finally {
+          } finally {
       if (mounted) {
         setState(() => _isAppending = false);
       }
@@ -242,8 +240,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
     try {
       await Provider.of<KugouProvider>(context, listen: false).getPersonalFm();
     } catch (e) {
-      debugPrint('dislike error: $e');
-    } finally {
+          } finally {
       if (mounted) {
         setState(() => _isLoading = false);
       }

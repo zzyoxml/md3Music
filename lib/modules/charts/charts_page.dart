@@ -53,7 +53,7 @@ class _ChartsPageState extends State<ChartsPage> {
                 Text('暂无排行榜数据', style: TextStyle(color: cs.onSurfaceVariant)),
                 const SizedBox(height: 16),
                 FilledButton.tonal(
-                  onPressed: () => kugou.getRankList(),
+                  onPressed: () => kugou.getRankList(forceRefresh: true),
                   child: const Text('重试'),
                 ),
               ],
@@ -61,7 +61,7 @@ class _ChartsPageState extends State<ChartsPage> {
           );
         }
         return RefreshIndicator(
-          onRefresh: () => kugou.getRankList(),
+          onRefresh: () => kugou.getRankList(forceRefresh: true),
           child: ListView.builder(
             padding: const EdgeInsets.all(16),
             itemCount: ranks.ranks.length,
@@ -152,7 +152,10 @@ class _RankSongPageState extends State<_RankSongPage> {
                   const Text('暂无数据'),
                   const SizedBox(height: 16),
                   FilledButton.tonal(
-                    onPressed: () => kugou.getRankSongs(rankId: widget.rankId),
+                    onPressed: () => kugou.getRankSongs(
+                      rankId: widget.rankId,
+                      forceRefresh: true,
+                    ),
                     child: const Text('重试'),
                   ),
                 ],

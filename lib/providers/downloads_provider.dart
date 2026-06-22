@@ -67,38 +67,31 @@ class DownloadsProvider extends ChangeNotifier {
   Future<void> downloadSong(Song song, {String quality = '128'}) async {
     if (isDownloading(song.id)) return;
 
-    debugPrint('Starting download for: ${song.title}, quality: $quality');
-
+    
     String? downloadUrl = song.url;
 
     if (downloadUrl == null || downloadUrl.isEmpty) {
-      debugPrint('Song URL is null, resolving...');
-      try {
+            try {
         final api = KugouApiClient();
-        debugPrint('Resolving URL for song id: ${song.id}, quality: $quality, albumId: ${song.albumId}, albumAudioId: ${song.albumAudioId}');
-        final result = await api.getSongUrl(
+                final result = await api.getSongUrl(
           song.id,
           quality: quality,
           albumId: song.albumId,
           albumAudioId: song.albumAudioId,
         );
-        debugPrint('URL resolve result: ${result?.url}');
-        if (result != null && result.url.isNotEmpty) {
+                if (result != null && result.url.isNotEmpty) {
           downloadUrl = result.url;
         }
       } catch (e) {
-        debugPrint('Resolve download URL error: $e');
-        return;
+                return;
       }
     }
 
     if (downloadUrl == null || downloadUrl.isEmpty) {
-      debugPrint('Download URL is empty after resolve, aborting');
-      return;
+            return;
     }
 
-    debugPrint('Download URL resolved: $downloadUrl');
-    final task = DownloadTask(
+        final task = DownloadTask(
       songId: song.id,
       title: song.title,
       artist: song.artist,
@@ -110,8 +103,7 @@ class DownloadsProvider extends ChangeNotifier {
     notifyListeners();
 
     await _repository.saveTask(task);
-    debugPrint('Starting file download...');
-    _manager.download(task);
+        _manager.download(task);
   }
 
   void cancelDownload(String songId) {
