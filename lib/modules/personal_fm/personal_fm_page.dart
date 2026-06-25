@@ -286,7 +286,12 @@ class _PersonalFmPageState extends State<PersonalFmPage>
 
     return Scaffold(
       body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: MediaQuery.of(context).padding.top + 10,
+          bottom: 16,
+        ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

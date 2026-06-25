@@ -22,7 +22,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final SettingsRepository _settingsRepository = SettingsRepository();
   final TextEditingController _apiServerController = TextEditingController(
-    text: 'http://musicplayer.ccwu.cc',
+    text: 'https://musicplayer.ccwu.cc',
   );
   ThemeMode _themeMode = ThemeMode.system;
   String _defaultQuality = 'hq';
@@ -214,7 +214,7 @@ class _SettingsPageState extends State<SettingsPage> {
             controller: _apiServerController,
             decoration: InputDecoration(
               labelText: 'API 服务器地址',
-              hintText: 'http://musicplayer.ccwu.cc',
+              hintText: 'https://musicplayer.ccwu.cc',
               border: const OutlineInputBorder(),
               suffixIcon: IconButton(
                 icon: _isTestingConnection
