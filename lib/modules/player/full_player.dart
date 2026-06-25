@@ -8,6 +8,7 @@ import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/downloads_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
+import '../../services/kugou_api/kugou_models.dart';
 import 'comments_view.dart';
 import 'lyrics_view.dart';
 
@@ -892,18 +893,27 @@ class _FullPlayerState extends State<FullPlayer>
             if (data is List) {
               rawPlaylists = data;
             } else if (data is Map) {
-              rawPlaylists = data['info'] ?? data['list'] ?? [];
+              rawPlaylists = data['info'] ?? data['list'] ?? data['special_list'] ?? [];
             }
 
-            // 只显示用户自己创建的歌单，严格过滤
-            // type=0 → 自己创建；type=1 → 收藏/订阅他人的
+            // 使用 KugouPlaylistBrief 模型解析，确保字段名映射正确
+            // 只显示用户自己创建的歌单 (type=0)
             final playlists = <Map<String, dynamic>>[];
             for (final item in rawPlaylists) {
               final json = item as Map<String, dynamic>;
-              final type = json['type'] as int? ?? 0;
-              // 只保留 type=0（自己创建的），其余一律排除
-              if (type != 0) continue;
-              playlists.add(json);
+              final brief = KugouPlaylistBrief.fromJson(json);
+              if (brief.type != 0) continue;
+              // 将模型数据转回 Map 以便 UI 使用（包含正确的字段值）
+              playlists.add({
+                'name': brief.name,
+                'songCount': brief.songCount,
+                'listid': brief.listId.isEmpty ? brief.id : brief.listId,
+                'specialid': brief.id,
+                'global_collection_id': brief.globalCollectionId,
+                'type': brief.type,
+                // 保留原始 JSON 用于 API 调用
+                ...json,
+              });
             }
 
             if (playlists.isEmpty) {
@@ -928,8 +938,13 @@ class _FullPlayerState extends State<FullPlayer>
                   itemCount: playlists.length,
                   itemBuilder: (context, index) {
                     final playlist = playlists[index];
-                    final name = playlist['name']?.toString() ?? '未知歌单';
-                    final songCount = playlist['songcount'] ?? playlist['song_count'] ?? 0;
+                    final name = (playlist['name'] ?? playlist['specialname'] ?? '未知歌单').toString();
+                    // 优先使用模型解析后的 songCount，再尝试原始字段
+                    final songCount = playlist['songCount']
+                        ?? playlist['songcount']
+                        ?? playlist['song_count']
+                        ?? playlist['count']
+                        ?? 0;
 
                     return ListTile(
                       leading: const Icon(Icons.queue_music),

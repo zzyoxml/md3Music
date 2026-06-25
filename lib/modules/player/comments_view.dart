@@ -173,23 +173,6 @@ class _CommentsViewState extends State<CommentsView> {
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
                     const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.thumb_up_outlined,
-                          size: 14,
-                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${comment.likes}',
-                          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant
-                                    .withValues(alpha: 0.6),
-                              ),
-                        ),
-                      ],
-                    ),
                   ],
                 ),
               ),
