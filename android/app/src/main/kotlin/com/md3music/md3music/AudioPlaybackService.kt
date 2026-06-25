@@ -214,16 +214,35 @@ class AudioPlaybackService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(NotificationManager::class.java)
+            
+            // 删除旧渠道（如果存在且配置不正确）- Android 8+ 渠道一旦创建无法修改，必须删除重建
+            try {
+                val existingChannel = manager.getNotificationChannel(CHANNEL_ID)
+                if (existingChannel != null) {
+                    // 检查是否需要重建（重要度不是 LOW，或者声音未禁用）
+                    if (existingChannel.importance != NotificationManager.IMPORTANCE_LOW ||
+                        existingChannel.sound != null) {
+                        manager.deleteNotificationChannel(CHANNEL_ID)
+                    }
+                }
+            } catch (_: Exception) {}
+            
+            // 创建静音通知渠道 - 修复荣耀/vivo 手机通知提示音问题
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "音乐播放",
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_LOW  // 使用 LOW 而不是 DEFAULT，减少通知干扰
             ).apply {
                 description = "音乐播放控制"
                 setShowBadge(false)
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
+                // 关键修复：禁用声音和震动
+                setSound(null, null)
+                enableVibration(false)
+                // 不在锁屏上显示（可选，根据需求调整）
+                // setLockscreenVisibility(Notification.VISIBILITY_PUBLIC)
             }
-            val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
         }
     }
@@ -277,7 +296,8 @@ class AudioPlaybackService : Service() {
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_LOW)  // 降低优先级，配合渠道的 LOW 设置
+            .setOnlyAlertOnce(true)  // 关键：确保通知更新时不会触发声音/震动
             .setShowWhen(false)
             .addAction(android.R.drawable.ic_media_previous, "上一首", prevIntent)
             .addAction(playPauseIcon, if (isPlaying) "暂停" else "播放", playPauseIntent)

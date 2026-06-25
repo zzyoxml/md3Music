@@ -46,7 +46,9 @@ class AudioService {
         if (event.begin) {
           switch (event.type) {
             case AudioInterruptionType.duck:
-              _player.setVolume(0.5);
+              // 修复荣耀平板 V8 Pro 音量忽高忽低问题
+              // 不再降低音量，而是保持原音量（避免频繁 duck/unduck 导致波动）
+              // _player.setVolume(0.5);  // 注释掉：会导致音量波动
               break;
             case AudioInterruptionType.pause:
             case AudioInterruptionType.unknown:
@@ -58,10 +60,12 @@ class AudioService {
         } else {
           switch (event.type) {
             case AudioInterruptionType.duck:
-              _player.setVolume(1.0);
+              // 恢复时也不再调整音量，保持 1.0
+              // _player.setVolume(1.0);  // 注释掉：避免音量波动
               break;
             case AudioInterruptionType.pause:
-              if (_player.processingState == ProcessingState.ready) {
+              // 仅在确实暂停后才恢复播放
+              if (!_player.playing && _player.processingState == ProcessingState.ready) {
                 play();
               }
               break;

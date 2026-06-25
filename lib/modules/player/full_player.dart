@@ -7,6 +7,7 @@ import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/downloads_provider.dart';
+import '../../services/kugou_api/kugou_api_client.dart';
 import 'comments_view.dart';
 import 'lyrics_view.dart';
 
@@ -259,7 +260,10 @@ class _FullPlayerState extends State<FullPlayer>
               indicatorSize: TabBarIndicatorSize.label,
             ),
           ),
-          IconButton(icon: const Icon(Icons.more_vert), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.more_vert),
+            onPressed: () => _showMoreMenu(context),
+          ),
         ],
       ),
     );
@@ -803,6 +807,215 @@ class _FullPlayerState extends State<FullPlayer>
     );
     // 触发下载
     downloadsProvider.downloadSong(song);
+  }
+
+  void _showMoreMenu(BuildContext context) {
+    final song = context.read<PlayerProvider>().currentSong;
+    if (song == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.playlist_add),
+                title: const Text('添加到歌单'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showAddToPlaylistDialog(context, song);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.share),
+                title: const Text('分享'),
+                onTap: () {
+                  Navigator.pop(context);
+                  // TODO: 实现分享功能
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('分享功能开发中')),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showAddToPlaylistDialog(BuildContext context, dynamic song) async {
+    final api = KugouApiClient();
+    if (!api.isLoggedIn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请先登录'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return FutureBuilder<Map<String, dynamic>?>(
+          future: api.getUserPlaylist(pagesize: 50),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const AlertDialog(
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text('加载歌单中...'),
+                  ],
+                ),
+              );
+            }
+
+            if (snapshot.hasError || snapshot.data == null) {
+              return AlertDialog(
+                title: const Text('错误'),
+                content: const Text('获取歌单失败'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('关闭'),
+                  ),
+                ],
+              );
+            }
+
+            final data = snapshot.data!['data'];
+            List<dynamic> rawPlaylists = [];
+            if (data is List) {
+              rawPlaylists = data;
+            } else if (data is Map) {
+              rawPlaylists = data['info'] ?? data['list'] ?? [];
+            }
+
+            // 只显示用户自己创建的歌单（排除收藏的、导入的专辑）
+            final currentUserId = api.userid;
+            final playlists = <Map<String, dynamic>>[];
+            for (final item in rawPlaylists) {
+              final json = item as Map<String, dynamic>;
+              // 过滤条件1：只保留用户创建的（list_create_userid 匹配当前用户）
+              final createUid = json['list_create_userid']?.toString();
+              if (createUid != null && createUid.isNotEmpty && createUid != currentUserId) {
+                continue;
+              }
+              // 过滤条件2：排除收藏的专辑（type=1 && source=2）
+              final type = json['type'] as int? ?? 0;
+              final source = json['source'] as int? ?? 0;
+              if (type == 1 && source == 2) {
+                continue;
+              }
+              playlists.add(json);
+            }
+
+            if (playlists.isEmpty) {
+              return AlertDialog(
+                title: const Text('我的歌单'),
+                content: const Text('暂无歌单，请先创建歌单'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('关闭'),
+                  ),
+                ],
+              );
+            }
+
+            return AlertDialog(
+              title: const Text('添加到歌单'),
+              content: SizedBox(
+                width: 300,
+                height: 400,
+                child: ListView.builder(
+                  itemCount: playlists.length,
+                  itemBuilder: (context, index) {
+                    final playlist = playlists[index];
+                    final name = playlist['name']?.toString() ?? '未知歌单';
+                    final songCount = playlist['songcount'] ?? playlist['song_count'] ?? 0;
+
+                    return ListTile(
+                      leading: const Icon(Icons.queue_music),
+                      title: Text(name),
+                      subtitle: Text('$songCount 首'),
+                      onTap: () async {
+                        Navigator.pop(dialogContext);
+                        await _addSongToPlaylist(context, song, playlist);
+                      },
+                    );
+                  },
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('取消'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> _addSongToPlaylist(
+    BuildContext context,
+    dynamic song,
+    Map<String, dynamic> playlist,
+  ) async {
+    final api = KugouApiClient();
+    final listid = playlist['listid']?.toString() ?? playlist['list_id']?.toString() ?? '';
+
+    if (listid.isEmpty) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('歌单ID无效'), behavior: SnackBarBehavior.floating),
+      );
+      return;
+    }
+
+    // 构造歌曲数据 — 酷狗API要求的格式：歌名|hash|albumId|albumAudioId
+    final songData = '${song.title}|${song.id}|${song.albumId ?? 0}|${int.tryParse(song.albumAudioId ?? '') ?? 0}';
+
+    try {
+      final result = await api.addPlaylistTracks(listid, songData);
+
+      if (!context.mounted) return;
+
+      if (result != null) {
+        final status = result['status'] ?? result['code'];
+        if (status == 1 || status == 200) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('已添加到「${playlist['name']}」'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('添加失败: ${result['info'] ?? result['message'] ?? '未知错误'}'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('添加失败，请重试'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('添加失败: $e'), behavior: SnackBarBehavior.floating),
+      );
+    }
   }
 
   void _showPlaylist(PlayerProvider playerProvider) {
