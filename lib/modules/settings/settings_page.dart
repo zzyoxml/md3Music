@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -29,11 +30,13 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _isTestingConnection = false;
   String? _connectionResult;
   bool _autoReceiveVip = true;
+  String _appVersion = '';
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
+    _loadVersion();
   }
 
   @override
@@ -57,6 +60,23 @@ class _SettingsPageState extends State<SettingsPage> {
 
     final kugouProvider = context.read<KugouProvider>();
     kugouProvider.setBaseUrl(apiServerUrl);
+  }
+
+  Future<void> _loadVersion() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (mounted) {
+        setState(() {
+          _appVersion = info.version;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _appVersion = '2.2.0';
+        });
+      }
+    }
   }
 
   Future<void> _testConnection() async {
@@ -271,8 +291,76 @@ class _SettingsPageState extends State<SettingsPage> {
           leading: Icon(Icons.delete_outline, color: colorScheme.error),
           onTap: () => _showClearCacheDialog(),
         ),
+        ListTile(
+          title: const Text('数据迁移（修复数据混乱）'),
+          subtitle: const Text('如果看到其他用户的信息，执行此操作'),
+          leading: Icon(Icons.bug_report, color: colorScheme.tertiary),
+          onTap: () => _showDataMigrationDialog(),
+        ),
       ],
     );
+  }
+
+  Future<void> _showDataMigrationDialog() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('🔧 数据迁移'),
+        content: const Text(
+          '此操作将清除旧版本的登录数据，修复可能的数据混乱问题。\n\n'
+          '执行后需要重新登录。\n\n'
+          '是否继续？'
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('执行'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        
+        // 清除旧版本的全局键
+        await prefs.remove('kugou_token');
+        await prefs.remove('kugou_userid');
+        await prefs.remove('kugou_vip_token');
+        await prefs.remove('kugou_dfid');
+        await prefs.remove('kugou_current_userid');
+        
+        if (!mounted) return;
+        
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✅ 数据迁移完成，请重新登录'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        
+        // 退出登录
+        context.read<KugouProvider>().logout();
+        
+        // 返回上一页
+        Navigator.of(context).pop();
+        
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('❌ 数据迁移失败: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildAboutSection(ColorScheme colorScheme) {
@@ -280,7 +368,7 @@ class _SettingsPageState extends State<SettingsPage> {
       children: [
         ListTile(
           title: const Text('应用版本'),
-          subtitle: const Text('2.1.0'),
+          subtitle: Text(_appVersion.isEmpty ? '2.2.0' : _appVersion),
           leading: const Icon(Icons.info_outline),
         ),
         ListTile(

@@ -42,6 +42,8 @@ class KugouApiClient {
     if (!_isInitialized) {
       await _initCompleter?.future;
     }
+    
+    // 关键修复：每次请求前验证用户身份
     if (_token != null && _userid != null) {
       // 把 vip_token 一并写入 Authorization，服务端的 cookieToJson
       // 会按 ; 切成 cookie 对象，song_url_new 等模块可直接读取。
@@ -50,8 +52,15 @@ class KugouApiClient {
         authParts.add('vip_token=$_vipToken');
       }
       options.headers['Authorization'] = authParts.join(';');
+      
+      // 调试日志：打印请求的用户身份（生产环境可移除）
+      print('🌐 [API Request] User: $_userid, URL: ${options.path}');
           } else {
+      // 未登录，清除 Authorization 头
+      options.headers.remove('Authorization');
+      print('⚠️ [API Request] 未登录状态, URL: ${options.path}');
           }
+          
     if (_dfid != null) {
       options.queryParameters['dfid'] = _dfid;
     }
@@ -113,13 +122,42 @@ class KugouApiClient {
     _initCompleter = Completer<void>();
     try {
       final prefs = await SharedPreferences.getInstance();
-      _token = prefs.getString('kugou_token');
-      _userid = prefs.getString('kugou_userid');
-      _vipToken = prefs.getString('kugou_vip_token');
+      
+      // 先读取当前登录的用户ID
+      final currentUserid = prefs.getString('kugou_current_userid');
+      
+      if (currentUserid != null && currentUserid.isNotEmpty) {
+        // 从用户隔离的键名读取
+        final userTokenKey = 'kugou_token_$currentUserid';
+        final userIdKey = 'kugou_userid_$currentUserid';
+        final userVipKey = 'kugou_vip_token_$currentUserid';
+        
+        _token = prefs.getString(userTokenKey);
+        _userid = prefs.getString(userIdKey);
+        _vipToken = prefs.getString(userVipKey);
+        
+        if (_token != null && _userid != null) {
+          print('✅ [Auth] 从存储恢复用户 $currentUserid 的登录状态');
+        } else {
+          print('⚠️ [Auth] 用户 $currentUserid 的凭证不完整，需要重新登录');
+          _token = null;
+          _userid = null;
+          _vipToken = null;
+        }
+      } else {
+        // 兼容旧版本：尝试读取全局键
+        _token = prefs.getString('kugou_token');
+        _userid = prefs.getString('kugou_userid');
+        _vipToken = prefs.getString('kugou_vip_token');
+        
+        if (_token != null && _userid != null) {
+          print('⚠️ [Auth] 检测到旧版本登录状态，建议重新登录');
+        }
+      }
+      
       _dfid = prefs.getString('kugou_dfid');
-      if (_token != null && _userid != null) {
-              }
-    } catch (e) {
+          } catch (e) {
+      print('❌ [Auth] 从存储初始化失败: $e');
           } finally {
       _isInitialized = true;
       _initCompleter?.complete();
@@ -131,32 +169,72 @@ class KugouApiClient {
     String userid, {
     String? vipToken,
   }) async {
+    // 关键修复：先清除旧的用户数据，再设置新的
+    await clearCookies();
+    
     _token = token;
     _userid = userid;
     _vipToken = vipToken;
-        try {
+    
+    // 使用用户隔离的键名，避免多用户数据混乱
+    try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('kugou_token', token);
-      await prefs.setString('kugou_userid', userid);
+      
+      // 清除所有可能的旧键（兼容旧版本）
+      await prefs.remove('kugou_token');
+      await prefs.remove('kugou_userid');
+      await prefs.remove('kugou_vip_token');
+      await prefs.remove('kugou_dfid');
+      
+      // 使用带用户ID的键名存储（防止多用户冲突）
+      final userTokenKey = 'kugou_token_$userid';
+      final userIdKey = 'kugou_userid_$userid';
+      final userVipKey = 'kugou_vip_token_$userid';
+      final currentUserKey = 'kugou_current_userid';
+      
+      await prefs.setString(userTokenKey, token);
+      await prefs.setString(userIdKey, userid);
       if (vipToken != null && vipToken.isNotEmpty) {
-        await prefs.setString('kugou_vip_token', vipToken);
-      } else {
-        await prefs.remove('kugou_vip_token');
+        await prefs.setString(userVipKey, vipToken);
       }
+      
+      // 记录当前登录的用户ID
+      await prefs.setString(currentUserKey, userid);
+      
+      print('✅ [Auth] 登录成功，用户ID: $userid, Token已存储到: $userTokenKey');
           } catch (e) {
+      print('❌ [Auth] 保存登录状态失败: $e');
           }
   }
 
   Future<void> clearCookies() async {
+    final oldUserid = _userid;
+    
     _token = null;
     _userid = null;
     _vipToken = null;
+    _dfid = null;
+    
     try {
       final prefs = await SharedPreferences.getInstance();
+      
+      // 清除当前用户的键
+      if (oldUserid != null) {
+        await prefs.remove('kugou_token_$oldUserid');
+        await prefs.remove('kugou_userid_$oldUserid');
+        await prefs.remove('kugou_vip_token_$oldUserid');
+      }
+      
+      // 清除全局键（兼容旧版本）
       await prefs.remove('kugou_token');
       await prefs.remove('kugou_userid');
       await prefs.remove('kugou_vip_token');
+      await prefs.remove('kugou_dfid');
+      await prefs.remove('kugou_current_userid');
+      
+      print('✅ [Auth] 已清除用户 $oldUserid 的登录状态');
           } catch (e) {
+      print('❌ [Auth] 清除登录状态失败: $e');
           }
   }
 
@@ -1460,7 +1538,11 @@ class KugouApiClient {
     int pagesize = 30,
     int? type, // 0=歌单, 1=专辑
   }) async {
-    final params = <String, dynamic>{'page': page, 'pagesize': pagesize};
+    final params = <String, dynamic>{
+      'page': page,
+      'pagesize': pagesize,
+      if (isLoggedIn && userid != null) 'userid': userid!,
+    };
     if (type != null) params['type'] = type;
     return await _get(
       KugouEndpoints.userPlaylist,

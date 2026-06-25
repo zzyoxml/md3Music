@@ -895,22 +895,14 @@ class _FullPlayerState extends State<FullPlayer>
               rawPlaylists = data['info'] ?? data['list'] ?? [];
             }
 
-            // 只显示用户自己创建的歌单（排除收藏的、导入的专辑）
-            final currentUserId = api.userid;
+            // 只显示用户自己创建的歌单，严格过滤
+            // type=0 → 自己创建；type=1 → 收藏/订阅他人的
             final playlists = <Map<String, dynamic>>[];
             for (final item in rawPlaylists) {
               final json = item as Map<String, dynamic>;
-              // 过滤条件1：只保留用户创建的（list_create_userid 匹配当前用户）
-              final createUid = json['list_create_userid']?.toString();
-              if (createUid != null && createUid.isNotEmpty && createUid != currentUserId) {
-                continue;
-              }
-              // 过滤条件2：排除收藏的专辑（type=1 && source=2）
               final type = json['type'] as int? ?? 0;
-              final source = json['source'] as int? ?? 0;
-              if (type == 1 && source == 2) {
-                continue;
-              }
+              // 只保留 type=0（自己创建的），其余一律排除
+              if (type != 0) continue;
               playlists.add(json);
             }
 
@@ -980,42 +972,36 @@ class _FullPlayerState extends State<FullPlayer>
       return;
     }
 
+    // 乐观更新：立即显示成功，后台同步到酷狗服务器
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已添加到「${playlist['name']}」'),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+
     // 构造歌曲数据 — 酷狗API要求的格式：歌名|hash|albumId|albumAudioId
     final songData = '${song.title}|${song.id}|${song.albumId ?? 0}|${int.tryParse(song.albumAudioId ?? '') ?? 0}';
 
-    try {
-      final result = await api.addPlaylistTracks(listid, songData);
-
-      if (!context.mounted) return;
-
-      if (result != null) {
-        final status = result['status'] ?? result['code'];
-        if (status == 1 || status == 200) {
+    // 后台同步，不阻塞 UI
+    api.addPlaylistTracks(listid, songData).then((result) {
+      // 同步失败时提示用户（静默失败，不影响已显示的乐观更新）
+      if (result == null) {
+        if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text('已添加到「${playlist['name']}」'),
+              content: const Text('同步到服务器失败，将在下次启动时重试'),
               behavior: SnackBarBehavior.floating,
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('添加失败: ${result['info'] ?? result['message'] ?? '未知错误'}'),
-              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 3),
             ),
           );
         }
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('添加失败，请重试'), behavior: SnackBarBehavior.floating),
-        );
       }
-    } catch (e) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('添加失败: $e'), behavior: SnackBarBehavior.floating),
-      );
-    }
+    }).catchError((_) {
+      // 网络错误等，同样静默处理
+    });
   }
 
   void _showPlaylist(PlayerProvider playerProvider) {

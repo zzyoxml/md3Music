@@ -64,3 +64,6 @@ package.json
 package-lock.json
 Run
 CHANGELOG.md
+DATA_ISOLATION_FIX.md
+.gitignore
+FIX_SUMMARY.md

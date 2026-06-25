@@ -717,9 +717,21 @@ class KugouProvider extends ChangeNotifier {
     _userInfo = null;
     _qrKey = null;
     _qrData = null;
+    _vipInfo = null;
+    _vipMonthRecord = null;
+    _userHistoryData = null;
+    _everydayHistory = null;
+    
+    // 清除所有用户相关的内存缓存
+    clearMemoryCache();
+    
+    // 清除API客户端的认证信息
     _apiClient.clearCookies();
+    
     // 清除头像缓存
     _clearAvatarCache();
+    
+    print('✅ [Logout] 用户已退出登录，所有用户数据已清除');
     notifyListeners();
   }
 

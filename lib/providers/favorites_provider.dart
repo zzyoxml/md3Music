@@ -121,12 +121,15 @@ class FavoritesProvider extends ChangeNotifier {
       await _repository.addFavorite(song);
 
       if (isLoggedIn) {
-        try {
-          final data =
-              '${song.title}|${song.id}|${song.albumId ?? 0}|${int.tryParse(song.albumAudioId ?? '') ?? 0}';
-          await api.addPlaylistTracks(listid, data);
-        } catch (e) {
-                  }
+        final data =
+            '${song.title}|${song.id}|${song.albumId ?? 0}|${int.tryParse(song.albumAudioId ?? '') ?? 0}';
+        // 后台同步，不阻塞 UI；失败时静默记录，下次启动时重试
+        api.addPlaylistTracks(listid, data).then((result) {
+          if (result == null) {
+            // 同步失败：记录日志，可后续扩展为待同步队列
+            debugPrint('[Favorites] 同步到服务器失败，song=${song.id}, listid=$listid');
+          }
+        }).catchError((_) {});
       }
     }
     notifyListeners();

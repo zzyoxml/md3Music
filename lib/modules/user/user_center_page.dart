@@ -152,13 +152,17 @@ class _UserCenterPageState extends State<UserCenterPage> {
       );
     }
     
+    // 修复：使用更安全的缓存键，避免 userId 为 null 导致的问题
+    final safeUserId = userId.toString().replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    final cacheKey = 'avatar_$safeUserId';
+    
     return CircleAvatar(
       radius: 32,
       backgroundColor: cs.primary.withValues(alpha: 0.2),
       child: ClipOval(
         child: CachedNetworkImage(
           imageUrl: avatarUrl,
-          cacheKey: 'avatar_$userId',
+          cacheKey: cacheKey,
           width: 64,
           height: 64,
           fit: BoxFit.cover,

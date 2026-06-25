@@ -49,9 +49,27 @@ class _FavoritesPageState extends State<FavoritesPage> {
   String? get _currentUserId => KugouApiClient().userid;
 
   /// 判断歌单是否为用户自己创建的
+  /// 优先级：listCreateUserid > type+source > 硬编码名称
   bool _isCreated(KugouPlaylistBrief p) {
-    if (_currentUserId == null) return false;
-    return p.listCreateUserid == _currentUserId;
+    final uid = _currentUserId;
+    if (uid == null) return false;
+
+    // 方式1（最可靠）：list_create_userid 有值且匹配当前用户
+    if (p.listCreateUserid != null && p.listCreateUserid!.isNotEmpty) {
+      return p.listCreateUserid == uid;
+    }
+
+    // 方式2：type=0 且 source!=2 的视为自己创建
+    if (p.type == 0 && p.source != 2) return true;
+
+    // 方式3：已知系统歌单名
+    if (p.name == '我喜欢' || p.name == '默认收藏') return true;
+
+    // listCreateUserid 为空时，type=1 或 source=2 的一定是收藏的
+    if (p.type == 1 || p.source == 2) return false;
+
+    // 兜底：listCreateUserid 为空且无法判断时，保守归为收藏的
+    return false;
   }
 
   List<KugouPlaylistBrief> get _createdPlaylists =>
@@ -89,7 +107,16 @@ class _FavoritesPageState extends State<FavoritesPage> {
         }
 
         if (list != null && list.isNotEmpty) {
-          final uid = _currentUserId;
+          // 调试：打印每个歌单的原始字段，帮助确认过滤条件
+          for (final item in list!) {
+            final j = item as Map<String, dynamic>;
+            debugPrint(
+              '[Playlist] name=${j['specialname'] ?? j['name']} | '
+              'type=${j['type']} | source=${j['source']} | '
+              'list_create_userid=${j['list_create_userid']} | '
+              'global_collection_id=${j['global_collection_id'] ?? j['gid']}',
+            );
+          }
           setState(() {
             _playlists = list!
                 .where((e) {
@@ -224,7 +251,10 @@ class _FavoritesPageState extends State<FavoritesPage> {
     });
   }
 
-  Future<void> _batchDeleteSelected(List<KugouPlaylistBrief> targetList) async {
+  Future<void> _batchDeleteSelected(
+    List<KugouPlaylistBrief> targetList, {
+    int baseIndex = 0,
+  }) async {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -242,8 +272,9 @@ class _FavoritesPageState extends State<FavoritesPage> {
     final sortedIndices = _selectedIndices.toList()..sort((a, b) => b.compareTo(a));
 
     for (final idx in sortedIndices) {
-      if (idx < targetList.length) {
-        final p = targetList[idx];
+      final relativeIdx = idx - baseIndex;
+      if (relativeIdx >= 0 && relativeIdx < targetList.length) {
+        final p = targetList[relativeIdx];
         try {
           if (_isCreated(p)) {
             await fav.deletePlaylist(p.listId);
@@ -285,17 +316,6 @@ class _FavoritesPageState extends State<FavoritesPage> {
               tooltip: '新建歌单',
               onPressed: _showCreatePlaylistDialog,
             ),
-          if (_selectedPlaylist == null && _isManaging) ...[
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              tooltip: '批量删除',
-              onPressed: _selectedIndices.isEmpty ? null : () => _batchDeleteSelected([..._createdPlaylists, ..._collectedPlaylists]),
-            ),
-            TextButton(
-              onPressed: () => _toggleManageMode(false),
-              child: const Text('取消'),
-            ),
-          ],
         ],
       ),
       body: _selectedPlaylist != null ? _buildSongList() : _buildGroupedPlaylistList(),
@@ -376,20 +396,32 @@ class _FavoritesPageState extends State<FavoritesPage> {
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 )),
                 const SizedBox(width: 8),
-                if (showAdd)
-                  IconButton(icon: const Icon(Icons.add, size: 20), onPressed: _showCreatePlaylistDialog)
-                else if (_isManaging)
+                // 我创建的歌单：显示"+"和"管理"；收藏的歌单：只显示"管理"
+                if (_isManaging) ...[
                   IconButton(
-                    icon: const Icon(Icons.sort, size: 20),
-                    tooltip: '管理模式',
-                    onPressed: () {}, // 已在管理中，无额外操作
-                  )
-                else
+                    icon: const Icon(Icons.delete_outline, size: 20),
+                    tooltip: '批量删除',
+                    onPressed: _selectedIndices.isEmpty
+                        ? null
+                        : () => _batchDeleteSelected(playlists, baseIndex: baseIndex),
+                  ),
+                  TextButton(
+                    onPressed: () => _toggleManageMode(false),
+                    child: const Text('取消'),
+                  ),
+                ] else ...[
+                  if (showAdd)
+                    IconButton(
+                      icon: const Icon(Icons.add, size: 20),
+                      tooltip: '新建歌单',
+                      onPressed: _showCreatePlaylistDialog,
+                    ),
                   IconButton(
                     icon: const Icon(Icons.sort, size: 20),
                     tooltip: '管理歌单',
                     onPressed: () => _toggleManageMode(true),
                   ),
+                ],
               ],
             ),
           ),
