@@ -23,7 +23,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final SettingsRepository _settingsRepository = SettingsRepository();
   final TextEditingController _apiServerController = TextEditingController(
-    text: 'https://musicplayer.ccwu.cc',
+    text: 'http://musicplayer.ccwu.cc',
   );
   ThemeMode _themeMode = ThemeMode.system;
   String _defaultQuality = 'hq';
@@ -234,7 +234,7 @@ class _SettingsPageState extends State<SettingsPage> {
             controller: _apiServerController,
             decoration: InputDecoration(
               labelText: 'API 服务器地址',
-              hintText: 'https://musicplayer.ccwu.cc',
+              hintText: 'http://musicplayer.ccwu.cc',
               border: const OutlineInputBorder(),
               suffixIcon: IconButton(
                 icon: _isTestingConnection
@@ -309,7 +309,7 @@ class _SettingsPageState extends State<SettingsPage> {
         content: const Text(
           '此操作将清除旧版本的登录数据，修复可能的数据混乱问题。\n\n'
           '执行后需要重新登录。\n\n'
-          '是否继续？'
+          '是否继续？',
         ),
         actions: [
           TextButton(
@@ -327,16 +327,16 @@ class _SettingsPageState extends State<SettingsPage> {
     if (confirmed == true) {
       try {
         final prefs = await SharedPreferences.getInstance();
-        
+
         // 清除旧版本的全局键
         await prefs.remove('kugou_token');
         await prefs.remove('kugou_userid');
         await prefs.remove('kugou_vip_token');
         await prefs.remove('kugou_dfid');
         await prefs.remove('kugou_current_userid');
-        
+
         if (!mounted) return;
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('✅ 数据迁移完成，请重新登录'),
@@ -344,13 +344,12 @@ class _SettingsPageState extends State<SettingsPage> {
             duration: Duration(seconds: 3),
           ),
         );
-        
+
         // 退出登录
         context.read<KugouProvider>().logout();
-        
+
         // 返回上一页
         Navigator.of(context).pop();
-        
       } catch (e) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(

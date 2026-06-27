@@ -12,7 +12,7 @@ class SettingsRepository {
 
   Future<String> getApiServerUrl() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyApiServerUrl) ?? 'https://musicplayer.ccwu.cc';
+    return prefs.getString(_keyApiServerUrl) ?? 'http://musicplayer.ccwu.cc';
   }
 
   Future<void> setApiServerUrl(String url) async {

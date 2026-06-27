@@ -156,7 +156,7 @@ md3Music/
 
 ### API 服务器地址
 
-在应用设置页面可以配置 API 服务器地址，默认为 `https://musicplayer.ccwu.cc`。
+在应用设置页面可以配置 API 服务器地址，默认为 `http://musicplayer.ccwu.cc`。
 
 ### 音质设置
 
