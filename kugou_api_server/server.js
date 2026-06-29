@@ -433,6 +433,15 @@ async function consturctServer(moduleDefs) {
 
   for (const moduleDef of moduleDefinitions) {
     app.use(moduleDef.route, async (req, res) => {
+    // 🚨 安全：禁用音频代理，避免服务器流量耗尽
+    if (req.originalUrl && req.originalUrl.startsWith('/audio/proxy')) {
+      console.warn('[AUDIO_PROXY] Disabled - client should use URL from /song/url directly');
+      return res.status(403).json({
+        error: 'Audio proxy is disabled. Use the URL from /song/url directly.',
+        reason: 'Server traffic limit exceeded. Clients must play audio directly from CDN.',
+      });
+    }
+
       [req.query, req.body].forEach((item) => {
         if (typeof item.cookie === 'string') {
           item.cookie = cookieToJson(decode(item.cookie));
@@ -553,44 +562,12 @@ async function consturctServer(moduleDefs) {
   }
 
   app.get('/audio/proxy', async (req, res) => {
-    const audioUrl = req.query.url;
-    if (!audioUrl) {
-      return res.status(400).json({ error: 'url parameter is required' });
-    }
-
-    try {
-      const axios = require('axios');
-      const response = await axios.get(audioUrl, {
-        responseType: 'stream',
-        timeout: 30000,
-        headers: {
-          'User-Agent': 'Android15-1070-11083-46-0-DiscoveryDRADProtocol-wifi',
-          'Referer': 'https://www.kugou.com/',
-        },
-      });
-
-      res.set({
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Range',
-        'Access-Control-Expose-Headers': 'Content-Length, Content-Range, Accept-Ranges',
-        'Content-Type': response.headers['content-type'] || 'audio/mpeg',
-        'Accept-Ranges': 'bytes',
-      });
-
-      if (response.headers['content-length']) {
-        res.set('Content-Length', response.headers['content-length']);
-      }
-      if (response.headers['content-range']) {
-        res.set('Content-Range', response.headers['content-range']);
-      }
-
-      response.data.pipe(res);
-    } catch (e) {
-      console.error('Audio proxy error:', e.message);
-      if (!res.headersSent) {
-        res.status(502).json({ error: 'Failed to fetch audio' });
-      }
-    }
+    // 🚨 安全：禁用音频代理，避免服务器流量耗尽
+    console.warn('[AUDIO_PROXY] Disabled - client should use URL from /song/url directly');
+    return res.status(403).json({
+      error: 'Audio proxy is disabled. Use the URL from /song/url directly.',
+      reason: 'Server traffic limit exceeded. Clients must play audio directly from CDN.',
+    });
   });
 
   app.options('/audio/proxy', (req, res) => {
