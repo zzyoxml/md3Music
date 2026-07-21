@@ -299,6 +299,9 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // 注册元数据写入插件（下载完成后嵌入标题/艺术家/专辑/封面/歌词）
+        MetadataWriterPlugin().register(flutterEngine)
     }
 
     override fun onDestroy() {

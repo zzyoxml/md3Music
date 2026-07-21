@@ -10,6 +10,7 @@ import '../core/services/lyricon_provider_service.dart';
 import '../core/services/media_notification_service.dart';
 import '../data/models/song.dart';
 import '../data/repositories/history_repository.dart';
+import '../data/repositories/playback_state_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../main.dart';
 import '../widgets/apple_lyrics/models/lyric_line.dart';
@@ -49,7 +50,12 @@ class PlayerProvider extends ChangeNotifier {
   Song? get currentSong => _currentSong;
   bool get isPlaying => _isPlaying;
   Duration get position => _position;
-  Duration? get duration => _duration;
+  /// 当前播放时长。优先用音频引擎的实际时长，fallback 到歌曲元数据时长。
+  ///
+  /// fallback 的原因：恢复上次会话时音频源未加载，durationStream 会发射 null
+  /// 覆盖 _duration。用 currentSong.duration 作为 fallback 让 mini player
+  /// 进度条在恢复后立即可见，不需要等用户点播放。
+  Duration? get duration => _duration ?? _currentSong?.duration;
   List<Song> get playlist => _playlist;
   int get currentIndex => _currentIndex;
   AppLoopMode get loopMode => _loopMode;
@@ -81,6 +87,13 @@ class PlayerProvider extends ChangeNotifier {
   // 歌词异步拉取的竞态 token：每次切歌自增，过期结果被丢弃
   int _lyriconFetchToken = 0;
 
+  // —— 上次播放状态恢复 ——
+  // 持久化仓库：保存/读取"上次退出时的播放列表 + 索引 + 进度"
+  final PlaybackStateRepository _playbackStateRepo = PlaybackStateRepository();
+  // 恢复状态后首次按播放键时，需要 seek 到此进度并懒加载音频源；
+  // 为 null 表示无待恢复进度，直接走普通 play() 路径
+  Duration? _pendingResumePosition;
+
   PlayerProvider() {
     _initAudioService();
     // 监听自身变化检测切歌 → 推送 Lyricon（仅 enabled 时实际推送）
@@ -108,8 +121,71 @@ class PlayerProvider extends ChangeNotifier {
       await _audioService.init();
       _initStreams();
       await _loadDefaultQuality();
+      // 恢复上次退出时的播放状态（仅设置元数据，不播放）
+      await restoreLastSession();
     } catch (e) {
           }
+  }
+
+  /// 恢复上次会话：设置播放列表/当前歌曲/进度，并预加载音频源。
+  ///
+  /// 预加载音频源（setUrl + seek，不播放）的目的是：
+  /// 1. 让 durationStream 从音频引擎获取真实时长，mini player 进度条立即可见
+  /// 2. seek 到上次进度，用户按播放键时直接续播，无需再次加载
+  Future<void> restoreLastSession() async {
+    try {
+      final saved = await _playbackStateRepo.load();
+      if (saved == null) return;
+      _playlist = saved.playlist;
+      _originalPlaylist = List.from(saved.playlist);
+      _currentIndex = saved.currentIndex;
+      _currentSong = saved.playlist[saved.currentIndex];
+      _position = saved.position;
+      _duration = _currentSong?.duration; // fallback，音频加载后会被真实值覆盖
+      _pendingResumePosition = saved.position;
+      // 重启后强制暂停：用户必须主动按播放键，避免冷启动突然出声
+      _isPlaying = false;
+      notifyListeners();
+      _updateNotification();
+
+      // 预加载音频源（不播放），让 durationStream 发射真实时长，
+      // mini player 进度条立即可见，不需要等用户点播放。
+      // _resolveAndPlayCurrentSong 会解析在线 URL 并调用 _setUrlAndPlay(playAfter: false)
+      if (_currentSong != null && saved.position > Duration.zero) {
+        await _resolveAndPlayCurrentSong(
+            seekTo: saved.position, playAfter: false);
+        // 预加载完成，音频已就绪。清除标记，resume() 不需要再次加载。
+        _pendingResumePosition = null;
+      }
+    } catch (_) {}
+  }
+
+  /// 供 app.dart 在 AppLifecycleState.paused 时调用，保存当前播放状态。
+  Future<void> savePlaybackStateForBackground() async {
+    await _savePlaybackState();
+  }
+
+  /// 供 app.dart 在 AppLifecycleState.resumed 时调用。
+  /// 如果当前是被音频焦点打断（如抖音抢占 AUDIOFOCUS_GAIN）导致的暂停，
+  /// 主动恢复播放。用户手动暂停的情况下不会恢复。
+  Future<void> tryResumeAfterFocusLoss() async {
+    await _audioService?.tryResumeAfterFocusLoss();
+  }
+
+  /// 私有保存方法。多处调用（切歌/暂停/完成/清空）。
+  /// fire-and-forget 调用即可，不阻塞 UI；失败静默忽略。
+  Future<void> _savePlaybackState() async {
+    try {
+      if (_playlist.isEmpty || _currentSong == null) {
+        await _playbackStateRepo.clear();
+        return;
+      }
+      await _playbackStateRepo.save(
+        playlist: _playlist,
+        currentIndex: _currentIndex < 0 ? 0 : _currentIndex,
+        position: _position,
+      );
+    } catch (_) {}
   }
 
   Future<void> _loadDefaultQuality() async {
@@ -267,6 +343,7 @@ class PlayerProvider extends ChangeNotifier {
             _resolveError = '无法获取播放链接';
           }
           notifyListeners();
+          _savePlaybackState();
         }
       } else {
         next();
@@ -287,9 +364,11 @@ class PlayerProvider extends ChangeNotifier {
     _originalPlaylist = [song];
     _currentIndex = 0;
     _resolveError = null;
+    _pendingResumePosition = null;  // 用户主动选歌，放弃待恢复进度
     _recordHistory(song);
     _updateNotification();
     notifyListeners();
+    _savePlaybackState();
 
     if (_audioService != null) {
       final source = _createAudioSource(song);
@@ -305,6 +384,7 @@ class PlayerProvider extends ChangeNotifier {
       return;
     }
     _currentSong = song;
+    _pendingResumePosition = null;  // 用户主动选歌，放弃待恢复进度
     _playlist = [song];
     _originalPlaylist = [song];
     _currentIndex = 0;
@@ -330,6 +410,7 @@ class PlayerProvider extends ChangeNotifier {
         _playlist = [resolvedSong];
         _isResolvingUrl = false;
                 notifyListeners();
+        _savePlaybackState();
 
         if (_audioService != null) {
                     final source = _createAudioSource(resolvedSong);
@@ -359,6 +440,7 @@ class PlayerProvider extends ChangeNotifier {
     _resolveError = null;
     _recordHistory(songs[startIndex]);
     notifyListeners();
+    _savePlaybackState();
 
     if (_currentSong!.isOnline && _currentSong!.url == null) {
       _isResolvingUrl = true;
@@ -379,6 +461,7 @@ class PlayerProvider extends ChangeNotifier {
           _playlist[startIndex] = resolvedSong;
           _isResolvingUrl = false;
           notifyListeners();
+          _savePlaybackState();
 
           if (_audioService != null) {
             await _setUrlAndPlay(result.url);
@@ -422,6 +505,7 @@ class PlayerProvider extends ChangeNotifier {
     _recordHistory(songs[startIndex]);
     _updateNotification();
     notifyListeners();
+    _savePlaybackState();
 
     try {
       final apiClient = KugouApiClient();
@@ -431,13 +515,14 @@ class PlayerProvider extends ChangeNotifier {
         albumId: _currentSong!.albumId,
         albumAudioId: _currentSong!.albumAudioId,
       );
-      
+
       if (result != null && result.url.isNotEmpty) {
         final resolvedSong = _currentSong!.copyWith(url: result.url);
         _currentSong = resolvedSong;
         _playlist[startIndex] = resolvedSong;
         _isResolvingUrl = false;
         notifyListeners();
+        _savePlaybackState();
 
         if (_audioService != null) {
           await _setUrlAndPlay(result.url);
@@ -494,6 +579,9 @@ class PlayerProvider extends ChangeNotifier {
     bool playAfter = true,
   }) async {
     if (_audioService == null) return;
+    // 任何路径加载新音频源后，待恢复进度都失去意义：
+    // 防止"恢复状态后用户点其他歌曲 → 后续 resume() 错误 seek 到旧进度"
+    _pendingResumePosition = null;
     await _audioService.setUrl(url);
     final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (DateTime.now().isBefore(deadline)) {
@@ -520,9 +608,18 @@ class PlayerProvider extends ChangeNotifier {
 
   Future<void> pause() async {
     await _audioService?.pause();
+    _savePlaybackState();
   }
 
   Future<void> resume() async {
+    // 上次会话恢复后首次按播放：懒加载音频源 + seek 到上次进度
+    if (_pendingResumePosition != null && _currentSong != null) {
+      final pending = _pendingResumePosition!;
+      _pendingResumePosition = null;
+      // 走完整解析流程（处理在线 URL 失效），seek 到上次进度
+      await _resolveAndPlayCurrentSong(seekTo: pending);
+      return;
+    }
     await _audioService?.play();
   }
 
@@ -544,7 +641,7 @@ class PlayerProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> _resolveAndPlayCurrentSong() async {
+  Future<bool> _resolveAndPlayCurrentSong({Duration? seekTo, bool playAfter = true}) async {
     if (_currentSong == null) return false;
 
     if (_currentSong!.isOnline && _currentSong!.url == null) {
@@ -585,7 +682,8 @@ class PlayerProvider extends ChangeNotifier {
           ? _currentSong!.url
           : _currentSong!.localPath;
       if (playbackUrl != null && playbackUrl.isNotEmpty) {
-        await _setUrlAndPlay(playbackUrl);
+        // seekTo 仅在恢复上次会话时非空，由 resume() 或 restoreLastSession() 传入
+        await _setUrlAndPlay(playbackUrl, seekTo: seekTo, playAfter: playAfter);
       }
     }
     return true;
@@ -617,6 +715,7 @@ class PlayerProvider extends ChangeNotifier {
       _resolveError = '无法获取播放链接';
     }
     notifyListeners();
+    _savePlaybackState();
   }
 
   Future<void> previous() async {
@@ -641,7 +740,10 @@ class PlayerProvider extends ChangeNotifier {
       _currentSong = _playlist[prevIndex];
       _resolveError = null;
 
-      if (await _resolveAndPlayCurrentSong()) return;
+      if (await _resolveAndPlayCurrentSong()) {
+        _savePlaybackState();
+        return;
+      }
       _resolveError = '无法获取播放链接';
     }
     notifyListeners();
@@ -656,6 +758,7 @@ class PlayerProvider extends ChangeNotifier {
     notifyListeners();
 
     await _resolveAndPlayCurrentSong();
+    _savePlaybackState();
   }
 
   Future<void> clearPlaylist() async {
@@ -668,8 +771,10 @@ class PlayerProvider extends ChangeNotifier {
     _position = Duration.zero;
     _duration = null;
     _resolveError = null;
+    _pendingResumePosition = null;
     _updateNotification();
     notifyListeners();
+    _savePlaybackState();  // 会触发 _playbackStateRepo.clear()
   }
 
   Future<void> appendPlaylist(List<Song> songs) async {
@@ -949,6 +1054,8 @@ class PlayerProvider extends ChangeNotifier {
 
   @override
   void dispose() {
+    // 应用被销毁前保存一次播放状态（fire-and-forget，不阻塞 dispose）
+    _savePlaybackState();
     removeListener(_handleLyriconSongChange);
     _positionSubscription?.cancel();
     _durationSubscription?.cancel();

@@ -24,16 +24,7 @@ class LyricPreferences extends ChangeNotifier {
   static const double maxFontSize = 30;
 
   /// 字号默认值（px）
-  ///
-  /// 这是公式 `(fontSize / defaultFontSize) * lineSpacing` 中的分母，
-  /// 保持 15px 不变。改动此值会影响所有用户计算出的实际行高。
   static const double defaultFontSize = 15;
-
-  /// 用户首选项的字号默认值（px）
-  ///
-  /// 新用户首次进入时歌词显示的字号。保持 22px 让初始实际行高为
-  /// (22/15)*1.5 = 2.20×，更符合阅读习惯。
-  static const double defaultUserFontSize = 22;
 
   /// 行间距系数最小值
   ///
@@ -53,7 +44,7 @@ class LyricPreferences extends ChangeNotifier {
 
   // ============== 当前值 ==============
 
-  double _fontSize = defaultUserFontSize;
+  double _fontSize = defaultFontSize;
   double _lineSpacing = defaultLineSpacing;
   bool _loaded = false;
 
@@ -74,7 +65,7 @@ class LyricPreferences extends ChangeNotifier {
   Future<void> load() async {
     if (_loaded) return;
     final prefs = await SharedPreferences.getInstance();
-    _fontSize = prefs.getDouble(_keyFontSize) ?? defaultUserFontSize;
+    _fontSize = prefs.getDouble(_keyFontSize) ?? defaultFontSize;
     _lineSpacing = prefs.getDouble(_keyLineSpacing) ?? defaultLineSpacing;
     _loaded = true;
     notifyListeners();
@@ -102,7 +93,7 @@ class LyricPreferences extends ChangeNotifier {
 
   /// 重置为默认值。
   Future<void> reset() async {
-    _fontSize = defaultUserFontSize;
+    _fontSize = defaultFontSize;
     _lineSpacing = defaultLineSpacing;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();

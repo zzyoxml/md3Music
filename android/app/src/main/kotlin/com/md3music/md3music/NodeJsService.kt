@@ -13,10 +13,6 @@ class NodeJsService(private val context: Context, flutterEngine: FlutterEngine) 
         private const val CHANNEL = "com.md3music.md3music/nodejs"
         private const val NODEJS_PROJECT_DIR = "nodejs-project"
 
-        /** 进程级防重入：Node.js 只能在一个进程中初始化一次，重复调用会触发 abort */
-        @Volatile
-        private var nodeInitialized = false
-
         init {
             System.loadLibrary("nodejs_bridge")
         }
@@ -67,13 +63,6 @@ class NodeJsService(private val context: Context, flutterEngine: FlutterEngine) 
     }
 
     private fun startNodeServer() {
-        // 进程级防重入：同一进程内 Node.js 只能初始化一次，
-        // 重复调用 nativeStartNode → initializeNode → InitializeNodeWithArgs 会触发 assert abort
-        if (nodeInitialized) {
-            Log.w(TAG, "Node.js already initialized in this process, skipping")
-            return
-        }
-
         killOldNodeProcesses()
 
         val projectDir = File(nodeProjectPath)
@@ -101,8 +90,6 @@ class NodeJsService(private val context: Context, flutterEngine: FlutterEngine) 
         val modulesPath = nodeProjectPath
         Log.d(TAG, "Starting Node.js with script: ${bundleFile.absolutePath}")
         nativeStartNode(args, modulesPath)
-        nodeInitialized = true
-        Log.d(TAG, "Node.js started successfully")
     }
 
     private fun copyAssetFile(assetPath: String, targetPath: String) {
@@ -130,18 +117,8 @@ class NodeJsService(private val context: Context, flutterEngine: FlutterEngine) 
     }
 
     fun stopServer() {
-        if (!nodeInitialized) {
-            Log.w(TAG, "stopServer: Node.js was not started in this process, skipping")
-            return
-        }
         Log.d(TAG, "Stopping Node.js server...")
-        try {
-            nativeStopNode()
-        } catch (e: Exception) {
-            Log.e(TAG, "stopServer failed: ${e.message}")
-        }
-        nodeInitialized = false
-        Log.d(TAG, "Node.js stopped")
+        nativeStopNode()
     }
 
     private fun killOldNodeProcesses() {

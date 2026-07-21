@@ -35,12 +35,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
   bool _isCollected = false;
   String? _collectedListId;
 
-  // 歌单内搜索
-  bool _isSearching = false;
-  String _searchQuery = '';
-  final TextEditingController _searchController = TextEditingController();
-  final FocusNode _searchFocusNode = FocusNode();
-
   /// 顶栏渐变 ScrollController：监听 CustomScrollView 滚动 offset，
   /// 用于 SliverAppBar pinned 后 fade-in 显示歌单名称
   final ScrollController _scrollController = ScrollController();
@@ -49,8 +43,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
   @override
   void dispose() {
     _scrollController.dispose();
-    _searchController.dispose();
-    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -74,32 +66,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
     if ((offset - _scrollOffset).abs() > 0.5) {
       setState(() => _scrollOffset = offset);
     }
-  }
-
-  /// 当前显示的歌曲列表（根据搜索关键词过滤）
-  List<Song> get _displaySongs {
-    if (_searchQuery.isEmpty) return _songs;
-    final q = _searchQuery.toLowerCase();
-    return _songs.where((s) {
-      return s.title.toLowerCase().contains(q) ||
-          s.artist.toLowerCase().contains(q) ||
-          (s.album?.toLowerCase().contains(q) ?? false);
-    }).toList();
-  }
-
-  void _toggleSearch() {
-    setState(() {
-      _isSearching = !_isSearching;
-      if (!_isSearching) {
-        _searchQuery = '';
-        _searchController.clear();
-      } else {
-        // 延迟聚焦，等 UI 构建完成
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _searchFocusNode.requestFocus();
-        });
-      }
-    });
   }
 
   // ==================== 收藏本地缓存（解决后端 user/playlist 列表 ~1-2 分钟缓存才同步的问题）====================
@@ -436,15 +402,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         )!,
                         surfaceTintColor: Colors.transparent,
                         scrolledUnderElevation: 0,
-                        actions: [
-                          if (_songs.isNotEmpty)
-                            IconButton(
-                              icon: Icon(
-                                _isSearching ? Icons.close : Icons.search,
-                              ),
-                              onPressed: _toggleSearch,
-                            ),
-                        ],
                         // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示歌单名称
                         title: Opacity(
                           opacity: ((_scrollOffset - (280 - kToolbarHeight)) /
@@ -576,44 +533,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
                           ),
                         ),
                       ),
-                      // 歌单内搜索栏（点击搜索图标后展开）
-                      if (_isSearching)
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                            child: TextField(
-                              controller: _searchController,
-                              focusNode: _searchFocusNode,
-                              decoration: InputDecoration(
-                                hintText: '搜索歌单内的歌曲...',
-                                prefixIcon: const Icon(Icons.search),
-                                suffixIcon: _searchQuery.isNotEmpty
-                                    ? IconButton(
-                                        icon: const Icon(Icons.clear),
-                                        onPressed: () {
-                                          _searchController.clear();
-                                          setState(() => _searchQuery = '');
-                                        },
-                                      )
-                                    : null,
-                                filled: true,
-                                fillColor: colorScheme.surfaceContainerHighest
-                                    .withValues(alpha: 0.5),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(28),
-                                  borderSide: BorderSide.none,
-                                ),
-                                contentPadding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 12,
-                                ),
-                              ),
-                              onChanged: (value) {
-                                setState(() => _searchQuery = value);
-                              },
-                            ),
-                          ),
-                        ),
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
@@ -625,26 +544,22 @@ class _PlaylistPageState extends State<PlaylistPage> {
                               Expanded(
                                 child: FilledButton.icon(
                                   onPressed: () {
-                                    final songs = _displaySongs;
-                                    if (songs.isNotEmpty) {
+                                    if (_songs.isNotEmpty) {
                                       context
                                           .read<PlayerProvider>()
-                                          .playOnlinePlaylist(songs, 0);
+                                          .playOnlinePlaylist(_songs, 0);
                                     }
                                   },
                                   icon: const Icon(Icons.play_arrow),
-                                  label: Text(
-                                    '播放全部${_isSearching && _searchQuery.isNotEmpty ? ' (${_displaySongs.length})' : ''}',
-                                  ),
+                                  label: const Text('播放全部'),
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: OutlinedButton.icon(
                                   onPressed: () {
-                                    final songs = _displaySongs;
-                                    if (songs.isNotEmpty) {
-                                      final shuffled = List<Song>.from(songs)
+                                    if (_songs.isNotEmpty) {
+                                      final shuffled = List<Song>.from(_songs)
                                         ..shuffle();
                                       context
                                           .read<PlayerProvider>()
@@ -680,41 +595,17 @@ class _PlaylistPageState extends State<PlaylistPage> {
                       SliverList(
                         delegate: SliverChildBuilderDelegate((context, index) {
                           return SongListItem(
-                            song: _displaySongs[index],
+                            song: _songs[index],
                             onTap: () {
                               context.read<PlayerProvider>().playOnlinePlaylist(
-                                _displaySongs,
+                                _songs,
                                 index,
                               );
                             },
                             onMoreTap: () {},
                           );
-                        }, childCount: _displaySongs.length),
+                        }, childCount: _songs.length),
                       ),
-                      // 搜索无结果提示
-                      if (_isSearching && _displaySongs.isEmpty && _songs.isNotEmpty)
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.all(32),
-                            child: Column(
-                              children: [
-                                Icon(
-                                  Icons.search_off,
-                                  size: 48,
-                                  color: colorScheme.onSurfaceVariant
-                                      .withValues(alpha: 0.5),
-                                ),
-                                const SizedBox(height: 8),
-                                Text(
-                                  '没有找到「$_searchQuery」相关的歌曲',
-                                  style: textTheme.bodyMedium?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
                     ],
                   ),
                 ),

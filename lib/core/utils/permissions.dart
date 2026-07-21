@@ -12,35 +12,88 @@ bool _isAndroidNative() {
   }
 }
 
+/// 请求存储权限（用于下载到系统 Downloads 目录）。
+///
+/// 之前的实现用 Platform.version 当 Android SDK 版本，那是错的——
+/// Platform.version 是 Dart VM 版本（如 "3.5.0"），导致 Android 13+ 设备
+/// 永远走不到 audio 分支，Permission.storage 在 13+ 上是 dead permission，
+/// 永远 denied 且不弹窗，下载按钮点击完全无反应。
+///
+/// 新方案：不依赖 SDK 版本号，按"现代权限优先"顺序探测——
+///   1. Permission.audio（Android 13+ 有效，13- 上 status 为 denied）
+///   2. Permission.manageExternalStorage（Android 11+ 写共享目录必需）
+///   3. Permission.storage（Android 10 及以下）
+/// 任一权限 status.isGranted 即视为已授权；否则按顺序 request 第一个未授权的。
+/// 这样既能覆盖所有 Android 版本，又不需要 device_info_plus 额外依赖。
 Future<bool> requestStoragePermission() async {
   if (!_isAndroidNative()) return true;
 
-  final sdkInt = await _getAndroidSdkVersion();
+  // 已经授权的最优权限直接通过
+  if (await Permission.audio.isGranted) return true;
+  if (await Permission.manageExternalStorage.isGranted) return true;
+  if (await Permission.storage.isGranted) return true;
 
-  if (sdkInt >= 33) {
-    return await checkPermission(Permission.audio);
+  // 按优先级请求第一个未授权权限
+  // Android 13+: Permission.audio 会弹系统授权弹窗
+  // Android 11-12: Permission.audio 不会弹（权限不存在，返回 denied），
+  //                接着尝试 manageExternalStorage，会跳系统设置页让用户手动开
+  // Android 10-: 前两个都不弹，最终走 Permission.storage 弹窗
+  final audioStatus = await Permission.audio.status;
+  if (!audioStatus.isPermanentlyDenied) {
+    // audio 未被永久拒绝：尝试请求
+    final result = await Permission.audio.request();
+    if (result.isGranted) return true;
+    // 13- 设备：request 会返回 denied 或 permanentlyDenied（取决于厂商），
+    // 继续尝试下一个权限，不要因 audio 失败就放弃。
   }
 
-  if (sdkInt >= 30) {
-    final status = await Permission.manageExternalStorage.status;
-    if (status.isGranted) return true;
+  final manageStatus = await Permission.manageExternalStorage.status;
+  if (!manageStatus.isPermanentlyDenied) {
     final result = await Permission.manageExternalStorage.request();
-    return result.isGranted;
+    if (result.isGranted) return true;
   }
 
-  return await checkPermission(Permission.storage);
+  // 最终回退：Permission.storage（Android 10 及以下的主要权限）
+  final storageStatus = await Permission.storage.status;
+  if (storageStatus.isPermanentlyDenied) {
+    await openAppSettings();
+    return false;
+  }
+  final result = await Permission.storage.request();
+  if (result.isGranted) return true;
+
+  if (result.isPermanentlyDenied) {
+    await openAppSettings();
+    return false;
+  }
+  return false;
 }
 
 Future<bool> requestAudioPermission() async {
   if (!_isAndroidNative()) return true;
 
-  final sdkInt = await _getAndroidSdkVersion();
+  if (await Permission.audio.isGranted) return true;
+  if (await Permission.storage.isGranted) return true;
 
-  if (sdkInt >= 33) {
-    return await checkPermission(Permission.audio);
+  final audioStatus = await Permission.audio.status;
+  if (!audioStatus.isPermanentlyDenied) {
+    final result = await Permission.audio.request();
+    if (result.isGranted) return true;
   }
 
-  return await checkPermission(Permission.storage);
+  final storageStatus = await Permission.storage.status;
+  if (storageStatus.isPermanentlyDenied) {
+    await openAppSettings();
+    return false;
+  }
+  final result = await Permission.storage.request();
+  if (result.isGranted) return true;
+
+  if (result.isPermanentlyDenied) {
+    await openAppSettings();
+    return false;
+  }
+  return false;
 }
 
 Future<bool> checkPermission(Permission permission) async {
@@ -56,14 +109,4 @@ Future<bool> checkPermission(Permission permission) async {
   }
 
   return false;
-}
-
-Future<int> _getAndroidSdkVersion() async {
-  if (!_isAndroidNative()) return 0;
-  try {
-    final sdkVersion = int.tryParse(Platform.version.split('.').first) ?? 0;
-    return sdkVersion;
-  } catch (_) {
-    return 0;
-  }
 }

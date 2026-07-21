@@ -950,14 +950,41 @@ class _FullPlayerState extends State<FullPlayer>
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('开始下载: ${song.title}'),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-    // 触发下载
-    downloadsProvider.downloadSong(song);
+    // 异步触发下载，根据返回值给出反馈。
+    // 之前是 fire-and-forget 且提前显示"开始下载"，
+    // 权限失败时用户会看到"开始下载"但实际什么都没发生。
+    _triggerDownload(downloadsProvider, song);
+  }
+
+  Future<void> _triggerDownload(
+    DownloadsProvider provider,
+    dynamic song,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final songTitle = song.title;
+    final started = await provider.downloadSong(song);
+    if (started) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('开始下载: $songTitle'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else if (provider.lastPermissionGranted == false) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('存储权限被拒，请在系统设置中授予后重试'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } else {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('无法下载: $songTitle（未获取到下载链接）'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   void _showMoreMenu(BuildContext context) {

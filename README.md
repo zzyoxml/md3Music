@@ -7,7 +7,7 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.12+-02569B?logo=flutter)](https://flutter.dev)
 [![Platform](https://img.shields.io/badge/Platform-Android-green)]()
-[![Version](https://img.shields.io/badge/Version-3.3.0-blue)]()
+[![Version](https://img.shields.io/badge/Version-2.5.0-blue)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 </div>
@@ -21,14 +21,11 @@
 - **每日推荐** - 个性化歌曲推荐
 - **热门排行榜** - 多种排行榜实时更新
 - **私人 FM** - 猜你喜欢，无限畅听
-- **歌曲信息** - 自动剥离音频扩展名显示纯净标题
 
 ### 🎧 播放体验
 - **多音质选择** - 标准(128k)、高质(320k)、无损(FLAC)
 - **循环模式** - 单曲循环、列表循环、随机播放
-- **逐字歌词** - KRC/LRC/纯文本歌词解析与实时滚动显示
-- **Lyricon 歌词** - 扩展歌词格式支持
-- **频谱动画** - 播放中动态频谱可视化标识
+- **歌词同步** - 实时滚动歌词显示
 - **桌面歌词** - 桌面歌词展示功能
 - **后台播放** - Android 后台播放通知
 - **状态栏控制** - 上一曲/下一曲/播放暂停/进度拖动
@@ -41,13 +38,11 @@
 
 ### ⚙️ 设置功能
 - **一键清理缓存** - 快速清理应用缓存
-- **深色模式** - 浅色/深色/跟随系统/OLED 纯黑
-- **主题色选择** - 预设种子色面板，动态主题色切换
+- **深色模式** - 浅色/深色/跟随系统
 
 ### 🎨 设计风格
 - **Material Design 3** - 最新 MD3 设计规范
 - **动态颜色主题** - 基于 Seed Color 动态配色
-- **滚动感知 AppBar** - 页面滚动时顶栏渐变效果
 - **响应式布局** - 手机/平板/桌面自适应
 
 ---
@@ -85,16 +80,6 @@
 - **流量优化**：仅有登录和同步功能走云端，其他所有功能都在本地运行，月流量 < 100MB
 - **无需外部服务器**：用户无需自行搭建 API 服务器
 - **多架构支持**：支持 armeabi-v7a（32位）、arm64-v8a（64位）、x86_64（模拟器）
-
----
-
-## 🔄 CI/CD
-
-项目已配置 GitHub Actions 自动构建，推送 `v*` 标签即可触发：
-
-- 自动构建 3 个架构的 APK
-- 自动创建 GitHub Release 并上传产物
-- 自动递增 versionCode 并生成 Changelog
 
 ---
 

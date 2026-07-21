@@ -1,6 +1,3 @@
-import 'dart:io' show exit;
-
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -199,6 +196,18 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 进入后台时保存播放状态：防止后台被系统回收后丢失上次播放进度
+    if (state == AppLifecycleState.paused) {
+      // ignore: discarded_futures — fire-and-forget，不阻塞生命周期回调
+      context.read<PlayerProvider>().savePlaybackStateForBackground();
+    }
+    // app 回到前台：如果是被音频焦点打断（如抖音抢占 AUDIOFOCUS_GAIN）导致的暂停，
+    // Android 不会触发 interruption end 事件，需要这里主动恢复。
+    // 用户手动暂停的情况下 _pausedByInterruption 已被 pause() 清除，不会误恢复。
+    if (state == AppLifecycleState.resumed) {
+      // ignore: discarded_futures — fire-and-forget
+      context.read<PlayerProvider>().tryResumeAfterFocusLoss();
+    }
     // 当系统即将销毁应用进程时（包含后台划掉 / 系统回收），Flutter 会先收到 detached。
     // 此时同步触发 Node.js 关闭：若进程随之被 kill 也无副作用；若进程仍存活则关闭 libuv。
     if (state == AppLifecycleState.detached) {
@@ -355,53 +364,6 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         children: [
           Expanded(child: _pages[_selectedIndex]),
           const MiniPlayer(),
-        ],
-      ),
-    );
-  }
-
-  /// 显示"退出 App"确认对话框。
-  ///
-  /// 点击退出按钮会触发：
-  /// 1) `PlayerProvider.pause()` — 停 just_audio + 同步通知栏
-  /// 2) `NodeJsServer.stop()` — 释放 127.0.0.1:8080 端口 + 关 libuv
-  /// 3) `SystemNavigator.pop()` — 通知系统 finish 当前 Activity，
-  ///    系统会随之销毁进程（等同 kill app）
-  void _showExitConfirmDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('退出 App'),
-        content: const Text('确定要退出 md3Music 吗？\n将停止播放并释放本地 Node.js 服务器。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              // 关闭对话框（避免 SystemNavigator.pop 后 context 失效）
-              Navigator.of(ctx).pop();
-              // 1) 暂停播放（just_audio 内部会停音频 + 通知栏可同步清空）
-              // ignore: discarded_futures
-              context.read<PlayerProvider>().pause();
-              // 2) 关停 Node.js（释放 8080 端口 + libuv 事件循环退出）
-              // 必须等待完成，否则端口未释放，下次冷启动会冲突导致闪退
-              try {
-                await NodeJsServer.stop();
-                // nativeStopNode() 在独立线程执行，MethodChannel 返回只代表调用已发出，
-                // 需要给 native 线程一点时间完成 libuv 事件循环退出
-                await Future.delayed(const Duration(milliseconds: 300));
-              } catch (_) {}
-              // 3) 杀进程：exit(0) 立即终止整个进程（含 Node.js 线程），
-              //    确保 8080 端口一定被释放。SystemNavigator.pop() 只 finish Activity，
-              //    进程可能残留，导致下次启动时端口冲突/服务器未启动。
-              // ignore: avoid_print
-              print('Exiting app...');
-              exit(0);
-            },
-            child: const Text('退出'),
-          ),
         ],
       ),
     );

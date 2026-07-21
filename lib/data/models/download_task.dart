@@ -4,6 +4,7 @@ class DownloadTask {
   final String songId;
   final String title;
   final String artist;
+  final String? album;
   final String? artworkUri;
   final String downloadUrl;
   final String? localPath;
@@ -15,6 +16,7 @@ class DownloadTask {
     required this.songId,
     required this.title,
     required this.artist,
+    this.album,
     this.artworkUri,
     required this.downloadUrl,
     this.localPath,
@@ -33,6 +35,7 @@ class DownloadTask {
       songId: songId,
       title: title,
       artist: artist,
+      album: album,
       artworkUri: artworkUri,
       downloadUrl: downloadUrl,
       localPath: localPath ?? this.localPath,
@@ -47,6 +50,7 @@ class DownloadTask {
       'songId': songId,
       'title': title,
       'artist': artist,
+      'album': album,
       'artworkUri': artworkUri,
       'downloadUrl': downloadUrl,
       'localPath': localPath,
@@ -61,6 +65,7 @@ class DownloadTask {
       songId: json['songId'] as String,
       title: json['title'] as String,
       artist: json['artist'] as String,
+      album: json['album'] as String?,
       artworkUri: json['artworkUri'] as String?,
       downloadUrl: json['downloadUrl'] as String,
       localPath: json['localPath'] as String?,

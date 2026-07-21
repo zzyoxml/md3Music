@@ -134,9 +134,45 @@ class SongListItem extends StatelessWidget {
       title: Text(label, style: const TextStyle(fontSize: 14)),
       onTap: () {
         Navigator.pop(context);
-        provider.downloadSong(song, quality: quality);
+        _triggerDownload(context, provider, quality);
       },
     );
+  }
+
+  /// 真正触发下载，并根据 downloadSong 返回值给出 SnackBar 反馈。
+  /// 之前直接 fire-and-forget，权限失败时用户看不到任何提示，
+  /// 表现为"点了下载什么都不发生"。
+  Future<void> _triggerDownload(
+    BuildContext context,
+    DownloadsProvider provider,
+    String quality,
+  ) async {
+    // 先捕获 messenger 引用，await 之后 BuildContext 可能已失效
+    final messenger = ScaffoldMessenger.of(context);
+    final songTitle = song.title;
+    final started = await provider.downloadSong(song, quality: quality);
+    if (started) {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('开始下载: $songTitle'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } else if (provider.lastPermissionGranted == false) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('存储权限被拒，请在系统设置中授予后重试'),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } else {
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('无法下载: $songTitle（未获取到下载链接）'),
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
 
   @override

@@ -18,14 +18,6 @@ import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/apple_lyrics/preview/lyrics_preview_page.dart';
 import '../../widgets/seed_color_picker.dart';
 
-/// CI compile-time version injection via --dart-define=APP_VERSION=X
-/// Fallback display when runtime PackageInfo read fails.
-const String kBuildAppVersion = String.fromEnvironment(
-  'APP_VERSION',
-  defaultValue: '3.3.0',
-);
-
-
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
 
@@ -51,6 +43,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _lyriconEnabled = false;
   bool _lyriconDisplayTranslation = true;
   bool _lyriconDisplayRoma = false;
+  // 下载目录（默认系统 Downloads 下的 MD3Music 子目录）
+  String _downloadDir = SettingsRepository.defaultDownloadDir;
 
   @override
   void initState() {
@@ -111,6 +105,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final quality = await _settingsRepository.getDefaultQuality();
     final autoReceiveVip = await _settingsRepository.getAutoReceiveVip();
     final apiServerUrl = await _settingsRepository.getApiServerUrl();
+    final downloadDir = await _settingsRepository.getDownloadDir();
     // 从 ThemeProvider 同步「使用系统主题色」开关状态
     final useDynamicColor = context.read<ThemeProvider>().useDynamicColor;
     // 从 ThemeProvider 同步「Apple Music 风格播放页」开关状态
@@ -123,6 +118,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _apiServerController.text = apiServerUrl;
       _useDynamicColor = useDynamicColor;
       _useAmStylePlayer = useAmStylePlayer;
+      _downloadDir = downloadDir;
     });
   }
 
@@ -137,7 +133,7 @@ class _SettingsPageState extends State<SettingsPage> {
     } catch (_) {
       if (mounted) {
         setState(() {
-          _appVersion = kBuildAppVersion;
+          _appVersion = '3.2.0';
         });
       }
     }
@@ -194,6 +190,9 @@ class _SettingsPageState extends State<SettingsPage> {
           const Divider(),
           _buildSectionHeader('在线音乐'),
           _buildOnlineMusicSection(colorScheme),
+          const Divider(),
+          _buildSectionHeader('下载'),
+          _buildDownloadSection(colorScheme),
           const Divider(),
           _buildSectionHeader('缓存'),
           _buildCacheSection(colorScheme),
@@ -525,6 +524,73 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  Widget _buildDownloadSection(ColorScheme colorScheme) {
+    return Column(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.download),
+          title: const Text('下载目录'),
+          subtitle: Text(
+            _downloadDir,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 12,
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: _showDownloadDirDialog,
+        ),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            '下载歌曲会保存到此目录并嵌入标题/艺术家/专辑/封面/歌词。\n'
+            '首次下载需要授予「所有文件访问权限」。',
+            style: TextStyle(fontSize: 12, color: Colors.grey),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _showDownloadDirDialog() {
+    final controller = TextEditingController(text: _downloadDir);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('下载目录'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            labelText: '目录绝对路径',
+            hintText: '/storage/emulated/0/Download/MD3Music',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final path = controller.text.trim();
+              if (path.isEmpty) return;
+              await _settingsRepository.setDownloadDir(path);
+              setState(() {
+                _downloadDir = path;
+              });
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCacheSection(ColorScheme colorScheme) {
     return Column(
       children: [
@@ -609,7 +675,7 @@ class _SettingsPageState extends State<SettingsPage> {
       children: [
         ListTile(
           title: const Text('应用版本'),
-          subtitle: Text(_appVersion.isEmpty ? kBuildAppVersion : _appVersion),
+          subtitle: Text(_appVersion.isEmpty ? '3.2.0' : _appVersion),
           leading: const Icon(Icons.info_outline),
         ),
         ListTile(
@@ -626,7 +692,7 @@ class _SettingsPageState extends State<SettingsPage> {
             showLicensePage(
               context: context,
               applicationName: 'MD3Music',
-              applicationVersion: _appVersion.isEmpty ? kBuildAppVersion : _appVersion,
+              applicationVersion: _appVersion.isEmpty ? '3.2.0' : _appVersion,
             );
           },
         ),

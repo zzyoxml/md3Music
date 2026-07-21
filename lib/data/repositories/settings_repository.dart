@@ -10,6 +10,21 @@ class SettingsRepository {
   static const String _keyAutoReceiveVip = 'settings_auto_receive_vip';
   static const String _keyApiServerUrl = 'settings_api_server_url';
   static const String _keySignedDays = 'settings_signed_days';
+  static const String _keyDownloadDir = 'settings_download_dir';
+
+  /// 下载目录默认值：系统 Downloads 下的 MD3Music 子目录。
+  /// 用户可在设置页修改为任意路径，但写入受 MANAGE_EXTERNAL_STORAGE 权限限制。
+  static const String defaultDownloadDir = '/storage/emulated/0/Download/MD3Music';
+
+  Future<String> getDownloadDir() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_keyDownloadDir) ?? defaultDownloadDir;
+  }
+
+  Future<void> setDownloadDir(String path) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyDownloadDir, path);
+  }
 
   /// 读取本地打卡日期集合（格式 yyyy-MM-dd）
   Future<Set<String>> getSignedDays() async {
