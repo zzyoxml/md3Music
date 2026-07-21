@@ -355,6 +355,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         children: [
           Expanded(child: _pages[_selectedIndex]),
           const MiniPlayer(),
+        ],
+      ),
     );
   }
 
