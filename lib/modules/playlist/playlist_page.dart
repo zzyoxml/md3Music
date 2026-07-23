@@ -47,6 +47,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
 
+  // 定位正在播放歌曲
+  String? _highlightSongId;
+
   /// 顶栏渐变 ScrollController：监听 CustomScrollView 滚动 offset，
   /// 用于 SliverAppBar pinned 后 fade-in 显示歌单名称
   final ScrollController _scrollController = ScrollController();
@@ -127,6 +130,32 @@ class _PlaylistPageState extends State<PlaylistPage> {
         });
       }
     });
+  }
+
+  void _scrollToPlayingSong() {
+    final player = context.read<PlayerProvider>();
+    final currentSong = player.currentSong;
+    if (currentSong == null) return;
+
+    final displayList = _displaySongs;
+    final index = displayList.indexWhere((s) => s.id == currentSong.id);
+    if (index == -1) return;
+
+    // 高亮提示
+    setState(() => _highlightSongId = currentSong.id);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _highlightSongId = null);
+    });
+
+    // 使用 SliverChildBuilderDelegate 的 key 来定位并滚动
+    // 通过 ScrollController 滚动到大致位置（每项约 72px 高度）
+    const itemHeight = 72.0;
+    final targetOffset = index * itemHeight;
+    _scrollController.animateTo(
+      targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   // ==================== 收藏本地缓存（解决后端 user/playlist 列表 ~1-2 分钟缓存才同步的问题）====================
@@ -472,6 +501,12 @@ class _PlaylistPageState extends State<PlaylistPage> {
                               onPressed: _toggleSearch,
                             ),
                           if (_songs.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.my_location),
+                              onPressed: _scrollToPlayingSong,
+                              tooltip: '定位正在播放',
+                            ),
+                          if (_songs.isNotEmpty)
                             PopupMenuButton<_SortBy>(
                               icon: const Icon(Icons.sort),
                               onSelected: (value) {
@@ -776,15 +811,23 @@ class _PlaylistPageState extends State<PlaylistPage> {
                       ),
                       SliverList(
                         delegate: SliverChildBuilderDelegate((context, index) {
-                          return SongListItem(
-                            song: _displaySongs[index],
-                            onTap: () {
-                              context.read<PlayerProvider>().playOnlinePlaylist(
-                                _displaySongs,
-                                index,
-                              );
-                            },
-                            onMoreTap: () {},
+                          final song = _displaySongs[index];
+                          final isHighlighted = _highlightSongId == song.id;
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            color: isHighlighted
+                                ? colorScheme.primaryContainer.withValues(alpha: 0.5)
+                                : Colors.transparent,
+                            child: SongListItem(
+                              song: song,
+                              onTap: () {
+                                context.read<PlayerProvider>().playOnlinePlaylist(
+                                  _displaySongs,
+                                  index,
+                                );
+                              },
+                              onMoreTap: () {},
+                            ),
                           );
                         }, childCount: _displaySongs.length),
                       ),
