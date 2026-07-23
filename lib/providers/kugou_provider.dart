@@ -516,6 +516,16 @@ class KugouProvider extends ChangeNotifier {
     }
   }
 
+  Future<KugouCommentList?> getAlbumComments(String albumId, {int page = 1}) async {
+    _error = null;
+    try {
+      return await _apiClient.getAlbumComments(albumId, page: page);
+    } catch (e) {
+      _error = e.toString();
+      return null;
+    }
+  }
+
   Future<void> getSongDetail(String hash) async {
     _beginLoading();
     _error = null;

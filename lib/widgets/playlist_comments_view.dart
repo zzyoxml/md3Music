@@ -4,11 +4,14 @@ import 'package:provider/provider.dart';
 import '../providers/kugou_provider.dart';
 import '../services/kugou_api/kugou_models.dart';
 
-/// 歌单评论列表视图。
+/// 歌单/专辑评论列表视图。
 ///
-/// 在 PlaylistPage 中展示歌单的评论，支持加载更多。
+/// 在 PlaylistPage / AlbumDetailPage 中展示评论，支持加载更多。
 class PlaylistCommentsView extends StatefulWidget {
   final String specialId;
+
+  /// 评论类型：'playlist' 或 'album'
+  final String commentType;
 
   /// 外部传入的 ScrollController（如 DraggableScrollableSheet），
   /// 传入后评论列表使用该 controller，使外部可控制滚动。
@@ -17,6 +20,7 @@ class PlaylistCommentsView extends StatefulWidget {
   const PlaylistCommentsView({
     super.key,
     required this.specialId,
+    this.commentType = 'playlist',
     this.scrollController,
   });
 
@@ -84,10 +88,18 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
     });
 
     final kugouProvider = context.read<KugouProvider>();
-    final result = await kugouProvider.getPlaylistComments(
-      widget.specialId,
-      page: 1,
-    );
+    KugouCommentList? result;
+    if (widget.commentType == 'album') {
+      result = await kugouProvider.getAlbumComments(
+        widget.specialId,
+        page: 1,
+      );
+    } else {
+      result = await kugouProvider.getPlaylistComments(
+        widget.specialId,
+        page: 1,
+      );
+    }
 
     if (mounted) {
       setState(() {
@@ -111,10 +123,18 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
     setState(() => _isLoadingMore = true);
 
     final kugouProvider = context.read<KugouProvider>();
-    final result = await kugouProvider.getPlaylistComments(
-      widget.specialId,
-      page: _currentPage + 1,
-    );
+    KugouCommentList? result;
+    if (widget.commentType == 'album') {
+      result = await kugouProvider.getAlbumComments(
+        widget.specialId,
+        page: _currentPage + 1,
+      );
+    } else {
+      result = await kugouProvider.getPlaylistComments(
+        widget.specialId,
+        page: _currentPage + 1,
+      );
+    }
 
     if (mounted) {
       setState(() {

@@ -141,6 +141,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                 Expanded(
                   child: PlaylistCommentsView(
                     specialId: widget.album.id,
+                    commentType: 'album',
                     scrollController: scrollController,
                   ),
                 ),
