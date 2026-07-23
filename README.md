@@ -2,8 +2,8 @@
 
 <div align="center">
 
-基于酷狗音乐 API 的 Flutter 音乐播放器，采用 Material Design 3 设计规范。
-**内置 Node.js 服务器 + 云端 API (networkapi)**。
+基于酷狗音乐 API 的 Flutter 音乐播放器，采用 Material Design 3 设计规范，自带本地 Node.js 服务。
+支持手机/平板自适应，提供 Apple Music 风格播放页与逐字歌词。
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.12+-02569B?logo=flutter)](https://flutter.dev)
 [![Platform](https://img.shields.io/badge/Platform-Android-green)]()
@@ -85,29 +85,34 @@
 ### 🎧 播放体验
 - **多音质选择** - 标准(128k)、高质(320k)、无损(FLAC)
 - **循环模式** - 单曲循环、列表循环、随机播放
-- **逐字歌词** - KRC/LRC/纯文本歌词解析与实时滚动显示
+- **播放进度记忆** - 退出或被清理后恢复上次位置与列表，冷启动不会自动出声
+- **进度条高潮标记** - 进度条上高亮副歌区间，便于快速跳转
+- **拖动暂停** - 拖动进度条时自动暂停，松手后恢复，定位更准确
+- **逐字歌词** - KRC/LRC/纯文本歌词解析与实时滚动显示，支持 offset
 - **Lyricon 歌词** - 扩展歌词格式支持
+- **桌面歌词** - 桌面悬浮歌词展示
 - **频谱动画** - 播放中动态频谱可视化标识
-- **桌面歌词** - 桌面歌词展示功能
-- **后台播放** - Android 后台播放通知
-- **状态栏控制** - 上一曲/下一曲/播放暂停/进度拖动
+- **后台播放** - Android 后台播放通知与状态栏控制
+- **音频焦点** - 耳机拔出、来电等场景自动暂停与恢复
 
 ### 📱 用户中心
 - **VIP 签到** - 自动领取 VIP 特权
 - **我的收藏** - 本地收藏 + 云端同步
 - **播放历史** - 自动记录播放记录
-- **下载管理** - 后台下载，离线播放
+- **下载管理** - 后台下载、写入封面/歌词元数据、支持自定义目录
 
 ### ⚙️ 设置功能
 - **一键清理缓存** - 快速清理应用缓存
 - **深色模式** - 浅色/深色/跟随系统/OLED 纯黑
 - **主题色选择** - 预设种子色面板，动态主题色切换
+- **设备模式** - 自动/手机/平板手动切换，播放器与列表按模式适配
 
 ### 🎨 设计风格
 - **Material Design 3** - 最新 MD3 设计规范
-- **动态颜色主题** - 基于 Seed Color 动态配色
+- **Apple Music 风格** - 模糊封面背景 + 弹簧动画 + 逐字歌词
+- **动态颜色主题** - 基于 Seed Color 动态配色，支持莫奈色（Android 12+）
 - **滚动感知 AppBar** - 页面滚动时顶栏渐变效果
-- **响应式布局** - 手机/平板/桌面自适应
+- **响应式布局** - 手机/平板自适应，横屏沉浸播放
 
 ---
 
@@ -255,12 +260,12 @@ md3Music/
 │   ├── app.dart                # 主应用组件
 │   ├── core/                   # 核心模块
 │   │   ├── layout/             # 响应式布局
-│   │   ├── services/           # 平台服务
+│   │   ├── services/           # 平台服务（音频/桌面歌词/Lyricon/通知）
 │   │   ├── theme/              # 主题配置
 │   │   └── utils/              # 工具类
 │   ├── data/                   # 数据层
 │   │   ├── models/             # 数据模型
-│   │   └── repositories/       # 数据仓库
+│   │   └── repositories/       # 数据仓库（设置/收藏/历史/下载）
 │   ├── modules/                # 功能模块
 │   │   ├── discover/           # 发现页
 │   │   ├── charts/             # 排行榜
@@ -269,8 +274,9 @@ md3Music/
 │   │   ├── user/               # 用户中心
 │   │   └── settings/           # 设置
 │   ├── providers/              # 状态管理
-│   ├── services/               # API 服务
+│   ├── services/               # API 服务（元数据写入/下载管理）
 │   └── widgets/                # 公共组件
+│       └── apple_lyrics/       # Apple Music 风格歌词
 ├── kugou_api_server/           # Node.js API 服务器源代码
 │   ├── index.js                # 服务器入口
 │   ├── module/                 # API 模块
@@ -301,12 +307,14 @@ md3Music/
 |------|------|
 | **UI 框架** | Flutter 3.12+ |
 | **状态管理** | Provider |
-| **音频播放** | just_audio |
+| **音频播放** | just_audio + just_audio_background |
 | **网络请求** | Dio |
 | **本地存储** | SharedPreferences + SQLite |
 | **图片缓存** | cached_network_image |
 | **嵌入式服务器** | nodejs-mobile (Node.js 18) |
 | **服务器打包** | esbuild |
+| **元数据写入** | JAudioTagger (MP3/FLAC/M4A) |
+| **桌面歌词** | Lyricon Provider |
 | **音乐源** | 酷狗音乐 API |
 | **云端登录** | networkapi (Node.js) |
 
@@ -395,6 +403,7 @@ node index.js
 - [EchoMusic](https://github.com/hoowhoami/EchoMusic) - UI 设计和架构参考
 - [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) - API 代理服务
 - [nodejs-mobile](https://github.com/janeasystems/nodejs-mobile) - 嵌入式 Node.js 框架
+- [JAudioTagger](https://www.jthink.net/jaudiotagger/) - 音频元数据读写
 
 ---
 
