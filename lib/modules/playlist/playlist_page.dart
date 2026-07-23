@@ -27,6 +27,8 @@ class PlaylistPage extends StatefulWidget {
   State<PlaylistPage> createState() => _PlaylistPageState();
 }
 
+enum _SortBy { time, title, duration }
+
 class _PlaylistPageState extends State<PlaylistPage> {
   bool _isLoading = true;
   List<Song> _songs = [];
@@ -34,6 +36,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
   // 普通歌单（发现/热门/排行榜）的红心收藏状态
   bool _isCollected = false;
   String? _collectedListId;
+
+  // 排序
+  _SortBy _sortBy = _SortBy.time;
+  bool _sortAscending = false; // 默认降序（最新在前 / Z→A / 长→短）
 
   // 歌单内搜索
   bool _isSearching = false;
@@ -76,15 +82,36 @@ class _PlaylistPageState extends State<PlaylistPage> {
     }
   }
 
-  /// 当前显示的歌曲列表（根据搜索关键词过滤）
+  /// 当前显示的歌曲列表（根据搜索关键词过滤 + 排序）
   List<Song> get _displaySongs {
-    if (_searchQuery.isEmpty) return _songs;
-    final q = _searchQuery.toLowerCase();
-    return _songs.where((s) {
-      return s.title.toLowerCase().contains(q) ||
-          s.artist.toLowerCase().contains(q) ||
-          (s.album?.toLowerCase().contains(q) ?? false);
-    }).toList();
+    List<Song> list;
+    if (_searchQuery.isEmpty) {
+      list = List.of(_songs);
+    } else {
+      final q = _searchQuery.toLowerCase();
+      list = _songs.where((s) {
+        return s.title.toLowerCase().contains(q) ||
+            s.artist.toLowerCase().contains(q) ||
+            (s.album?.toLowerCase().contains(q) ?? false);
+      }).toList();
+    }
+    list.sort((a, b) {
+      int cmp;
+      switch (_sortBy) {
+        case _SortBy.time:
+          // API 原始顺序：索引越小越早添加
+          cmp = _songs.indexOf(a).compareTo(_songs.indexOf(b));
+          break;
+        case _SortBy.title:
+          cmp = a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
+          break;
+        case _SortBy.duration:
+          cmp = a.duration.compareTo(b.duration);
+          break;
+      }
+      return _sortAscending ? cmp : -cmp;
+    });
+    return list;
   }
 
   void _toggleSearch() {
@@ -443,6 +470,76 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                 _isSearching ? Icons.close : Icons.search,
                               ),
                               onPressed: _toggleSearch,
+                            ),
+                          if (_songs.isNotEmpty)
+                            PopupMenuButton<_SortBy>(
+                              icon: const Icon(Icons.sort),
+                              onSelected: (value) {
+                                setState(() {
+                                  if (_sortBy == value) {
+                                    _sortAscending = !_sortAscending;
+                                  } else {
+                                    _sortBy = value;
+                                    _sortAscending = value == _SortBy.time ? false : true;
+                                  }
+                                });
+                              },
+                              itemBuilder: (context) => [
+                                CheckedPopupMenuItem<_SortBy>(
+                                  value: _SortBy.time,
+                                  checked: _sortBy == _SortBy.time,
+                                  child: Row(
+                                    children: [
+                                      const Text('添加时间'),
+                                      if (_sortBy == _SortBy.time) ...[
+                                        const Spacer(),
+                                        Icon(
+                                          _sortAscending
+                                              ? Icons.arrow_upward
+                                              : Icons.arrow_downward,
+                                          size: 16,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                CheckedPopupMenuItem<_SortBy>(
+                                  value: _SortBy.title,
+                                  checked: _sortBy == _SortBy.title,
+                                  child: Row(
+                                    children: [
+                                      const Text('歌曲名称'),
+                                      if (_sortBy == _SortBy.title) ...[
+                                        const Spacer(),
+                                        Icon(
+                                          _sortAscending
+                                              ? Icons.arrow_upward
+                                              : Icons.arrow_downward,
+                                          size: 16,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                CheckedPopupMenuItem<_SortBy>(
+                                  value: _SortBy.duration,
+                                  checked: _sortBy == _SortBy.duration,
+                                  child: Row(
+                                    children: [
+                                      const Text('时长'),
+                                      if (_sortBy == _SortBy.duration) ...[
+                                        const Spacer(),
+                                        Icon(
+                                          _sortAscending
+                                              ? Icons.arrow_upward
+                                              : Icons.arrow_downward,
+                                          size: 16,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                         ],
                         // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示歌单名称
