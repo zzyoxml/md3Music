@@ -72,10 +72,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
     super.initState();
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // 只有普通歌单才需要查收藏状态。「我收藏」里进来的歌单跳过。
-      if (!widget.isInMyFavorites) {
-        _checkCollected();
-      }
+      _checkCollected();
       _fetchSongs();
     });
   }
@@ -163,6 +160,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
   }
 
   void _showCommentsSheet(BuildContext context) {
+    // 收藏歌单使用 listCreateGid 作为评论 ID（原始歌单的 global_collection_id）
+    final commentId = widget.playlist.listCreateGid ?? widget.playlist.id;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -220,7 +219,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                 // 评论列表（使用 DraggableScrollableSheet 的 controller 实现拖拽扩展）
                 Expanded(
                   child: PlaylistCommentsView(
-                    specialId: widget.playlist.id,
+                    specialId: commentId,
                     scrollController: scrollController,
                   ),
                 ),
@@ -234,11 +233,21 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   // ==================== 收藏本地缓存（解决后端 user/playlist 列表 ~1-2 分钟缓存才同步的问题）====================
 
-  /// 查询当前歌单是否已被收藏（仅供普通歌单「发现/热门/排行榜」用）。
-  /// 「我收藏」里点进来的歌单本身已是已收藏状态，不需要再查。
+  /// 查询当前歌单是否已被收藏。
+  /// 「我收藏」里点进来的歌单本身已是已收藏状态，直接标记为已收藏。
   Future<void> _checkCollected() async {
     final api = KugouApiClient();
     if (!api.isLoggedIn) return;
+
+    // 「我收藏」里的歌单直接标记为已收藏
+    if (widget.isInMyFavorites) {
+      if (mounted) {
+        setState(() {
+          _isCollected = true;
+        });
+      }
+      return;
+    }
 
     // 1) 本地缓存优先：即时显示红心，不再等后端 1~2 分钟的缓存
     final cached = await CollectedPlaylistStore.getListId(widget.playlist.id);
@@ -963,23 +972,22 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              // 红心收藏按钮：仅在「发现/热门歌单」等普通歌单显示
-                              // （「我的收藏」里的歌单已是已收藏状态，外部「我的收藏」页有批量删除，
-                              // 不需要再展示冗余的红心按钮）。
-                              if (!widget.isInMyFavorites)
-                                IconButton.filledTonal(
-                                  onPressed: _isCollected
-                                      ? _uncollectPlaylist
-                                      : _collectPlaylist,
-                                  icon: Icon(
-                                    _isCollected
-                                        ? Icons.favorite
-                                        : Icons.favorite_border,
-                                    color: _isCollected
-                                        ? colorScheme.error
-                                        : null,
-                                  ),
+                              // 红心收藏按钮：始终显示，支持收藏/取消收藏
+                              IconButton.filledTonal(
+                                onPressed: widget.isInMyFavorites
+                                    ? _uncollectPlaylist
+                                    : (_isCollected
+                                        ? _uncollectPlaylist
+                                        : _collectPlaylist),
+                                icon: Icon(
+                                  widget.isInMyFavorites || _isCollected
+                                      ? Icons.favorite
+                                      : Icons.favorite_border,
+                                  color: widget.isInMyFavorites || _isCollected
+                                      ? colorScheme.error
+                                      : null,
                                 ),
+                              ),
                             ],
                           ),
                         ),
