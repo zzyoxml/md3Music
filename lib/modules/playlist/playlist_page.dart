@@ -217,10 +217,11 @@ class _PlaylistPageState extends State<PlaylistPage> {
                   ),
                 ),
                 Divider(height: 1, color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
-                // 评论列表
+                // 评论列表（使用 DraggableScrollableSheet 的 controller 实现拖拽扩展）
                 Expanded(
                   child: PlaylistCommentsView(
                     specialId: widget.playlist.id,
+                    scrollController: scrollController,
                   ),
                 ),
               ],

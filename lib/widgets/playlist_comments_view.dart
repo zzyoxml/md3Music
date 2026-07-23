@@ -10,9 +10,14 @@ import '../services/kugou_api/kugou_models.dart';
 class PlaylistCommentsView extends StatefulWidget {
   final String specialId;
 
+  /// 外部传入的 ScrollController（如 DraggableScrollableSheet），
+  /// 传入后评论列表使用该 controller，使外部可控制滚动。
+  final ScrollController? scrollController;
+
   const PlaylistCommentsView({
     super.key,
     required this.specialId,
+    this.scrollController,
   });
 
   @override
@@ -26,11 +31,17 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
   String? _error;
   int _currentPage = 1;
   bool _hasMore = true;
-  final ScrollController _scrollController = ScrollController();
+  ScrollController? _internalScrollController;
+
+  ScrollController get _scrollController =>
+      widget.scrollController ?? _internalScrollController!;
 
   @override
   void initState() {
     super.initState();
+    if (widget.scrollController == null) {
+      _internalScrollController = ScrollController();
+    }
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchComments();
@@ -39,7 +50,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _scrollController.removeListener(_onScroll);
+    _internalScrollController?.dispose();
     super.dispose();
   }
 
