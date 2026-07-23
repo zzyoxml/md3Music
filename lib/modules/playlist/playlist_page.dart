@@ -765,16 +765,38 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                       duration: const Duration(milliseconds: 250),
                                       curve: Curves.easeInOut,
                                       alignment: Alignment.topCenter,
-                                      clipBehavior: Clip.hardEdge,
-                                      child: Text(
-                                        displayPlaylist.description!,
-                                        maxLines: _isDescriptionExpanded ? null : 2,
-                                        overflow: _isDescriptionExpanded
-                                            ? null
-                                            : TextOverflow.ellipsis,
-                                        style: textTheme.bodyMedium?.copyWith(
-                                          color: colorScheme.onSurfaceVariant,
-                                          height: 1.5,
+                                      clipBehavior: Clip.none,
+                                      child: ShaderMask(
+                                        shaderCallback: (Rect bounds) {
+                                          if (_isDescriptionExpanded) {
+                                            return const LinearGradient(
+                                              begin: Alignment.topCenter,
+                                              end: Alignment.bottomCenter,
+                                              colors: [Colors.white, Colors.white],
+                                            ).createShader(bounds);
+                                          }
+                                          return LinearGradient(
+                                            begin: Alignment.topCenter,
+                                            end: Alignment.bottomCenter,
+                                            colors: [
+                                              Colors.white,
+                                              Colors.white,
+                                              Colors.white.withValues(alpha: 0.0),
+                                            ],
+                                            stops: const [0.0, 0.7, 1.0],
+                                          ).createShader(bounds);
+                                        },
+                                        blendMode: BlendMode.dstIn,
+                                        child: Text(
+                                          displayPlaylist.description!,
+                                          maxLines: _isDescriptionExpanded ? null : 2,
+                                          overflow: _isDescriptionExpanded
+                                              ? null
+                                              : TextOverflow.ellipsis,
+                                          style: textTheme.bodyMedium?.copyWith(
+                                            color: colorScheme.onSurfaceVariant,
+                                            height: 1.5,
+                                          ),
                                         ),
                                       ),
                                     ),
