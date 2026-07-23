@@ -194,11 +194,15 @@ class _FavoritesPageState extends State<FavoritesPage>
       if (result != null) {
         final data = result['data'];
         List<dynamic>? list;
-        if (data is List) {
-          list = data;
-        } else if (data is Map<String, dynamic>) {
-          list = data['info'] as List<dynamic>?;
+
+        // API 返回格式: {data: {total: N, lists: [...]}}
+        if (data is Map<String, dynamic>) {
+          list = data['lists'] as List<dynamic>?;
+          list ??= data['info'] as List<dynamic>?;
           list ??= data['list'] as List<dynamic>?;
+          list ??= data['fans'] as List<dynamic>?;
+        } else if (data is List) {
+          list = data;
         }
 
         if (list != null && list.isNotEmpty) {
@@ -211,6 +215,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       }
       setState(() => _isLoadingArtists = false);
     } catch (e) {
+      debugPrint('[Follow] Error: $e');
       if (mounted) setState(() => _isLoadingArtists = false);
     }
   }
