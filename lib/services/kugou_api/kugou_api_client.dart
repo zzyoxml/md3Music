@@ -1112,7 +1112,7 @@ class KugouApiClient {
   }) async {
     final json = await _get(
       KugouEndpoints.commentAlbum,
-      queryParameters: {'album_id': albumId, 'page': page},
+      queryParameters: {'id': albumId, 'page': page},
     );
     if (json == null) return null;
     try {
