@@ -35,6 +35,9 @@ class _FavoritesPageState extends State<FavoritesPage>
   List<Map<String, dynamic>> _artists = [];
   bool _isLoadingArtists = true;
 
+  // 专辑原始 global_collection_id 映射
+  final Map<String, String> _albumOriginalIds = {};
+
   // 分组折叠状态
   bool _createdExpanded = true;
   bool _collectedExpanded = true;
@@ -161,24 +164,52 @@ class _FavoritesPageState extends State<FavoritesPage>
         }
 
         if (list != null && list.isNotEmpty) {
+          final albums = list!
+              .where((e) {
+                final json = e as Map<String, dynamic>;
+                final type = json['type'] as int? ?? 0;
+                final source = json['source'] as int? ?? 0;
+                return type == 1 && source == 2;
+              })
+              .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
+              .toList();
           setState(() {
-            _albums = list!
-                .where((e) {
-                  final json = e as Map<String, dynamic>;
-                  final type = json['type'] as int? ?? 0;
-                  final source = json['source'] as int? ?? 0;
-                  return type == 1 && source == 2;
-                })
-                .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
-                .toList();
+            _albums = albums;
             _isLoadingAlbums = false;
           });
+          // 并发获取每个专辑的原始 global_collection_id
+          _fetchAlbumGlobalIds(albums);
           return;
         }
       }
       setState(() => _isLoadingAlbums = false);
     } catch (e) {
       if (mounted) setState(() => _isLoadingAlbums = false);
+    }
+  }
+
+  /// 通过搜索 API 获取每个专辑的原始 global_collection_id
+  Future<void> _fetchAlbumGlobalIds(List<KugouPlaylistBrief> albums) async {
+    final api = KugouApiClient();
+    for (final album in albums) {
+      try {
+        final searchResult = await api.search(album.name, type: 'album');
+        if (!mounted) return;
+        if (searchResult != null && searchResult.albums.isNotEmpty) {
+          for (final found in searchResult.albums) {
+            if (found.name == album.name && found.globalCollectionId != null) {
+              if (mounted) {
+                setState(() {
+                  _albumOriginalIds[album.id] = found.globalCollectionId!;
+                });
+              }
+              break;
+            }
+          }
+        }
+      } catch (e) {
+        // 忽略搜索错误
+      }
     }
   }
 
@@ -624,6 +655,8 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildAlbumTile(KugouPlaylistBrief album) {
     final colorScheme = Theme.of(context).colorScheme;
+    // 优先使用搜索到的原始 global_collection_id
+    final originalId = _albumOriginalIds[album.id] ?? album.numericId;
 
     return InkWell(
       onTap: () {
@@ -635,7 +668,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               playlist: album.toPlaylist(),
               isInMyFavorites: true,
               isAlbum: true,
-              albumGlobalCollectionId: album.numericId, // 使用数字 album ID
+              albumGlobalCollectionId: originalId,
             ),
           ),
         );
