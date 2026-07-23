@@ -138,6 +138,7 @@ class KugouAlbumBrief {
   final String? coverUrl;
   final String? artistName;
   final String? globalCollectionId;
+  final String? numericId;
 
   const KugouAlbumBrief({
     required this.id,
@@ -145,6 +146,7 @@ class KugouAlbumBrief {
     this.coverUrl,
     this.artistName,
     this.globalCollectionId,
+    this.numericId,
   });
 
   factory KugouAlbumBrief.fromJson(Map<String, dynamic> json) {
@@ -177,12 +179,13 @@ class KugouAlbumBrief {
             json['author_name'],
       ),
       globalCollectionId: _strNull(json['global_collection_id'] ?? json['gid']),
+      numericId: _strNull(json['albumid'] ?? json['album_id'] ?? json['AlbumID']),
     );
   }
 
   Album toAlbum() {
     return Album(
-      id: id,
+      id: numericId ?? id,
       name: name,
       artist: artistName ?? '',
       artworkUri: coverUrl,
@@ -198,6 +201,7 @@ class KugouPlaylistBrief {
   final String? coverUrl;
   final int songCount;
   final String? globalCollectionId;
+  final String? numericId;
   final String listId;
   final String? listCreateUserid;
   final String? listCreateListid;
@@ -212,6 +216,7 @@ class KugouPlaylistBrief {
     this.coverUrl,
     this.songCount = 0,
     this.globalCollectionId,
+    this.numericId,
     this.listId = '',
     this.listCreateUserid,
     this.listCreateListid,
@@ -238,6 +243,7 @@ class KugouPlaylistBrief {
         json['songcount'] ?? json['song_count'] ?? json['count'] ?? 0,
       ),
       globalCollectionId: _strNull(json['global_collection_id'] ?? json['gid']),
+      numericId: _strNull(json['specialid'] ?? json['albumid'] ?? json['album_id']),
       listId: listid,
       listCreateUserid: _strNull(json['list_create_userid']),
       listCreateListid: _strNull(json['list_create_listid']) ?? listid,

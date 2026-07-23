@@ -635,7 +635,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               playlist: album.toPlaylist(),
               isInMyFavorites: true,
               isAlbum: true,
-              albumGlobalCollectionId: album.id, // 使用数字 album ID
+              albumGlobalCollectionId: album.numericId, // 使用数字 album ID
             ),
           ),
         );
