@@ -634,6 +634,7 @@ class _FavoritesPageState extends State<FavoritesPage>
             builder: (context) => PlaylistPage(
               playlist: album.toPlaylist(),
               isInMyFavorites: true,
+              isAlbum: true,
             ),
           ),
         );

@@ -17,11 +17,14 @@ class PlaylistPage extends StatefulWidget {
   final Playlist playlist;
   // 「我收藏」里的歌单：本身已是已收藏状态，不显示红心收藏按钮。
   final bool isInMyFavorites;
+  // 是否为专辑（用于评论类型判断）
+  final bool isAlbum;
 
   const PlaylistPage({
     super.key,
     required this.playlist,
     this.isInMyFavorites = false,
+    this.isAlbum = false,
   });
 
   @override
@@ -189,7 +192,11 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   void _showCommentsSheet(BuildContext context) {
     // 收藏歌单使用 listCreateGid 作为评论 ID（原始歌单的 global_collection_id）
-    final commentId = widget.playlist.listCreateGid ?? widget.playlist.id;
+    // 专辑使用专辑 ID
+    final commentId = widget.isAlbum
+        ? widget.playlist.id
+        : (widget.playlist.listCreateGid ?? widget.playlist.id);
+    final commentType = widget.isAlbum ? 'album' : 'playlist';
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -248,6 +255,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                 Expanded(
                   child: PlaylistCommentsView(
                     specialId: commentId,
+                    commentType: commentType,
                     scrollController: scrollController,
                   ),
                 ),
