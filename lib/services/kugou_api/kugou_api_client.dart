@@ -1561,7 +1561,7 @@ class KugouApiClient {
     final json = await _get(
       KugouEndpoints.artistAudios,
       queryParameters: {
-        'singerid': artistId,
+        'id': artistId,
         'page': page,
         'pagesize': pagesize,
       },

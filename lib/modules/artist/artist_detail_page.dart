@@ -71,9 +71,19 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     }
   }
 
+  /// 将 http:// URL 转换为 https://
+  String? _fixImageUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    if (url.startsWith('http://')) {
+      return url.replaceFirst('http://', 'https://');
+    }
+    return url;
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final avatarUrl = _fixImageUrl(widget.avatarUrl);
 
     return Scaffold(
       body: _isLoading
@@ -104,10 +114,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                             ),
                           ),
                           child: Center(
-                            child: widget.avatarUrl != null
+                            child: avatarUrl != null
                                 ? ClipOval(
                                     child: CachedNetworkImage(
-                                      imageUrl: widget.avatarUrl!,
+                                      imageUrl: avatarUrl,
                                       width: 120,
                                       height: 120,
                                       fit: BoxFit.cover,

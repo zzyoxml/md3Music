@@ -754,10 +754,21 @@ class _FavoritesPageState extends State<FavoritesPage>
     );
   }
 
+  /// 将 http:// URL 转换为 https://
+  String? _fixImageUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    if (url.startsWith('http://')) {
+      return url.replaceFirst('http://', 'https://');
+    }
+    return url;
+  }
+
   Widget _buildArtistTile(Map<String, dynamic> artist) {
     final colorScheme = Theme.of(context).colorScheme;
     final name = artist['nickname'] ?? artist['user_name'] ?? artist['name'] ?? '';
-    final avatar = artist['user_pic'] ?? artist['user_img'] ?? artist['avatar'];
+    final avatar = _fixImageUrl(
+      (artist['pic'] ?? artist['user_pic'] ?? artist['user_img'] ?? artist['avatar'])?.toString(),
+    );
     final id = artist['userid'] ?? artist['id'] ?? '';
 
     return InkWell(
@@ -768,7 +779,7 @@ class _FavoritesPageState extends State<FavoritesPage>
             builder: (context) => ArtistDetailPage(
               artistId: id.toString(),
               artistName: name.toString(),
-              avatarUrl: avatar?.toString(),
+              avatarUrl: avatar,
             ),
           ),
         );
@@ -781,7 +792,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               radius: 26,
               backgroundColor: colorScheme.surfaceContainerHighest,
               backgroundImage: avatar != null
-                  ? CachedNetworkImageProvider(avatar.toString())
+                  ? CachedNetworkImageProvider(avatar)
                   : null,
               child: avatar == null
                   ? Icon(
