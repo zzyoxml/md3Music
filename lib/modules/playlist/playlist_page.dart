@@ -10,6 +10,7 @@ import '../../providers/player_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../widgets/song_list_item.dart';
+import '../../widgets/playlist_comments_view.dart';
 import '../player/mini_player.dart';
 
 class PlaylistPage extends StatefulWidget {
@@ -52,6 +53,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   // 歌单介绍展开/折叠
   bool _isDescriptionExpanded = false;
+
+  // 歌单评论展开/折叠
+  bool _isCommentsExpanded = false;
 
   /// 顶栏渐变 ScrollController：监听 CustomScrollView 滚动 offset，
   /// 用于 SliverAppBar pinned 后 fade-in 显示歌单名称
@@ -903,6 +907,20 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                         : null,
                                   ),
                                 ),
+                              const SizedBox(width: 12),
+                              IconButton.filledTonal(
+                                onPressed: () {
+                                  setState(() {
+                                    _isCommentsExpanded = !_isCommentsExpanded;
+                                  });
+                                },
+                                icon: Icon(
+                                  Icons.comment_outlined,
+                                  color: _isCommentsExpanded
+                                      ? colorScheme.primary
+                                      : null,
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -929,6 +947,38 @@ class _PlaylistPageState extends State<PlaylistPage> {
                           );
                         }, childCount: _displaySongs.length),
                       ),
+                      // 歌单评论区域
+                      if (_isCommentsExpanded)
+                        SliverToBoxAdapter(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.comment_outlined,
+                                      size: 18,
+                                      color: colorScheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      '评论',
+                                      style: textTheme.titleSmall?.copyWith(
+                                        color: colorScheme.onSurfaceVariant,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              PlaylistCommentsView(
+                                specialId: widget.playlist.id,
+                              ),
+                            ],
+                          ),
+                        ),
                       // 搜索无结果提示
                       if (_isSearching && _displaySongs.isEmpty && _songs.isNotEmpty)
                         SliverToBoxAdapter(
