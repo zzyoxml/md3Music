@@ -7,6 +7,7 @@ import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
+import '../../widgets/playlist_comments_view.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
 
@@ -81,6 +82,76 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     });
   }
 
+  void _showCommentsSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return Container(
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            child: Column(
+              children: [
+                // 拖动手柄
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // 标题栏
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.comment_outlined,
+                        size: 20,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '评论',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
+                // 评论列表
+                Expanded(
+                  child: PlaylistCommentsView(
+                    specialId: widget.album.id,
+                    scrollController: scrollController,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -111,6 +182,13 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                             )!,
                             surfaceTintColor: Colors.transparent,
                             scrolledUnderElevation: 0,
+                            actions: [
+                              IconButton(
+                                icon: const Icon(Icons.comment_outlined),
+                                onPressed: () => _showCommentsSheet(context),
+                                tooltip: '评论',
+                              ),
+                            ],
                             // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示专辑名称
                             title: Opacity(
                               opacity: ((_scrollOffset - (280 - kToolbarHeight)) /
