@@ -51,22 +51,37 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       final result = await api.getArtistAudios(widget.artistId);
       if (!mounted) return;
 
-      debugPrint('[ArtistDetail] artistId=${widget.artistId}, result=$result');
-
       if (result != null && result.songs.isNotEmpty) {
         setState(() {
           _songs = result.songs.map((s) => s.toSong()).toList();
           _isLoading = false;
         });
+        return;
+      }
+
+      // API 返回空或失败，尝试通过搜索获取该歌手的歌曲
+      final searchResult = await api.search(widget.artistName, type: 'song');
+      if (!mounted) return;
+
+      if (searchResult != null && searchResult.songs.isNotEmpty) {
+        // 过滤出该歌手的歌曲
+        final artistNameLower = widget.artistName.toLowerCase();
+        final artistSongs = searchResult.songs.where((s) {
+          final songArtist = s.artistName?.toLowerCase() ?? '';
+          return songArtist.contains(artistNameLower) ||
+              artistNameLower.contains(songArtist);
+        }).toList();
+        setState(() {
+          _songs = artistSongs.map((s) => s.toSong()).toList();
+          _isLoading = false;
+        });
       } else {
-        // 如果没有歌曲，尝试使用 artist detail 获取更多信息
         setState(() {
           _songs = [];
           _isLoading = false;
         });
       }
     } catch (e) {
-      debugPrint('[ArtistDetail] Error: $e');
       if (mounted) {
         setState(() {
           _error = e.toString();
