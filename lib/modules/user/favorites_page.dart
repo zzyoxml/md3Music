@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -7,6 +8,8 @@ import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
+import '../album/album_detail_page.dart';
+import '../artist/artist_detail_page.dart';
 import '../playlist/playlist_page.dart';
 
 class FavoritesPage extends StatefulWidget {
@@ -16,9 +19,21 @@ class FavoritesPage extends StatefulWidget {
   State<FavoritesPage> createState() => _FavoritesPageState();
 }
 
-class _FavoritesPageState extends State<FavoritesPage> {
+class _FavoritesPageState extends State<FavoritesPage>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+
+  // 歌单
   List<KugouPlaylistBrief> _playlists = [];
   bool _isLoadingPlaylists = true;
+
+  // 专辑
+  List<KugouPlaylistBrief> _albums = [];
+  bool _isLoadingAlbums = true;
+
+  // 歌手
+  List<Map<String, dynamic>> _artists = [];
+  bool _isLoadingArtists = true;
 
   // 分组折叠状态
   bool _createdExpanded = true;
@@ -34,9 +49,9 @@ class _FavoritesPageState extends State<FavoritesPage> {
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _loadPlaylists();
-      // 监听跨页面的「收藏的歌单」变更：歌单详情页收藏/取消收藏后立即刷新
+      _loadAllData();
       context.read<PlaylistCollectionNotifier>().addListener(_onCollectionChanged);
     });
   }
@@ -44,39 +59,35 @@ class _FavoritesPageState extends State<FavoritesPage> {
   @override
   void dispose() {
     context.read<PlaylistCollectionNotifier>().removeListener(_onCollectionChanged);
+    _tabController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  /// 歌单详情页的收藏/取消收藏被通知时，强制无缓存重新拉一次列表
   void _onCollectionChanged() {
     if (!mounted) return;
     _loadPlaylists(forceNoCache: true);
   }
 
+  Future<void> _loadAllData() async {
+    await Future.wait([
+      _loadPlaylists(),
+      _loadAlbums(),
+      _loadArtists(),
+    ]);
+  }
+
   String? get _currentUserId => KugouApiClient().userid;
 
-  /// 判断歌单是否为用户自己创建的
-  /// 优先级：listCreateUserid > type+source > 硬编码名称
   bool _isCreated(KugouPlaylistBrief p) {
     final uid = _currentUserId;
     if (uid == null) return false;
-
-    // 方式1（最可靠）：list_create_userid 有值且匹配当前用户
     if (p.listCreateUserid != null && p.listCreateUserid!.isNotEmpty) {
       return p.listCreateUserid == uid;
     }
-
-    // 方式2：type=0 且 source!=2 的视为自己创建
     if (p.type == 0 && p.source != 2) return true;
-
-    // 方式3：已知系统歌单名
     if (p.name == '我喜欢' || p.name == '默认收藏') return true;
-
-    // listCreateUserid 为空时，type=1 或 source=2 的一定是收藏的
     if (p.type == 1 || p.source == 2) return false;
-
-    // 兜底：listCreateUserid 为空且无法判断时，保守归为收藏的
     return false;
   }
 
@@ -86,13 +97,14 @@ class _FavoritesPageState extends State<FavoritesPage> {
   List<KugouPlaylistBrief> get _collectedPlaylists =>
       _playlists.where((p) => !_isCreated(p)).toList();
 
+  // ==================== 数据加载 ====================
+
   Future<void> _loadPlaylists({bool forceNoCache = false}) async {
     if (!mounted) return;
     setState(() => _isLoadingPlaylists = true);
 
     try {
       final api = KugouApiClient();
-      // 走本地 Node 代理 apicache 缓存 2 分钟；forceNoCache 时带 x-apicache-bypass 头绕过
       final result = await api.getUserPlaylist(pagesize: 50, noCache: forceNoCache);
       if (!mounted) return;
 
@@ -107,20 +119,9 @@ class _FavoritesPageState extends State<FavoritesPage> {
         }
 
         if (list != null && list.isNotEmpty) {
-          // 调试：打印每个歌单的原始字段，帮助确认过滤条件
-          for (final item in list) {
-            final j = item as Map<String, dynamic>;
-            debugPrint(
-              '[Playlist] name=${j['specialname'] ?? j['name']} | '
-              'type=${j['type']} | source=${j['source']} | '
-              'list_create_userid=${j['list_create_userid']} | '
-              'global_collection_id=${j['global_collection_id'] ?? j['gid']}',
-            );
-          }
           setState(() {
             _playlists = list!
                 .where((e) {
-                  // 过滤掉收藏的专辑：type=1 && source=2
                   final json = e as Map<String, dynamic>;
                   final type = json['type'] as int? ?? 0;
                   final source = json['source'] as int? ?? 0;
@@ -136,9 +137,85 @@ class _FavoritesPageState extends State<FavoritesPage> {
       }
       setState(() => _isLoadingPlaylists = false);
     } catch (e) {
-            if (mounted) setState(() => _isLoadingPlaylists = false);
+      if (mounted) setState(() => _isLoadingPlaylists = false);
     }
   }
+
+  Future<void> _loadAlbums() async {
+    if (!mounted) return;
+    setState(() => _isLoadingAlbums = true);
+
+    try {
+      final api = KugouApiClient();
+      final result = await api.getUserPlaylist(pagesize: 50);
+      if (!mounted) return;
+
+      if (result != null) {
+        final data = result['data'];
+        List<dynamic>? list;
+        if (data is List) {
+          list = data;
+        } else if (data is Map<String, dynamic>) {
+          list = data['info'] as List<dynamic>?;
+          list ??= data['list'] as List<dynamic>?;
+        }
+
+        if (list != null && list.isNotEmpty) {
+          setState(() {
+            _albums = list!
+                .where((e) {
+                  final json = e as Map<String, dynamic>;
+                  final type = json['type'] as int? ?? 0;
+                  final source = json['source'] as int? ?? 0;
+                  return type == 1 && source == 2;
+                })
+                .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
+                .toList();
+            _isLoadingAlbums = false;
+          });
+          return;
+        }
+      }
+      setState(() => _isLoadingAlbums = false);
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingAlbums = false);
+    }
+  }
+
+  Future<void> _loadArtists() async {
+    if (!mounted) return;
+    setState(() => _isLoadingArtists = true);
+
+    try {
+      final api = KugouApiClient();
+      final result = await api.getUserFollow();
+      if (!mounted) return;
+
+      if (result != null) {
+        final data = result['data'];
+        List<dynamic>? list;
+        if (data is List) {
+          list = data;
+        } else if (data is Map<String, dynamic>) {
+          list = data['info'] as List<dynamic>?;
+          list ??= data['list'] as List<dynamic>?;
+        }
+
+        if (list != null && list.isNotEmpty) {
+          setState(() {
+            _artists = list!.map((e) => e as Map<String, dynamic>).toList();
+            _isLoadingArtists = false;
+          });
+          return;
+        }
+      }
+      setState(() => _isLoadingArtists = false);
+    } catch (e) {
+      if (mounted) setState(() => _isLoadingArtists = false);
+    }
+  }
+
+  // ==================== 歌单操作 ====================
 
   Future<void> _showCreatePlaylistDialog() async {
     final controller = TextEditingController();
@@ -149,156 +226,176 @@ class _FavoritesPageState extends State<FavoritesPage> {
         content: TextField(
           controller: controller,
           autofocus: true,
-          decoration: const InputDecoration(hintText: '输入歌单名称', border: OutlineInputBorder()),
+          decoration: const InputDecoration(
+            hintText: '输入歌单名称',
+            border: OutlineInputBorder(),
+          ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, controller.text.trim()), child: const Text('确定')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('创建'),
+          ),
         ],
       ),
     );
+
     if (result != null && result.isNotEmpty) {
-      final fav = context.read<FavoritesProvider>();
-      final resp = await fav.createPlaylist(result);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(resp != null ? '创建成功' : '创建失败，请重试'),
-          behavior: SnackBarBehavior.floating,
-        ));
-        // 新建后立即看到新歌单，强制绕过本地代理缓存
-        _loadPlaylists(forceNoCache: true);
-      }
+      final api = KugouApiClient();
+      await api.createPlaylist(result);
+      _loadPlaylists(forceNoCache: true);
     }
-    // 延迟销毁控制器，确保对话框完全关闭后再销毁
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      controller.dispose();
-    });
   }
 
-  // ---- 批量管理 ----
-
-  void _toggleManageMode(bool value) {
+  void _enterManageMode() {
     setState(() {
-      _isManaging = value;
+      _isManaging = true;
       _selectedIndices.clear();
     });
   }
 
-  void _toggleSelection(int index, int totalCreatedCount) {
+  void _exitManageMode() {
     setState(() {
-      if (_selectedIndices.contains(index)) {
-        _selectedIndices.remove(index);
-      } else {
-        _selectedIndices.add(index);
-      }
+      _isManaging = false;
+      _selectedIndices.clear();
     });
   }
 
-  Future<void> _batchDeleteSelected(
-    List<KugouPlaylistBrief> targetList, {
-    int baseIndex = 0,
-  }) async {
+  Future<void> _deleteSelectedPlaylists() async {
+    if (_selectedIndices.isEmpty) return;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('确认删除'),
-        content: Text('确定删除选中的 ${_selectedIndices.length} 个歌单？\n（收藏的歌单将取消收藏）'),
+        content: Text('确定要删除选中的 ${_selectedIndices.length} 个歌单吗？'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('删除')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
         ],
       ),
     );
-    if (confirm != true || !mounted) return;
 
-    final fav = context.read<FavoritesProvider>();
-    final sortedIndices = _selectedIndices.toList()..sort((a, b) => b.compareTo(a));
+    if (confirm != true) return;
 
-    for (final idx in sortedIndices) {
-      final relativeIdx = idx - baseIndex;
-      if (relativeIdx >= 0 && relativeIdx < targetList.length) {
-        final p = targetList[relativeIdx];
-        try {
-          if (_isCreated(p)) {
-            await fav.deletePlaylist(p.listId);
-          } else {
-            // 收藏的歌单：取消收藏，传 type=0
-            await fav.deletePlaylist(p.listId, type: 0);
-            // 同步清除歌单详情页本地收藏缓存，避免重进仍残留红心
-            await CollectedPlaylistStore.remove(p.listCreateGid ?? p.globalCollectionId ?? p.id);
-          }
-        } catch (e) {
-                  }
+    final api = KugouApiClient();
+    for (final index in _selectedIndices) {
+      final playlist = _playlists[index];
+      final listId = playlist.listId;
+      if (listId.isNotEmpty) {
+        await api.deletePlaylist(listId);
       }
     }
 
-    _toggleManageMode(false);
-    // 批量删除（自己创建 / 取消收藏）后立即看到列表变化，强制绕过本地代理缓存
+    _exitManageMode();
     _loadPlaylists(forceNoCache: true);
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('操作完成'),
-        behavior: SnackBarBehavior.floating,
-      ));
-    }
   }
+
+  // ==================== UI构建 ====================
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: ScrollAwareAppBar(
-        title: '我的收藏',
-        scrollController: _scrollController,
+      appBar: AppBar(
+        title: const Text('我的收藏'),
         actions: [
-          if (!_isManaging)
+          if (_isManaging)
+            IconButton(
+              icon: const Icon(Icons.delete),
+              onPressed: _deleteSelectedPlaylists,
+            )
+          else
             IconButton(
               icon: const Icon(Icons.add),
-              tooltip: '新建歌单',
               onPressed: _showCreatePlaylistDialog,
             ),
         ],
+        bottom: TabBar(
+          controller: _tabController,
+          tabs: const [
+            Tab(icon: Icon(Icons.queue_music), text: '歌单'),
+            Tab(icon: Icon(Icons.album), text: '专辑'),
+            Tab(icon: Icon(Icons.person), text: '歌手'),
+          ],
+        ),
       ),
-      body: _buildGroupedPlaylistList(),
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildPlaylistsTab(),
+          _buildAlbumsTab(),
+          _buildArtistsTab(),
+        ],
+      ),
     );
   }
 
-  // ==================== 歌单列表（分组折叠式）====================
+  // ==================== 歌单Tab ====================
 
-  Widget _buildGroupedPlaylistList() {
+  Widget _buildPlaylistsTab() {
     if (_isLoadingPlaylists) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_playlists.isEmpty) return _buildEmpty();
 
-    final created = _createdPlaylists;
-    final collected = _collectedPlaylists;
+    if (_playlists.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.queue_music,
+              size: 64,
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '还没有歌单',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '去发现页找找喜欢的歌单吧',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
 
     return RefreshIndicator(
       onRefresh: () => _loadPlaylists(forceNoCache: true),
       child: ListView(
         controller: _scrollController,
+        padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
-          // 我创建的歌单
-          if (created.isNotEmpty)
+          if (_createdPlaylists.isNotEmpty)
             _buildGroupSection(
               title: '我创建的歌单',
-              count: created.length,
-              isExpanded: _createdExpanded,
-              onToggle: (v) => setState(() => _createdExpanded = v),
-              playlists: created,
-              baseIndex: 0,
+              expanded: _createdExpanded,
+              onToggle: () => setState(() => _createdExpanded = !_createdExpanded),
+              playlists: _createdPlaylists,
             ),
-
-          // 我收藏的歌单
-          if (collected.isNotEmpty)
+          if (_collectedPlaylists.isNotEmpty)
             _buildGroupSection(
               title: '我收藏的歌单',
-              count: collected.length,
-              isExpanded: _collectedExpanded,
-              onToggle: (v) => setState(() => _collectedExpanded = v),
-              playlists: collected,
-              baseIndex: created.length,
+              expanded: _collectedExpanded,
+              onToggle: () => setState(() => _collectedExpanded = !_collectedExpanded),
+              playlists: _collectedPlaylists,
             ),
         ],
       ),
@@ -307,153 +404,411 @@ class _FavoritesPageState extends State<FavoritesPage> {
 
   Widget _buildGroupSection({
     required String title,
-    required int count,
-    required bool isExpanded,
-    required ValueChanged<bool> onToggle,
+    required bool expanded,
+    required VoidCallback onToggle,
     required List<KugouPlaylistBrief> playlists,
-    required int baseIndex,
   }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 分组头部
         InkWell(
-          onTap: () => onToggle(!isExpanded),
+          onTap: onToggle,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Row(
               children: [
-                // 箭头图标加旋转动画
-                AnimatedRotation(
-                  turns: isExpanded ? 0.25 : 0.0,
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOutCubic,
-                  child: const Icon(Icons.chevron_right, size: 22),
+                Icon(
+                  expanded ? Icons.expand_more : Icons.chevron_right,
+                  color: colorScheme.onSurfaceVariant,
+                  size: 20,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                 ),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text(title, style: Theme.of(context).textTheme.titleMedium),
+                Text(
+                  '${playlists.length}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                 ),
-                Text('$count', style: TextStyle(
-                  fontSize: 13,
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                )),
-                const SizedBox(width: 8),
-                // 管理模式下显示「删除 + 取消」，否则只显示「sort」管理按钮
-                if (_isManaging) ...[
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 20),
-                    tooltip: '批量删除',
-                    onPressed: _selectedIndices.isEmpty
-                        ? null
-                        : () => _batchDeleteSelected(playlists, baseIndex: baseIndex),
-                  ),
-                  TextButton(
-                    onPressed: () => _toggleManageMode(false),
-                    child: const Text('取消'),
-                  ),
-                ] else ...[
-                  IconButton(
-                    icon: const Icon(Icons.sort, size: 20),
-                    tooltip: '管理歌单',
-                    onPressed: () => _toggleManageMode(true),
-                  ),
-                ],
               ],
             ),
           ),
         ),
-        Divider(height: 1, indent: 44, color: Theme.of(context).colorScheme.outlineVariant),
-
-        // 用 AnimatedSwitcher + SizeTransition 实现展开/收纳动画：
-        // AnimatedSize 在折叠时 child 立即变空 Column，动画过程无可视内容；
-        // SizeTransition 的 child 始终完整渲染所有 tiles，通过 sizeFactor
-        // 控制可见比例，折叠时 tiles 从顶部向下被裁切消失，展开时反向显现。
-        AnimatedSwitcher(
-          duration: const Duration(milliseconds: 280),
-          switchInCurve: Curves.easeInOutCubic,
-          switchOutCurve: Curves.easeInOutCubic,
-          transitionBuilder: (child, animation) => SizeTransition(
-            sizeFactor: animation,
-            axisAlignment: 1.0, // 顶部对齐，向下展开/向上收起
-            child: child,
+        SizeTransition(
+          sizeFactor: CurvedAnimation(
+            parent: AlwaysStoppedAnimation(expanded ? 1.0 : 0.0),
+            curve: Curves.easeInOut,
           ),
-          child: isExpanded
-              ? Column(
-                  key: const ValueKey('expanded'),
-                  mainAxisSize: MainAxisSize.min,
-                  children: List.generate(playlists.length, (i) {
-                    final playlist = playlists[i];
-                    final idx = baseIndex + i;
-                    final isSelected = _selectedIndices.contains(idx);
-                    return _buildPlaylistTile(
-                        playlist, isSelected, idx, baseIndex);
-                  }),
-                )
-              : const SizedBox.shrink(key: ValueKey('collapsed')),
+          child: Column(
+            children: playlists.map((playlist) {
+              final index = _playlists.indexOf(playlist);
+              return _buildPlaylistTile(playlist, index);
+            }).toList(),
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildPlaylistTile(KugouPlaylistBrief playlist, bool isSelected, int index, int baseIndex) {
-    return ListTile(
-      leading: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_isManaging)
-            Checkbox(
-              value: isSelected,
-              onChanged: (_) => _toggleSelection(index, baseIndex),
-            )
-          else
-            const SizedBox(width: 0),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              width: 48,
-              height: 48,
-              color: Theme.of(context).colorScheme.surfaceContainerHighest,
-              child: playlist.coverUrl != null
-                  ? Image.network(playlist.coverUrl!, fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => Icon(Icons.queue_music,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant))
-                  : Icon(Icons.queue_music,
-                      color: Theme.of(context).colorScheme.onSurfaceVariant),
-            ),
-          ),
-        ],
-      ),
-      title: Text(playlist.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text('${playlist.songCount} 首', style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
-      trailing: _isManaging ? null : const Icon(Icons.chevron_right),
+  Widget _buildPlaylistTile(KugouPlaylistBrief playlist, int index) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final isSelected = _selectedIndices.contains(index);
+
+    return InkWell(
       onTap: _isManaging
-          ? () => _toggleSelection(index, baseIndex)
-          // 复用热门歌单子页的 UI：封面/标题/播放全部/随机播放/左上返回箭头
-          : () => Navigator.of(context).push(
+          ? () {
+              setState(() {
+                if (isSelected) {
+                  _selectedIndices.remove(index);
+                } else {
+                  _selectedIndices.add(index);
+                }
+              });
+            }
+          : () {
+              Navigator.push(
+                context,
                 MaterialPageRoute(
-                  builder: (_) => PlaylistPage(
+                  builder: (context) => PlaylistPage(
                     playlist: playlist.toPlaylist(),
                     isInMyFavorites: true,
                   ),
                 ),
+              );
+            },
+      onLongPress: _isManaging
+          ? null
+          : () {
+              _enterManageMode();
+              setState(() => _selectedIndices.add(index));
+            },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: isSelected ? colorScheme.primaryContainer.withValues(alpha: 0.3) : null,
+        child: Row(
+          children: [
+            if (_isManaging)
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Icon(
+                  isSelected ? Icons.check_circle : Icons.circle_outlined,
+                  color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
+                  size: 22,
+                ),
               ),
-      onLongPress: _isManaging ? null : () => _toggleManageMode(true),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 52,
+                height: 52,
+                child: playlist.coverUrl != null
+                    ? CachedNetworkImage(
+                        imageUrl: playlist.coverUrl!,
+                        fit: BoxFit.cover,
+                        placeholder: (_, _) => Container(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.queue_music,
+                            size: 24,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        errorWidget: (_, _, _) => Container(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.queue_music,
+                            size: 24,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      )
+                    : Container(
+                        color: colorScheme.surfaceContainerHighest,
+                        child: Icon(
+                          Icons.queue_music,
+                          size: 24,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    playlist.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${playlist.songCount} 首',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            if (!_isManaging)
+              Icon(
+                Icons.chevron_right,
+                color: colorScheme.onSurfaceVariant,
+                size: 20,
+              ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _buildEmpty() {
-    final cs = Theme.of(context).colorScheme;
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.favorite_border, size: 64, color: cs.onSurfaceVariant.withValues(alpha: 0.4)),
-          const SizedBox(height: 12),
-          Text('暂无歌单', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: cs.onSurfaceVariant)),
-          const SizedBox(height: 8),
-          Text('点击右上角 + 创建新歌单',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant.withValues(alpha: 0.6))),
-        ],
+  // ==================== 专辑Tab ====================
+
+  Widget _buildAlbumsTab() {
+    if (_isLoadingAlbums) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_albums.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.album,
+              size: 64,
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '还没有收藏专辑',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => _loadAlbums(),
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: _albums.length,
+        itemBuilder: (context, index) {
+          final album = _albums[index];
+          return _buildAlbumTile(album);
+        },
+      ),
+    );
+  }
+
+  Widget _buildAlbumTile(KugouPlaylistBrief album) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return InkWell(
+      onTap: () {
+        // 收藏的专辑可以作为歌单查看
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PlaylistPage(
+              playlist: album.toPlaylist(),
+              isInMyFavorites: true,
+            ),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SizedBox(
+                width: 52,
+                height: 52,
+                child: album.coverUrl != null
+                    ? CachedNetworkImage(
+                        imageUrl: album.coverUrl!,
+                        fit: BoxFit.cover,
+                        placeholder: (_, _) => Container(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.album,
+                            size: 24,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        errorWidget: (_, _, _) => Container(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.album,
+                            size: 24,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      )
+                    : Container(
+                        color: colorScheme.surfaceContainerHighest,
+                        child: Icon(
+                          Icons.album,
+                          size: 24,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    album.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${album.songCount} 首',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              color: colorScheme.onSurfaceVariant,
+              size: 20,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ==================== 歌手Tab ====================
+
+  Widget _buildArtistsTab() {
+    if (_isLoadingArtists) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_artists.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.person,
+              size: 64,
+              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '还没有关注歌手',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return RefreshIndicator(
+      onRefresh: () => _loadArtists(),
+      child: ListView.builder(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        itemCount: _artists.length,
+        itemBuilder: (context, index) {
+          final artist = _artists[index];
+          return _buildArtistTile(artist);
+        },
+      ),
+    );
+  }
+
+  Widget _buildArtistTile(Map<String, dynamic> artist) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final name = artist['nickname'] ?? artist['user_name'] ?? artist['name'] ?? '';
+    final avatar = artist['user_pic'] ?? artist['user_img'] ?? artist['avatar'];
+    final id = artist['userid'] ?? artist['id'] ?? '';
+
+    return InkWell(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ArtistDetailPage(
+              artistId: id.toString(),
+              artistName: name.toString(),
+              avatarUrl: avatar?.toString(),
+            ),
+          ),
+        );
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 26,
+              backgroundColor: colorScheme.surfaceContainerHighest,
+              backgroundImage: avatar != null
+                  ? CachedNetworkImageProvider(avatar.toString())
+                  : null,
+              child: avatar == null
+                  ? Icon(
+                      Icons.person,
+                      size: 24,
+                      color: colorScheme.onSurfaceVariant,
+                    )
+                  : null,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name.toString(),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w500,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right,
+              color: colorScheme.onSurfaceVariant,
+              size: 20,
+            ),
+          ],
+        ),
       ),
     );
   }
