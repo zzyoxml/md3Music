@@ -711,7 +711,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                           ),
                         ),
                       ),
-                      // 歌单介绍（默认折叠，最多显示2行）
+                      // 歌单介绍（默认折叠，最多显示2行，带动画）
                       if (displayPlaylist.description != null &&
                           displayPlaylist.description!.isNotEmpty)
                         SliverToBoxAdapter(
@@ -749,25 +749,33 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                           ),
                                         ),
                                         const Spacer(),
-                                        Icon(
-                                          _isDescriptionExpanded
-                                              ? Icons.keyboard_arrow_up
-                                              : Icons.keyboard_arrow_down,
-                                          size: 20,
-                                          color: colorScheme.onSurfaceVariant,
+                                        AnimatedRotation(
+                                          turns: _isDescriptionExpanded ? 0.5 : 0,
+                                          duration: const Duration(milliseconds: 200),
+                                          child: Icon(
+                                            Icons.keyboard_arrow_down,
+                                            size: 20,
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
                                         ),
                                       ],
                                     ),
                                     const SizedBox(height: 8),
-                                    Text(
-                                      displayPlaylist.description!,
-                                      maxLines: _isDescriptionExpanded ? null : 2,
-                                      overflow: _isDescriptionExpanded
-                                          ? null
-                                          : TextOverflow.ellipsis,
-                                      style: textTheme.bodyMedium?.copyWith(
-                                        color: colorScheme.onSurfaceVariant,
-                                        height: 1.5,
+                                    AnimatedSize(
+                                      duration: const Duration(milliseconds: 250),
+                                      curve: Curves.easeInOut,
+                                      alignment: Alignment.topCenter,
+                                      clipBehavior: Clip.hardEdge,
+                                      child: Text(
+                                        displayPlaylist.description!,
+                                        maxLines: _isDescriptionExpanded ? null : 2,
+                                        overflow: _isDescriptionExpanded
+                                            ? null
+                                            : TextOverflow.ellipsis,
+                                        style: textTheme.bodyMedium?.copyWith(
+                                          color: colorScheme.onSurfaceVariant,
+                                          height: 1.5,
+                                        ),
                                       ),
                                     ),
                                   ],
