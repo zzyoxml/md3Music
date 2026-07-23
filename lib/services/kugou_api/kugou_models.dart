@@ -200,6 +200,7 @@ class KugouPlaylistBrief {
   final String? listCreateGid;
   final int type;  // 0=自己创建, 1=收藏/订阅他人
   final int source; // 0=普通歌单, 2=收藏的专辑等
+  final String? description;
 
   const KugouPlaylistBrief({
     required this.id,
@@ -213,6 +214,7 @@ class KugouPlaylistBrief {
     this.listCreateGid,
     this.type = 0,
     this.source = 0,
+    this.description,
   });
 
   factory KugouPlaylistBrief.fromJson(Map<String, dynamic> json) {
@@ -238,6 +240,7 @@ class KugouPlaylistBrief {
       listCreateGid: _strNull(json['list_create_gid'] ?? json['list_create_gid']),
       type: _parseInt(json['type'] ?? 0),
       source: _parseInt(json['source'] ?? 0),
+      description: _strNull(json['intro'] ?? json['description'] ?? json['desc']),
     );
   }
 
@@ -248,6 +251,7 @@ class KugouPlaylistBrief {
       artworkUri: coverUrl,
       songCount: songCount,
       songs: [],
+      description: description,
       listCreateUserid: listCreateUserid,
       listCreateListid: listCreateListid,
       listCreateGid: listCreateGid,
