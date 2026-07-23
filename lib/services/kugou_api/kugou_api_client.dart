@@ -1096,7 +1096,7 @@ class KugouApiClient {
   }) async {
     final json = await _get(
       KugouEndpoints.commentPlaylist,
-      queryParameters: {'specialid': specialId, 'page': page},
+      queryParameters: {'id': specialId, 'page': page},
     );
     if (json == null) return null;
     try {

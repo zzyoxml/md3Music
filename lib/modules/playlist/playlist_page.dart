@@ -509,6 +509,20 @@ class _PlaylistPageState extends State<PlaylistPage> {
                             ),
                           if (_songs.isNotEmpty)
                             IconButton(
+                              icon: Icon(
+                                _isCommentsExpanded
+                                    ? Icons.comment
+                                    : Icons.comment_outlined,
+                              ),
+                              onPressed: () {
+                                setState(() {
+                                  _isCommentsExpanded = !_isCommentsExpanded;
+                                });
+                              },
+                              tooltip: '评论',
+                            ),
+                          if (_songs.isNotEmpty)
+                            IconButton(
                               icon: const Icon(Icons.my_location),
                               onPressed: _scrollToPlayingSong,
                               tooltip: '定位正在播放',
@@ -907,20 +921,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                         : null,
                                   ),
                                 ),
-                              const SizedBox(width: 12),
-                              IconButton.filledTonal(
-                                onPressed: () {
-                                  setState(() {
-                                    _isCommentsExpanded = !_isCommentsExpanded;
-                                  });
-                                },
-                                icon: Icon(
-                                  Icons.comment_outlined,
-                                  color: _isCommentsExpanded
-                                      ? colorScheme.primary
-                                      : null,
-                                ),
-                              ),
                             ],
                           ),
                         ),
