@@ -635,6 +635,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               playlist: album.toPlaylist(),
               isInMyFavorites: true,
               isAlbum: true,
+              albumGlobalCollectionId: album.globalCollectionId,
             ),
           ),
         );

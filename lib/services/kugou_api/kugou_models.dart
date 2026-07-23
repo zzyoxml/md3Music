@@ -137,12 +137,14 @@ class KugouAlbumBrief {
   final String name;
   final String? coverUrl;
   final String? artistName;
+  final String? globalCollectionId;
 
   const KugouAlbumBrief({
     required this.id,
     required this.name,
     this.coverUrl,
     this.artistName,
+    this.globalCollectionId,
   });
 
   factory KugouAlbumBrief.fromJson(Map<String, dynamic> json) {
@@ -174,6 +176,7 @@ class KugouAlbumBrief {
             json['SingerName'] ??
             json['author_name'],
       ),
+      globalCollectionId: _strNull(json['global_collection_id'] ?? json['gid']),
     );
   }
 
@@ -184,6 +187,7 @@ class KugouAlbumBrief {
       artist: artistName ?? '',
       artworkUri: coverUrl,
       songCount: 0,
+      globalCollectionId: globalCollectionId,
     );
   }
 }

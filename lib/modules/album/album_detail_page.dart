@@ -137,10 +137,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                   ),
                 ),
                 Divider(height: 1, color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
-                // 评论列表
+                // 评论列表（使用 globalCollectionId 获取专辑评论）
                 Expanded(
                   child: PlaylistCommentsView(
-                    specialId: widget.album.id,
+                    specialId: widget.album.globalCollectionId ?? widget.album.id,
                     commentType: 'album',
                     scrollController: scrollController,
                   ),

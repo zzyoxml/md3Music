@@ -19,12 +19,15 @@ class PlaylistPage extends StatefulWidget {
   final bool isInMyFavorites;
   // 是否为专辑（用于评论类型判断）
   final bool isAlbum;
+  // 专辑的 globalCollectionId（用于评论 API）
+  final String? albumGlobalCollectionId;
 
   const PlaylistPage({
     super.key,
     required this.playlist,
     this.isInMyFavorites = false,
     this.isAlbum = false,
+    this.albumGlobalCollectionId,
   });
 
   @override
@@ -192,9 +195,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   void _showCommentsSheet(BuildContext context) {
     // 收藏歌单使用 listCreateGid 作为评论 ID（原始歌单的 global_collection_id）
-    // 专辑使用专辑 ID
+    // 专辑使用 globalCollectionId（如果有的话）
     final commentId = widget.isAlbum
-        ? widget.playlist.id
+        ? (widget.albumGlobalCollectionId ?? widget.playlist.id)
         : (widget.playlist.listCreateGid ?? widget.playlist.id);
     final commentType = widget.isAlbum ? 'album' : 'playlist';
     showModalBottomSheet(
