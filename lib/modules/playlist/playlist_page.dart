@@ -851,7 +851,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                       duration: const Duration(milliseconds: 250),
                                       curve: Curves.easeInOut,
                                       alignment: Alignment.topCenter,
-                                      clipBehavior: Clip.none,
+                                      clipBehavior: Clip.hardEdge,
                                       child: ShaderMask(
                                         shaderCallback: (Rect bounds) {
                                           if (_isDescriptionExpanded) {
@@ -869,13 +869,13 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                               Colors.white,
                                               Colors.white.withValues(alpha: 0.0),
                                             ],
-                                            stops: const [0.0, 0.7, 1.0],
+                                            stops: const [0.0, 0.4, 0.9],
                                           ).createShader(bounds);
                                         },
                                         blendMode: BlendMode.dstIn,
                                         child: Text(
                                           displayPlaylist.description!,
-                                          maxLines: _isDescriptionExpanded ? null : 2,
+                                          maxLines: _isDescriptionExpanded ? null : 3,
                                           overflow: _isDescriptionExpanded
                                               ? null
                                               : TextOverflow.ellipsis,
