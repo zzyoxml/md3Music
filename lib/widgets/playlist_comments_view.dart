@@ -191,8 +191,6 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
     return ListView.separated(
       controller: _scrollController,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
       itemCount: _comments.length + (_hasMore ? 1 : 0),
       separatorBuilder: (_, _) => Divider(
         height: 1,
