@@ -54,9 +54,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
   // 歌单介绍展开/折叠
   bool _isDescriptionExpanded = false;
 
-  // 歌单评论展开/折叠
-  bool _isCommentsExpanded = false;
-
   /// 顶栏渐变 ScrollController：监听 CustomScrollView 滚动 offset，
   /// 用于 SliverAppBar pinned 后 fade-in 显示歌单名称
   final ScrollController _scrollController = ScrollController();
@@ -162,6 +159,75 @@ class _PlaylistPageState extends State<PlaylistPage> {
       targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOut,
+    );
+  }
+
+  void _showCommentsSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return Container(
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            child: Column(
+              children: [
+                // 拖动手柄
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // 标题栏
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.comment_outlined,
+                        size: 20,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '评论',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
+                // 评论列表
+                Expanded(
+                  child: PlaylistCommentsView(
+                    specialId: widget.playlist.id,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -509,16 +575,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
                             ),
                           if (_songs.isNotEmpty)
                             IconButton(
-                              icon: Icon(
-                                _isCommentsExpanded
-                                    ? Icons.comment
-                                    : Icons.comment_outlined,
-                              ),
-                              onPressed: () {
-                                setState(() {
-                                  _isCommentsExpanded = !_isCommentsExpanded;
-                                });
-                              },
+                              icon: const Icon(Icons.comment_outlined),
+                              onPressed: () => _showCommentsSheet(context),
                               tooltip: '评论',
                             ),
                           if (_songs.isNotEmpty)
@@ -947,38 +1005,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
                           );
                         }, childCount: _displaySongs.length),
                       ),
-                      // 歌单评论区域
-                      if (_isCommentsExpanded)
-                        SliverToBoxAdapter(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                                child: Row(
-                                  children: [
-                                    Icon(
-                                      Icons.comment_outlined,
-                                      size: 18,
-                                      color: colorScheme.onSurfaceVariant,
-                                    ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      '评论',
-                                      style: textTheme.titleSmall?.copyWith(
-                                        color: colorScheme.onSurfaceVariant,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              PlaylistCommentsView(
-                                specialId: widget.playlist.id,
-                              ),
-                            ],
-                          ),
-                        ),
                       // 搜索无结果提示
                       if (_isSearching && _displaySongs.isEmpty && _songs.isNotEmpty)
                         SliverToBoxAdapter(
