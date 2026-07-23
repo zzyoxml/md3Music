@@ -1110,12 +1110,10 @@ class KugouApiClient {
     String albumId, {
     int page = 1,
   }) async {
-    print('[AlbumComments] albumId=$albumId');
     final json = await _get(
       KugouEndpoints.commentAlbum,
       queryParameters: {'id': albumId, 'page': page},
     );
-    print('[AlbumComments] count=${json?['count'] ?? 'null'}');
     if (json == null) return null;
     try {
       return KugouCommentList.fromJson(json);
