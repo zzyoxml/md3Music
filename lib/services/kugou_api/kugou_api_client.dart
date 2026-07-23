@@ -1521,7 +1521,7 @@ class KugouApiClient {
   Future<KugouArtistDetail?> getArtistDetail(String artistId) async {
     final json = await _get(
       KugouEndpoints.artistDetail,
-      queryParameters: {'singerid': artistId},
+      queryParameters: {'id': artistId},
     );
     if (json == null) return null;
     try {
