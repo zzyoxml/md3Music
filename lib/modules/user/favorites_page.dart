@@ -769,7 +769,8 @@ class _FavoritesPageState extends State<FavoritesPage>
     final avatar = _fixImageUrl(
       (artist['pic'] ?? artist['user_pic'] ?? artist['user_img'] ?? artist['avatar'])?.toString(),
     );
-    final id = artist['userid'] ?? artist['id'] ?? '';
+    // 使用 singerid 作为歌手 ID（userid 是用户 ID，不是歌手 ID）
+    final id = artist['singerid']?.toString() ?? artist['userid']?.toString() ?? artist['id']?.toString() ?? '';
 
     return InkWell(
       onTap: () {
@@ -777,7 +778,7 @@ class _FavoritesPageState extends State<FavoritesPage>
           context,
           MaterialPageRoute(
             builder: (context) => ArtistDetailPage(
-              artistId: id.toString(),
+              artistId: id,
               artistName: name.toString(),
               avatarUrl: avatar,
             ),

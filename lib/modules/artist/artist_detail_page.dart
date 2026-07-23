@@ -47,8 +47,11 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
 
     try {
       final api = KugouApiClient();
+      // 尝试使用 artistId 获取歌曲
       final result = await api.getArtistAudios(widget.artistId);
       if (!mounted) return;
+
+      debugPrint('[ArtistDetail] artistId=${widget.artistId}, result=$result');
 
       if (result != null && result.songs.isNotEmpty) {
         setState(() {
@@ -56,12 +59,14 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
           _isLoading = false;
         });
       } else {
+        // 如果没有歌曲，尝试使用 artist detail 获取更多信息
         setState(() {
           _songs = [];
           _isLoading = false;
         });
       }
     } catch (e) {
+      debugPrint('[ArtistDetail] Error: $e');
       if (mounted) {
         setState(() {
           _error = e.toString();
