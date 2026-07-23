@@ -1881,6 +1881,10 @@ class KugouApiClient {
       'list_create_userid': userid,
       'list_create_listid': listid,
     };
+    // 收藏歌单时需要传入 list_create_gid
+    if (globalCollectionId != null && globalCollectionId.isNotEmpty) {
+      params['list_create_gid'] = globalCollectionId;
+    }
     return await _get(KugouEndpoints.playlistAdd, queryParameters: params);
   }
 
