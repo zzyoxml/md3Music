@@ -30,6 +30,8 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   bool _isLoading = true;
   String? _error;
   bool _isFollowing = false;
+  String? _description;
+  bool _isDescriptionExpanded = false;
 
   @override
   void initState() {
@@ -47,13 +49,25 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
 
     try {
       final api = KugouApiClient();
-      // 尝试使用 artistId 获取歌曲
-      final result = await api.getArtistAudios(widget.artistId);
+
+      // 并行获取歌手详情和歌曲
+      final detailFuture = api.getArtistDetail(widget.artistId);
+      final songsFuture = api.getArtistAudios(widget.artistId);
+
+      final results = await Future.wait([detailFuture, songsFuture]);
       if (!mounted) return;
 
-      if (result != null && result.songs.isNotEmpty) {
+      final detail = results[0] as KugouArtistDetail?;
+      final songsResult = results[1] as KugouArtistAudios?;
+
+      // 获取歌手简介
+      if (detail != null && detail.description != null && detail.description!.isNotEmpty) {
+        _description = detail.description;
+      }
+
+      if (songsResult != null && songsResult.songs.isNotEmpty) {
         setState(() {
-          _songs = result.songs.map((s) => s.toSong()).toList();
+          _songs = songsResult.songs.map((s) => s.toSong()).toList();
           _isLoading = false;
         });
         return;
@@ -64,7 +78,6 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       if (!mounted) return;
 
       if (searchResult != null && searchResult.songs.isNotEmpty) {
-        // 过滤出该歌手的歌曲
         final artistNameLower = widget.artistName.toLowerCase();
         final artistSongs = searchResult.songs.where((s) {
           final songArtist = s.artistName?.toLowerCase() ?? '';
@@ -218,6 +231,84 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                         ),
                       ),
                     ),
+                    // 歌手介绍（默认折叠，带动画）
+                    if (_description != null && _description!.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                          child: GestureDetector(
+                            onTap: () {
+                              setState(() {
+                                _isDescriptionExpanded = !_isDescriptionExpanded;
+                              });
+                            },
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: colorScheme.surfaceContainerHighest
+                                    .withValues(alpha: 0.5),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(
+                                        Icons.info_outline,
+                                        size: 16,
+                                        color: colorScheme.onSurfaceVariant,
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '歌手介绍',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .labelLarge
+                                            ?.copyWith(
+                                              color: colorScheme.onSurfaceVariant,
+                                            ),
+                                      ),
+                                      const Spacer(),
+                                      AnimatedRotation(
+                                        turns: _isDescriptionExpanded ? 0.5 : 0,
+                                        duration: const Duration(milliseconds: 200),
+                                        child: Icon(
+                                          Icons.keyboard_arrow_down,
+                                          size: 20,
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  AnimatedSize(
+                                    duration: const Duration(milliseconds: 250),
+                                    curve: Curves.easeInOut,
+                                    alignment: Alignment.topCenter,
+                                    clipBehavior: Clip.hardEdge,
+                                    child: Text(
+                                      _description!,
+                                      maxLines: _isDescriptionExpanded ? null : 2,
+                                      overflow: _isDescriptionExpanded
+                                          ? null
+                                          : TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                            color: colorScheme.onSurfaceVariant,
+                                            height: 1.5,
+                                          ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     if (_songs.isEmpty)
                       SliverToBoxAdapter(
                         child: Center(
