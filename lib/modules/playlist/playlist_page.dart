@@ -58,9 +58,11 @@ class _PlaylistPageState extends State<PlaylistPage> {
   /// 用于 SliverAppBar pinned 后 fade-in 显示歌单名称
   final ScrollController _scrollController = ScrollController();
   double _scrollOffset = 0;
+  double _lastReportedOffset = 0;
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -77,17 +79,36 @@ class _PlaylistPageState extends State<PlaylistPage> {
     });
   }
 
-  /// 滚动监听：更新 _scrollOffset 触发重绘，驱动顶栏 fade-in 歌单名称
+  /// 滚动监听：减少无意义 setState，仅在偏移变化超过 1px 时更新
   void _onScroll() {
     if (!mounted) return;
     final offset = _scrollController.offset;
-    if ((offset - _scrollOffset).abs() > 0.5) {
-      setState(() => _scrollOffset = offset);
+    if ((offset - _lastReportedOffset).abs() > 1.0) {
+      _lastReportedOffset = offset;
+      _scrollOffset = offset;
+      setState(() {});
     }
   }
 
-  /// 当前显示的歌曲列表（根据搜索关键词过滤 + 排序）
+  /// 缓存的过滤/排序结果，避免每次 build 重新计算
+  List<Song>? _cachedDisplaySongs;
+  String? _lastSearchQuery;
+  _SortBy? _lastSortBy;
+  bool? _lastSortAscending;
+
+  /// 获取当前显示的歌曲列表（带缓存）
   List<Song> get _displaySongs {
+    if (_cachedDisplaySongs != null &&
+        _lastSearchQuery == _searchQuery &&
+        _lastSortBy == _sortBy &&
+        _lastSortAscending == _sortAscending) {
+      return _cachedDisplaySongs!;
+    }
+    _rebuildDisplaySongs();
+    return _cachedDisplaySongs!;
+  }
+
+  void _rebuildDisplaySongs() {
     List<Song> list;
     if (_searchQuery.isEmpty) {
       list = List.of(_songs);
@@ -103,7 +124,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
       int cmp;
       switch (_sortBy) {
         case _SortBy.time:
-          // API 原始顺序：索引越小越早添加
           cmp = _songs.indexOf(a).compareTo(_songs.indexOf(b));
           break;
         case _SortBy.title:
@@ -115,7 +135,15 @@ class _PlaylistPageState extends State<PlaylistPage> {
       }
       return _sortAscending ? cmp : -cmp;
     });
-    return list;
+    _cachedDisplaySongs = list;
+    _lastSearchQuery = _searchQuery;
+    _lastSortBy = _sortBy;
+    _lastSortAscending = _sortAscending;
+  }
+
+  /// 使显示列表缓存失效
+  void _invalidateDisplaySongs() {
+    _cachedDisplaySongs = null;
   }
 
   void _toggleSearch() {
@@ -534,6 +562,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
           final validDuration = song.duration.inMilliseconds > 0;
           return validTitle && validDuration;
         }).toList();
+        _invalidateDisplaySongs();
       });
     } catch (e) {
       setState(() {
@@ -606,6 +635,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                     _sortBy = value;
                                     _sortAscending = value == _SortBy.time ? false : true;
                                   }
+                                  _invalidateDisplaySongs();
                                 });
                               },
                               itemBuilder: (context) => [
@@ -886,7 +916,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                         icon: const Icon(Icons.clear),
                                         onPressed: () {
                                           _searchController.clear();
-                                          setState(() => _searchQuery = '');
+                                          setState(() {
+                                            _searchQuery = '';
+                                            _invalidateDisplaySongs();
+                                          });
                                         },
                                       )
                                     : null,
@@ -903,7 +936,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                 ),
                               ),
                               onChanged: (value) {
-                                setState(() => _searchQuery = value);
+                                setState(() {
+                                  _searchQuery = value;
+                                  _invalidateDisplaySongs();
+                                });
                               },
                             ),
                           ),
