@@ -124,11 +124,11 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
         return;
       }
 
-      final bytes = await file.readAsBytes();
+      final fileBytes = await file.readAsBytes();
       // 删除临时文件
       await file.delete().catchError((_) {});
 
-      if (bytes.isEmpty) {
+      if (fileBytes.isEmpty) {
         setState(() {
           _isRecognizing = false;
           _error = '录音数据为空，请重试';
@@ -136,8 +136,18 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
         return;
       }
 
+      // 去掉 WAV 文件头，提取纯 PCM 数据
+      final pcmData = _extractPcmFromWav(fileBytes);
+      if (pcmData.isEmpty) {
+        setState(() {
+          _isRecognizing = false;
+          _error = '音频数据解析失败，请重试';
+        });
+        return;
+      }
+
       final api = KugouApiClient();
-      final response = await api.audioMatch(bytes);
+      final response = await api.audioMatch(pcmData);
 
       if (!mounted) return;
 
@@ -346,6 +356,26 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
         ],
       ),
     );
+  }
+
+  /// 从 WAV 文件中提取纯 PCM 数据（去掉 44 字节 WAV 头）
+  List<int> _extractPcmFromWav(List<int> bytes) {
+    if (bytes.length < 44) return bytes;
+    // 检查 RIFF 头
+    if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46) {
+      // 找到 "data" 标记：遍历查找 "data" 字符串
+      for (int i = 12; i < bytes.length - 4; i++) {
+        if (bytes[i] == 0x64 && bytes[i + 1] == 0x61 && bytes[i + 2] == 0x74 && bytes[i + 3] == 0x61) {
+          // data chunk: 4 bytes "data" + 4 bytes size + PCM data
+          final pcmStart = i + 8;
+          if (pcmStart < bytes.length) {
+            return bytes.sublist(pcmStart);
+          }
+        }
+      }
+    }
+    // 非标准 WAV，直接返回全部数据
+    return bytes;
   }
 
   String? _extractField(Map<String, dynamic>? map, List<String> keys) {
