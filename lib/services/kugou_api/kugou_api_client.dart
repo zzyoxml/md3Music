@@ -368,13 +368,20 @@ class KugouApiClient {
     int page = 1,
     int pagesize = 20,
   }) async {
+    final params = <String, dynamic>{
+      'keyword': keywords,
+      'page': page,
+      'pagesize': pagesize,
+    };
+    // 搜索接口需要 cookie 认证
+    if (_token != null && _userid != null) {
+      final cookieParts = <String>['token=$_token', 'userid=$_userid'];
+      if (_dfid != null) cookieParts.add('dfid=$_dfid');
+      params['cookie'] = cookieParts.join(';');
+    }
     final json = await _get(
       KugouEndpoints.searchAlbum,
-      queryParameters: {
-        'keyword': keywords,
-        'page': page,
-        'pagesize': pagesize,
-      },
+      queryParameters: params,
     );
     print('[SearchAlbums] keyword=$keywords, result=${json != null ? "ok" : "null"}');
     if (json == null) return null;
