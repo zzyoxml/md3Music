@@ -683,7 +683,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
     // 清晰区半径：当前行及紧邻行
     final double clearRadius = mainLineHeight * 1.5;
-    final double maxSigma = 16.0;
+    final double maxSigma = 10.0;
     final int zoneCount = 10;
 
     final List<Widget> layers = [];
