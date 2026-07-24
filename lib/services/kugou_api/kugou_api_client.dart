@@ -187,6 +187,36 @@ class KugouApiClient {
     }
   }
 
+  /// 发送二进制 POST 请求（用于听歌识曲等接口）
+  Future<Map<String, dynamic>?> _postBinary(
+    String path, {
+    required List<int> body,
+  }) async {
+    try {
+      final response = await _dio.post(
+        path,
+        data: body,
+        options: Options(
+          contentType: 'application/octet-stream',
+          responseType: ResponseType.json,
+        ),
+      );
+      if (response.statusCode == 200) {
+        if (response.data is Map<String, dynamic>) {
+          return response.data as Map<String, dynamic>;
+        }
+      }
+      print('[API _postBinary] Non-200 or non-map: status=${response.statusCode}');
+      return null;
+    } on DioException catch (e) {
+      print('[API _postBinary] DioException: ${e.type} ${e.message}');
+      return null;
+    } catch (e) {
+      print('[API _postBinary] Error: $e');
+      return null;
+    }
+  }
+
   Future<void> _initFromStorage() async {
     _initCompleter = Completer<void>();
     try {
@@ -2293,6 +2323,14 @@ class KugouApiClient {
     return await _get(
       KugouEndpoints.youthMonthVipRecord,
       queryParameters: query.isNotEmpty ? query : null,
+    );
+  }
+
+  /// 听歌识曲：发送 PCM 音频数据识别歌曲
+  Future<Map<String, dynamic>?> audioMatch(List<int> pcmData) async {
+    return await _postBinary(
+      KugouEndpoints.audioMatch,
+      body: pcmData,
     );
   }
 }

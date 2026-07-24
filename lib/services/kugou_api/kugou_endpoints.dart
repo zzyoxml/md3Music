@@ -200,6 +200,7 @@ class KugouEndpoints {
   // Other
   static const String brush = '/brush';
   static const String aiRecommend = '/ai/recommend';
+  static const String audioMatch = '/audio/match';
   static const String lastestSongsListenList = '/lastest/songs/listen';
   static const String ip = '/ip';
   static const String privilegeLite = '/privilege/lite';

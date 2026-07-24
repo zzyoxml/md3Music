@@ -22,6 +22,7 @@ import 'modules/settings/settings_page.dart';
 import 'modules/library/library_page.dart';
 import 'modules/login/login_page.dart';
 import 'modules/personal_fm/personal_fm_page.dart';
+import 'modules/recognition/song_recognition_page.dart';
 import 'providers/downloads_provider.dart';
 import 'providers/favorites_provider.dart';
 import 'providers/kugou_provider.dart';
@@ -237,6 +238,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     DiscoverPage(),
     ChartsPage(),
     FavoritesPage(),
+    SongRecognitionPage(),
     PersonalFmPage(),
     UserCenterPage(),
   ];
@@ -311,6 +313,11 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       label: '我收藏',
     ),
     NavigationDestination(
+      icon: Icon(Icons.mic_outlined),
+      selectedIcon: Icon(Icons.mic),
+      label: '识曲',
+    ),
+    NavigationDestination(
       icon: Icon(Icons.radio_outlined),
       selectedIcon: Icon(Icons.radio),
       label: '私人FM',
@@ -339,6 +346,11 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       label: Text('我收藏'),
     ),
     NavigationRailDestination(
+      icon: Icon(Icons.mic_outlined),
+      selectedIcon: Icon(Icons.mic),
+      label: Text('识曲'),
+    ),
+    NavigationRailDestination(
       icon: Icon(Icons.radio_outlined),
       selectedIcon: Icon(Icons.radio),
       label: Text('私人FM'),
@@ -365,6 +377,11 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       icon: Icon(Icons.favorite_outline),
       selectedIcon: Icon(Icons.favorite),
       label: Text('我收藏'),
+    ),
+    NavigationDrawerDestination(
+      icon: Icon(Icons.mic_outlined),
+      selectedIcon: Icon(Icons.mic),
+      label: Text('识曲'),
     ),
     NavigationDrawerDestination(
       icon: Icon(Icons.radio_outlined),
