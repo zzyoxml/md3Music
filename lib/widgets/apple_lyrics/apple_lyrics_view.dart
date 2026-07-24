@@ -136,7 +136,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
   /// 级联偏移系数：每行初始向下偏移 = lineHeight × 此系数。
   /// 正值 = 向下偏移，弹簧拉回 0 = 向上回到自然位置。
-  static const double _perLineOffsetFactor = 0.6;
+  static const double _perLineOffsetFactor = 0.3;
 
   /// 预计算每行实际高度（含自动换行）。
   ///
