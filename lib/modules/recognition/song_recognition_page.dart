@@ -96,7 +96,7 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       await _recorder.start(
         RecordConfig(
           encoder: AudioEncoder.wav,
-          sampleRate: 16000,
+          sampleRate: 44100,
           numChannels: 1,
         ),
         path: filePath,
@@ -164,29 +164,31 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
         return;
       }
 
-      // 去掉 WAV 文件头，提取纯 PCM 数据
+      // 尝试发送完整 WAV 文件给 API
       final pcmData = _extractPcmFromWav(fileBytes);
       print('[SongRecognition] fileBytes=${fileBytes.length}, pcmData=${pcmData.length}');
-      if (pcmData.isEmpty || pcmData.length < 32000) {
-        // 至少 1 秒的 PCM 数据 (16000Hz * 2bytes)
-        setState(() {
-          _isRecognizing = false;
-          _error = pcmData.isEmpty ? '音频数据解析失败，请重试' : '录音时间太短，请多录一会儿';
-        });
-        return;
-      }
+      print('[SongRecognition] wav header: ${fileBytes.take(4).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
 
-      // 检查是否全是静音
-      final isSilent = _isSilentAudio(pcmData);
-      if (isSilent) {
+      // 分析 PCM 数据：采样检查实际音频内容
+      int maxAmplitude = 0;
+      int nonZeroSamples = 0;
+      for (int i = 0; i < pcmData.length - 1; i += 2) {
+        final sample = (pcmData[i] | (pcmData[i + 1] << 8)).toSigned(16);
+        final abs = sample.abs();
+        if (abs > maxAmplitude) maxAmplitude = abs;
+        if (abs > 100) nonZeroSamples++;
+      }
+      print('[SongRecognition] PCM analysis: maxAmplitude=$maxAmplitude, nonZeroSamples=$nonZeroSamples/${pcmData.length ~/ 2}');
+      if (maxAmplitude < 100) {
         setState(() {
           _isRecognizing = false;
-          _error = '没有检测到声音，请确保周围有音乐播放';
+          _error = '录音为静音，请检查麦克风权限或确保周围有声音';
         });
         return;
       }
 
       final api = KugouApiClient();
+      // 先试裸 PCM，如果不行再试完整 WAV
       final response = await api.audioMatch(pcmData);
 
       if (!mounted) return;
@@ -199,10 +201,22 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
           _isRecognizing = false;
         });
       } else if (response != null) {
-        setState(() {
-          _isRecognizing = false;
-          _error = '未能识别出歌曲，请换个片段重试';
-        });
+        // PCM 无效，尝试发送完整 WAV 文件
+        print('[SongRecognition] PCM failed, trying full WAV...');
+        final wavResponse = await api.audioMatch(Uint8List.fromList(fileBytes));
+        if (!mounted) return;
+        print('[SongRecognition] WAV response: $wavResponse');
+        if (wavResponse != null && _hasSongData(wavResponse)) {
+          setState(() {
+            _result = wavResponse;
+            _isRecognizing = false;
+          });
+        } else {
+          setState(() {
+            _isRecognizing = false;
+            _error = '未能识别出歌曲，请换个片段重试';
+          });
+        }
       } else {
         setState(() {
           _isRecognizing = false;

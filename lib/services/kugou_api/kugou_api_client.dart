@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'kugou_endpoints.dart';
@@ -189,30 +190,45 @@ class KugouApiClient {
   }
 
   /// 发送二进制 POST 请求（用于听歌识曲等接口）
+  /// 使用 http 包直接发送，避免 Dio 把 Uint8List JSON 序列化成数组
   Future<Map<String, dynamic>?> _postBinary(
     String path, {
     required Uint8List body,
     Map<String, dynamic>? queryParameters,
   }) async {
     try {
-      final response = await _dio.post(
-        path,
-        data: body,
-        queryParameters: queryParameters,
-        options: Options(
-          contentType: 'application/octet-stream',
-          responseType: ResponseType.json,
-        ),
+      // 构建 URL
+      var url = '${KugouEndpoints.baseUrl}$path';
+      if (queryParameters != null && queryParameters.isNotEmpty) {
+        final qs = queryParameters.entries
+            .map((e) => '${Uri.encodeComponent(e.key)}=${Uri.encodeComponent(e.value.toString())}')
+            .join('&');
+        url = '$url?$qs';
+      }
+      print('[API _postBinary] POST $url, body length=${body.length}');
+      final headers = <String, String>{
+        'Content-Type': 'application/octet-stream',
+      };
+      // 添加认证信息（与 Dio 请求一致）
+      if (_token != null && _userid != null) {
+        final cookieParts = <String>['token=$_token', 'userid=$_userid'];
+        if (_dfid != null) cookieParts.add('dfid=$_dfid');
+        headers['cookie'] = cookieParts.join(';');
+        headers['Authorization'] = cookieParts.join(';');
+      }
+      final response = await http.post(
+        Uri.parse(url),
+        headers: headers,
+        body: body,
       );
+      print('[API _postBinary] status=${response.statusCode}');
       if (response.statusCode == 200) {
-        if (response.data is Map<String, dynamic>) {
-          return response.data as Map<String, dynamic>;
+        final json = jsonDecode(response.body);
+        if (json is Map<String, dynamic>) {
+          return json;
         }
       }
-      print('[API _postBinary] Non-200 or non-map: status=${response.statusCode} data=${response.data}');
-      return null;
-    } on DioException catch (e) {
-      print('[API _postBinary] DioException: ${e.type} ${e.message} response=${e.response?.statusCode} ${e.response?.data}');
+      print('[API _postBinary] Non-200 or non-map: status=${response.statusCode} body=${response.body.substring(0, response.body.length.clamp(0, 200))}');
       return null;
     } catch (e) {
       print('[API _postBinary] Error: $e');
