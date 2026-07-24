@@ -193,22 +193,27 @@ class _FavoritesPageState extends State<FavoritesPage>
     final api = KugouApiClient();
     for (final album in albums) {
       try {
+        debugPrint('[AlbumSearch] searching: ${album.name}');
         final searchResult = await api.search(album.name, type: 'album');
         if (!mounted) return;
         if (searchResult != null && searchResult.albums.isNotEmpty) {
           for (final found in searchResult.albums) {
+            debugPrint('[AlbumSearch] found: ${found.name} -> globalCollectionId=${found.globalCollectionId}');
             if (found.name == album.name && found.globalCollectionId != null) {
               if (mounted) {
                 setState(() {
                   _albumOriginalIds[album.id] = found.globalCollectionId!;
                 });
+                debugPrint('[AlbumSearch] mapped: ${album.id} -> ${found.globalCollectionId}');
               }
               break;
             }
           }
+        } else {
+          debugPrint('[AlbumSearch] no results for: ${album.name}');
         }
       } catch (e) {
-        // 忽略搜索错误
+        debugPrint('[AlbumSearch] error for ${album.name}: $e');
       }
     }
   }
@@ -657,9 +662,11 @@ class _FavoritesPageState extends State<FavoritesPage>
     final colorScheme = Theme.of(context).colorScheme;
     // 优先使用搜索到的原始 global_collection_id
     final originalId = _albumOriginalIds[album.id] ?? album.numericId;
+    debugPrint('[AlbumTile] ${album.name}: originalId=$originalId, album.id=${album.id}');
 
     return InkWell(
       onTap: () {
+        debugPrint('[AlbumTile] tapping ${album.name} with originalId=$originalId');
         // 收藏的专辑可以作为歌单查看
         Navigator.push(
           context,

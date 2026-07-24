@@ -339,14 +339,21 @@ class KugouApiClient {
     int pagesize = 30,
     String type = 'song',
   }) async {
+    final params = <String, dynamic>{
+      'keywords': keywords,
+      'page': page,
+      'pagesize': pagesize,
+      'type': type,
+    };
+    // 搜索接口需要 cookie 认证
+    if (_token != null && _userid != null) {
+      final cookieParts = <String>['token=$_token', 'userid=$_userid'];
+      if (_dfid != null) cookieParts.add('dfid=$_dfid');
+      params['cookie'] = cookieParts.join(';');
+    }
     final json = await _get(
       KugouEndpoints.search,
-      queryParameters: {
-        'keywords': keywords,
-        'page': page,
-        'pagesize': pagesize,
-        'type': type,
-      },
+      queryParameters: params,
     );
     if (json == null) return null;
     try {
