@@ -683,66 +683,84 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
     // 清晰区半径：当前行及紧邻行
     final double clearRadius = mainLineHeight * 1.5;
-    final double clearTop = currentY - clearRadius;
-    final double clearBottom = currentY + clearRadius;
 
-    // 模糊分区：[区域起始距当前行距离, sigma]
-    // 距离从 clearRadius 开始算
-    final zones = [
-      [clearRadius, clearRadius + 60, 3.0],       // 轻微模糊
-      [clearRadius + 60, clearRadius + 140, 8.0],  // 中等模糊
-      [clearRadius + 140, 9999.0, 16.0],           // 强模糊（到视口边缘）
-    ];
+    // 模糊分区：从清晰区边缘到视口边缘，sigma 从 0 递增到 16
+    // 每个分区 ~25px 高，共 8 级，形成平滑渐变
+    final double blurExtent = 200.0; // 清晰区外的模糊总范围
+    final int zoneCount = 8;
+    final double zoneHeight = blurExtent / zoneCount;
+    final double maxSigma = 16.0;
 
     final List<Widget> layers = [];
 
     // 上方模糊层（从清晰区上边界到视口顶部）
-    for (final zone in zones) {
-      final top = currentY - zone[1];
-      final bottom = currentY - zone[0];
-      if (bottom < 0) break; // 已超出视口顶部
+    for (int z = 0; z < zoneCount; z++) {
+      final sigma = (z / zoneCount) * maxSigma * _blurIntensity;
+      if (sigma < 0.1) continue;
+      final bottom = currentY - clearRadius - z * zoneHeight;
+      final top = bottom - zoneHeight;
+      if (bottom < 0) break;
       final clampedTop = top < 0 ? 0.0 : top;
       final height = bottom - clampedTop;
       if (height <= 0) continue;
-      final sigma = zone[2] * _blurIntensity;
-      layers.add(Positioned(
-        top: clampedTop,
-        left: 0,
-        right: 0,
-        height: height,
-        child: ClipRect(
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-            child: const SizedBox.expand(),
-          ),
-        ),
-      ));
+      layers.add(_buildBlurRect(top: clampedTop, height: height, sigma: sigma));
     }
 
     // 下方模糊层（从清晰区下边界到视口底部）
-    for (final zone in zones) {
-      final top = currentY + zone[0];
-      final bottom = currentY + zone[1];
-      if (top > viewportHeight) break; // 已超出视口底部
+    for (int z = 0; z < zoneCount; z++) {
+      final sigma = (z / zoneCount) * maxSigma * _blurIntensity;
+      if (sigma < 0.1) continue;
+      final top = currentY + clearRadius + z * zoneHeight;
+      final bottom = top + zoneHeight;
+      if (top > viewportHeight) break;
       final clampedBottom = bottom > viewportHeight ? viewportHeight : bottom;
       final height = clampedBottom - top;
       if (height <= 0) continue;
-      final sigma = zone[2] * _blurIntensity;
-      layers.add(Positioned(
-        top: top,
-        left: 0,
-        right: 0,
-        height: height,
-        child: ClipRect(
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-            child: const SizedBox.expand(),
-          ),
-        ),
-      ));
+      layers.add(_buildBlurRect(top: top, height: height, sigma: sigma));
     }
 
     return layers;
+  }
+
+  /// 构建一个水平全宽的模糊矩形（垂直定位）。
+  Widget _buildBlurRect({
+    required double top,
+    required double height,
+    required double sigma,
+  }) {
+    return Positioned(
+      top: top,
+      left: 0,
+      right: 0,
+      height: height,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+          child: const SizedBox.expand(),
+        ),
+      ),
+    );
+  }
+
+  /// 构建一个垂直全高的模糊矩形（水平定位）。
+  Widget _buildBlurRectHorizontal({
+    required double left,
+    required double width,
+    required double sigma,
+    required double viewportHeight,
+  }) {
+    return Positioned(
+      top: 0,
+      bottom: 0,
+      left: left,
+      width: width,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+          child: const SizedBox.expand(),
+        ),
+      ),
+    );
   }
 }
 
