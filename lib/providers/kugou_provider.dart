@@ -325,75 +325,29 @@ class KugouProvider extends ChangeNotifier {
     _beginLoading();
     _error = null;
     try {
+      // 只加载第一页，后续由搜索页按需加载更多
       if (type == 'album') {
-        // type='album'：自动分页拉取全部专辑（避免只显示 20 个）
-        const batchSize = 20;
-        const maxPages = 100;
-        final all = <KugouAlbumBrief>[];
-        for (int p = 1; p <= maxPages; p++) {
-          final albums = await _apiClient.searchAlbums(
-            keywords,
-            page: p,
-            pagesize: batchSize,
-          );
-          if (albums == null) {
-            if (all.isEmpty) _error = '搜索失败';
-            break;
-          }
-          all.addAll(albums);
-          if (albums.length < batchSize) break;
-        }
-        if (all.isNotEmpty) {
-          _searchResults = KugouSearchResult(albums: all, total: all.length);
-        } else if (_error == null) {
+        final albums = await _apiClient.searchAlbums(keywords, page: 1, pagesize: 20);
+        if (albums != null) {
+          _searchResults = KugouSearchResult(albums: albums, total: albums.length);
+        } else {
+          _error = '搜索失败';
           _searchResults = KugouSearchResult(albums: const [], total: 0);
         }
       } else if (type == 'special') {
-        // type='special'：自动分页拉取全部歌单（避免只显示 20 个）
-        const batchSize = 20;
-        const maxPages = 100;
-        final all = <KugouPlaylistBrief>[];
-        for (int p = 1; p <= maxPages; p++) {
-          final playlists = await _apiClient.searchPlaylists(
-            keywords,
-            page: p,
-            pagesize: batchSize,
-          );
-          if (playlists == null) {
-            if (all.isEmpty) _error = '搜索失败';
-            break;
-          }
-          all.addAll(playlists);
-          if (playlists.length < batchSize) break;
-        }
-        if (all.isNotEmpty) {
-          _searchResults = KugouSearchResult(playlists: all, total: all.length);
-        } else if (_error == null) {
+        final playlists = await _apiClient.searchPlaylists(keywords, page: 1, pagesize: 20);
+        if (playlists != null) {
+          _searchResults = KugouSearchResult(playlists: playlists, total: playlists.length);
+        } else {
+          _error = '搜索失败';
           _searchResults = KugouSearchResult(playlists: const [], total: 0);
         }
       } else {
-        // type='song'：自动分页拉取全部歌曲（避免只显示 30 首）
-        const batchSize = 30;
-        const maxPages = 100;
-        final all = <KugouSongDetail>[];
-        for (int p = 1; p <= maxPages; p++) {
-          final result = await _apiClient.search(
-            keywords,
-            type: type,
-            page: p,
-            pagesize: batchSize,
-          );
-          if (result == null) {
-            if (all.isEmpty) _error = '搜索失败';
-            break;
-          }
-          all.addAll(result.songs);
-          if (result.songs.length < batchSize) break;
-        }
-        if (all.isNotEmpty) {
-          _searchResults = KugouSearchResult(songs: all, total: all.length);
-        } else if (_error == null) {
-          // 无结果：保留空结果对象，避免搜索页误判为未搜索
+        final result = await _apiClient.search(keywords, type: type, page: 1, pagesize: 30);
+        if (result != null) {
+          _searchResults = result;
+        } else {
+          _error = '搜索失败';
           _searchResults = KugouSearchResult(songs: const [], total: 0);
         }
       }
@@ -409,6 +363,53 @@ class KugouProvider extends ChangeNotifier {
       _error = e.toString();
     }
     _endLoading();
+  }
+
+  /// 加载搜索结果的下一页
+  Future<void> loadMoreSearchResults({required String type}) async {
+    if (_isLoading || _lastSearchKeyword == null) return;
+    _isLoading = true;
+    notifyListeners();
+    try {
+      if (type == 'album') {
+        final current = _searchResultsByType[type];
+        final currentCount = current?.albums.length ?? 0;
+        final nextPage = (currentCount ~/ 20) + 1;
+        final albums = await _apiClient.searchAlbums(_lastSearchKeyword!, page: nextPage, pagesize: 20);
+        if (albums != null && albums.isNotEmpty) {
+          final existing = current?.albums ?? [];
+          final merged = [...existing, ...albums];
+          _searchResults = KugouSearchResult(albums: merged, total: merged.length);
+          _searchResultsByType[type] = _searchResults!;
+        }
+      } else if (type == 'special') {
+        final current = _searchResultsByType[type];
+        final currentCount = current?.playlists.length ?? 0;
+        final nextPage = (currentCount ~/ 20) + 1;
+        final playlists = await _apiClient.searchPlaylists(_lastSearchKeyword!, page: nextPage, pagesize: 20);
+        if (playlists != null && playlists.isNotEmpty) {
+          final existing = current?.playlists ?? [];
+          final merged = [...existing, ...playlists];
+          _searchResults = KugouSearchResult(playlists: merged, total: merged.length);
+          _searchResultsByType[type] = _searchResults!;
+        }
+      } else {
+        final current = _searchResultsByType[type];
+        final currentCount = current?.songs.length ?? 0;
+        final nextPage = (currentCount ~/ 30) + 1;
+        final result = await _apiClient.search(_lastSearchKeyword!, type: type, page: nextPage, pagesize: 30);
+        if (result != null && result.songs.isNotEmpty) {
+          final existing = current?.songs ?? [];
+          final merged = [...existing, ...result.songs];
+          _searchResults = KugouSearchResult(songs: merged, total: merged.length);
+          _searchResultsByType[type] = _searchResults!;
+        }
+      }
+    } catch (e) {
+      _error = e.toString();
+    }
+    _isLoading = false;
+    notifyListeners();
   }
 
   Future<void> getHotSearch() async {

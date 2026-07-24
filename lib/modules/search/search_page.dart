@@ -338,11 +338,11 @@ class _SearchPageState extends State<SearchPage>
   Widget _buildSongResults() {
     final kugouProvider = context.watch<KugouProvider>();
 
-    if (kugouProvider.isLoading) {
+    if (kugouProvider.isLoading && (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (kugouProvider.error != null) {
+    if (kugouProvider.error != null && (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
       return _buildErrorState(kugouProvider.error!, () {
         kugouProvider.clearError();
         _performSearchByType(_query, 'song');
@@ -359,17 +359,37 @@ class _SearchPageState extends State<SearchPage>
     if (results.isEmpty) {
       return _buildNoResult();
     }
-    return ListView.builder(
-      itemCount: results.length,
-      itemBuilder: (context, index) {
-        return SongListItem(
-          song: results[index],
-          onTap: () {
-            context.read<PlayerProvider>().playOnlinePlaylist(results, index);
-          },
-          onMoreTap: () {},
-        );
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification &&
+            notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
+          context.read<KugouProvider>().loadMoreSearchResults(type: 'song');
+        }
+        return false;
       },
+      child: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              itemCount: results.length,
+              itemBuilder: (context, index) {
+                return SongListItem(
+                  song: results[index],
+                  onTap: () {
+                    context.read<PlayerProvider>().playOnlinePlaylist(results, index);
+                  },
+                  onMoreTap: () {},
+                );
+              },
+            ),
+          ),
+          if (kugouProvider.isLoading)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+        ],
+      ),
     );
   }
 
@@ -382,11 +402,11 @@ class _SearchPageState extends State<SearchPage>
   Widget _buildAlbumResults() {
     final kugouProvider = context.watch<KugouProvider>();
 
-    if (kugouProvider.isLoading) {
+    if (kugouProvider.isLoading && (kugouProvider.searchResults?.albums.isEmpty ?? true)) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (kugouProvider.error != null) {
+    if (kugouProvider.error != null && (kugouProvider.searchResults?.albums.isEmpty ?? true)) {
       return _buildErrorState(kugouProvider.error!, () {
         kugouProvider.clearError();
         _performSearchByType(_query, 'album');
@@ -403,38 +423,58 @@ class _SearchPageState extends State<SearchPage>
     if (results.isEmpty) {
       return _buildNoResult();
     }
-    return GridView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: 0.75,
-      ),
-      itemCount: results.length,
-      itemBuilder: (context, index) {
-        final album = results[index];
-        final cleanName = album.name.replaceAll(RegExp(r'<[^>]*>'), '');
-        final cleanArtist = album.artist.replaceAll(RegExp(r'<[^>]*>'), '');
-        return _SearchAlbumCard(
-          name: cleanName,
-          artist: cleanArtist,
-          artworkUri: album.artworkUri,
-          icon: Icons.album,
-          onTap: () => _showAlbumDetail(album),
-        );
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification &&
+            notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
+          context.read<KugouProvider>().loadMoreSearchResults(type: 'album');
+        }
+        return false;
       },
+      child: Column(
+        children: [
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 0.75,
+              ),
+              itemCount: results.length,
+              itemBuilder: (context, index) {
+                final album = results[index];
+                final cleanName = album.name.replaceAll(RegExp(r'<[^>]*>'), '');
+                final cleanArtist = album.artist.replaceAll(RegExp(r'<[^>]*>'), '');
+                return _SearchAlbumCard(
+                  name: cleanName,
+                  artist: cleanArtist,
+                  artworkUri: album.artworkUri,
+                  icon: Icons.album,
+                  onTap: () => _showAlbumDetail(album),
+                );
+              },
+            ),
+          ),
+          if (kugouProvider.isLoading)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+        ],
+      ),
     );
   }
 
   Widget _buildPlaylistResults() {
     final kugouProvider = context.watch<KugouProvider>();
 
-    if (kugouProvider.isLoading) {
+    if (kugouProvider.isLoading && (kugouProvider.searchResults?.playlists.isEmpty ?? true)) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (kugouProvider.error != null) {
+    if (kugouProvider.error != null && (kugouProvider.searchResults?.playlists.isEmpty ?? true)) {
       return _buildErrorState(kugouProvider.error!, () {
         kugouProvider.clearError();
         _performSearchByType(_query, 'special');
@@ -451,32 +491,52 @@ class _SearchPageState extends State<SearchPage>
     if (results.isEmpty) {
       return _buildNoResult();
     }
-    return GridView.builder(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        mainAxisSpacing: 12,
-        crossAxisSpacing: 12,
-        childAspectRatio: 0.75,
-      ),
-      itemCount: results.length,
-      itemBuilder: (context, index) {
-        final pl = results[index];
-        final cleanName = pl.name.replaceAll(RegExp(r'<[^>]*>'), '');
-        return _SearchAlbumCard(
-          name: cleanName,
-          artist: pl.songCount > 0 ? '${pl.songCount} 首歌曲' : '',
-          artworkUri: pl.coverUrl,
-          icon: Icons.queue_music,
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => PlaylistPage(playlist: pl.toPlaylist()),
-              ),
-            );
-          },
-        );
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification &&
+            notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
+          context.read<KugouProvider>().loadMoreSearchResults(type: 'special');
+        }
+        return false;
       },
+      child: Column(
+        children: [
+          Expanded(
+            child: GridView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 0.75,
+              ),
+              itemCount: results.length,
+              itemBuilder: (context, index) {
+                final pl = results[index];
+                final cleanName = pl.name.replaceAll(RegExp(r'<[^>]*>'), '');
+                return _SearchAlbumCard(
+                  name: cleanName,
+                  artist: pl.songCount > 0 ? '${pl.songCount} 首歌曲' : '',
+                  artworkUri: pl.coverUrl,
+                  icon: Icons.queue_music,
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => PlaylistPage(playlist: pl.toPlaylist()),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          if (kugouProvider.isLoading)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+        ],
+      ),
     );
   }
 
