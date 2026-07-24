@@ -153,7 +153,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
 
   Widget _buildUserAvatar(KugouProvider kugou, ColorScheme cs) {
     final avatarUrl = kugou.userInfo?.avatar;
-    final userId = kugou.userInfo?.userid ?? 'default';
+    final userId = kugou.userid ?? 'default';
     
     if (avatarUrl == null || avatarUrl.isEmpty) {
       return CircleAvatar(
@@ -221,7 +221,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'ID: ${kugou.userInfo?.userid ?? ''}',
+                      'ID: ${kugou.userid ?? ''}',
                       style: TextStyle(
                         color: cs.onPrimaryContainer.withValues(alpha: 0.7),
                         fontSize: 12,
