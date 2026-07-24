@@ -21,6 +21,7 @@ import 'package:flutter/widgets.dart';
 
 import 'controllers/line_scale_controller.dart';
 import 'controllers/lyric_scroll_controller.dart';
+import 'animation/spring.dart';
 import 'layout/lyric_layout.dart';
 import 'layout/lyric_preferences.dart';
 import 'models/lyric_line.dart';
@@ -115,6 +116,26 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 5s 自动回弹触发时在 ~600ms 内恢复到 1.0。
   double _blurIntensity = 1.0;
   double _blurTarget = 1.0;
+
+  // ============== 级联弹簧延迟 ==============
+
+  /// 每行偏移弹簧（行索引 → Spring）。
+  ///
+  /// 当前行切换时，下方行的弹簧从负偏移动画到 0，
+  /// 形成逐级延迟上拉效果。
+  final Map<int, Spring> _perLineSprings = {};
+
+  /// 每行延迟开始时间戳（行索引 → 毫秒）。
+  final Map<int, double> _delayStartTimes = {};
+
+  /// 上一帧的当前行索引，用于检测行切换。
+  int _previousLineIndex = -1;
+
+  /// 级联延迟：相邻行间延迟毫秒数。
+  static const double _perLineDelayMs = 50.0;
+
+  /// 级联偏移：每行初始向下偏移量（负值 = 向下，弹簧拉回 0 = 向上）。
+  static const double _perLineOffset = -40.0;
 
   /// 预计算每行实际高度（含自动换行）。
   ///
@@ -290,6 +311,23 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   LineRenderer _lineRendererFor(int index) =>
       _lineRenderers.putIfAbsent(index, () => LineRenderer());
 
+  /// 获取或创建指定行的偏移弹簧。
+  Spring _perLineSpringFor(int index) => _perLineSprings.putIfAbsent(
+      index,
+      () => Spring(
+            mass: 1.0,
+            damping: 15.0,
+            stiffness: 100.0,
+            initialPosition: 0,
+          ));
+
+  /// 构建每行的偏移量列表，传给 _LyricsPainter。
+  List<double> _buildPerLineOffsets() {
+    return List.generate(widget.lines.length, (i) {
+      return _perLineSprings[i]?.position ?? 0.0;
+    });
+  }
+
   // ============== 动画推进 ==============
 
   void _onTick(Duration elapsed) {
@@ -401,7 +439,42 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       _blurIntensity = _blurTarget;
     }
 
-    // 9. 触发重绘
+    // 9. 级联弹簧延迟：检测当前行切换，为下方行设置延迟偏移
+    if (_currentLineIndex >= 0 && _currentLineIndex != _previousLineIndex) {
+      final now = _lastElapsed.inMicroseconds / 1000.0;
+      // 为当前行下方的行设置延迟和弹簧初始偏移
+      for (int i = _currentLineIndex + 1; i < widget.lines.length; i++) {
+        _delayStartTimes[i] = now;
+        final spring = _perLineSpringFor(i);
+        spring.setPosition(_perLineOffset, 0);
+        spring.setTarget(0);
+      }
+      // 清除已过行的延迟记录
+      _delayStartTimes.removeWhere((k, _) => k <= _currentLineIndex);
+    }
+    _previousLineIndex = _currentLineIndex;
+
+    // 推进每行偏移弹簧
+    for (final entry in Map.of(_perLineSprings).entries) {
+      final i = entry.key;
+      final spring = entry.value;
+      if (i < _currentLineIndex || i >= widget.lines.length) {
+        // 上方或超出范围：直接归零
+        spring.setPosition(0, 0);
+        continue;
+      }
+      final delayStart = _delayStartTimes[i];
+      if (delayStart != null) {
+        final elapsedMs = (_lastElapsed.inMicroseconds / 1000.0) - delayStart;
+        final delayMs = (i - _currentLineIndex) * _perLineDelayMs;
+        if (elapsedMs >= delayMs) {
+          spring.tick(dt);
+        }
+        // 延迟未到：保持初始偏移（setPosition 已设置）
+      }
+    }
+
+    // 10. 触发重绘
     setState(() {});
   }
 
@@ -544,10 +617,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           // 挂载垂直拖动手势：用户可上下滑动歌词，5s 后自动回弹到当前行。
           onVerticalDragUpdate: _onVerticalDragUpdate,
           onVerticalDragEnd: _onVerticalDragEnd,
-          // AMLL 上下渐变 mask：顶部底部各 15% 视口高度 alpha 渐变（黑→透明→黑）
-          // 用户确认（grill-me Q6）：按 AMLL 规范来。
-          // 用 ShaderMask + LinearGradient 实现，blendMode: dstIn
-          // 让歌词在两端淡出，营造无限滚动感。
           child: ClipRect(
             child: Stack(
               children: [
@@ -575,6 +644,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
                     activeInterludeIdx: _activeInterludeIdx,
                     lastActiveAnchorIdx: _lastActiveAnchorIdx,
                     interludeExpandProgress: _interludeExpandProgress,
+                    perLineOffsets: _buildPerLineOffsets(),
                   ),
                   size: Size.infinite,
                 ),
@@ -717,6 +787,9 @@ class _LyricsPainter extends CustomPainter {
   /// 占位高度 = interludePlaceholderHeight * interludeExpandProgress
   final double interludeExpandProgress;
 
+  /// 每行偏移量（级联弹簧延迟动画），正值=向下，负值=向上。
+  final List<double> perLineOffsets;
+
   _LyricsPainter({
     required this.lines,
     required this.currentLineIndex,
@@ -740,6 +813,7 @@ class _LyricsPainter extends CustomPainter {
     required this.activeInterludeIdx,
     required this.lastActiveAnchorIdx,
     required this.interludeExpandProgress,
+    required this.perLineOffsets,
   });
 
   /// 获取指定行 i 的实际高度（含换行），降级到 mainLineHeight。
@@ -776,8 +850,9 @@ class _LyricsPainter extends CustomPainter {
     for (int i = 0; i < lines.length; i++) {
       final line = lines[i];
       final double lineHeight = _heightOf(i);
-      // 行顶部 y 坐标 = lineTops[i] + 该行上方间奏占位偏移 + posY
-      final double y = _topOf(i) + _interludeOffsetBefore(i) + posY;
+      // 行顶部 y 坐标 = lineTops[i] + 该行上方间奏占位偏移 + posY + 级联偏移
+      final double offset = (i < perLineOffsets.length) ? perLineOffsets[i] : 0.0;
+      final double y = _topOf(i) + _interludeOffsetBefore(i) + posY + offset;
 
       // 跳过视口外（含 overscan=300px 上下缓冲）的行，避免不必要的绘制
       if (y + lineHeight < -LyricLayout.overscanPx) continue;
