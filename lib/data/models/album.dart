@@ -5,6 +5,7 @@ class Album {
   final String? artworkUri;
   final int songCount;
   final int? year;
+  final String? globalCollectionId;
 
   const Album({
     required this.id,
@@ -13,6 +14,7 @@ class Album {
     this.artworkUri,
     required this.songCount,
     this.year,
+    this.globalCollectionId,
   });
 
   factory Album.fromJson(Map<String, dynamic> json) {
@@ -23,6 +25,7 @@ class Album {
       artworkUri: json['artworkUri'] as String?,
       songCount: (json['songCount'] as num).toInt(),
       year: json['year'] as int?,
+      globalCollectionId: json['globalCollectionId'] as String?,
     );
   }
 
@@ -34,6 +37,7 @@ class Album {
       'artworkUri': artworkUri,
       'songCount': songCount,
       'year': year,
+      'globalCollectionId': globalCollectionId,
     };
   }
 

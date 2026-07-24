@@ -339,14 +339,21 @@ class KugouApiClient {
     int pagesize = 30,
     String type = 'song',
   }) async {
+    final params = <String, dynamic>{
+      'keywords': keywords,
+      'page': page,
+      'pagesize': pagesize,
+      'type': type,
+    };
+    // 搜索接口需要 cookie 认证
+    if (_token != null && _userid != null) {
+      final cookieParts = <String>['token=$_token', 'userid=$_userid'];
+      if (_dfid != null) cookieParts.add('dfid=$_dfid');
+      params['cookie'] = cookieParts.join(';');
+    }
     final json = await _get(
       KugouEndpoints.search,
-      queryParameters: {
-        'keywords': keywords,
-        'page': page,
-        'pagesize': pagesize,
-        'type': type,
-      },
+      queryParameters: params,
     );
     if (json == null) return null;
     try {
@@ -361,14 +368,22 @@ class KugouApiClient {
     int page = 1,
     int pagesize = 20,
   }) async {
+    final params = <String, dynamic>{
+      'keyword': keywords,
+      'page': page,
+      'pagesize': pagesize,
+    };
+    // 搜索接口需要 cookie 认证
+    if (_token != null && _userid != null) {
+      final cookieParts = <String>['token=$_token', 'userid=$_userid'];
+      if (_dfid != null) cookieParts.add('dfid=$_dfid');
+      params['cookie'] = cookieParts.join(';');
+    }
     final json = await _get(
       KugouEndpoints.searchAlbum,
-      queryParameters: {
-        'keyword': keywords,
-        'page': page,
-        'pagesize': pagesize,
-      },
+      queryParameters: params,
     );
+    print('[SearchAlbums] keyword=$keywords, result=${json != null ? "ok" : "null"}');
     if (json == null) return null;
     try {
       final data = json['data'];
@@ -378,10 +393,20 @@ class KugouApiClient {
       } else if (data is Map) {
         list = data['info'] ?? data['list'] ?? [];
       }
-      return list
+      // 打印原始 JSON 查看实际字段名
+      if (list.isNotEmpty) {
+        print('[SearchAlbums] RAW FIRST ITEM: ${list.first}');
+      }
+      final albums = list
           .map((e) => KugouAlbumBrief.fromJson(e as Map<String, dynamic>))
           .toList();
+      print('[SearchAlbums] found ${albums.length} albums');
+      for (final a in albums) {
+        print('[SearchAlbums]   ${a.name} -> globalCollectionId=${a.globalCollectionId}, id=${a.id}, numericId=${a.numericId}');
+      }
+      return albums;
     } catch (e) {
+      print('[SearchAlbums] parse error: $e');
       return null;
     }
   }
@@ -1096,7 +1121,7 @@ class KugouApiClient {
   }) async {
     final json = await _get(
       KugouEndpoints.commentPlaylist,
-      queryParameters: {'specialid': specialId, 'page': page},
+      queryParameters: {'id': specialId, 'page': page},
     );
     if (json == null) return null;
     try {
@@ -1112,7 +1137,7 @@ class KugouApiClient {
   }) async {
     final json = await _get(
       KugouEndpoints.commentAlbum,
-      queryParameters: {'album_id': albumId, 'page': page},
+      queryParameters: {'id': albumId, 'page': page},
     );
     if (json == null) return null;
     try {
@@ -1521,7 +1546,7 @@ class KugouApiClient {
   Future<KugouArtistDetail?> getArtistDetail(String artistId) async {
     final json = await _get(
       KugouEndpoints.artistDetail,
-      queryParameters: {'singerid': artistId},
+      queryParameters: {'id': artistId},
     );
     if (json == null) return null;
     try {
@@ -1561,7 +1586,7 @@ class KugouApiClient {
     final json = await _get(
       KugouEndpoints.artistAudios,
       queryParameters: {
-        'singerid': artistId,
+        'id': artistId,
         'page': page,
         'pagesize': pagesize,
       },
@@ -1881,6 +1906,10 @@ class KugouApiClient {
       'list_create_userid': userid,
       'list_create_listid': listid,
     };
+    // 收藏歌单时需要传入 list_create_gid
+    if (globalCollectionId != null && globalCollectionId.isNotEmpty) {
+      params['list_create_gid'] = globalCollectionId;
+    }
     return await _get(KugouEndpoints.playlistAdd, queryParameters: params);
   }
 
