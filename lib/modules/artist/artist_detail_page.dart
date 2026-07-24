@@ -33,12 +33,6 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   String? _description;
   bool _isDescriptionExpanded = false;
 
-  // 分页状态
-  int _currentSongPage = 1;
-  bool _hasMoreSongs = true;
-  bool _isLoadingMore = false;
-  static const int _pageSize = 30;
-
   @override
   void initState() {
     super.initState();
@@ -59,11 +53,13 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       final artistName = widget.artistName;
 
       // 并行获取歌手详情和第一页歌曲
+      const batchSize = 30;
+      const maxPages = 100;
       final detailFuture = api.getArtistDetail(artistId);
       final firstPageFuture = api.getArtistAudios(
         artistId,
         page: 1,
-        pagesize: _pageSize,
+        pagesize: batchSize,
         noCache: true,
       );
 
@@ -80,21 +76,48 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
         _description = detail.description;
       }
 
-      // 只加载第一页，设置分页状态
-      final songs = firstPage?.songs ?? [];
-      final total = firstPage?.total ?? 0;
+      // 一次性拉取全部歌曲
+      final allSongs = <KugouSongDetail>[];
+      if (firstPage != null && firstPage.songs.isNotEmpty) {
+        allSongs.addAll(firstPage.songs);
+        final total = firstPage.total;
+        final targetTotal = (total > 0) ? total : 999999;
+
+        int currentPage = 2;
+        while (allSongs.length < targetTotal && currentPage <= maxPages) {
+          final pageResult = await api.getArtistAudios(
+            artistId,
+            page: currentPage,
+            pagesize: batchSize,
+            noCache: true,
+          );
+          if (pageResult == null || pageResult.songs.isEmpty) break;
+          allSongs.addAll(pageResult.songs);
+          if (pageResult.songs.length < batchSize) break;
+          currentPage++;
+        }
+      }
+
+      // API 返回不足时，用搜索补充
+      final expectedTotal = firstPage?.total ?? 0;
+      if (allSongs.isEmpty || (expectedTotal > 0 && allSongs.length < expectedTotal && allSongs.length < 30)) {
+        final searchSongs = await _searchArtistSongs(api, artistId, artistName);
+        if (!mounted) return;
+        if (searchSongs.isNotEmpty) {
+          final existingHashes = allSongs.map((s) => s.hash).toSet();
+          for (final song in searchSongs) {
+            if (!existingHashes.contains(song.hash)) {
+              allSongs.add(song);
+              existingHashes.add(song.hash);
+            }
+          }
+        }
+      }
 
       setState(() {
-        _songs = songs.map((s) => s.toSong()).toList();
+        _songs = allSongs.map((s) => s.toSong()).toList();
         _isLoading = false;
-        _currentSongPage = 1;
-        _hasMoreSongs = songs.length >= _pageSize && (total <= 0 || _songs.length < total);
       });
-
-      // 如果第一页为空或太少，用搜索补充
-      if (_songs.isEmpty || (total > 0 && _songs.length < total && songs.length < _pageSize)) {
-        _searchAndAppend(api, artistId, artistName);
-      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -103,76 +126,6 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
         });
       }
     }
-  }
-
-  /// 加载更多歌曲（滚动到底部时调用）
-  Future<void> _loadMoreSongs() async {
-    if (_isLoadingMore || !_hasMoreSongs) return;
-    setState(() => _isLoadingMore = true);
-
-    try {
-      final api = KugouApiClient();
-      final nextPage = _currentSongPage + 1;
-      final result = await api.getArtistAudios(
-        widget.artistId,
-        page: nextPage,
-        pagesize: _pageSize,
-        noCache: true,
-      );
-
-      if (!mounted) return;
-
-      if (result != null && result.songs.isNotEmpty) {
-        final existingHashes = _songs.map((s) => s.id).toSet();
-        final newSongs = result.songs
-            .map((s) => s.toSong())
-            .where((s) => !existingHashes.contains(s.id))
-            .toList();
-
-        setState(() {
-          _songs.addAll(newSongs);
-          _currentSongPage = nextPage;
-          _hasMoreSongs = result.songs.length >= _pageSize;
-          _isLoadingMore = false;
-        });
-      } else {
-        setState(() {
-          _hasMoreSongs = false;
-          _isLoadingMore = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _isLoadingMore = false);
-      }
-    }
-  }
-
-  /// 滚动监听 —— 到底时触发加载更多
-  bool _onScrollNotification(ScrollNotification notification) {
-    if (notification is ScrollEndNotification &&
-        notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
-      _loadMoreSongs();
-    }
-    return false;
-  }
-
-  /// API 返回歌曲不足时，用搜索补充
-  void _searchAndAppend(KugouApiClient api, String artistId, String artistName) async {
-    try {
-      final searchSongs = await _searchArtistSongs(api, artistId, artistName);
-      if (!mounted || searchSongs.isEmpty) return;
-
-      final existingHashes = _songs.map((s) => s.id).toSet();
-      final newSongs = searchSongs
-          .where((s) => !existingHashes.contains(s.hash))
-          .map((s) => s.toSong())
-          .toList();
-
-      if (newSongs.isNotEmpty) {
-        setState(() => _songs.addAll(newSongs));
-      }
-    } catch (_) {}
   }
 
   /// 通过搜索获取该歌手的歌曲，用 artistId 精确匹配
@@ -249,9 +202,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
           ? const Center(child: CircularProgressIndicator())
           : _error != null
               ? _buildError(context, colorScheme)
-              : NotificationListener<ScrollNotification>(
-                  onNotification: _onScrollNotification,
-                  child: CustomScrollView(
+              : CustomScrollView(
                   slivers: [
                     SliverAppBar(
                       expandedHeight: 200,
@@ -482,16 +433,8 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           childCount: _songs.length,
                         ),
                       ),
-                      if (_isLoadingMore)
-                        const SliverToBoxAdapter(
-                          child: Padding(
-                            padding: EdgeInsets.all(16),
-                            child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                          ),
-                        ),
                     ],
                   ),
-                ),
       bottomNavigationBar: const MiniPlayer(),
     );
   }
