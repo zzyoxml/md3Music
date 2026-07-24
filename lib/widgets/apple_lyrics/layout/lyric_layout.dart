@@ -246,10 +246,10 @@ class LyricLayout {
   // ============== 弹簧参数：posY 普通播放动态范围 ==============
 
   /// posY 普通播放 stiffness 下限
-  static const double posYNormalStiffnessMin = 170;
+  static const double posYNormalStiffnessMin = 110;
 
   /// posY 普通播放 stiffness 上限
-  static const double posYNormalStiffnessMax = 220;
+  static const double posYNormalStiffnessMax = 140;
 
   /// posY 普通播放 interval 下限（ms）
   static const int posYNormalIntervalMinMs = 100;
@@ -262,17 +262,17 @@ class LyricLayout {
   /// 公式（spec.md "Scenario: posY 滚动弹簧（普通播放）"）：
   /// ```
   /// ratio = (1 - (interval - 100) / 700) ** 0.2
-  /// stiffness = 170 + ratio * 50
+  /// stiffness = 110 + ratio * 30
   /// ```
   /// 其中 intervalMs 会被 clamp 到 [100, 800]：
-  /// - interval=100ms（密集）→ ratio=1.0 → stiffness=220（最灵敏）
-  /// - interval=800ms（稀疏）→ ratio=0.0 → stiffness=170（最迟缓）
+  /// - interval=100ms（密集）→ ratio=1.0 → stiffness=140（最灵敏）
+  /// - interval=800ms（稀疏）→ ratio=0.0 → stiffness=110（最迟缓）
   static double posYNormalStiffness(int intervalMs) {
     final clamped =
         intervalMs.clamp(posYNormalIntervalMinMs, posYNormalIntervalMaxMs)
             .toDouble();
     final ratio = math.pow(1 - (clamped - 100) / 700, 0.2).toDouble();
-    return 170 + ratio * 50;
+    return posYNormalStiffnessMin + ratio * (posYNormalStiffnessMax - posYNormalStiffnessMin);
   }
 
   /// 计算 posY 普通播放的 damping
