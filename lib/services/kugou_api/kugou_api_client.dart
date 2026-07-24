@@ -1631,6 +1631,7 @@ class KugouApiClient {
     String artistId, {
     int page = 1,
     int pagesize = 30,
+    bool noCache = false,
   }) async {
     final json = await _get(
       KugouEndpoints.artistAudios,
@@ -1639,6 +1640,7 @@ class KugouApiClient {
         'page': page,
         'pagesize': pagesize,
       },
+      noCache: noCache,
     );
     if (json == null) return null;
     try {

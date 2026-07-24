@@ -167,7 +167,8 @@ class KugouProvider extends ChangeNotifier {
     final key = '$keyword:$type';
     final entry = _searchCache[key];
     if (entry != null && !entry.isExpired) return true;
-    return _lastSearchKeyword == keyword && _searchResultsByType.containsKey(type);
+    return _lastSearchKeyword == keyword &&
+        _searchResultsByType.containsKey(type);
   }
 
   /// 获取缓存中的搜索结果（可能为 null）
@@ -193,7 +194,8 @@ class KugouProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    if (_lastSearchKeyword == keyword && _searchResultsByType.containsKey(type)) {
+    if (_lastSearchKeyword == keyword &&
+        _searchResultsByType.containsKey(type)) {
       _searchResults = _searchResultsByType[type];
       _error = null;
       notifyListeners();
@@ -323,25 +325,75 @@ class KugouProvider extends ChangeNotifier {
     _error = null;
     try {
       if (type == 'album') {
-        final albums = await _apiClient.searchAlbums(keywords);
-        if (albums != null) {
-          _searchResults = KugouSearchResult(albums: albums);
-        } else {
-          _error = '搜索失败';
+        // type='album'：自动分页拉取全部专辑（避免只显示 20 个）
+        const batchSize = 20;
+        const maxPages = 100;
+        final all = <KugouAlbumBrief>[];
+        for (int p = 1; p <= maxPages; p++) {
+          final albums = await _apiClient.searchAlbums(
+            keywords,
+            page: p,
+            pagesize: batchSize,
+          );
+          if (albums == null) {
+            if (all.isEmpty) _error = '搜索失败';
+            break;
+          }
+          all.addAll(albums);
+          if (albums.length < batchSize) break;
+        }
+        if (all.isNotEmpty) {
+          _searchResults = KugouSearchResult(albums: all, total: all.length);
+        } else if (_error == null) {
+          _searchResults = KugouSearchResult(albums: const [], total: 0);
         }
       } else if (type == 'special') {
-        final playlists = await _apiClient.searchPlaylists(keywords);
-        if (playlists != null) {
-          _searchResults = KugouSearchResult(playlists: playlists);
-        } else {
-          _error = '搜索失败';
+        // type='special'：自动分页拉取全部歌单（避免只显示 20 个）
+        const batchSize = 20;
+        const maxPages = 100;
+        final all = <KugouPlaylistBrief>[];
+        for (int p = 1; p <= maxPages; p++) {
+          final playlists = await _apiClient.searchPlaylists(
+            keywords,
+            page: p,
+            pagesize: batchSize,
+          );
+          if (playlists == null) {
+            if (all.isEmpty) _error = '搜索失败';
+            break;
+          }
+          all.addAll(playlists);
+          if (playlists.length < batchSize) break;
+        }
+        if (all.isNotEmpty) {
+          _searchResults = KugouSearchResult(playlists: all, total: all.length);
+        } else if (_error == null) {
+          _searchResults = KugouSearchResult(playlists: const [], total: 0);
         }
       } else {
-        final result = await _apiClient.search(keywords, type: type);
-        if (result != null) {
-          _searchResults = result;
-        } else {
-          _error = '搜索失败';
+        // type='song'：自动分页拉取全部歌曲（避免只显示 30 首）
+        const batchSize = 30;
+        const maxPages = 100;
+        final all = <KugouSongDetail>[];
+        for (int p = 1; p <= maxPages; p++) {
+          final result = await _apiClient.search(
+            keywords,
+            type: type,
+            page: p,
+            pagesize: batchSize,
+          );
+          if (result == null) {
+            if (all.isEmpty) _error = '搜索失败';
+            break;
+          }
+          all.addAll(result.songs);
+          if (result.songs.length < batchSize) break;
+        }
+        if (all.isNotEmpty) {
+          _searchResults = KugouSearchResult(songs: all, total: all.length);
+        } else if (_error == null) {
+          // 无结果：保留空结果对象，避免搜索页误判为未搜索
+          _searchResults = KugouSearchResult(songs: const [], total: 0);
         }
       }
       if (_searchResults != null) {
@@ -506,7 +558,10 @@ class KugouProvider extends ChangeNotifier {
     _endLoading();
   }
 
-  Future<KugouCommentList?> getPlaylistComments(String specialId, {int page = 1}) async {
+  Future<KugouCommentList?> getPlaylistComments(
+    String specialId, {
+    int page = 1,
+  }) async {
     _error = null;
     try {
       return await _apiClient.getPlaylistComments(specialId, page: page);
@@ -516,7 +571,10 @@ class KugouProvider extends ChangeNotifier {
     }
   }
 
-  Future<KugouCommentList?> getAlbumComments(String albumId, {int page = 1}) async {
+  Future<KugouCommentList?> getAlbumComments(
+    String albumId, {
+    int page = 1,
+  }) async {
     _error = null;
     try {
       return await _apiClient.getAlbumComments(albumId, page: page);
@@ -798,16 +856,16 @@ class KugouProvider extends ChangeNotifier {
     _vipMonthRecord = null;
     _userHistoryData = null;
     _everydayHistory = null;
-    
+
     // 清除所有用户相关的内存缓存
     clearMemoryCache();
-    
+
     // 清除API客户端的认证信息
     _apiClient.clearCookies();
-    
+
     // 清除头像缓存
     _clearAvatarCache();
-    
+
     print('✅ [Logout] 用户已退出登录，所有用户数据已清除');
     notifyListeners();
   }
@@ -856,7 +914,8 @@ class KugouProvider extends ChangeNotifier {
 
       try {
         final autoClaim = await _apiClient.claimDayVip(receiveDay);
-        final autoOk = autoClaim != null &&
+        final autoOk =
+            autoClaim != null &&
             (autoClaim['status'] == 1 || autoClaim['error_code'] == 0);
         if (autoOk) {
           await _markSignedToday();
@@ -930,7 +989,8 @@ class KugouProvider extends ChangeNotifier {
 
       final status = claim['status'];
       final errorCode = claim['error_code'];
-      final errorMsg = claim['error_msg']?.toString() ?? claim['msg']?.toString() ?? '';
+      final errorMsg =
+          claim['error_msg']?.toString() ?? claim['msg']?.toString() ?? '';
 
       // status=1 成功，或 error_code=0 也视为成功
       final claimOk = (status == 1 || errorCode == 0);
@@ -1244,8 +1304,7 @@ class KugouProvider extends ChangeNotifier {
     try {
       // 传入当前年月，否则接口默认返回最早月份（如 4 月）的记录，导致当月打卡不显示
       final now = DateTime.now();
-      final month =
-          '${now.year}-${now.month.toString().padLeft(2, '0')}';
+      final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
       final r = await _apiClient.getYouthMonthVipRecord(month: month);
       print('[VIP_RECORD] getYouthMonthVipRecord($month) response: $r');
       if (r != null) {

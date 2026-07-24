@@ -11,8 +11,8 @@ module.exports = (params, useAxios) => {
     clienttime,
     key: signParamsKey(clienttime),
     author_id: params.id,
-    pagesize: params?.pagesize || 30,
-    page: params?.page || 1,
+    pagesize: parseInt(params?.pagesize, 10) || 30,
+    page: parseInt(params?.page, 10) || 1,
     sort: params?.sort === 'hot' ? 1 : 2, // 1：最热，2：最新
     area_code: 'all',
   };

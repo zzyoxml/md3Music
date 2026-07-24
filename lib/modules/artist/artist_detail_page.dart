@@ -49,51 +49,95 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
 
     try {
       final api = KugouApiClient();
+      final artistId = widget.artistId;
+      final artistName = widget.artistName;
 
-      // 并行获取歌手详情和歌曲
-      final detailFuture = api.getArtistDetail(widget.artistId);
-      final songsFuture = api.getArtistAudios(widget.artistId);
+      // 并行获取歌手详情和第一页歌曲，避免首次加载等待
+      const batchSize = 30;
+      const maxPages = 200;
+      final detailFuture = api.getArtistDetail(artistId);
+      final firstPageFuture = api.getArtistAudios(
+        artistId,
+        page: 1,
+        pagesize: batchSize,
+        noCache: true,
+      );
 
-      final results = await Future.wait([detailFuture, songsFuture]);
+      final initial = await Future.wait([detailFuture, firstPageFuture]);
       if (!mounted) return;
 
-      final detail = results[0] as KugouArtistDetail?;
-      final songsResult = results[1] as KugouArtistAudios?;
+      final detail = initial[0] as KugouArtistDetail?;
+      final firstPage = initial[1] as KugouArtistAudios?;
 
       // 获取歌手简介
-      if (detail != null && detail.description != null && detail.description!.isNotEmpty) {
+      if (detail != null &&
+          detail.description != null &&
+          detail.description!.isNotEmpty) {
         _description = detail.description;
       }
 
-      if (songsResult != null && songsResult.songs.isNotEmpty) {
-        setState(() {
-          _songs = songsResult.songs.map((s) => s.toSong()).toList();
-          _isLoading = false;
-        });
-        return;
+      // 自动分页拉取该歌手全部歌曲
+      final allSongs = <KugouSongDetail>[];
+      if (firstPage != null && firstPage.songs.isNotEmpty) {
+        allSongs.addAll(firstPage.songs);
+        final total = firstPage.total;
+
+        // 如果API返回了有效的total，使用它；否则持续拉取直到没有更多数据
+        final targetTotal = (total > 0) ? total : 999999;
+
+        // 继续拉取后续页面
+        int currentPage = 2;
+        while (allSongs.length < targetTotal && currentPage <= maxPages) {
+          final pageResult = await api.getArtistAudios(
+            artistId,
+            page: currentPage,
+            pagesize: batchSize,
+            noCache: true,
+          );
+
+          // 如果返回空或出错，停止拉取
+          if (pageResult == null || pageResult.songs.isEmpty) break;
+
+          allSongs.addAll(pageResult.songs);
+
+          // 如果返回的歌曲数少于请求的数量，说明已经是最后一页
+          if (pageResult.songs.length < batchSize) break;
+
+          currentPage++;
+        }
       }
 
-      // API 返回空或失败，尝试通过搜索获取该歌手的歌曲
-      final searchResult = await api.search(widget.artistName, type: 'song');
-      if (!mounted) return;
+      // 如果API返回的歌曲数量明显少于预期（可能是分页失效），用搜索补充
+      final apiSongCount = allSongs.length;
+      final expectedTotal = (firstPage?.total ?? 0);
+      final needSearchSupplement =
+          apiSongCount == 0 || (expectedTotal > 0 && apiSongCount < expectedTotal);
 
-      if (searchResult != null && searchResult.songs.isNotEmpty) {
-        final artistNameLower = widget.artistName.toLowerCase();
-        final artistSongs = searchResult.songs.where((s) {
-          final songArtist = s.artistName?.toLowerCase() ?? '';
-          return songArtist.contains(artistNameLower) ||
-              artistNameLower.contains(songArtist);
-        }).toList();
-        setState(() {
-          _songs = artistSongs.map((s) => s.toSong()).toList();
-          _isLoading = false;
-        });
-      } else {
-        setState(() {
-          _songs = [];
-          _isLoading = false;
-        });
+      if (needSearchSupplement) {
+        // 通过搜索补充该歌手的歌曲，用 artistId 精确匹配
+        final searchSongs = await _searchArtistSongs(
+          api,
+          artistId,
+          artistName,
+        );
+        if (!mounted) return;
+
+        if (searchSongs.isNotEmpty) {
+          // 用 hash 去重，合并搜索结果
+          final existingHashes = allSongs.map((s) => s.hash).toSet();
+          for (final song in searchSongs) {
+            if (!existingHashes.contains(song.hash)) {
+              allSongs.add(song);
+              existingHashes.add(song.hash);
+            }
+          }
+        }
       }
+
+      setState(() {
+        _songs = allSongs.map((s) => s.toSong()).toList();
+        _isLoading = false;
+      });
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -102,6 +146,61 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
         });
       }
     }
+  }
+
+  /// 通过搜索获取该歌手的歌曲，用 artistId 精确匹配
+  Future<List<KugouSongDetail>> _searchArtistSongs(
+    KugouApiClient api,
+    String artistId,
+    String artistName,
+  ) async {
+    final matchedSongs = <KugouSongDetail>[];
+    final seenHashes = <String>{};
+    const maxSearchPages = 10;
+    const searchPageSize = 30;
+
+    // 搜索多个页面，用 artistId 精确匹配
+    for (int page = 1; page <= maxSearchPages; page++) {
+      if (!mounted) break;
+
+      final searchResult = await api.search(
+        artistName,
+        page: page,
+        pagesize: searchPageSize,
+        type: 'song',
+      );
+
+      if (searchResult == null || searchResult.songs.isEmpty) break;
+
+      bool foundAny = false;
+      for (final song in searchResult.songs) {
+        if (seenHashes.contains(song.hash)) continue;
+
+        // 用 artistId 精确匹配（最可靠）
+        if (song.artistId != null && song.artistId == artistId) {
+          matchedSongs.add(song);
+          seenHashes.add(song.hash);
+          foundAny = true;
+          continue;
+        }
+
+        // 备选：artistName 完全匹配（忽略大小写）
+        if (song.artistName != null &&
+            song.artistName!.toLowerCase() == artistName.toLowerCase()) {
+          matchedSongs.add(song);
+          seenHashes.add(song.hash);
+          foundAny = true;
+        }
+      }
+
+      // 如果本页没有匹配到任何结果，说明后面也不会有了
+      if (!foundAny && page > 1) break;
+
+      // 如果返回的歌曲数少于请求的数量，说明已经是最后一页
+      if (searchResult.songs.length < searchPageSize) break;
+    }
+
+    return matchedSongs;
   }
 
   /// 将 http:// URL 转换为 https://
