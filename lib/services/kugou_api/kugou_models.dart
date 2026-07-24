@@ -137,12 +137,16 @@ class KugouAlbumBrief {
   final String name;
   final String? coverUrl;
   final String? artistName;
+  final String? globalCollectionId;
+  final String? numericId;
 
   const KugouAlbumBrief({
     required this.id,
     required this.name,
     this.coverUrl,
     this.artistName,
+    this.globalCollectionId,
+    this.numericId,
   });
 
   factory KugouAlbumBrief.fromJson(Map<String, dynamic> json) {
@@ -174,16 +178,19 @@ class KugouAlbumBrief {
             json['SingerName'] ??
             json['author_name'],
       ),
+      globalCollectionId: _strNull(json['global_collection_id'] ?? json['gid']),
+      numericId: _strNull(json['albumid'] ?? json['album_id'] ?? json['AlbumID']),
     );
   }
 
   Album toAlbum() {
     return Album(
-      id: id,
+      id: numericId ?? id,
       name: name,
       artist: artistName ?? '',
       artworkUri: coverUrl,
       songCount: 0,
+      globalCollectionId: globalCollectionId,
     );
   }
 }
@@ -194,12 +201,14 @@ class KugouPlaylistBrief {
   final String? coverUrl;
   final int songCount;
   final String? globalCollectionId;
+  final String? numericId;
   final String listId;
   final String? listCreateUserid;
   final String? listCreateListid;
   final String? listCreateGid;
   final int type;  // 0=自己创建, 1=收藏/订阅他人
   final int source; // 0=普通歌单, 2=收藏的专辑等
+  final String? description;
 
   const KugouPlaylistBrief({
     required this.id,
@@ -207,12 +216,14 @@ class KugouPlaylistBrief {
     this.coverUrl,
     this.songCount = 0,
     this.globalCollectionId,
+    this.numericId,
     this.listId = '',
     this.listCreateUserid,
     this.listCreateListid,
     this.listCreateGid,
     this.type = 0,
     this.source = 0,
+    this.description,
   });
 
   factory KugouPlaylistBrief.fromJson(Map<String, dynamic> json) {
@@ -232,12 +243,14 @@ class KugouPlaylistBrief {
         json['songcount'] ?? json['song_count'] ?? json['count'] ?? 0,
       ),
       globalCollectionId: _strNull(json['global_collection_id'] ?? json['gid']),
+      numericId: _strNull(json['specialid'] ?? json['albumid'] ?? json['album_id']),
       listId: listid,
       listCreateUserid: _strNull(json['list_create_userid']),
       listCreateListid: _strNull(json['list_create_listid']) ?? listid,
       listCreateGid: _strNull(json['list_create_gid'] ?? json['list_create_gid']),
       type: _parseInt(json['type'] ?? 0),
       source: _parseInt(json['source'] ?? 0),
+      description: _strNull(json['intro'] ?? json['description'] ?? json['desc']),
     );
   }
 
@@ -248,6 +261,7 @@ class KugouPlaylistBrief {
       artworkUri: coverUrl,
       songCount: songCount,
       songs: [],
+      description: description,
       listCreateUserid: listCreateUserid,
       listCreateListid: listCreateListid,
       listCreateGid: listCreateGid,

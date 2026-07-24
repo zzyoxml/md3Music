@@ -10,22 +10,31 @@ import '../../providers/player_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../widgets/song_list_item.dart';
+import '../../widgets/playlist_comments_view.dart';
 import '../player/mini_player.dart';
 
 class PlaylistPage extends StatefulWidget {
   final Playlist playlist;
   // 「我收藏」里的歌单：本身已是已收藏状态，不显示红心收藏按钮。
   final bool isInMyFavorites;
+  // 是否为专辑（用于评论类型判断）
+  final bool isAlbum;
+  // 专辑的 globalCollectionId（用于评论 API）
+  final String? albumGlobalCollectionId;
 
   const PlaylistPage({
     super.key,
     required this.playlist,
     this.isInMyFavorites = false,
+    this.isAlbum = false,
+    this.albumGlobalCollectionId,
   });
 
   @override
   State<PlaylistPage> createState() => _PlaylistPageState();
 }
+
+enum _SortBy { time, title, duration }
 
 class _PlaylistPageState extends State<PlaylistPage> {
   bool _isLoading = true;
@@ -35,19 +44,31 @@ class _PlaylistPageState extends State<PlaylistPage> {
   bool _isCollected = false;
   String? _collectedListId;
 
+  // 排序
+  _SortBy _sortBy = _SortBy.time;
+  bool _sortAscending = false; // 默认降序（最新在前 / Z→A / 长→短）
+
   // 歌单内搜索
   bool _isSearching = false;
   String _searchQuery = '';
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
 
+  // 定位正在播放歌曲
+  String? _highlightSongId;
+
+  // 歌单介绍展开/折叠
+  bool _isDescriptionExpanded = false;
+
   /// 顶栏渐变 ScrollController：监听 CustomScrollView 滚动 offset，
   /// 用于 SliverAppBar pinned 后 fade-in 显示歌单名称
   final ScrollController _scrollController = ScrollController();
   double _scrollOffset = 0;
+  double _lastReportedOffset = 0;
 
   @override
   void dispose() {
+    _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -59,32 +80,76 @@ class _PlaylistPageState extends State<PlaylistPage> {
     super.initState();
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // 只有普通歌单才需要查收藏状态。「我收藏」里进来的歌单跳过。
-      if (!widget.isInMyFavorites) {
-        _checkCollected();
-      }
+      _checkCollected();
       _fetchSongs();
     });
   }
 
-  /// 滚动监听：更新 _scrollOffset 触发重绘，驱动顶栏 fade-in 歌单名称
+  /// 滚动监听：减少无意义 setState，仅在偏移变化超过 1px 时更新
   void _onScroll() {
     if (!mounted) return;
     final offset = _scrollController.offset;
-    if ((offset - _scrollOffset).abs() > 0.5) {
-      setState(() => _scrollOffset = offset);
+    if ((offset - _lastReportedOffset).abs() > 1.0) {
+      _lastReportedOffset = offset;
+      _scrollOffset = offset;
+      setState(() {});
     }
   }
 
-  /// 当前显示的歌曲列表（根据搜索关键词过滤）
+  /// 缓存的过滤/排序结果，避免每次 build 重新计算
+  List<Song>? _cachedDisplaySongs;
+  String? _lastSearchQuery;
+  _SortBy? _lastSortBy;
+  bool? _lastSortAscending;
+
+  /// 获取当前显示的歌曲列表（带缓存）
   List<Song> get _displaySongs {
-    if (_searchQuery.isEmpty) return _songs;
-    final q = _searchQuery.toLowerCase();
-    return _songs.where((s) {
-      return s.title.toLowerCase().contains(q) ||
-          s.artist.toLowerCase().contains(q) ||
-          (s.album?.toLowerCase().contains(q) ?? false);
-    }).toList();
+    if (_cachedDisplaySongs != null &&
+        _lastSearchQuery == _searchQuery &&
+        _lastSortBy == _sortBy &&
+        _lastSortAscending == _sortAscending) {
+      return _cachedDisplaySongs!;
+    }
+    _rebuildDisplaySongs();
+    return _cachedDisplaySongs!;
+  }
+
+  void _rebuildDisplaySongs() {
+    List<Song> list;
+    if (_searchQuery.isEmpty) {
+      list = List.of(_songs);
+    } else {
+      final q = _searchQuery.toLowerCase();
+      list = _songs.where((s) {
+        return s.title.toLowerCase().contains(q) ||
+            s.artist.toLowerCase().contains(q) ||
+            (s.album?.toLowerCase().contains(q) ?? false);
+      }).toList();
+    }
+    list.sort((a, b) {
+      int cmp;
+      switch (_sortBy) {
+        case _SortBy.time:
+          cmp = _songs.indexOf(a).compareTo(_songs.indexOf(b));
+          break;
+        case _SortBy.title:
+          cmp = a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
+          break;
+        case _SortBy.duration:
+          cmp = a.duration.compareTo(b.duration);
+          break;
+      }
+      return _sortAscending ? cmp : -cmp;
+    });
+    _cachedDisplaySongs = list;
+    _lastSearchQuery = _searchQuery;
+    _lastSortBy = _sortBy;
+    _lastSortAscending = _sortAscending;
+  }
+
+  /// 使显示列表缓存失效
+  void _invalidateDisplaySongs() {
+    _cachedDisplaySongs = null;
   }
 
   void _toggleSearch() {
@@ -102,13 +167,127 @@ class _PlaylistPageState extends State<PlaylistPage> {
     });
   }
 
+  void _scrollToPlayingSong() {
+    final player = context.read<PlayerProvider>();
+    final currentSong = player.currentSong;
+    if (currentSong == null) return;
+
+    final displayList = _displaySongs;
+    final index = displayList.indexWhere((s) => s.id == currentSong.id);
+    if (index == -1) return;
+
+    // 高亮提示
+    setState(() => _highlightSongId = currentSong.id);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _highlightSongId = null);
+    });
+
+    // 使用 SliverChildBuilderDelegate 的 key 来定位并滚动
+    // 通过 ScrollController 滚动到大致位置（每项约 72px 高度）
+    const itemHeight = 72.0;
+    final targetOffset = index * itemHeight;
+    _scrollController.animateTo(
+      targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
+  }
+
+  void _showCommentsSheet(BuildContext context) {
+    // 收藏歌单使用 listCreateGid 作为评论 ID（原始歌单的 global_collection_id）
+    // 专辑使用 globalCollectionId（如果有的话）
+    final commentId = widget.isAlbum
+        ? (widget.albumGlobalCollectionId ?? widget.playlist.id)
+        : (widget.playlist.listCreateGid ?? widget.playlist.id);
+    final commentType = widget.isAlbum ? 'album' : 'playlist';
+    debugPrint('[CommentsSheet] commentId=$commentId, commentType=$commentType');
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.5,
+        minChildSize: 0.3,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return Container(
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+            ),
+            child: Column(
+              children: [
+                // 拖动手柄
+                Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                // 标题栏
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.comment_outlined,
+                        size: 20,
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '评论',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const Spacer(),
+                      IconButton(
+                        icon: const Icon(Icons.close, size: 20),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ],
+                  ),
+                ),
+                Divider(height: 1, color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
+                // 评论列表（使用 DraggableScrollableSheet 的 controller 实现拖拽扩展）
+                Expanded(
+                  child: PlaylistCommentsView(
+                    specialId: commentId,
+                    commentType: commentType,
+                    scrollController: scrollController,
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   // ==================== 收藏本地缓存（解决后端 user/playlist 列表 ~1-2 分钟缓存才同步的问题）====================
 
-  /// 查询当前歌单是否已被收藏（仅供普通歌单「发现/热门/排行榜」用）。
-  /// 「我收藏」里点进来的歌单本身已是已收藏状态，不需要再查。
+  /// 查询当前歌单是否已被收藏。
+  /// 「我收藏」里点进来的歌单本身已是已收藏状态，直接标记为已收藏。
   Future<void> _checkCollected() async {
     final api = KugouApiClient();
     if (!api.isLoggedIn) return;
+
+    // 「我收藏」里的歌单直接标记为已收藏
+    if (widget.isInMyFavorites) {
+      if (mounted) {
+        setState(() {
+          _isCollected = true;
+        });
+      }
+      return;
+    }
 
     // 1) 本地缓存优先：即时显示红心，不再等后端 1~2 分钟的缓存
     final cached = await CollectedPlaylistStore.getListId(widget.playlist.id);
@@ -395,6 +574,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
           final validDuration = song.duration.inMilliseconds > 0;
           return validTitle && validDuration;
         }).toList();
+        _invalidateDisplaySongs();
       });
     } catch (e) {
       setState(() {
@@ -443,6 +623,89 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                 _isSearching ? Icons.close : Icons.search,
                               ),
                               onPressed: _toggleSearch,
+                            ),
+                          if (_songs.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.comment_outlined),
+                              onPressed: () => _showCommentsSheet(context),
+                              tooltip: '评论',
+                            ),
+                          if (_songs.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.my_location),
+                              onPressed: _scrollToPlayingSong,
+                              tooltip: '定位正在播放',
+                            ),
+                          if (_songs.isNotEmpty)
+                            PopupMenuButton<_SortBy>(
+                              icon: const Icon(Icons.sort),
+                              onSelected: (value) {
+                                setState(() {
+                                  if (_sortBy == value) {
+                                    _sortAscending = !_sortAscending;
+                                  } else {
+                                    _sortBy = value;
+                                    _sortAscending = value == _SortBy.time ? false : true;
+                                  }
+                                  _invalidateDisplaySongs();
+                                });
+                              },
+                              itemBuilder: (context) => [
+                                CheckedPopupMenuItem<_SortBy>(
+                                  value: _SortBy.time,
+                                  checked: _sortBy == _SortBy.time,
+                                  child: Row(
+                                    children: [
+                                      const Text('添加时间'),
+                                      if (_sortBy == _SortBy.time) ...[
+                                        const Spacer(),
+                                        Icon(
+                                          _sortAscending
+                                              ? Icons.arrow_upward
+                                              : Icons.arrow_downward,
+                                          size: 16,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                CheckedPopupMenuItem<_SortBy>(
+                                  value: _SortBy.title,
+                                  checked: _sortBy == _SortBy.title,
+                                  child: Row(
+                                    children: [
+                                      const Text('歌曲名称'),
+                                      if (_sortBy == _SortBy.title) ...[
+                                        const Spacer(),
+                                        Icon(
+                                          _sortAscending
+                                              ? Icons.arrow_upward
+                                              : Icons.arrow_downward,
+                                          size: 16,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                                CheckedPopupMenuItem<_SortBy>(
+                                  value: _SortBy.duration,
+                                  checked: _sortBy == _SortBy.duration,
+                                  child: Row(
+                                    children: [
+                                      const Text('时长'),
+                                      if (_sortBy == _SortBy.duration) ...[
+                                        const Spacer(),
+                                        Icon(
+                                          _sortAscending
+                                              ? Icons.arrow_upward
+                                              : Icons.arrow_downward,
+                                          size: 16,
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                         ],
                         // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示歌单名称
@@ -576,6 +839,79 @@ class _PlaylistPageState extends State<PlaylistPage> {
                           ),
                         ),
                       ),
+                      // 歌单介绍（默认折叠，最多显示2行，带动画）
+                      if (displayPlaylist.description != null &&
+                          displayPlaylist.description!.isNotEmpty)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _isDescriptionExpanded = !_isDescriptionExpanded;
+                                });
+                              },
+                              child: Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: colorScheme.surfaceContainerHighest
+                                      .withValues(alpha: 0.5),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          Icons.info_outline,
+                                          size: 16,
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          '歌单介绍',
+                                          style: textTheme.labelLarge?.copyWith(
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                        const Spacer(),
+                                        AnimatedRotation(
+                                          turns: _isDescriptionExpanded ? 0.5 : 0,
+                                          duration: const Duration(milliseconds: 200),
+                                          child: Icon(
+                                            Icons.keyboard_arrow_down,
+                                            size: 20,
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    AnimatedSize(
+                                      duration: const Duration(milliseconds: 250),
+                                      curve: Curves.easeInOut,
+                                      alignment: Alignment.topCenter,
+                                      clipBehavior: Clip.hardEdge,
+                                      child: Text(
+                                        displayPlaylist.description!,
+                                        maxLines: _isDescriptionExpanded ? null : 2,
+                                        overflow: _isDescriptionExpanded
+                                              ? null
+                                              : TextOverflow.ellipsis,
+                                          style: textTheme.bodyMedium?.copyWith(
+                                            color: colorScheme.onSurfaceVariant,
+                                            height: 1.5,
+                                          ),
+                                        ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                       // 歌单内搜索栏（点击搜索图标后展开）
                       if (_isSearching)
                         SliverToBoxAdapter(
@@ -592,7 +928,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                         icon: const Icon(Icons.clear),
                                         onPressed: () {
                                           _searchController.clear();
-                                          setState(() => _searchQuery = '');
+                                          setState(() {
+                                            _searchQuery = '';
+                                            _invalidateDisplaySongs();
+                                          });
                                         },
                                       )
                                     : null,
@@ -609,7 +948,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                 ),
                               ),
                               onChanged: (value) {
-                                setState(() => _searchQuery = value);
+                                setState(() {
+                                  _searchQuery = value;
+                                  _invalidateDisplaySongs();
+                                });
                               },
                             ),
                           ),
@@ -656,38 +998,45 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              // 红心收藏按钮：仅在「发现/热门歌单」等普通歌单显示
-                              // （「我的收藏」里的歌单已是已收藏状态，外部「我的收藏」页有批量删除，
-                              // 不需要再展示冗余的红心按钮）。
-                              if (!widget.isInMyFavorites)
-                                IconButton.filledTonal(
-                                  onPressed: _isCollected
-                                      ? _uncollectPlaylist
-                                      : _collectPlaylist,
-                                  icon: Icon(
-                                    _isCollected
-                                        ? Icons.favorite
-                                        : Icons.favorite_border,
-                                    color: _isCollected
-                                        ? colorScheme.error
-                                        : null,
-                                  ),
+                              // 红心收藏按钮：始终显示，支持收藏/取消收藏
+                              IconButton.filledTonal(
+                                onPressed: widget.isInMyFavorites
+                                    ? _uncollectPlaylist
+                                    : (_isCollected
+                                        ? _uncollectPlaylist
+                                        : _collectPlaylist),
+                                icon: Icon(
+                                  widget.isInMyFavorites || _isCollected
+                                      ? Icons.favorite
+                                      : Icons.favorite_border,
+                                  color: widget.isInMyFavorites || _isCollected
+                                      ? colorScheme.error
+                                      : null,
                                 ),
+                              ),
                             ],
                           ),
                         ),
                       ),
                       SliverList(
                         delegate: SliverChildBuilderDelegate((context, index) {
-                          return SongListItem(
-                            song: _displaySongs[index],
-                            onTap: () {
-                              context.read<PlayerProvider>().playOnlinePlaylist(
-                                _displaySongs,
-                                index,
-                              );
-                            },
-                            onMoreTap: () {},
+                          final song = _displaySongs[index];
+                          final isHighlighted = _highlightSongId == song.id;
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            color: isHighlighted
+                                ? colorScheme.primaryContainer.withValues(alpha: 0.5)
+                                : Colors.transparent,
+                            child: SongListItem(
+                              song: song,
+                              onTap: () {
+                                context.read<PlayerProvider>().playOnlinePlaylist(
+                                  _displaySongs,
+                                  index,
+                                );
+                              },
+                              onMoreTap: () {},
+                            ),
                           );
                         }, childCount: _displaySongs.length),
                       ),
