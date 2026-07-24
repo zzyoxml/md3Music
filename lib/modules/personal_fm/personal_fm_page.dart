@@ -562,7 +562,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                 ),
               ),
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   _buildRadioCard(
                     cs,
