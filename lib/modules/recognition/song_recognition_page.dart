@@ -141,6 +141,8 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
 
       if (!mounted) return;
 
+      print('[SongRecognition] raw response: $response');
+
       if (response != null) {
         setState(() {
           _result = response;
@@ -179,6 +181,7 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
               constraints: BoxConstraints(minHeight: constraints.maxHeight - 48),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   const SizedBox(height: 32),
                   _buildPulseCircle(colorScheme),
@@ -202,37 +205,39 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
   }
 
   Widget _buildPulseCircle(ColorScheme colorScheme) {
-    return GestureDetector(
-      onTap: _isRecognizing ? null : _toggleRecording,
-      child: ScaleTransition(
-        scale: _isRecording ? _pulseAnimation : const AlwaysStoppedAnimation(1.0),
-        child: Container(
-          width: 140,
-          height: 140,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: _isRecording
-                ? colorScheme.error
-                : _isRecognizing
-                    ? colorScheme.tertiary
-                    : colorScheme.primaryContainer,
-            boxShadow: _isRecording
-                ? [
-                    BoxShadow(
-                      color: colorScheme.error.withValues(alpha: 0.3),
-                      blurRadius: 24,
-                      spreadRadius: 8,
-                    ),
-                  ]
-                : null,
-          ),
-          child: Center(
-            child: Icon(
-              _isRecording ? Icons.mic : Icons.mic_none,
-              size: 56,
+    return Center(
+      child: GestureDetector(
+        onTap: _isRecognizing ? null : _toggleRecording,
+        child: ScaleTransition(
+          scale: _isRecording ? _pulseAnimation : const AlwaysStoppedAnimation(1.0),
+          child: Container(
+            width: 140,
+            height: 140,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
               color: _isRecording
-                  ? colorScheme.onError
-                  : colorScheme.onPrimaryContainer,
+                  ? colorScheme.error
+                  : _isRecognizing
+                      ? colorScheme.tertiary
+                      : colorScheme.primaryContainer,
+              boxShadow: _isRecording
+                  ? [
+                      BoxShadow(
+                        color: colorScheme.error.withValues(alpha: 0.3),
+                        blurRadius: 24,
+                        spreadRadius: 8,
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Center(
+              child: Icon(
+                _isRecording ? Icons.mic : Icons.mic_none,
+                size: 56,
+                color: _isRecording
+                    ? colorScheme.onError
+                    : colorScheme.onPrimaryContainer,
+              ),
             ),
           ),
         ),
