@@ -95,15 +95,22 @@ class KugouArtistBrief {
   });
 
   factory KugouArtistBrief.fromJson(Map<String, dynamic> json) {
+    // 去除 HTML 标签
+    String cleanName(String? s) {
+      if (s == null) return '';
+      return s.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+    }
+
     return KugouArtistBrief(
       id: _str(
         json['singerid'] ??
             json['artist_id'] ??
             json['AuthorID'] ??
             json['id'] ??
+            json['mix_singer_id'] ??
             '',
       ),
-      name: _str(
+      name: cleanName(
         json['singername'] ??
             json['artist_name'] ??
             json['SingerName'] ??
@@ -116,7 +123,9 @@ class KugouArtistBrief {
             json['avatar_url'] ??
             json['img'] ??
             json['pic'] ??
-            json['ImgUrl'],
+            json['ImgUrl'] ??
+            json['sizable_cover'] ??
+            json['avatar'],
       ),
     );
   }

@@ -10,6 +10,7 @@ import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/song_list_item.dart';
 import '../album/album_detail_page.dart';
+import '../artist/artist_detail_page.dart';
 import '../playlist/playlist_page.dart';
 import '../player/mini_player.dart';
 
@@ -34,7 +35,7 @@ class _SearchPageState extends State<SearchPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _tabController.addListener(_onTabChanged);
     _loadSearchHistory();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -52,7 +53,7 @@ class _SearchPageState extends State<SearchPage>
 
   void _onTabChanged() {
     if (_tabController.indexIsChanging) return;
-    final types = ['song', 'album', 'special'];
+    final types = ['song', 'album', 'artist', 'special'];
     final newType = types[_tabController.index];
     if (newType != _currentSearchType && _query.isNotEmpty) {
       _currentSearchType = newType;
@@ -190,6 +191,7 @@ class _SearchPageState extends State<SearchPage>
                           tabs: const [
                             Tab(text: '歌曲'),
                             Tab(text: '专辑'),
+                            Tab(text: '歌手'),
                             Tab(text: '歌单'),
                           ],
                         ),
@@ -299,6 +301,7 @@ class _SearchPageState extends State<SearchPage>
       children: [
         _buildSongResults(),
         _buildAlbumResults(),
+        _buildArtistResults(),
         _buildPlaylistResults(),
       ],
     );
@@ -465,6 +468,103 @@ class _SearchPageState extends State<SearchPage>
         ],
       ),
     );
+  }
+
+  Widget _buildArtistResults() {
+    final kugouProvider = context.watch<KugouProvider>();
+
+    if (kugouProvider.isLoading && (kugouProvider.searchResults?.artists.isEmpty ?? true)) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (kugouProvider.error != null && (kugouProvider.searchResults?.artists.isEmpty ?? true)) {
+      return _buildErrorState(kugouProvider.error!, () {
+        kugouProvider.clearError();
+        _performSearchByType(_query, 'artist');
+      });
+    }
+
+    final searchResults = kugouProvider.searchResults;
+    List<KugouArtistBrief> results = [];
+
+    if (searchResults != null && searchResults.artists.isNotEmpty) {
+      results = searchResults.artists;
+    }
+
+    if (results.isEmpty) {
+      return _buildNoResult();
+    }
+
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification &&
+            notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
+          context.read<KugouProvider>().loadMoreSearchResults(type: 'artist');
+        }
+        return false;
+      },
+      child: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              itemCount: results.length,
+              itemBuilder: (context, index) {
+                final artist = results[index];
+                return ListTile(
+                  leading: ClipOval(
+                    child: CachedNetworkImage(
+                      imageUrl: _fixImageUrl(artist.avatarUrl) ?? '',
+                      width: 48,
+                      height: 48,
+                      fit: BoxFit.cover,
+                      placeholder: (_, _) => Container(
+                        width: 48,
+                        height: 48,
+                        color: colorScheme.surfaceContainerHighest,
+                        child: Icon(Icons.person, color: colorScheme.onSurfaceVariant),
+                      ),
+                      errorWidget: (_, _, _) => Container(
+                        width: 48,
+                        height: 48,
+                        color: colorScheme.surfaceContainerHighest,
+                        child: Icon(Icons.person, color: colorScheme.onSurfaceVariant),
+                      ),
+                    ),
+                  ),
+                  title: Text(artist.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: const Text('歌手'),
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => ArtistDetailPage(
+                          artistId: artist.id,
+                          artistName: artist.name,
+                          avatarUrl: artist.avatarUrl,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+          if (kugouProvider.isLoading)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String? _fixImageUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    if (url.startsWith('http://')) return url.replaceFirst('http://', 'https://');
+    return url;
   }
 
   Widget _buildPlaylistResults() {

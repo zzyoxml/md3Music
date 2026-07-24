@@ -490,6 +490,36 @@ class KugouApiClient {
     }
   }
 
+  Future<List<KugouArtistBrief>?> searchArtists(
+    String keywords, {
+    int page = 1,
+    int pagesize = 20,
+  }) async {
+    final json = await _get(
+      KugouEndpoints.searchArtist,
+      queryParameters: {
+        'keyword': keywords,
+        'page': page,
+        'pagesize': pagesize,
+      },
+    );
+    if (json == null) return null;
+    try {
+      final data = json['data'];
+      List<dynamic> list = [];
+      if (data is List) {
+        list = data;
+      } else if (data is Map) {
+        list = data['info'] ?? data['list'] ?? data['artists'] ?? [];
+      }
+      return list
+          .map((e) => KugouArtistBrief.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      return null;
+    }
+  }
+
   Future<Map<String, dynamic>?> searchComplex(String keywords) async {
     return await _get(
       KugouEndpoints.searchComplex,

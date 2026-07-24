@@ -342,6 +342,16 @@ class KugouProvider extends ChangeNotifier {
           _error = '搜索失败';
           _searchResults = KugouSearchResult(playlists: const [], total: 0);
         }
+      } else if (type == 'artist') {
+        final artists = await _apiClient.searchArtists(keywords, page: 1, pagesize: 30);
+        if (artists != null && artists.isNotEmpty) {
+          final seen = <String>{};
+          final unique = artists.where((a) => a.name.isNotEmpty && seen.add(a.name)).toList();
+          _searchResults = KugouSearchResult(artists: unique, total: unique.length);
+        } else {
+          _error = '搜索失败';
+          _searchResults = KugouSearchResult(artists: const [], total: 0);
+        }
       } else {
         final result = await _apiClient.search(keywords, type: type, page: 1, pagesize: 30);
         if (result != null) {
@@ -393,6 +403,9 @@ class KugouProvider extends ChangeNotifier {
           _searchResults = KugouSearchResult(playlists: merged, total: merged.length);
           _searchResultsByType[type] = _searchResults!;
         }
+      } else if (type == 'artist') {
+        // 综合搜索不分页，歌手结果一次性返回
+        // 不做加载更多
       } else {
         final current = _searchResultsByType[type];
         final currentCount = current?.songs.length ?? 0;
