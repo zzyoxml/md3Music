@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 
@@ -58,8 +61,16 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
 
   Future<void> _startRecording() async {
     if (!await _recorder.hasPermission()) {
-      setState(() => _error = '需要麦克风权限才能使用听歌识曲');
-      return;
+      try {
+        final status = await Permission.microphone.request();
+        if (!status.isGranted) {
+          setState(() => _error = '需要麦克风权限才能使用听歌识曲');
+          return;
+        }
+      } catch (_) {
+        setState(() => _error = '需要麦克风权限才能使用听歌识曲');
+        return;
+      }
     }
 
     setState(() {
@@ -68,11 +79,23 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
     });
 
     try {
+      // 切换音频会话为录音模式（暂停播放器释放音频焦点）
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration(
+        avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
+        avAudioSessionMode: AVAudioSessionMode.defaultMode,
+        androidAudioAttributes: AndroidAudioAttributes(
+          contentType: AndroidAudioContentType.speech,
+          usage: AndroidAudioUsage.voiceCommunication,
+        ),
+        androidWillPauseWhenDucked: false,
+      ));
+
       final dir = await getTemporaryDirectory();
       final filePath = '${dir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.wav';
       await _recorder.start(
         RecordConfig(
-          encoder: AudioEncoder.pcm16bits,
+          encoder: AudioEncoder.wav,
           sampleRate: 16000,
           numChannels: 1,
         ),
@@ -105,6 +128,12 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       _isRecognizing = true;
     });
 
+    // 恢复音频会话为播放模式
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+    } catch (_) {}
+
     if (path == null || path.isEmpty) {
       setState(() {
         _isRecognizing = false;
@@ -125,7 +154,6 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       }
 
       final fileBytes = await file.readAsBytes();
-      // 删除临时文件
       await file.delete().catchError((_) {});
 
       if (fileBytes.isEmpty) {
@@ -138,10 +166,22 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
 
       // 去掉 WAV 文件头，提取纯 PCM 数据
       final pcmData = _extractPcmFromWav(fileBytes);
-      if (pcmData.isEmpty) {
+      print('[SongRecognition] fileBytes=${fileBytes.length}, pcmData=${pcmData.length}');
+      if (pcmData.isEmpty || pcmData.length < 32000) {
+        // 至少 1 秒的 PCM 数据 (16000Hz * 2bytes)
         setState(() {
           _isRecognizing = false;
-          _error = '音频数据解析失败，请重试';
+          _error = pcmData.isEmpty ? '音频数据解析失败，请重试' : '录音时间太短，请多录一会儿';
+        });
+        return;
+      }
+
+      // 检查是否全是静音
+      final isSilent = _isSilentAudio(pcmData);
+      if (isSilent) {
+        setState(() {
+          _isRecognizing = false;
+          _error = '没有检测到声音，请确保周围有音乐播放';
         });
         return;
       }
@@ -153,10 +193,15 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
 
       print('[SongRecognition] raw response: $response');
 
-      if (response != null) {
+      if (response != null && _hasSongData(response)) {
         setState(() {
           _result = response;
           _isRecognizing = false;
+        });
+      } else if (response != null) {
+        setState(() {
+          _isRecognizing = false;
+          _error = '未能识别出歌曲，请换个片段重试';
         });
       } else {
         setState(() {
@@ -358,9 +403,43 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
     );
   }
 
-  /// 从 WAV 文件中提取纯 PCM 数据（去掉 44 字节 WAV 头）
-  List<int> _extractPcmFromWav(List<int> bytes) {
-    if (bytes.length < 44) return bytes;
+  /// 检查 PCM 数据是否为静音
+  bool _isSilentAudio(Uint8List pcmData) {
+    // 采样检查：每隔 1000 个样本检查一次
+    int nonZeroCount = 0;
+    final step = 2000; // 每 2000 字节（1000 个 16bit 样本）检查一次
+    final checkCount = (pcmData.length / step).floor().clamp(1, 100);
+    for (int i = 0; i < checkCount; i++) {
+      final offset = i * step;
+      if (offset + 1 < pcmData.length) {
+        final sample = (pcmData[offset] | (pcmData[offset + 1] << 8)).toSigned(16);
+        if (sample.abs() > 500) {
+          nonZeroCount++;
+        }
+      }
+    }
+    // 如果 10% 以上的采样点有声音，认为不是静音
+    return nonZeroCount < (checkCount * 0.1);
+  }
+
+  /// 检查 API 响应是否包含有效歌曲数据
+  bool _hasSongData(Map<String, dynamic> response) {
+    final data = response['data'];
+    if (data is List && data.isNotEmpty) {
+      final first = data.first;
+      if (first is Map<String, dynamic>) {
+        // 检查是否有实际的歌曲字段
+        final hasName = first.containsKey('songname') || first.containsKey('song_name') || first.containsKey('name');
+        final hasHash = first.containsKey('hash') || first.containsKey('FileHash');
+        return hasName || hasHash;
+      }
+    }
+    return false;
+  }
+
+  /// 从 WAV 文件中提取纯 PCM 数据（去掉 WAV 头）
+  Uint8List _extractPcmFromWav(List<int> bytes) {
+    if (bytes.length < 44) return Uint8List.fromList(bytes);
     // 检查 RIFF 头
     if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46) {
       // 找到 "data" 标记：遍历查找 "data" 字符串
@@ -369,13 +448,13 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
           // data chunk: 4 bytes "data" + 4 bytes size + PCM data
           final pcmStart = i + 8;
           if (pcmStart < bytes.length) {
-            return bytes.sublist(pcmStart);
+            return Uint8List.fromList(bytes.sublist(pcmStart));
           }
         }
       }
     }
     // 非标准 WAV，直接返回全部数据
-    return bytes;
+    return Uint8List.fromList(bytes);
   }
 
   String? _extractField(Map<String, dynamic>? map, List<String> keys) {
