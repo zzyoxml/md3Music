@@ -4,7 +4,9 @@ import 'package:provider/provider.dart';
 
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
+import '../../data/repositories/collected_playlist_store.dart';
 import '../../providers/player_provider.dart';
+import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/playlist_comments_view.dart';
@@ -20,37 +22,158 @@ class AlbumDetailPage extends StatefulWidget {
   State<AlbumDetailPage> createState() => _AlbumDetailPageState();
 }
 
+enum _SortBy { time, title, duration }
+
 class _AlbumDetailPageState extends State<AlbumDetailPage> {
   bool _isLoading = true;
   List<Song> _songs = [];
   String? _error;
   KugouAlbumDetail? _albumDetail;
 
-  // 顶栏 fade-in 用的滚动监听：与 playlist_page.dart 保持一致的实现风格
+  // 排序
+  _SortBy _sortBy = _SortBy.time;
+  bool _sortAscending = false;
+
+  // 专辑内搜索
+  bool _isSearching = false;
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+
+  // 定位正在播放歌曲
+  String? _highlightSongId;
+
+  // 专辑介绍展开/折叠
+  bool _isDescriptionExpanded = false;
+
+  // 收藏状态
+  bool _isCollected = false;
+  String? _collectedListId;
+
+  // 滚动监听
   final ScrollController _scrollController = ScrollController();
   double _scrollOffset = 0;
+  double _lastReportedOffset = 0;
+
+  // 缓存的过滤/排序结果
+  List<Song>? _cachedDisplaySongs;
+  String? _lastSearchQuery;
+  _SortBy? _lastSortBy;
+  bool? _lastSortAscending;
+
+  List<Song> get _displaySongs {
+    if (_cachedDisplaySongs != null &&
+        _lastSearchQuery == _searchQuery &&
+        _lastSortBy == _sortBy &&
+        _lastSortAscending == _sortAscending) {
+      return _cachedDisplaySongs!;
+    }
+    _rebuildDisplaySongs();
+    return _cachedDisplaySongs!;
+  }
+
+  void _rebuildDisplaySongs() {
+    List<Song> list;
+    if (_searchQuery.isEmpty) {
+      list = List.of(_songs);
+    } else {
+      final q = _searchQuery.toLowerCase();
+      list = _songs.where((s) {
+        return s.title.toLowerCase().contains(q) ||
+            s.artist.toLowerCase().contains(q) ||
+            (s.album?.toLowerCase().contains(q) ?? false);
+      }).toList();
+    }
+    list.sort((a, b) {
+      int cmp;
+      switch (_sortBy) {
+        case _SortBy.time:
+          cmp = _songs.indexOf(a).compareTo(_songs.indexOf(b));
+          break;
+        case _SortBy.title:
+          cmp = a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
+          break;
+        case _SortBy.duration:
+          cmp = a.duration.compareTo(b.duration);
+          break;
+      }
+      return _sortAscending ? cmp : -cmp;
+    });
+    _cachedDisplaySongs = list;
+    _lastSearchQuery = _searchQuery;
+    _lastSortBy = _sortBy;
+    _lastSortAscending = _sortAscending;
+  }
+
+  void _invalidateDisplaySongs() {
+    _cachedDisplaySongs = null;
+  }
 
   @override
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _fetchAlbum());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _fetchAlbum();
+      _checkCollected();
+    });
   }
 
   @override
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
-  /// 滚动监听：阈值 0.5px 防抖，避免过度 setState。
   void _onScroll() {
     if (!mounted) return;
     final offset = _scrollController.offset;
-    if ((offset - _scrollOffset).abs() > 0.5) {
-      setState(() => _scrollOffset = offset);
+    if ((offset - _lastReportedOffset).abs() > 1.0) {
+      _lastReportedOffset = offset;
+      _scrollOffset = offset;
+      setState(() {});
     }
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _isSearching = !_isSearching;
+      if (!_isSearching) {
+        _searchQuery = '';
+        _searchController.clear();
+        _invalidateDisplaySongs();
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _searchFocusNode.requestFocus();
+        });
+      }
+    });
+  }
+
+  void _scrollToPlayingSong() {
+    final player = context.read<PlayerProvider>();
+    final currentSong = player.currentSong;
+    if (currentSong == null) return;
+
+    final displayList = _displaySongs;
+    final index = displayList.indexWhere((s) => s.id == currentSong.id);
+    if (index == -1) return;
+
+    setState(() => _highlightSongId = currentSong.id);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _highlightSongId = null);
+    });
+
+    const itemHeight = 72.0;
+    final targetOffset = index * itemHeight;
+    _scrollController.animateTo(
+      targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> _fetchAlbum() async {
@@ -71,6 +194,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       setState(() {
         _albumDetail = detail;
         _songs = songsResult?.songs.map((e) => e.toSong()).toList() ?? [];
+        _invalidateDisplaySongs();
       });
     } catch (e) {
       setState(() {
@@ -81,6 +205,150 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       _isLoading = false;
     });
   }
+
+  // ==================== 收藏 ====================
+
+  Future<void> _checkCollected() async {
+    final api = KugouApiClient();
+    if (!api.isLoggedIn) return;
+
+    final cached = await CollectedPlaylistStore.getListId(widget.album.id);
+    if (cached != null) {
+      if (mounted) {
+        setState(() {
+          _isCollected = true;
+          _collectedListId = cached;
+        });
+      }
+      return;
+    }
+
+    final listid = await _findCollectedListId(api);
+    if (listid != null && mounted) {
+      await CollectedPlaylistStore.setListId(widget.album.id, listid);
+      setState(() {
+        _isCollected = true;
+        _collectedListId = listid;
+      });
+    }
+  }
+
+  Future<String?> _findCollectedListId(KugouApiClient api) async {
+    try {
+      final result = await api.getUserPlaylist(pagesize: 50);
+      if (result == null) return null;
+      final data = result['data'];
+      List<dynamic>? list;
+      if (data is List) {
+        list = data;
+      } else if (data is Map<String, dynamic>) {
+        list = data['info'] as List<dynamic>?;
+        list ??= data['list'] as List<dynamic>?;
+      }
+      if (list == null) return null;
+      for (final item in list) {
+        if (item is Map<String, dynamic>) {
+          final gid = item['global_collection_id']?.toString() ?? '';
+          final name = item['name']?.toString() ?? '';
+          if (gid == widget.album.id || name == widget.album.name) {
+            return item['listid']?.toString();
+          }
+        }
+      }
+    } catch (e) {
+      // 忽略
+    }
+    return null;
+  }
+
+  Future<void> _collectAlbum() async {
+    final api = KugouApiClient();
+    if (!api.isLoggedIn) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请先登录'), behavior: SnackBarBehavior.floating),
+        );
+      }
+      return;
+    }
+    try {
+      final result = await api.createPlaylist(
+        widget.album.name,
+        type: 1,
+        globalCollectionId: widget.album.id,
+      );
+      if (result == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('收藏失败，请重试'), behavior: SnackBarBehavior.floating),
+          );
+        }
+        return;
+      }
+      String? newId = await _findCollectedListId(api);
+      await CollectedPlaylistStore.setListId(widget.album.id, newId);
+      if (mounted) {
+        setState(() {
+          _isCollected = true;
+          _collectedListId = newId;
+        });
+        context.read<PlaylistCollectionNotifier>().notifyChanged();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('收藏成功'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('收藏失败'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    }
+  }
+
+  Future<void> _uncollectAlbum() async {
+    final api = KugouApiClient();
+    if (!api.isLoggedIn) return;
+
+    String? listId = await CollectedPlaylistStore.getListId(widget.album.id);
+    listId ??= _collectedListId;
+    listId ??= await _findCollectedListId(api);
+    if (listId == null || listId.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('找不到收藏记录，无法取消'), behavior: SnackBarBehavior.floating),
+        );
+      }
+      return;
+    }
+
+    try {
+      final result = await api.deletePlaylist(listId, type: 0);
+      if (result != null && mounted) {
+        await CollectedPlaylistStore.remove(widget.album.id);
+        setState(() {
+          _isCollected = false;
+          _collectedListId = null;
+        });
+        context.read<PlaylistCollectionNotifier>().notifyChanged();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已取消收藏'), behavior: SnackBarBehavior.floating),
+        );
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('取消收藏失败，请重试'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('取消收藏失败'), behavior: SnackBarBehavior.floating),
+        );
+      }
+    }
+  }
+
+  // ==================== 评论 ====================
 
   void _showCommentsSheet(BuildContext context) {
     showModalBottomSheet(
@@ -101,7 +369,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
             ),
             child: Column(
               children: [
-                // 拖动手柄
                 Container(
                   margin: const EdgeInsets.only(top: 12),
                   width: 40,
@@ -111,22 +378,15 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-                // 标题栏
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   child: Row(
                     children: [
-                      Icon(
-                        Icons.comment_outlined,
-                        size: 20,
-                        color: colorScheme.onSurfaceVariant,
-                      ),
+                      Icon(Icons.comment_outlined, size: 20, color: colorScheme.onSurfaceVariant),
                       const SizedBox(width: 8),
                       Text(
                         '评论',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                       ),
                       const Spacer(),
                       IconButton(
@@ -137,7 +397,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                   ),
                 ),
                 Divider(height: 1, color: colorScheme.outlineVariant.withValues(alpha: 0.3)),
-                // 评论列表（使用 globalCollectionId 获取专辑评论）
                 Expanded(
                   child: PlaylistCommentsView(
                     specialId: widget.album.globalCollectionId ?? widget.album.id,
@@ -153,11 +412,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     );
   }
 
+  // ==================== UI ====================
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final displayAlbum = _albumDetail?.toAlbum() ?? widget.album;
+    final description = _albumDetail?.description;
 
     return Scaffold(
       body: _isLoading
@@ -173,8 +435,6 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                           SliverAppBar(
                             expandedHeight: 280,
                             pinned: true,
-                            // pinned 后顶栏背景色：滚动到 expandedHeight - kToolbarHeight
-                            // 之后从透明渐变到 surface（与 playlist_page 一致）
                             backgroundColor: Color.lerp(
                               Colors.transparent,
                               colorScheme.surface,
@@ -184,23 +444,88 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                             surfaceTintColor: Colors.transparent,
                             scrolledUnderElevation: 0,
                             actions: [
-                              IconButton(
-                                icon: const Icon(Icons.comment_outlined),
-                                onPressed: () => _showCommentsSheet(context),
-                                tooltip: '评论',
-                              ),
+                              if (_songs.isNotEmpty)
+                                IconButton(
+                                  icon: Icon(_isSearching ? Icons.close : Icons.search),
+                                  onPressed: _toggleSearch,
+                                ),
+                              if (_songs.isNotEmpty)
+                                IconButton(
+                                  icon: const Icon(Icons.comment_outlined),
+                                  onPressed: () => _showCommentsSheet(context),
+                                  tooltip: '评论',
+                                ),
+                              if (_songs.isNotEmpty)
+                                IconButton(
+                                  icon: const Icon(Icons.my_location),
+                                  onPressed: _scrollToPlayingSong,
+                                  tooltip: '定位正在播放',
+                                ),
+                              if (_songs.isNotEmpty)
+                                PopupMenuButton<_SortBy>(
+                                  icon: const Icon(Icons.sort),
+                                  onSelected: (value) {
+                                    setState(() {
+                                      if (_sortBy == value) {
+                                        _sortAscending = !_sortAscending;
+                                      } else {
+                                        _sortBy = value;
+                                        _sortAscending = value == _SortBy.time ? false : true;
+                                      }
+                                      _invalidateDisplaySongs();
+                                    });
+                                  },
+                                  itemBuilder: (context) => [
+                                    CheckedPopupMenuItem<_SortBy>(
+                                      value: _SortBy.time,
+                                      checked: _sortBy == _SortBy.time,
+                                      child: Row(
+                                        children: [
+                                          const Text('添加时间'),
+                                          if (_sortBy == _SortBy.time) ...[
+                                            const Spacer(),
+                                            Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 16),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    CheckedPopupMenuItem<_SortBy>(
+                                      value: _SortBy.title,
+                                      checked: _sortBy == _SortBy.title,
+                                      child: Row(
+                                        children: [
+                                          const Text('歌曲名称'),
+                                          if (_sortBy == _SortBy.title) ...[
+                                            const Spacer(),
+                                            Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 16),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                    CheckedPopupMenuItem<_SortBy>(
+                                      value: _SortBy.duration,
+                                      checked: _sortBy == _SortBy.duration,
+                                      child: Row(
+                                        children: [
+                                          const Text('时长'),
+                                          if (_sortBy == _SortBy.duration) ...[
+                                            const Spacer(),
+                                            Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 16),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
                             ],
-                            // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示专辑名称
                             title: Opacity(
-                              opacity: ((_scrollOffset - (280 - kToolbarHeight)) /
-                                      60.0)
+                              opacity: ((_scrollOffset - (280 - kToolbarHeight)) / 60.0)
                                   .clamp(0.0, 1.0),
                               child: Text(
                                 displayAlbum.name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: textTheme.titleLarge
-                                    ?.copyWith(fontWeight: FontWeight.w600),
+                                style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
                               ),
                             ),
                             flexibleSpace: FlexibleSpaceBar(
@@ -209,10 +534,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                   gradient: LinearGradient(
                                     begin: Alignment.topCenter,
                                     end: Alignment.bottomCenter,
-                                    colors: [
-                                      colorScheme.primaryContainer,
-                                      colorScheme.surface,
-                                    ],
+                                    colors: [colorScheme.primaryContainer, colorScheme.surface],
                                   ),
                                 ),
                                 child: SafeArea(
@@ -232,28 +554,16 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                                     fit: BoxFit.cover,
                                                     placeholder: (_, _) => Container(
                                                       color: colorScheme.surfaceContainerHighest,
-                                                      child: Icon(
-                                                        Icons.album,
-                                                        size: 48,
-                                                        color: colorScheme.onSurfaceVariant,
-                                                      ),
+                                                      child: Icon(Icons.album, size: 48, color: colorScheme.onSurfaceVariant),
                                                     ),
                                                     errorWidget: (_, _, _) => Container(
                                                       color: colorScheme.surfaceContainerHighest,
-                                                      child: Icon(
-                                                        Icons.album,
-                                                        size: 48,
-                                                        color: colorScheme.onSurfaceVariant,
-                                                      ),
+                                                      child: Icon(Icons.album, size: 48, color: colorScheme.onSurfaceVariant),
                                                     ),
                                                   )
                                                 : Container(
                                                     color: colorScheme.surfaceContainerHighest,
-                                                    child: Icon(
-                                                      Icons.album,
-                                                      size: 48,
-                                                      color: colorScheme.onSurfaceVariant,
-                                                    ),
+                                                    child: Icon(Icons.album, size: 48, color: colorScheme.onSurfaceVariant),
                                                   ),
                                           ),
                                         ),
@@ -267,25 +577,19 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                                 displayAlbum.name,
                                                 maxLines: 2,
                                                 overflow: TextOverflow.ellipsis,
-                                                style: textTheme.headlineSmall?.copyWith(
-                                                  fontWeight: FontWeight.bold,
-                                                ),
+                                                style: textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
                                               ),
                                               if (displayAlbum.artist.isNotEmpty) ...[
                                                 const SizedBox(height: 4),
                                                 Text(
                                                   displayAlbum.artist,
-                                                  style: textTheme.bodyMedium?.copyWith(
-                                                    color: colorScheme.onSurfaceVariant,
-                                                  ),
+                                                  style: textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
                                                 ),
                                               ],
                                               const SizedBox(height: 4),
                                               Text(
                                                 '${_songs.length} 首歌曲',
-                                                style: textTheme.labelMedium?.copyWith(
-                                                  color: colorScheme.onSurfaceVariant,
-                                                ),
+                                                style: textTheme.labelMedium?.copyWith(color: colorScheme.onSurfaceVariant),
                                               ),
                                             ],
                                           ),
@@ -297,6 +601,106 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                               ),
                             ),
                           ),
+                          // 专辑介绍
+                          if (description != null && description.isNotEmpty)
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                                child: GestureDetector(
+                                  onTap: () {
+                                    setState(() {
+                                      _isDescriptionExpanded = !_isDescriptionExpanded;
+                                    });
+                                  },
+                                  child: Container(
+                                    width: double.infinity,
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(
+                                      color: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Icon(Icons.info_outline, size: 16, color: colorScheme.onSurfaceVariant),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              '专辑介绍',
+                                              style: textTheme.labelLarge?.copyWith(color: colorScheme.onSurfaceVariant),
+                                            ),
+                                            const Spacer(),
+                                            AnimatedRotation(
+                                              turns: _isDescriptionExpanded ? 0.5 : 0,
+                                              duration: const Duration(milliseconds: 200),
+                                              child: Icon(Icons.keyboard_arrow_down, size: 20, color: colorScheme.onSurfaceVariant),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 8),
+                                        AnimatedSize(
+                                          duration: const Duration(milliseconds: 250),
+                                          curve: Curves.easeInOut,
+                                          alignment: Alignment.topCenter,
+                                          clipBehavior: Clip.hardEdge,
+                                          child: Text(
+                                            description,
+                                            maxLines: _isDescriptionExpanded ? null : 2,
+                                            overflow: _isDescriptionExpanded ? null : TextOverflow.ellipsis,
+                                            style: textTheme.bodyMedium?.copyWith(
+                                              color: colorScheme.onSurfaceVariant,
+                                              height: 1.5,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          // 搜索栏
+                          if (_isSearching)
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                                child: TextField(
+                                  controller: _searchController,
+                                  focusNode: _searchFocusNode,
+                                  decoration: InputDecoration(
+                                    hintText: '搜索专辑内的歌曲...',
+                                    prefixIcon: const Icon(Icons.search),
+                                    suffixIcon: _searchQuery.isNotEmpty
+                                        ? IconButton(
+                                            icon: const Icon(Icons.clear),
+                                            onPressed: () {
+                                              _searchController.clear();
+                                              setState(() {
+                                                _searchQuery = '';
+                                                _invalidateDisplaySongs();
+                                              });
+                                            },
+                                          )
+                                        : null,
+                                    filled: true,
+                                    fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(28),
+                                      borderSide: BorderSide.none,
+                                    ),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                  ),
+                                  onChanged: (value) {
+                                    setState(() {
+                                      _searchQuery = value;
+                                      _invalidateDisplaySongs();
+                                    });
+                                  },
+                                ),
+                              ),
+                            ),
+                          // 播放按钮 + 收藏红心
                           SliverToBoxAdapter(
                             child: Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -305,51 +709,83 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                   Expanded(
                                     child: FilledButton.icon(
                                       onPressed: () {
-                                        if (_songs.isNotEmpty) {
-                                          context
-                                              .read<PlayerProvider>()
-                                              .playOnlinePlaylist(_songs, 0);
+                                        final songs = _displaySongs;
+                                        if (songs.isNotEmpty) {
+                                          context.read<PlayerProvider>().playOnlinePlaylist(songs, 0);
                                         }
                                       },
                                       icon: const Icon(Icons.play_arrow),
-                                      label: const Text('播放全部'),
+                                      label: Text(
+                                        '播放全部${_isSearching && _searchQuery.isNotEmpty ? ' (${_displaySongs.length})' : ''}',
+                                      ),
                                     ),
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
                                     child: OutlinedButton.icon(
                                       onPressed: () {
-                                        if (_songs.isNotEmpty) {
-                                          final shuffled = List<Song>.from(_songs)..shuffle();
-                                          context
-                                              .read<PlayerProvider>()
-                                              .playOnlinePlaylist(shuffled, 0);
+                                        final songs = _displaySongs;
+                                        if (songs.isNotEmpty) {
+                                          final shuffled = List<Song>.from(songs)..shuffle();
+                                          context.read<PlayerProvider>().playOnlinePlaylist(shuffled, 0);
                                         }
                                       },
                                       icon: const Icon(Icons.shuffle),
                                       label: const Text('随机播放'),
                                     ),
                                   ),
+                                  const SizedBox(width: 12),
+                                  IconButton.filledTonal(
+                                    onPressed: _isCollected ? _uncollectAlbum : _collectAlbum,
+                                    icon: Icon(
+                                      _isCollected ? Icons.favorite : Icons.favorite_border,
+                                      color: _isCollected ? colorScheme.error : null,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
                           ),
+                          // 歌曲列表
                           SliverList(
                             delegate: SliverChildBuilderDelegate(
                               (context, index) {
-                                return SongListItem(
-                                  song: _songs[index],
-                                  onTap: () {
-                                    context
-                                        .read<PlayerProvider>()
-                                        .playOnlinePlaylist(_songs, index);
-                                  },
-                                  onMoreTap: () {},
+                                final song = _displaySongs[index];
+                                final isHighlighted = _highlightSongId == song.id;
+                                return AnimatedContainer(
+                                  duration: const Duration(milliseconds: 300),
+                                  color: isHighlighted
+                                      ? colorScheme.primaryContainer.withValues(alpha: 0.5)
+                                      : Colors.transparent,
+                                  child: SongListItem(
+                                    song: song,
+                                    onTap: () {
+                                      context.read<PlayerProvider>().playOnlinePlaylist(_displaySongs, index);
+                                    },
+                                    onMoreTap: () {},
+                                  ),
                                 );
                               },
-                              childCount: _songs.length,
+                              childCount: _displaySongs.length,
                             ),
                           ),
+                          // 搜索无结果
+                          if (_isSearching && _displaySongs.isEmpty && _songs.isNotEmpty)
+                            SliverToBoxAdapter(
+                              child: Padding(
+                                padding: const EdgeInsets.all(32),
+                                child: Column(
+                                  children: [
+                                    Icon(Icons.search_off, size: 48, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      '没有找到「$_searchQuery」相关的歌曲',
+                                      style: textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -366,31 +802,20 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.cloud_off,
-              size: 48,
-              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-            ),
+            Icon(Icons.cloud_off, size: 48, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
             const SizedBox(height: 12),
             Text(
               '加载失败',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(color: colorScheme.onSurfaceVariant),
             ),
             const SizedBox(height: 8),
             Text(
               _error ?? '未知错误',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            FilledButton.tonal(
-              onPressed: _fetchAlbum,
-              child: const Text('重试'),
-            ),
+            FilledButton.tonal(onPressed: _fetchAlbum, child: const Text('重试')),
           ],
         ),
       ),
