@@ -562,7 +562,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                 ),
               ),
               Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildRadioCard(
                     cs,
@@ -636,10 +636,13 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildModeSwitch(
-            cs,
-            isSmall: isVerySmall,
-            isUltraSmall: isUltraSmall,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: _buildModeSwitch(
+              cs,
+              isSmall: isVerySmall,
+              isUltraSmall: isUltraSmall,
+            ),
           ),
           SizedBox(height: isUltraSmall ? 2 : (isVerySmall ? 3 : 4)),
           Text(
@@ -682,12 +685,15 @@ class _PersonalFmPageState extends State<PersonalFmPage>
             children: [
               _buildAudioBars(isSmall: isVerySmall, isUltraSmall: isUltraSmall),
               const Spacer(),
-              _buildRadioActions(
-                cs,
-                isPlaying,
-                currentTrack,
-                isSmall: isVerySmall,
-                isUltraSmall: isUltraSmall,
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: _buildRadioActions(
+                  cs,
+                  isPlaying,
+                  currentTrack,
+                  isSmall: isVerySmall,
+                  isUltraSmall: isUltraSmall,
+                ),
               ),
             ],
           ),
@@ -708,43 +714,46 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               : const EdgeInsets.symmetric(horizontal: 8, vertical: 4));
     final fontSize = isUltraSmall ? 8.0 : (isSmall ? 9.0 : 10.0);
 
-    return Container(
-      padding: const EdgeInsets.all(1),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        color: Colors.white.withValues(alpha: 0.14),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: _modeOptions.map((option) {
-          final isActive = _selectedMode == option['value'];
-          return InkWell(
-            onTap: () {
-              setState(() => _selectedMode = option['value']);
-              _loadPersonalFm();
-            },
-            borderRadius: BorderRadius.circular(999),
-            child: Container(
-              padding: padding,
-              decoration: isActive
-                  ? BoxDecoration(
-                      borderRadius: BorderRadius.circular(999),
-                      color: Colors.white.withValues(alpha: 0.22),
-                    )
-                  : null,
-              child: Text(
-                option['label'],
-                style: TextStyle(
-                  fontSize: fontSize,
-                  fontWeight: FontWeight.w700,
-                  color: isActive
-                      ? Colors.white
-                      : Colors.white.withValues(alpha: 0.74),
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Container(
+        padding: const EdgeInsets.all(1),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(999),
+          color: Colors.white.withValues(alpha: 0.14),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: _modeOptions.map((option) {
+            final isActive = _selectedMode == option['value'];
+            return InkWell(
+              onTap: () {
+                setState(() => _selectedMode = option['value']);
+                _loadPersonalFm();
+              },
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                padding: padding,
+                decoration: isActive
+                    ? BoxDecoration(
+                        borderRadius: BorderRadius.circular(999),
+                        color: Colors.white.withValues(alpha: 0.22),
+                      )
+                    : null,
+                child: Text(
+                  option['label'],
+                  style: TextStyle(
+                    fontSize: fontSize,
+                    fontWeight: FontWeight.w700,
+                    color: isActive
+                        ? Colors.white
+                        : Colors.white.withValues(alpha: 0.74),
+                  ),
                 ),
               ),
-            ),
-          );
-        }).toList(),
+            );
+          }).toList(),
+        ),
       ),
     );
   }

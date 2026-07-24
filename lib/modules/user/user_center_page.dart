@@ -396,7 +396,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
         delayMs: 80,
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360),
+            constraints: const BoxConstraints(maxWidth: 400),
             child: Container(
               margin: const EdgeInsets.symmetric(horizontal: 16),
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -530,7 +530,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
         children: [
           for (final l in labels)
             SizedBox(
-              width: 44, // 与 _buildCalendarGrid 中的 cellSize 保持一致
+              width: 40, // 与 _buildCalendarGrid 中的 cellSize 保持一致
               child: Center(
                 child: Text(
                   l,
@@ -599,7 +599,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
     Set<int> receivedDays,
     DateTime now,
   ) {
-    const cellSize = 44.0;
+    const cellSize = 40.0;
     final rows = <Widget>[];
     var cells = <Widget>[];
 
@@ -623,8 +623,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
           height: cellSize,
           child: Center(
             child: Container(
-              width: 36,
-              height: 36,
+              width: 32,
+              height: 32,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: isReceived ? cs.primary : Colors.transparent,
