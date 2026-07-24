@@ -17,6 +17,7 @@ import '../../data/repositories/settings_repository.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/apple_lyrics/preview/lyrics_preview_page.dart';
 import '../../widgets/seed_color_picker.dart';
@@ -396,6 +397,14 @@ class _SettingsPageState extends State<SettingsPage> {
             setState(() => _useAmStylePlayer = v);
             context.read<ThemeProvider>().setUseAmStylePlayer(v);
           },
+        ),
+        SwitchListTile(
+          title: const Text('歌词高斯模糊'),
+          subtitle: const Text('开启为高斯模糊渐变，关闭为 alpha 淡出'),
+          value: LyricPreferences.instance.useGaussianBlur,
+          onChanged: _useAmStylePlayer
+              ? (v) => LyricPreferences.instance.setUseGaussianBlur(v)
+              : null,
         ),
         const Divider(),
         // 设备类型选择

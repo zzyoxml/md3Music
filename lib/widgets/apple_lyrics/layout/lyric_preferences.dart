@@ -50,15 +50,18 @@ class LyricPreferences extends ChangeNotifier {
 
   static const String _keyFontSize = 'lyric_font_size';
   static const String _keyLineSpacing = 'lyric_line_spacing';
+  static const String _keyUseGaussianBlur = 'lyric_use_gaussian_blur';
 
   // ============== 当前值 ==============
 
   double _fontSize = defaultUserFontSize;
   double _lineSpacing = defaultLineSpacing;
+  bool _useGaussianBlur = true;
   bool _loaded = false;
 
   double get fontSize => _fontSize;
   double get lineSpacing => _lineSpacing;
+  bool get useGaussianBlur => _useGaussianBlur;
 
   /// 计算实际行高系数。
   ///
@@ -76,6 +79,7 @@ class LyricPreferences extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _fontSize = prefs.getDouble(_keyFontSize) ?? defaultUserFontSize;
     _lineSpacing = prefs.getDouble(_keyLineSpacing) ?? defaultLineSpacing;
+    _useGaussianBlur = prefs.getBool(_keyUseGaussianBlur) ?? true;
     _loaded = true;
     notifyListeners();
   }
@@ -100,13 +104,24 @@ class LyricPreferences extends ChangeNotifier {
     await prefs.setDouble(_keyLineSpacing, _lineSpacing);
   }
 
+  /// 设置高斯模糊开关并持久化。
+  Future<void> setUseGaussianBlur(bool enabled) async {
+    if (_useGaussianBlur == enabled) return;
+    _useGaussianBlur = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyUseGaussianBlur, enabled);
+  }
+
   /// 重置为默认值。
   Future<void> reset() async {
     _fontSize = defaultUserFontSize;
     _lineSpacing = defaultLineSpacing;
+    _useGaussianBlur = true;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyFontSize, _fontSize);
     await prefs.setDouble(_keyLineSpacing, _lineSpacing);
+    await prefs.setBool(_keyUseGaussianBlur, _useGaussianBlur);
   }
 }

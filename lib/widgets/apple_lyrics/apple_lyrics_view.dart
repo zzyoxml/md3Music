@@ -616,51 +616,75 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         // 之前每帧都跑 N 次 TextPainter.layout 是 CPU 瓶颈（UI 线程 70%+）
         _recomputeLineHeightsIfNeeded(fontSize, constraints.maxWidth);
 
+        final lyricsContent = ClipRect(
+          child: CustomPaint(
+            painter: _LyricsPainter(
+              lines: widget.lines,
+              currentLineIndex: _currentLineIndex,
+              posY: _scrollController.posY,
+              fontSize: fontSize,
+              mainLineHeight: mainLineHeight,
+              lineHeights: _lineHeights,
+              lineTops: _lineTops,
+              viewportHeight: constraints.maxHeight,
+              viewportWidth: constraints.maxWidth,
+              maxLineWidth: maxLineWidth,
+              currentTimeMs: widget.currentTimeMs,
+              enableScale: widget.enableScale,
+              wordRenderers: _wordRenderers,
+              lineRenderers: _lineRenderers,
+              scaleController: _scaleController,
+              emphasizeEffect: _emphasizeEffect,
+              interludeDots: _interludeDots,
+              interludeAfterIndices: _interludeAfterIndices,
+              interludePlaceholderHeight: _interludePlaceholderHeight,
+              activeInterludeIdx: _activeInterludeIdx,
+              lastActiveAnchorIdx: _lastActiveAnchorIdx,
+              interludeExpandProgress: _interludeExpandProgress,
+              perLineOffsets: _buildPerLineOffsets(),
+            ),
+            size: Size.infinite,
+          ),
+        );
+
+        // 根据偏好选择高斯模糊或 alpha 渐变淡出
+        final useGaussian = LyricPreferences.instance.useGaussianBlur;
+
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapDown: _onTapDown,
           onTapUp: _onTapUp,
-          // 挂载垂直拖动手势：用户可上下滑动歌词，5s 后自动回弹到当前行。
           onVerticalDragUpdate: _onVerticalDragUpdate,
           onVerticalDragEnd: _onVerticalDragEnd,
-          child: ClipRect(
-            child: Stack(
-              children: [
-                CustomPaint(
-                  painter: _LyricsPainter(
-                    lines: widget.lines,
-                    currentLineIndex: _currentLineIndex,
-                    posY: _scrollController.posY,
-                    fontSize: fontSize,
-                    mainLineHeight: mainLineHeight,
-                    lineHeights: _lineHeights,
-                    lineTops: _lineTops,
-                    viewportHeight: constraints.maxHeight,
-                    viewportWidth: constraints.maxWidth,
-                    maxLineWidth: maxLineWidth,
-                    currentTimeMs: widget.currentTimeMs,
-                    enableScale: widget.enableScale,
-                    wordRenderers: _wordRenderers,
-                    lineRenderers: _lineRenderers,
-                    scaleController: _scaleController,
-                    emphasizeEffect: _emphasizeEffect,
-                    interludeDots: _interludeDots,
-                    interludeAfterIndices: _interludeAfterIndices,
-                    interludePlaceholderHeight: _interludePlaceholderHeight,
-                    activeInterludeIdx: _activeInterludeIdx,
-                    lastActiveAnchorIdx: _lastActiveAnchorIdx,
-                    interludeExpandProgress: _interludeExpandProgress,
-                    perLineOffsets: _buildPerLineOffsets(),
+          child: useGaussian
+              ? ClipRect(
+                  child: Stack(
+                    children: [
+                      lyricsContent,
+                      ..._buildBlurLayers(
+                        constraints.maxHeight,
+                        mainLineHeight,
+                      ),
+                    ],
                   ),
-                  size: Size.infinite,
+                )
+              : ShaderMask(
+                  shaderCallback: (Rect bounds) {
+                    return LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: const <Color>[
+                        Color(0x00000000),
+                        Color(0xFF000000),
+                        Color(0xFF000000),
+                        Color(0x00000000),
+                      ],
+                      stops: const <double>[0.0, 0.15, 0.85, 1.0],
+                    ).createShader(bounds);
+                  },
+                  blendMode: BlendMode.dstIn,
+                  child: lyricsContent,
                 ),
-                ..._buildBlurLayers(
-                  constraints.maxHeight,
-                  mainLineHeight,
-                ),
-              ],
-            ),
-          ),
         );
       },
     );
