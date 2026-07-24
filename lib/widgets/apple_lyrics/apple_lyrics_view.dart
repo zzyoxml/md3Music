@@ -443,13 +443,19 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 9. 级联弹簧延迟：检测当前行切换，为下方行设置延迟偏移
     if (_currentLineIndex >= 0 && _currentLineIndex != _previousLineIndex) {
       final now = _lastElapsed.inMicroseconds / 1000.0;
-      final fontSize = LyricLayout.fontSize(context);
-      final mainLineHeight = fontSize * LyricLayout.lineHeight;
+      // 使用当前行的实际高度（含换行），而非理论 mainLineHeight
+      final currentLineHeight = (_currentLineIndex < _lineHeights.length
+          ? _lineHeights[_currentLineIndex]
+          : LyricLayout.fontSize(context) * LyricLayout.lineHeight);
       // 为当前行下方的行设置延迟和弹簧初始偏移
-      // 偏移量与距离成正比：越远的行偏移越大，形成波浪式级联
+      // 偏移量与距离成正比，但递增幅度逐行衰减，避免过远的行偏移过大
       for (int i = _currentLineIndex + 1; i < widget.lines.length; i++) {
         final distance = i - _currentLineIndex;
-        final offset = mainLineHeight * _perLineOffsetFactor * distance;
+        // 衰减公式：offset = lineHeight * factor * (1 - 1/distance)
+        // distance=1 → 0, distance=2 → 0.5*factor, distance=3 → 0.67*factor, ...
+        // 这样相邻行偏移小，远处行偏移趋近上限
+        final offset = currentLineHeight * _perLineOffsetFactor *
+            (1 - 1.0 / distance);
         _delayStartTimes[i] = now;
         final spring = _perLineSpringFor(i);
         spring.setPosition(offset, 0);
