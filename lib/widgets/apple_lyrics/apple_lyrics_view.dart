@@ -693,7 +693,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     if (topBlurExtent > 0) {
       final double zoneHeight = topBlurExtent / zoneCount;
       for (int z = 0; z < zoneCount; z++) {
-        final sigma = ((z + 1) / zoneCount) * maxSigma * _blurIntensity;
+        // ease-in 曲线：靠近当前行 sigma 变化慢，远离处变化快
+        final t = (z + 1) / zoneCount;
+        final sigma = t * t * maxSigma * _blurIntensity;
         if (sigma < 0.1) continue;
         final bottom = currentY - clearRadius - z * zoneHeight;
         final top = z == 0 ? 0.0 : bottom - zoneHeight;
@@ -709,7 +711,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     if (bottomBlurExtent > 0) {
       final double zoneHeight = bottomBlurExtent / zoneCount;
       for (int z = 0; z < zoneCount; z++) {
-        final sigma = ((z + 1) / zoneCount) * maxSigma * _blurIntensity;
+        // ease-in 曲线：靠近当前行 sigma 变化慢，远离处变化快
+        final t = (z + 1) / zoneCount;
+        final sigma = t * t * maxSigma * _blurIntensity;
         if (sigma < 0.1) continue;
         final top = currentY + clearRadius + z * zoneHeight;
         final bottom = z == zoneCount - 1 ? viewportHeight : top + zoneHeight;
