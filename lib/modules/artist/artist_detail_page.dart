@@ -33,12 +33,36 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   String? _description;
   bool _isDescriptionExpanded = false;
 
+  /// 滚动监听：用于 SliverAppBar pinned 后 fade-in 显示歌手名
+  final ScrollController _scrollController = ScrollController();
+  double _scrollOffset = 0;
+  double _lastReportedOffset = 0;
+
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchArtistSongs();
     });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// 滚动监听：减少无意义 setState，仅在偏移变化超过 1px 时更新
+  void _onScroll() {
+    if (!mounted) return;
+    final offset = _scrollController.offset;
+    if ((offset - _lastReportedOffset).abs() > 1.0) {
+      _lastReportedOffset = offset;
+      _scrollOffset = offset;
+      setState(() {});
+    }
   }
 
   Future<void> _fetchArtistSongs() async {
@@ -124,27 +148,33 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
           : _error != null
               ? _buildError(context, colorScheme)
               : CustomScrollView(
+                  controller: _scrollController,
                   slivers: [
                     SliverAppBar(
                       expandedHeight: 180,
                       pinned: true,
                       centerTitle: false,
-                      title: LayoutBuilder(
-                        builder: (context, constraints) {
-                          // constraints.biggest.height 从 expandedHeight 到 toolbarHeight 变化
-                          final toolbarHeight = kToolbarHeight + MediaQuery.of(context).padding.top;
-                          final progress = ((constraints.biggest.height - toolbarHeight) / (180 - toolbarHeight)).clamp(0.0, 1.0);
-                          // progress=1 展开，progress=0 收起；只在收起时显示
-                          return Opacity(
-                            opacity: (1.0 - progress).clamp(0.0, 1.0),
-                            child: Text(
-                              widget.artistName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                          );
-                        },
+                      // pinned 后顶栏背景色：滚动到 expandedHeight - kToolbarHeight
+                      // 之后从透明渐变到 surface
+                      backgroundColor: Color.lerp(
+                        Colors.transparent,
+                        colorScheme.surface,
+                        (_scrollOffset - (180 - kToolbarHeight))
+                            .clamp(0.0, 60.0) / 60,
+                      )!,
+                      surfaceTintColor: Colors.transparent,
+                      scrolledUnderElevation: 0,
+                      // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示歌手名
+                      title: Opacity(
+                        opacity: ((_scrollOffset - (180 - kToolbarHeight)) /
+                                60.0)
+                            .clamp(0.0, 1.0),
+                        child: Text(
+                          widget.artistName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                       ),
                       flexibleSpace: FlexibleSpaceBar(
                         background: Container(
