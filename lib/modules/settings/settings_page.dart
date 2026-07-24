@@ -49,6 +49,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _useDynamicColor = false;
   // Apple Music 风格播放页开关（默认关闭，开启后用 AM 风格 FullPlayer）
   bool _useAmStylePlayer = false;
+  bool _useGaussianBlur = true;
   String _appVersion = '';
   // Lyricon 词幕推送相关状态
   bool _lyriconEnabled = false;
@@ -134,6 +135,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _apiServerController.text = apiServerUrl;
       _useDynamicColor = useDynamicColor;
       _useAmStylePlayer = useAmStylePlayer;
+      _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
       _deviceType = deviceType;
       _downloadDir = downloadDir;
       _uiScale = uiScale;
@@ -401,9 +403,12 @@ class _SettingsPageState extends State<SettingsPage> {
         SwitchListTile(
           title: const Text('歌词高斯模糊'),
           subtitle: const Text('开启为高斯模糊渐变，关闭为 alpha 淡出'),
-          value: LyricPreferences.instance.useGaussianBlur,
+          value: _useGaussianBlur,
           onChanged: _useAmStylePlayer
-              ? (v) => LyricPreferences.instance.setUseGaussianBlur(v)
+              ? (v) {
+                  setState(() => _useGaussianBlur = v);
+                  LyricPreferences.instance.setUseGaussianBlur(v);
+                }
               : null,
         ),
         const Divider(),
