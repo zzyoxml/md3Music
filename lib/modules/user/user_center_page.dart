@@ -526,7 +526,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
         children: [
           for (final l in labels)
             SizedBox(
-              width: 40, // 与 _buildCalendarGrid 中的 cellSize 保持一致
+              width: 44, // 与 _buildCalendarGrid 中的 cellSize 保持一致
               child: Center(
                 child: Text(
                   l,
@@ -595,7 +595,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
     Set<int> receivedDays,
     DateTime now,
   ) {
-    const cellSize = 40.0;
+    const cellSize = 44.0;
     final rows = <Widget>[];
     var cells = <Widget>[];
 
@@ -619,8 +619,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
           height: cellSize,
           child: Center(
             child: Container(
-              width: 32,
-              height: 32,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: isReceived ? cs.primary : Colors.transparent,

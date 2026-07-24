@@ -274,8 +274,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
   Widget _buildBannerSection(ColorScheme cs) {
     return SliverToBoxAdapter(
       child: FadeInUp(
-        child: Container(
-          height: 160,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 160),
+          child: Container(
           margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
@@ -322,6 +323,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
             ],
           ),
         ),
+       ),
       ),
     );
   }
@@ -362,7 +364,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                   ),
                 ),
                 SizedBox(
-                  height: 64,
+                  height: 72,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -431,7 +433,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                   ),
                 ),
                 SizedBox(
-                  height: 170,
+                  height: 180,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -521,7 +523,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                   ),
                 ),
                 SizedBox(
-                  height: 100,
+                  height: 110,
                   child: ListView.builder(
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
