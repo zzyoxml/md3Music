@@ -16,6 +16,12 @@ import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/player_playlist_dialog.dart';
 
+/// 预加载封面图片到磁盘缓存，防止切换时白屏
+void _preloadArtwork(String? url) {
+  if (url == null || url.isEmpty) return;
+  CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+}
+
 const List<AudioQuality> _audioQualities = [
   AudioQuality.standard,
   AudioQuality.high,
@@ -123,12 +129,22 @@ class _FullPlayerState extends State<FullPlayer>
     if (song != null && song.id != _lastSongId) {
       // 封面淡入淡出：song 已经是新歌，_previousArtworkUrl 是上一首的封面
       if (_previousArtworkUrl != null && _previousArtworkUrl != song.artworkUri) {
+        final newUrl = song.artworkUri;
         _artworkFadeController
           ..reset()
-          ..forward();
+          ..forward().then((_) {
+            // 动画结束后才更新，确保淡出期间旧封面引用不丢失
+            if (mounted) _previousArtworkUrl = newUrl;
+          });
+      } else {
+        _previousArtworkUrl = song.artworkUri;
       }
-      _previousArtworkUrl = song.artworkUri;
       _fetchLyrics(song);
+      // 预加载上一首和下一首的封面，防止切换时白屏
+      final playlist = player.playlist;
+      final idx = player.currentIndex;
+      if (idx > 0) _preloadArtwork(playlist[idx - 1].artworkUri);
+      if (idx < playlist.length - 1) _preloadArtwork(playlist[idx + 1].artworkUri);
     }
   }
 

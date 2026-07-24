@@ -23,6 +23,12 @@ import '../../utils/landscape_immersive.dart';
 import '../../widgets/player_playlist_dialog.dart';
 import 'comments_view.dart';
 
+/// 预加载封面图片到磁盘缓存，防止切换时白屏
+void _preloadArtwork(String? url) {
+  if (url == null || url.isEmpty) return;
+  CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+}
+
 const List<AudioQuality> _audioQualities = [
   AudioQuality.standard,
   AudioQuality.high,
@@ -142,16 +148,26 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
   void _onPlayerSongChanged() {
     if (!mounted) return;
-    final song = context.read<PlayerProvider>().currentSong;
+    final player = context.read<PlayerProvider>();
+    final song = player.currentSong;
     if (song != null && song.id != _lastSongId) {
       // 封面 + 背景淡入淡出
       if (_previousArtworkUrl != null && _previousArtworkUrl != song.artworkUri) {
+        final newUrl = song.artworkUri;
         _artworkFadeController
           ..reset()
-          ..forward();
+          ..forward().then((_) {
+            if (mounted) _previousArtworkUrl = newUrl;
+          });
+      } else {
+        _previousArtworkUrl = song.artworkUri;
       }
-      _previousArtworkUrl = song.artworkUri;
       _fetchLyrics(song);
+      // 预加载上一首和下一首的封面，防止切换时白屏
+      final playlist = player.playlist;
+      final idx = player.currentIndex;
+      if (idx > 0) _preloadArtwork(playlist[idx - 1].artworkUri);
+      if (idx < playlist.length - 1) _preloadArtwork(playlist[idx + 1].artworkUri);
     }
   }
 
