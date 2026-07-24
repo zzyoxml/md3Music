@@ -200,6 +200,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
         ? (widget.albumGlobalCollectionId ?? widget.playlist.id)
         : (widget.playlist.listCreateGid ?? widget.playlist.id);
     final commentType = widget.isAlbum ? 'album' : 'playlist';
+    debugPrint('[CommentsSheet] commentId=$commentId, commentType=$commentType');
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,

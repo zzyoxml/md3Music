@@ -376,6 +376,7 @@ class KugouApiClient {
         'pagesize': pagesize,
       },
     );
+    print('[SearchAlbums] keyword=$keywords, result=${json != null ? "ok" : "null"}');
     if (json == null) return null;
     try {
       final data = json['data'];
@@ -385,10 +386,16 @@ class KugouApiClient {
       } else if (data is Map) {
         list = data['info'] ?? data['list'] ?? [];
       }
-      return list
+      final albums = list
           .map((e) => KugouAlbumBrief.fromJson(e as Map<String, dynamic>))
           .toList();
+      print('[SearchAlbums] found ${albums.length} albums');
+      for (final a in albums) {
+        print('[SearchAlbums]   ${a.name} -> globalCollectionId=${a.globalCollectionId}, id=${a.id}');
+      }
+      return albums;
     } catch (e) {
+      print('[SearchAlbums] parse error: $e');
       return null;
     }
   }

@@ -657,9 +657,11 @@ class _FavoritesPageState extends State<FavoritesPage>
     final colorScheme = Theme.of(context).colorScheme;
     // 优先使用搜索到的原始 global_collection_id
     final originalId = _albumOriginalIds[album.id] ?? album.numericId;
+    debugPrint('[AlbumTile] ${album.name}: originalId=$originalId (from map: ${_albumOriginalIds[album.id]}, numericId: ${album.numericId})');
 
     return InkWell(
       onTap: () {
+        debugPrint('[AlbumTile] tapping ${album.name} -> albumGlobalCollectionId=$originalId');
         Navigator.push(
           context,
           MaterialPageRoute(
