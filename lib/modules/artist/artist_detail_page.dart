@@ -129,15 +129,24 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                       expandedHeight: 180,
                       pinned: true,
                       centerTitle: false,
-                      title: null,
+                      title: LayoutBuilder(
+                        builder: (context, constraints) {
+                          // constraints.biggest.height 从 expandedHeight 到 toolbarHeight 变化
+                          final toolbarHeight = kToolbarHeight + MediaQuery.of(context).padding.top;
+                          final progress = ((constraints.biggest.height - toolbarHeight) / (180 - toolbarHeight)).clamp(0.0, 1.0);
+                          // progress=1 展开，progress=0 收起；只在收起时显示
+                          return Opacity(
+                            opacity: (1.0 - progress).clamp(0.0, 1.0),
+                            child: Text(
+                              widget.artistName,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.bold),
+                            ),
+                          );
+                        },
+                      ),
                       flexibleSpace: FlexibleSpaceBar(
-                        titlePadding: const EdgeInsetsDirectional.only(start: 16, bottom: 16),
-                        title: Text(
-                          widget.artistName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
                         background: Container(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
