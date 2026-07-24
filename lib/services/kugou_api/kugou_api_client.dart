@@ -393,12 +393,16 @@ class KugouApiClient {
       } else if (data is Map) {
         list = data['info'] ?? data['list'] ?? [];
       }
+      // 打印原始 JSON 查看实际字段名
+      if (list.isNotEmpty) {
+        print('[SearchAlbums] RAW FIRST ITEM: ${list.first}');
+      }
       final albums = list
           .map((e) => KugouAlbumBrief.fromJson(e as Map<String, dynamic>))
           .toList();
       print('[SearchAlbums] found ${albums.length} albums');
       for (final a in albums) {
-        print('[SearchAlbums]   ${a.name} -> globalCollectionId=${a.globalCollectionId}, id=${a.id}');
+        print('[SearchAlbums]   ${a.name} -> globalCollectionId=${a.globalCollectionId}, id=${a.id}, numericId=${a.numericId}');
       }
       return albums;
     } catch (e) {
