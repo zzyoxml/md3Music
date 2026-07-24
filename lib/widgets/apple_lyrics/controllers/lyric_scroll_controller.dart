@@ -51,6 +51,11 @@ class LyricScrollController {
   /// 是否已自动回弹（避免在倒计时结束后重复 setTarget）
   bool _autoReturned = true;
 
+  /// 自动回弹触发回调：5s 倒计时结束、弹簧开始回弹时调用。
+  ///
+  /// 外部（AppleLyricsView）可监听此回调来恢复歌词模糊效果。
+  VoidCallback? onAutoReturn;
+
   /// 当前弹簧 stiffness（用于测试与外部诊断）
   double _currentStiffness = LyricLayout.posYSeekingStiffness;
 
@@ -229,6 +234,7 @@ class LyricScrollController {
   /// 自动回弹到当前行的 targetY
   void _returnToCurrentLine() {
     _autoReturned = true;
+    onAutoReturn?.call();
     if (_currentLineIndex < 0 || _currentLineHeight <= 0) return;
     final double targetY = targetYForLine(
       _currentLineIndex,

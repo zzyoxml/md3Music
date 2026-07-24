@@ -13,6 +13,7 @@
 library;
 
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -107,6 +108,13 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
   int _currentLineIndex = -1;
   Offset? _tapDownPosition;
+
+  /// 模糊强度（0.0 = 无模糊，1.0 = 完全模糊）。
+  ///
+  /// 用户拖动歌词时快速衰减到 0，松手后保持 0，
+  /// 5s 自动回弹触发时在 ~600ms 内恢复到 1.0。
+  double _blurIntensity = 1.0;
+  double _blurTarget = 1.0;
 
   /// 预计算每行实际高度（含自动换行）。
   ///
@@ -240,6 +248,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _ticker = createTicker(_onTick);
     _ticker.start();
     _lastElapsed = Duration.zero;
+    // 自动回弹触发时恢复模糊
+    _scrollController.onAutoReturn = () {
+      _blurTarget = 1.0;
+    };
     // 监听字号/行间距偏好变化，实时刷新（设置页滑块、长按菜单调节后立即生效）
     LyricPreferences.instance.addListener(_onPreferencesChanged);
   }
@@ -379,7 +391,17 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       _interludeExpandProgress = 0;
     }
 
-    // 8. 触发重绘
+    // 8. 推进模糊强度动画
+    // 拖动时 _blurTarget=0，回弹时 _blurTarget=1
+    // 用指数衰减：速度 8 → ~300ms 到位（拖动消失快），速度 5 → ~500ms 恢复（回弹渐进）
+    final double blurSpeed = _blurTarget < _blurIntensity ? 8.0 : 5.0;
+    _blurIntensity += (_blurTarget - _blurIntensity) *
+        (1 - math.exp(-blurSpeed * dt));
+    if ((_blurIntensity - _blurTarget).abs() < 0.001) {
+      _blurIntensity = _blurTarget;
+    }
+
+    // 9. 触发重绘
     setState(() {});
   }
 
@@ -483,6 +505,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 用户滚动后 5s 自动回弹到当前行）。这里补上 onVerticalDragUpdate/End。
   void _onVerticalDragUpdate(DragUpdateDetails details) {
     _scrollController.onUserScroll(details.primaryDelta ?? 0);
+    // 拖动时立即移除模糊
+    _blurTarget = 0.0;
   }
 
   void _onVerticalDragEnd(DragEndDetails details) {
@@ -524,54 +548,125 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           // 用户确认（grill-me Q6）：按 AMLL 规范来。
           // 用 ShaderMask + LinearGradient 实现，blendMode: dstIn
           // 让歌词在两端淡出，营造无限滚动感。
-          child: ShaderMask(
-            shaderCallback: (Rect bounds) {
-              return LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: const <Color>[
-                  Color(0x00000000),
-                  Color(0xFF000000),
-                  Color(0xFF000000),
-                  Color(0x00000000),
-                ],
-                stops: const <double>[0.0, 0.15, 0.85, 1.0],
-              ).createShader(bounds);
-            },
-            blendMode: BlendMode.dstIn,
-            child: ClipRect(
-              child: CustomPaint(
-                painter: _LyricsPainter(
-                  lines: widget.lines,
-                  currentLineIndex: _currentLineIndex,
-                  posY: _scrollController.posY,
-                  fontSize: fontSize,
-                  mainLineHeight: mainLineHeight,
-                  lineHeights: _lineHeights,
-                  lineTops: _lineTops,
-                  viewportHeight: constraints.maxHeight,
-                  viewportWidth: constraints.maxWidth,
-                  maxLineWidth: maxLineWidth,
-                  currentTimeMs: widget.currentTimeMs,
-                  enableScale: widget.enableScale,
-                  wordRenderers: _wordRenderers,
-                  lineRenderers: _lineRenderers,
-                  scaleController: _scaleController,
-                  emphasizeEffect: _emphasizeEffect,
-                  interludeDots: _interludeDots,
-                  interludeAfterIndices: _interludeAfterIndices,
-                  interludePlaceholderHeight: _interludePlaceholderHeight,
-                  activeInterludeIdx: _activeInterludeIdx,
-                  lastActiveAnchorIdx: _lastActiveAnchorIdx,
-                  interludeExpandProgress: _interludeExpandProgress,
+          child: ClipRect(
+            child: Stack(
+              children: [
+                CustomPaint(
+                  painter: _LyricsPainter(
+                    lines: widget.lines,
+                    currentLineIndex: _currentLineIndex,
+                    posY: _scrollController.posY,
+                    fontSize: fontSize,
+                    mainLineHeight: mainLineHeight,
+                    lineHeights: _lineHeights,
+                    lineTops: _lineTops,
+                    viewportHeight: constraints.maxHeight,
+                    viewportWidth: constraints.maxWidth,
+                    maxLineWidth: maxLineWidth,
+                    currentTimeMs: widget.currentTimeMs,
+                    enableScale: widget.enableScale,
+                    wordRenderers: _wordRenderers,
+                    lineRenderers: _lineRenderers,
+                    scaleController: _scaleController,
+                    emphasizeEffect: _emphasizeEffect,
+                    interludeDots: _interludeDots,
+                    interludeAfterIndices: _interludeAfterIndices,
+                    interludePlaceholderHeight: _interludePlaceholderHeight,
+                    activeInterludeIdx: _activeInterludeIdx,
+                    lastActiveAnchorIdx: _lastActiveAnchorIdx,
+                    interludeExpandProgress: _interludeExpandProgress,
+                  ),
+                  size: Size.infinite,
                 ),
-                size: Size.infinite,
-              ),
+                ..._buildBlurLayers(
+                  constraints.maxHeight,
+                  mainLineHeight,
+                ),
+              ],
             ),
           ),
         );
       },
     );
+  }
+
+  /// 构建基于当前行位置的高斯模糊层。
+  ///
+  /// 以当前播放行为中心，清晰区（lineHeight×1.5）内无模糊，
+  /// 向上下两侧递增模糊（sigma 3 → 8 → 16）。
+  /// 所有 sigma 乘以 [_blurIntensity]，用户拖动时模糊消失。
+  List<Widget> _buildBlurLayers(double viewportHeight, double mainLineHeight) {
+    if (_blurIntensity <= 0.01 || _currentLineIndex < 0) return const [];
+
+    // 当前行屏幕 Y = lineTops[i] + posY + lineHeight/2
+    final double lineTop = (_currentLineIndex < _lineTops.length
+            ? _lineTops[_currentLineIndex]
+            : _currentLineIndex * mainLineHeight) +
+        _interludeOffsetBefore(_currentLineIndex);
+    final double currentY = lineTop + _scrollController.posY + mainLineHeight / 2;
+
+    // 清晰区半径：当前行及紧邻行
+    final double clearRadius = mainLineHeight * 1.5;
+    final double clearTop = currentY - clearRadius;
+    final double clearBottom = currentY + clearRadius;
+
+    // 模糊分区：[区域起始距当前行距离, sigma]
+    // 距离从 clearRadius 开始算
+    final zones = [
+      [clearRadius, clearRadius + 60, 3.0],       // 轻微模糊
+      [clearRadius + 60, clearRadius + 140, 8.0],  // 中等模糊
+      [clearRadius + 140, 9999.0, 16.0],           // 强模糊（到视口边缘）
+    ];
+
+    final List<Widget> layers = [];
+
+    // 上方模糊层（从清晰区上边界到视口顶部）
+    for (final zone in zones) {
+      final top = currentY - zone[1];
+      final bottom = currentY - zone[0];
+      if (bottom < 0) break; // 已超出视口顶部
+      final clampedTop = top < 0 ? 0.0 : top;
+      final height = bottom - clampedTop;
+      if (height <= 0) continue;
+      final sigma = zone[2] * _blurIntensity;
+      layers.add(Positioned(
+        top: clampedTop,
+        left: 0,
+        right: 0,
+        height: height,
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ));
+    }
+
+    // 下方模糊层（从清晰区下边界到视口底部）
+    for (final zone in zones) {
+      final top = currentY + zone[0];
+      final bottom = currentY + zone[1];
+      if (top > viewportHeight) break; // 已超出视口底部
+      final clampedBottom = bottom > viewportHeight ? viewportHeight : bottom;
+      final height = clampedBottom - top;
+      if (height <= 0) continue;
+      final sigma = zone[2] * _blurIntensity;
+      layers.add(Positioned(
+        top: top,
+        left: 0,
+        right: 0,
+        height: height,
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ));
+    }
+
+    return layers;
   }
 }
 
