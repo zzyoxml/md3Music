@@ -447,45 +447,47 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         ),
       ),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisSize: MainAxisSize.max,
         children: _songPoolOptions.map((option) {
           final isActive = _selectedSongPoolId == option['value'];
-          return InkWell(
-            onTap: () {
-              setState(() => _selectedSongPoolId = option['value']);
-              _loadPersonalFm();
-            },
-            borderRadius: BorderRadius.circular(999),
-            child: Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: isSmallScreen ? 10 : 14,
-                vertical: isSmallScreen ? 6 : 8,
-              ),
-              decoration: isActive
-                  ? BoxDecoration(
-                      borderRadius: BorderRadius.circular(999),
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF0d8fff), Color(0xFF2fb4ff)],
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: const Color(
-                            0xFF0d8fff,
-                          ).withValues(alpha: 0.22),
-                          blurRadius: 10,
-                          offset: const Offset(0, 10),
+          return Expanded(
+            child: InkWell(
+              onTap: () {
+                setState(() => _selectedSongPoolId = option['value']);
+                _loadPersonalFm();
+              },
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: isSmallScreen ? 10 : 14,
+                  vertical: isSmallScreen ? 6 : 8,
+                ),
+                decoration: isActive
+                    ? BoxDecoration(
+                        borderRadius: BorderRadius.circular(999),
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF0d8fff), Color(0xFF2fb4ff)],
                         ),
-                      ],
-                    )
-                  : null,
-              child: Text(
-                option['label'],
-                style: TextStyle(
-                  fontSize: isSmallScreen ? 11 : 12,
-                  fontWeight: FontWeight.w700,
-                  color: isActive
-                      ? Colors.white
-                      : cs.onSurfaceVariant.withValues(alpha: 0.62),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(
+                              0xFF0d8fff,
+                            ).withValues(alpha: 0.22),
+                            blurRadius: 10,
+                            offset: const Offset(0, 10),
+                          ),
+                        ],
+                      )
+                    : null,
+                child: Text(
+                  option['label'],
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 11 : 12,
+                    fontWeight: FontWeight.w700,
+                    color: isActive
+                        ? Colors.white
+                        : cs.onSurfaceVariant.withValues(alpha: 0.62),
+                  ),
                 ),
               ),
             ),
@@ -1042,21 +1044,25 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                     ),
                   ),
                   if (track != null)
-                    Container(
-                      padding: EdgeInsets.symmetric(
-                        horizontal: isSmallScreen ? 8 : 10,
-                        vertical: isSmallScreen ? 3 : 4,
-                      ),
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(8),
-                        color: Colors.white,
-                      ),
-                      child: Text(
-                        '${_getModeLabel(_selectedMode)} 实时推荐',
-                        style: textTheme.bodySmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: const Color(0xFF1677ff),
-                          fontSize: isSmallScreen ? 11 : 12,
+                    Flexible(
+                      child: Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: isSmallScreen ? 8 : 10,
+                          vertical: isSmallScreen ? 3 : 4,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          color: Colors.white,
+                        ),
+                        child: Text(
+                          '${_getModeLabel(_selectedMode)} 实时推荐',
+                          style: textTheme.bodySmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFF1677ff),
+                            fontSize: isSmallScreen ? 11 : 12,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ),
