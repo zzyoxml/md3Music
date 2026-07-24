@@ -70,6 +70,7 @@ class _FavoritesPageState extends State<FavoritesPage>
   void _onCollectionChanged() {
     if (!mounted) return;
     _loadPlaylists(forceNoCache: true);
+    _loadAlbums(noCache: true);
   }
 
   Future<void> _loadAllData() async {
@@ -144,13 +145,13 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
   }
 
-  Future<void> _loadAlbums() async {
+  Future<void> _loadAlbums({bool noCache = false}) async {
     if (!mounted) return;
     setState(() => _isLoadingAlbums = true);
 
     try {
       final api = KugouApiClient();
-      final result = await api.getUserPlaylist(pagesize: 50);
+      final result = await api.getUserPlaylist(pagesize: 50, noCache: noCache);
       if (!mounted) return;
 
       if (result != null) {

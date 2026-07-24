@@ -22,6 +22,8 @@ module.exports = (params, useAxios) => {
     dataMap['is_pri'] = params.is_pri || 0;
   }
 
+  console.log('[playlist_add] dataMap:', JSON.stringify(dataMap));
+
   return useAxios({
     url: '/cloudlist.service/v5/add_list',
     data: dataMap,

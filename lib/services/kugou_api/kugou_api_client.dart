@@ -1934,6 +1934,7 @@ class KugouApiClient {
   Future<Map<String, dynamic>?> createPlaylist(
     String name, {
     int type = 0,
+    int source = 1,
     int isPri = 0,
     String? listCreateUserid,
     String? listCreateListid,
@@ -1953,6 +1954,7 @@ class KugouApiClient {
     final params = <String, dynamic>{
       'name': name,
       'type': type,
+      'source': source,
       'is_pri': isPri,
       'list_create_userid': userid,
       'list_create_listid': listid,
@@ -1961,6 +1963,23 @@ class KugouApiClient {
     if (globalCollectionId != null && globalCollectionId.isNotEmpty) {
       params['list_create_gid'] = globalCollectionId;
     }
+    return await _get(KugouEndpoints.playlistAdd, queryParameters: params);
+  }
+
+  /// 收藏专辑
+  Future<Map<String, dynamic>?> collectAlbum(
+    String name, {
+    required String artistId,
+    required String albumId,
+  }) async {
+    final params = <String, dynamic>{
+      'name': name,
+      'type': 1,
+      'source': 2,
+      'list_create_userid': artistId,
+      'list_create_listid': albumId,
+      'list_create_gid': '',
+    };
     return await _get(KugouEndpoints.playlistAdd, queryParameters: params);
   }
 
@@ -2128,8 +2147,16 @@ class KugouApiClient {
     );
     if (json == null) return null;
     try {
+      // 响应可能是 {status:0, data:{info:[...]}} 或 {status:0, data:{album_id:...}}
       final data = json['data'] as Map<String, dynamic>? ?? json;
-      return KugouAlbumDetail.fromJson(data);
+      final info = data['info'];
+      Map<String, dynamic> albumData;
+      if (info is List && info.isNotEmpty) {
+        albumData = info.first as Map<String, dynamic>;
+      } else {
+        albumData = data;
+      }
+      return KugouAlbumDetail.fromJson(albumData);
     } catch (e) {
       return null;
     }

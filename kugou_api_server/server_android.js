@@ -71,7 +71,7 @@ const moduleFiles = [
   'search_default', 'search_hot', 'search_lyric', 'search_mixed', 'search_special',
   'search_suggest', 'server_now', 'sheet_collection', 'sheet_detail', 'sheet_explore',
   'sheet_rank', 'sheet_song', 'sheet_tags', 'singer_list', 'song_climax',
-  'song_ranking', 'song_ranking_filter', 'song_url', 'song_url_new',
+  'song_ranking', 'song_ranking_filter', 'song_url', 'song_url_new', 'songlist_add',
   'theme_music', 'theme_music_detail', 'theme_playlist', 'theme_playlist_track',
   'top_album', 'top_card', 'top_card_youth', 'top_ip', 'top_playlist',
   'top_song', 'user_cloud', 'user_cloud_url', 'user_detail', 'user_follow',

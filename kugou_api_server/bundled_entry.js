@@ -117,6 +117,7 @@ const modules = {
   'song_ranking_filter': require('./module/song_ranking_filter.js'),
   'song_url': require('./module/song_url.js'),
   'song_url_new': require('./module/song_url_new.js'),
+  'songlist_add': require('./module/songlist_add.js'),
   'theme_music': require('./module/theme_music.js'),
   'theme_music_detail': require('./module/theme_music_detail.js'),
   'theme_playlist': require('./module/theme_playlist.js'),

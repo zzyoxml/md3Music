@@ -3,7 +3,7 @@ module.exports = (params, useAxios) => {
   const data = {
     data: [{ album_id: params.album_id || params.id }],
     is_buy: params?.is_buy || 0,
-    fields: 'album_id,album_name,publish_date,sizable_cover,intro,language,is_publish,heat,type,quality,authors,exclusive,author_name,trans_param',
+    fields: 'album_id,album_name,publish_date,sizable_cover,intro,language,is_publish,heat,type,quality,authors,exclusive,author_name,trans_param,gid',
   };
   return useAxios({
     url: '/kmr/v2/albums',

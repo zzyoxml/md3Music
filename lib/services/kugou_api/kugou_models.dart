@@ -316,11 +316,13 @@ class KugouSongDetail {
   factory KugouSongDetail.fromJson(Map<String, dynamic> json) {
     // 处理 singerinfo 数组格式
     String? artistName;
+    String? artistIdFromSingerInfo;
     final singerinfo = json['singerinfo'];
     if (singerinfo is List && singerinfo.isNotEmpty) {
       final firstSinger = singerinfo.first;
       if (firstSinger is Map) {
         artistName = firstSinger['name']?.toString();
+        artistIdFromSingerInfo = firstSinger['id']?.toString();
       }
     }
 
@@ -341,7 +343,8 @@ class KugouSongDetail {
             json['albumname'] ??
             json['albuminfo']?['name'],
       ),
-      artistId: _extractFirst(
+      artistId: _strNull(
+        artistIdFromSingerInfo ??
         json['SingerId'] ??
             json['singerid'] ??
             json['SingerID'] ??
@@ -827,6 +830,8 @@ class KugouAlbumDetail {
   final String? description;
   final int songCount;
   final String? publishDate;
+  final String? globalCollectionId;
+  final String? artistId;
 
   const KugouAlbumDetail({
     required this.id,
@@ -836,6 +841,8 @@ class KugouAlbumDetail {
     this.description,
     this.songCount = 0,
     this.publishDate,
+    this.globalCollectionId,
+    this.artistId,
   });
 
   factory KugouAlbumDetail.fromJson(Map<String, dynamic> json) {
@@ -870,6 +877,21 @@ class KugouAlbumDetail {
       publishDate: _strNull(
         json['publishtime'] ?? json['publish_date'] ?? json['PublishDate'],
       ),
+      globalCollectionId: _strNull(
+        json['global_collection_id'] ?? json['gid'],
+      ),
+      artistId: _strNull(
+        (() {
+          final authors = json['authors'];
+          if (authors is List && authors.isNotEmpty) {
+            final first = authors.first;
+            if (first is Map<String, dynamic>) {
+              return first['author_id'] ?? first['singerid'] ?? first['id'];
+            }
+          }
+          return null;
+        })(),
+      ),
     );
   }
 
@@ -880,6 +902,7 @@ class KugouAlbumDetail {
       artist: artistName ?? '',
       artworkUri: coverUrl,
       songCount: songCount,
+      globalCollectionId: globalCollectionId,
     );
   }
 }

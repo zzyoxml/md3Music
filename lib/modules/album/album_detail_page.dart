@@ -271,14 +271,26 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       }
       return;
     }
+
+    // 乐观更新：立即显示已收藏状态
+    setState(() {
+      _isCollected = true;
+    });
+
     try {
-      final result = await api.createPlaylist(
+      String artistId = _albumDetail?.artistId ?? '';
+      if (artistId.isEmpty && _songs.isNotEmpty) {
+        artistId = _songs.first.artistId ?? '';
+      }
+      final result = await api.collectAlbum(
         widget.album.name,
-        type: 1,
-        globalCollectionId: widget.album.id,
+        artistId: artistId,
+        albumId: widget.album.id,
       );
       if (result == null) {
+        // 回滚
         if (mounted) {
+          setState(() { _isCollected = false; });
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('收藏失败，请重试'), behavior: SnackBarBehavior.floating),
           );
@@ -288,17 +300,13 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       String? newId = await _findCollectedListId(api);
       await CollectedPlaylistStore.setListId(widget.album.id, newId);
       if (mounted) {
-        setState(() {
-          _isCollected = true;
-          _collectedListId = newId;
-        });
+        setState(() { _collectedListId = newId; });
         context.read<PlaylistCollectionNotifier>().notifyChanged();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('收藏成功'), behavior: SnackBarBehavior.floating),
-        );
       }
     } catch (e) {
+      // 回滚
       if (mounted) {
+        setState(() { _isCollected = false; });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('收藏失败'), behavior: SnackBarBehavior.floating),
         );
@@ -310,11 +318,17 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     final api = KugouApiClient();
     if (!api.isLoggedIn) return;
 
+    // 乐观更新：立即显示未收藏状态
+    setState(() {
+      _isCollected = false;
+    });
+
     String? listId = await CollectedPlaylistStore.getListId(widget.album.id);
     listId ??= _collectedListId;
     listId ??= await _findCollectedListId(api);
     if (listId == null || listId.isEmpty) {
       if (mounted) {
+        setState(() { _isCollected = true; });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('找不到收藏记录，无法取消'), behavior: SnackBarBehavior.floating),
         );
@@ -326,21 +340,19 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       final result = await api.deletePlaylist(listId, type: 0);
       if (result != null && mounted) {
         await CollectedPlaylistStore.remove(widget.album.id);
-        setState(() {
-          _isCollected = false;
-          _collectedListId = null;
-        });
+        setState(() { _collectedListId = null; });
         context.read<PlaylistCollectionNotifier>().notifyChanged();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已取消收藏'), behavior: SnackBarBehavior.floating),
-        );
       } else if (mounted) {
+        // 回滚
+        setState(() { _isCollected = true; });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('取消收藏失败，请重试'), behavior: SnackBarBehavior.floating),
         );
       }
     } catch (e) {
       if (mounted) {
+        // 回滚
+        setState(() { _isCollected = true; });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('取消收藏失败'), behavior: SnackBarBehavior.floating),
         );

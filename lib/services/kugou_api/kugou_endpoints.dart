@@ -55,6 +55,7 @@ class KugouEndpoints {
   static const String playlistEffect = '/playlist/effect';
   static const String playlistTags = '/playlist/tags';
   static const String playlistAdd = '/playlist/add';
+  static const String songlistAdd = '/songlist/add';
   static const String playlistDel = '/playlist/del';
   static const String playlistTracksAdd = '/playlist/tracks/add';
   static const String playlistTracksDel = '/playlist/tracks/del';
