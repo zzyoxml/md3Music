@@ -56,7 +56,7 @@ class _FullPlayerState extends State<FullPlayer>
     WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 3, vsync: this);
     _artworkFadeController = AnimationController(
-      duration: const Duration(milliseconds: 400),
+      duration: const Duration(milliseconds: 1000),
       vsync: this,
     );
     _artworkFadeAnimation = CurvedAnimation(
