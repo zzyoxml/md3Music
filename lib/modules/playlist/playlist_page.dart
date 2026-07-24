@@ -806,20 +806,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                                   fontWeight: FontWeight.bold,
                                                 ),
                                           ),
-                                          if (displayPlaylist.description !=
-                                              null) ...[
-                                            const SizedBox(height: 4),
-                                            Text(
-                                              displayPlaylist.description!,
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: textTheme.bodySmall
-                                                  ?.copyWith(
-                                                    color: colorScheme
-                                                        .onSurfaceVariant,
-                                                  ),
-                                            ),
-                                          ],
                                           const SizedBox(height: 4),
                                           Text(
                                             '${displayPlaylist.creator ?? ''} · ${_songs.length} 首',
