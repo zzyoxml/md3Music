@@ -683,40 +683,41 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
     // 清晰区半径：当前行及紧邻行
     final double clearRadius = mainLineHeight * 1.5;
-
-    // 模糊分区：从清晰区边缘到视口边缘，sigma 从 0 递增到 16
-    // 每个分区 ~25px 高，共 8 级，形成平滑渐变
-    final double blurExtent = 200.0; // 清晰区外的模糊总范围
-    final int zoneCount = 8;
-    final double zoneHeight = blurExtent / zoneCount;
     final double maxSigma = 16.0;
+    final int zoneCount = 10;
 
     final List<Widget> layers = [];
 
-    // 上方模糊层（从清晰区上边界到视口顶部）
-    for (int z = 0; z < zoneCount; z++) {
-      final sigma = (z / zoneCount) * maxSigma * _blurIntensity;
-      if (sigma < 0.1) continue;
-      final bottom = currentY - clearRadius - z * zoneHeight;
-      final top = bottom - zoneHeight;
-      if (bottom < 0) break;
-      final clampedTop = top < 0 ? 0.0 : top;
-      final height = bottom - clampedTop;
-      if (height <= 0) continue;
-      layers.add(_buildBlurRect(top: clampedTop, height: height, sigma: sigma));
+    // 上方模糊层：从清晰区上边界到视口顶部
+    final double topBlurExtent = currentY - clearRadius; // 可用模糊距离
+    if (topBlurExtent > 0) {
+      final double zoneHeight = topBlurExtent / zoneCount;
+      for (int z = 0; z < zoneCount; z++) {
+        final sigma = ((z + 1) / zoneCount) * maxSigma * _blurIntensity;
+        if (sigma < 0.1) continue;
+        final bottom = currentY - clearRadius - z * zoneHeight;
+        final top = z == 0 ? 0.0 : bottom - zoneHeight;
+        final clampedTop = top < 0 ? 0.0 : top;
+        final height = bottom - clampedTop;
+        if (height <= 0) continue;
+        layers.add(_buildBlurRect(top: clampedTop, height: height, sigma: sigma));
+      }
     }
 
-    // 下方模糊层（从清晰区下边界到视口底部）
-    for (int z = 0; z < zoneCount; z++) {
-      final sigma = (z / zoneCount) * maxSigma * _blurIntensity;
-      if (sigma < 0.1) continue;
-      final top = currentY + clearRadius + z * zoneHeight;
-      final bottom = top + zoneHeight;
-      if (top > viewportHeight) break;
-      final clampedBottom = bottom > viewportHeight ? viewportHeight : bottom;
-      final height = clampedBottom - top;
-      if (height <= 0) continue;
-      layers.add(_buildBlurRect(top: top, height: height, sigma: sigma));
+    // 下方模糊层：从清晰区下边界到视口底部
+    final double bottomBlurExtent = viewportHeight - (currentY + clearRadius);
+    if (bottomBlurExtent > 0) {
+      final double zoneHeight = bottomBlurExtent / zoneCount;
+      for (int z = 0; z < zoneCount; z++) {
+        final sigma = ((z + 1) / zoneCount) * maxSigma * _blurIntensity;
+        if (sigma < 0.1) continue;
+        final top = currentY + clearRadius + z * zoneHeight;
+        final bottom = z == zoneCount - 1 ? viewportHeight : top + zoneHeight;
+        final clampedBottom = bottom > viewportHeight ? viewportHeight : bottom;
+        final height = clampedBottom - top;
+        if (height <= 0) continue;
+        layers.add(_buildBlurRect(top: top, height: height, sigma: sigma));
+      }
     }
 
     return layers;
