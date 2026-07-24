@@ -133,7 +133,13 @@ class _AppView extends StatelessWidget {
       themeMode: themeProvider.themeMode,
       // 根据主题设置系统导航栏颜色
       builder: (context, child) {
-        return _SystemUiUpdater(child: child!);
+        final scale = context.watch<ThemeProvider>().uiScale;
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(scale),
+          ),
+          child: _SystemUiUpdater(child: child!),
+        );
       },
       navigatorKey: appNavigatorKey,
       initialRoute: '/',

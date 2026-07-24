@@ -12,6 +12,7 @@ class SettingsRepository {
   static const String _keySignedDays = 'settings_signed_days';
   // 自定义下载目录：空字符串表示使用默认目录（应用私有 documents/downloads）
   static const String _keyDownloadDir = 'settings_download_dir';
+  static const String _keyUiScale = 'settings_ui_scale';
 
   /// 读取本地打卡日期集合（格式 yyyy-MM-dd）
   Future<Set<String>> getSignedDays() async {
@@ -222,5 +223,17 @@ class SettingsRepository {
   Future<void> setLyriconDisplayRoma(bool v) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('lyricon_display_roma', v);
+  }
+
+  // ===== UI 缩放 =====
+
+  Future<double> getUiScale() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_keyUiScale) ?? 1.0;
+  }
+
+  Future<void> setUiScale(double scale) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyUiScale, scale);
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
@@ -55,6 +56,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _downloadDir;
   // 设备类型选择
   DeviceType _deviceType = DeviceType.auto;
+  double _uiScale = 1.0;
 
   @override
   void initState() {
@@ -121,6 +123,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final deviceType = context.read<DeviceProvider>().deviceType;
     // 读取自定义下载目录
     final downloadDir = await _settingsRepository.getDownloadDir();
+    // 从 ThemeProvider 同步 UI 缩放
+    final uiScale = context.read<ThemeProvider>().uiScale;
 
     setState(() {
       _themeMode = themeMode;
@@ -131,6 +135,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _useAmStylePlayer = useAmStylePlayer;
       _deviceType = deviceType;
       _downloadDir = downloadDir;
+      _uiScale = uiScale;
     });
   }
 
@@ -451,6 +456,58 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
         const SizedBox(height: 8),
+        // UI 缩放滑块
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Row(
+            children: [
+              Icon(Icons.format_size, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 4,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                  ),
+                  child: Slider(
+                    value: _uiScale,
+                    min: 0.5,
+                    max: 2.0,
+                    divisions: 15,
+                    label: '${_uiScale.toStringAsFixed(1)}x',
+                    onChanged: (v) {
+                      setState(() => _uiScale = v);
+                      HapticFeedback.lightImpact();
+                    },
+                    onChangeEnd: (v) {
+                      context.read<ThemeProvider>().setUiScale(v);
+                    },
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 40,
+                child: Text(
+                  '${_uiScale.toStringAsFixed(1)}x',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            '调整全局界面大小（歌词界面不受影响）',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
       ],
     );
   }
