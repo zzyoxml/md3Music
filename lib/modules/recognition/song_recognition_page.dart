@@ -171,25 +171,32 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       appBar: AppBar(
         title: const Text('听歌识曲'),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const SizedBox(height: 32),
-            _buildPulseCircle(colorScheme),
-            const SizedBox(height: 32),
-            _buildStatusText(textTheme, colorScheme),
-            const SizedBox(height: 32),
-            if (_result != null) _buildResult(colorScheme, textTheme),
-            if (_error != null) _buildError(colorScheme, textTheme),
-            if (_isRecognizing)
-              const Padding(
-                padding: EdgeInsets.only(top: 24),
-                child: CircularProgressIndicator(),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight - 48),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 32),
+                  _buildPulseCircle(colorScheme),
+                  const SizedBox(height: 32),
+                  _buildStatusText(textTheme, colorScheme),
+                  const SizedBox(height: 32),
+                  if (_result != null) _buildResult(colorScheme, textTheme),
+                  if (_error != null) _buildError(colorScheme, textTheme),
+                  if (_isRecognizing)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 24),
+                      child: CircularProgressIndicator(),
+                    ),
+                ],
               ),
-          ],
-        ),
+            ),
+          );
+        },
       ),
     );
   }
