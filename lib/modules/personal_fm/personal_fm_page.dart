@@ -632,72 +632,81 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         isUltraSmall ? 6 : (isVerySmall ? 8 : 10),
         isUltraSmall ? 5 : (isVerySmall ? 6 : 8),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: _buildModeSwitch(
-              cs,
-              isSmall: isVerySmall,
-              isUltraSmall: isUltraSmall,
-            ),
-          ),
-          SizedBox(height: isUltraSmall ? 2 : (isVerySmall ? 3 : 4)),
-          Text(
-            _getModeLabel(_selectedMode),
-            style: textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              letterSpacing: -0.04,
-              fontSize:
-                  (isUltraSmall
-                      ? 11
-                      : (isVerySmall ? 12 : (width < 180 ? 14 : 16))) *
-                  textSizeMultiplier,
-            ),
-          ),
-          SizedBox(height: isUltraSmall ? 0.5 : (isVerySmall ? 1 : 2)),
-          Text(
-            currentTrack != null ? currentTrack.songName : '暂无推荐',
-            style: textTheme.bodySmall?.copyWith(
-              color: Colors.white.withValues(alpha: 0.9),
-              fontWeight: FontWeight.w600,
-              fontSize: 9 * textSizeMultiplier,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          SizedBox(height: isUltraSmall ? 0.3 : (isVerySmall ? 0.5 : 1)),
-          Text(
-            currentTrack?.artistName ?? '',
-            style: textTheme.bodySmall?.copyWith(
-              color: Colors.white.withValues(alpha: 0.6),
-              fontWeight: FontWeight.w500,
-              fontSize: 8 * textSizeMultiplier,
-            ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const Spacer(),
-          Row(
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.topLeft,
+        child: SizedBox(
+          width: width,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildAudioBars(isSmall: isVerySmall, isUltraSmall: isUltraSmall),
-              const Spacer(),
               FittedBox(
                 fit: BoxFit.scaleDown,
-                child: _buildRadioActions(
+                child: _buildModeSwitch(
                   cs,
-                  isPlaying,
-                  currentTrack,
                   isSmall: isVerySmall,
                   isUltraSmall: isUltraSmall,
                 ),
               ),
+              SizedBox(height: isUltraSmall ? 2 : (isVerySmall ? 3 : 4)),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  _getModeLabel(_selectedMode),
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                    letterSpacing: -0.04,
+                    fontSize:
+                        (isUltraSmall
+                            ? 11
+                            : (isVerySmall ? 12 : (width < 180 ? 14 : 16))) *
+                        textSizeMultiplier,
+                  ),
+                ),
+              ),
+              SizedBox(height: isUltraSmall ? 0.5 : (isVerySmall ? 1 : 2)),
+              Text(
+                currentTrack != null ? currentTrack.songName : '暂无推荐',
+                style: textTheme.bodySmall?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.9),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 9 * textSizeMultiplier,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              SizedBox(height: isUltraSmall ? 0.3 : (isVerySmall ? 0.5 : 1)),
+              Text(
+                currentTrack?.artistName ?? '',
+                style: textTheme.bodySmall?.copyWith(
+                  color: Colors.white.withValues(alpha: 0.6),
+                  fontWeight: FontWeight.w500,
+                  fontSize: 8 * textSizeMultiplier,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              SizedBox(height: height * 0.08),
+              Row(
+                children: [
+                  _buildAudioBars(isSmall: isVerySmall, isUltraSmall: isUltraSmall),
+                  const Spacer(),
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: _buildRadioActions(
+                      cs,
+                      isPlaying,
+                      currentTrack,
+                      isSmall: isVerySmall,
+                      isUltraSmall: isUltraSmall,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1043,7 +1052,6 @@ class _PersonalFmPageState extends State<PersonalFmPage>
             mainAxisSize: MainAxisSize.min,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text(
                     '当前播放',
@@ -1052,6 +1060,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                       fontSize: isSmallScreen ? 13 : null,
                     ),
                   ),
+                  const Spacer(),
                   if (track != null)
                     Flexible(
                       child: Container(

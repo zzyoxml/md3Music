@@ -188,10 +188,12 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                               ],
                             ),
                           ),
-                          child: Align(
-                            alignment: Alignment.bottomLeft,
-                            child: Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                          child: SafeArea(
+                            bottom: false,
+                            child: Align(
+                              alignment: Alignment.bottomLeft,
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                               child: Row(
                                 children: [
                                   avatarUrl != null
@@ -268,6 +270,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           ),
                         ),
                       ),
+                    ),
                     ),
                     SliverToBoxAdapter(
                       child: Padding(
