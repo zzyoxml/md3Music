@@ -188,7 +188,7 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
   }
 
-  /// 通过搜索 API 获取每个专辑的原始 global_collection_id
+  /// 通过搜索 API 获取每个专辑的原始数字 album ID
   Future<void> _fetchAlbumGlobalIds(List<KugouPlaylistBrief> albums) async {
     final api = KugouApiClient();
     for (final album in albums) {
@@ -197,10 +197,12 @@ class _FavoritesPageState extends State<FavoritesPage>
         if (!mounted) return;
         if (searchResult != null && searchResult.isNotEmpty) {
           for (final found in searchResult) {
-            if (found.name == album.name && found.globalCollectionId != null) {
+            // 匹配专辑名，取 numericId（来自 albumid 字段）
+            if (found.name == album.name && found.numericId != null) {
+              debugPrint('[AlbumIDs] ${album.name} -> numericId=${found.numericId}');
               if (mounted) {
                 setState(() {
-                  _albumOriginalIds[album.id] = found.globalCollectionId!;
+                  _albumOriginalIds[album.id] = found.numericId!;
                 });
               }
               break;
@@ -655,7 +657,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildAlbumTile(KugouPlaylistBrief album) {
     final colorScheme = Theme.of(context).colorScheme;
-    // 优先使用搜索到的原始 global_collection_id
+    // 优先使用搜索到的原始数字 album ID
     final originalId = _albumOriginalIds[album.id] ?? album.numericId;
     debugPrint('[AlbumTile] ${album.name}: originalId=$originalId (from map: ${_albumOriginalIds[album.id]}, numericId: ${album.numericId})');
 
