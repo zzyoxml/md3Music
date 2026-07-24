@@ -396,9 +396,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
         delayMs: 80,
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 400),
+            constraints: const BoxConstraints(maxWidth: 380),
             child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
               decoration: BoxDecoration(
                 color: cs.surfaceContainerLow,

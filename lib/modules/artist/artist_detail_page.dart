@@ -129,15 +129,15 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                       expandedHeight: 180,
                       pinned: true,
                       centerTitle: false,
-                      title: Text(
-                        widget.artistName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      ),
+                      title: null,
                       flexibleSpace: FlexibleSpaceBar(
                         titlePadding: const EdgeInsetsDirectional.only(start: 16, bottom: 16),
-                        title: null,
+                        title: Text(
+                          widget.artistName,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.bold),
+                        ),
                         background: Container(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
