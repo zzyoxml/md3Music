@@ -110,13 +110,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   int _currentLineIndex = -1;
   Offset? _tapDownPosition;
 
-  /// 模糊强度（0.0 = 无模糊，1.0 = 完全模糊）。
-  ///
-  /// 用户拖动歌词时快速衰减到 0，松手后保持 0，
-  /// 5s 自动回弹触发时在 ~600ms 内恢复到 1.0。
-  double _blurIntensity = 1.0;
-  double _blurTarget = 1.0;
-
   // ============== 级联弹簧延迟 ==============
 
   /// 每行偏移弹簧（行索引 → Spring）。
@@ -270,10 +263,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _ticker = createTicker(_onTick);
     _ticker.start();
     _lastElapsed = Duration.zero;
-    // 自动回弹触发时恢复模糊
-    _scrollController.onAutoReturn = () {
-      _blurTarget = 1.0;
-    };
+    // 自动回弹触发时恢复模糊（由 _computeLineBlur 自动处理）
+    _scrollController.onAutoReturn = () {};
     // 监听字号/行间距偏好变化，实时刷新（设置页滑块、长按菜单调节后立即生效）
     LyricPreferences.instance.addListener(_onPreferencesChanged);
   }
@@ -430,17 +421,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       _interludeExpandProgress = 0;
     }
 
-    // 8. 推进模糊强度动画
-    // 拖动时 _blurTarget=0，回弹时 _blurTarget=1
-    // 用指数衰减：速度 8 → ~300ms 到位（拖动消失快），速度 5 → ~500ms 恢复（回弹渐进）
-    final double blurSpeed = _blurTarget < _blurIntensity ? 8.0 : 5.0;
-    _blurIntensity += (_blurTarget - _blurIntensity) *
-        (1 - math.exp(-blurSpeed * dt));
-    if ((_blurIntensity - _blurTarget).abs() < 0.001) {
-      _blurIntensity = _blurTarget;
-    }
-
-    // 9. 级联弹簧延迟：检测当前行切换，为下方行设置延迟偏移
+    // 8. 级联弹簧延迟：检测当前行切换，为下方行设置延迟偏移
     if (_currentLineIndex >= 0 && _currentLineIndex != _previousLineIndex) {
       final now = _lastElapsed.inMicroseconds / 1000.0;
       // 使用当前行的实际高度（含换行），而非理论 mainLineHeight
@@ -590,8 +571,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 用户滚动后 5s 自动回弹到当前行）。这里补上 onVerticalDragUpdate/End。
   void _onVerticalDragUpdate(DragUpdateDetails details) {
     _scrollController.onUserScroll(details.primaryDelta ?? 0);
-    // 拖动时立即移除模糊
-    _blurTarget = 0.0;
   }
 
   void _onVerticalDragEnd(DragEndDetails details) {
@@ -696,62 +675,59 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     );
   }
 
-  /// 构建基于当前行位置的高斯模糊层。
+  /// 计算指定行的模糊等级（参考 applemusic-like-lyrics 的 computeLineBlur）。
   ///
-  /// 以当前播放行为中心，清晰区（lineHeight×1.5）内无模糊，
-  /// 向上下两侧递增模糊（sigma 3 → 8 → 16）。
-  /// 所有 sigma 乘以 [_blurIntensity]，用户拖动时模糊消失。
+  /// - 当前行：0
+  /// - 已过行：1 + |currentLine - lineIndex| + 1
+  /// - 未到行：1 + |lineIndex - currentLine|
+  /// - 用户滚动时：0
+  int _computeLineBlur(int lineIndex) {
+    if (_currentLineIndex < 0 || lineIndex == _currentLineIndex) return 0;
+    if (_scrollController.isUserScrolling) return 0;
+    int blurLevel = 1;
+    if (lineIndex < _currentLineIndex) {
+      blurLevel += (_currentLineIndex - lineIndex).abs() + 1;
+    } else {
+      blurLevel += (lineIndex - _currentLineIndex).abs();
+    }
+    return blurLevel > 5 ? 5 : blurLevel;
+  }
+
+  /// 构建基于距离驱动的高斯模糊层。
+  ///
+  /// 参考 applemusic-like-lyrics 的模糊机制：每行独立计算 blur level，
+  /// 转换为 sigma 后用 BackdropFilter 实现。
+  /// sigma = blurLevel × 0.5（CSS blur px → Flutter sigma 换算）。
   List<Widget> _buildBlurLayers(double viewportHeight, double mainLineHeight) {
-    if (_blurIntensity <= 0.01 || _currentLineIndex < 0) return const [];
-
-    // 当前行屏幕 Y = lineTops[i] + posY + lineHeight/2
-    final double lineTop = (_currentLineIndex < _lineTops.length
-            ? _lineTops[_currentLineIndex]
-            : _currentLineIndex * mainLineHeight) +
-        _interludeOffsetBefore(_currentLineIndex);
-    final double currentY = lineTop + _scrollController.posY + mainLineHeight / 2;
-
-    // 清晰区半径：当前行及紧邻行
-    final double clearRadius = mainLineHeight * 1.5;
-    final double maxSigma = 10.0;
-    final int zoneCount = 10;
+    if (_currentLineIndex < 0) return const [];
 
     final List<Widget> layers = [];
+    // 遍历所有行，在其屏幕位置放置 BackdropFilter
+    for (int i = 0; i < widget.lines.length; i++) {
+      final int blurLevel = _computeLineBlur(i);
+      if (blurLevel <= 0) continue;
 
-    // 上方模糊层：从清晰区上边界到视口顶部
-    final double topBlurExtent = currentY - clearRadius; // 可用模糊距离
-    if (topBlurExtent > 0) {
-      final double zoneHeight = topBlurExtent / zoneCount;
-      for (int z = 0; z < zoneCount; z++) {
-        // ease-in 曲线：靠近当前行 sigma 变化慢，远离处变化快
-        final t = (z + 1) / zoneCount;
-        final sigma = t * t * maxSigma * _blurIntensity;
-        if (sigma < 0.1) continue;
-        final bottom = currentY - clearRadius - z * zoneHeight;
-        final top = z == 0 ? 0.0 : bottom - zoneHeight;
-        final clampedTop = top < 0 ? 0.0 : top;
-        final height = bottom - clampedTop;
-        if (height <= 0) continue;
-        layers.add(_buildBlurRect(top: clampedTop, height: height, sigma: sigma));
-      }
-    }
+      final double sigma = blurLevel * 0.5;
+      // 计算行的屏幕 Y 位置
+      final double lineTop = (i < _lineTops.length
+              ? _lineTops[i]
+              : i * mainLineHeight) +
+          _interludeOffsetBefore(i);
+      final double y = lineTop + _scrollController.posY;
+      final double lineHeight = (i < _lineHeights.length)
+          ? _lineHeights[i]
+          : mainLineHeight;
 
-    // 下方模糊层：从清晰区下边界到视口底部
-    final double bottomBlurExtent = viewportHeight - (currentY + clearRadius);
-    if (bottomBlurExtent > 0) {
-      final double zoneHeight = bottomBlurExtent / zoneCount;
-      for (int z = 0; z < zoneCount; z++) {
-        // ease-in 曲线：靠近当前行 sigma 变化慢，远离处变化快
-        final t = (z + 1) / zoneCount;
-        final sigma = t * t * maxSigma * _blurIntensity;
-        if (sigma < 0.1) continue;
-        final top = currentY + clearRadius + z * zoneHeight;
-        final bottom = z == zoneCount - 1 ? viewportHeight : top + zoneHeight;
-        final clampedBottom = bottom > viewportHeight ? viewportHeight : bottom;
-        final height = clampedBottom - top;
-        if (height <= 0) continue;
-        layers.add(_buildBlurRect(top: top, height: height, sigma: sigma));
-      }
+      // 跳过视口外的行
+      if (y + lineHeight < 0 || y > viewportHeight) continue;
+
+      final double clampedTop = y < 0 ? 0.0 : y;
+      final double clampedBottom =
+          y + lineHeight > viewportHeight ? viewportHeight : y + lineHeight;
+      final double height = clampedBottom - clampedTop;
+      if (height <= 0) continue;
+
+      layers.add(_buildBlurRect(top: clampedTop, height: height, sigma: sigma));
     }
 
     return layers;

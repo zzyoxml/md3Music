@@ -68,6 +68,9 @@ class LyricScrollController {
   /// 当前行索引
   int get currentLineIndex => _currentLineIndex;
 
+  /// 用户是否正在手动拖动歌词
+  bool get isUserScrolling => _isUserScrolling;
+
   /// 当前 posY（用于绘制时偏移）
   double get posY => _posYSpring.position;
 
