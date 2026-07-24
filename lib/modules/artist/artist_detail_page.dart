@@ -126,17 +126,18 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
               : CustomScrollView(
                   slivers: [
                     SliverAppBar(
-                      expandedHeight: 200,
+                      expandedHeight: 180,
                       pinned: true,
-                      centerTitle: true,
+                      centerTitle: false,
+                      title: Text(
+                        widget.artistName,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
                       flexibleSpace: FlexibleSpaceBar(
-                        centerTitle: true,
-                        title: Text(
-                          widget.artistName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
+                        titlePadding: const EdgeInsetsDirectional.only(start: 16, bottom: 16),
+                        title: null,
                         background: Container(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
@@ -148,49 +149,83 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                               ],
                             ),
                           ),
-                          child: Center(
-                            child: avatarUrl != null
-                                ? ClipOval(
-                                    child: CachedNetworkImage(
-                                      imageUrl: avatarUrl,
-                                      width: 120,
-                                      height: 120,
-                                      fit: BoxFit.cover,
-                                      placeholder: (_, _) => Container(
-                                        width: 120,
-                                        height: 120,
-                                        color: colorScheme.surfaceContainerHighest,
-                                        child: Icon(
-                                          Icons.person,
-                                          size: 48,
-                                          color: colorScheme.onSurfaceVariant,
+                          child: Align(
+                            alignment: Alignment.bottomLeft,
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                              child: Row(
+                                children: [
+                                  avatarUrl != null
+                                      ? ClipOval(
+                                          child: CachedNetworkImage(
+                                            imageUrl: avatarUrl,
+                                            width: 100,
+                                            height: 100,
+                                            fit: BoxFit.cover,
+                                            placeholder: (_, _) => Container(
+                                              width: 100,
+                                              height: 100,
+                                              color: colorScheme.surfaceContainerHighest,
+                                              child: Icon(
+                                                Icons.person,
+                                                size: 40,
+                                                color: colorScheme.onSurfaceVariant,
+                                              ),
+                                            ),
+                                            errorWidget: (_, _, _) => Container(
+                                              width: 100,
+                                              height: 100,
+                                              color: colorScheme.surfaceContainerHighest,
+                                              child: Icon(
+                                                Icons.person,
+                                                size: 40,
+                                                color: colorScheme.onSurfaceVariant,
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                      : Container(
+                                          width: 100,
+                                          height: 100,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: colorScheme.surfaceContainerHighest,
+                                          ),
+                                          child: Icon(
+                                            Icons.person,
+                                            size: 40,
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
                                         ),
-                                      ),
-                                      errorWidget: (_, _, _) => Container(
-                                        width: 120,
-                                        height: 120,
-                                        color: colorScheme.surfaceContainerHighest,
-                                        child: Icon(
-                                          Icons.person,
-                                          size: 48,
-                                          color: colorScheme.onSurfaceVariant,
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          widget.artistName,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                  )
-                                : Container(
-                                    width: 120,
-                                    height: 120,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: colorScheme.surfaceContainerHighest,
-                                    ),
-                                    child: Icon(
-                                      Icons.person,
-                                      size: 48,
-                                      color: colorScheme.onSurfaceVariant,
+                                        if (_songs.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${_songs.length} 首歌曲',
+                                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                              color: colorScheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
                                     ),
                                   ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
