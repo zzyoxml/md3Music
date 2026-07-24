@@ -445,12 +445,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       final now = _lastElapsed.inMicroseconds / 1000.0;
       final fontSize = LyricLayout.fontSize(context);
       final mainLineHeight = fontSize * LyricLayout.lineHeight;
-      final perLineOffset = mainLineHeight * _perLineOffsetFactor;
-      // 为当前行下方的行设置延迟和弹簧初始偏移（正值 = 向下偏移）
+      // 为当前行下方的行设置延迟和弹簧初始偏移
+      // 偏移量与距离成正比：越远的行偏移越大，形成波浪式级联
       for (int i = _currentLineIndex + 1; i < widget.lines.length; i++) {
+        final distance = i - _currentLineIndex;
+        final offset = mainLineHeight * _perLineOffsetFactor * distance;
         _delayStartTimes[i] = now;
         final spring = _perLineSpringFor(i);
-        spring.setPosition(perLineOffset, 0);
+        spring.setPosition(offset, 0);
         spring.setTarget(0);
       }
       // 清除已过行的延迟记录
