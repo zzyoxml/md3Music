@@ -23,6 +23,12 @@ import '../../utils/landscape_immersive.dart';
 import '../../widgets/player_playlist_dialog.dart';
 import 'comments_view.dart';
 
+/// 预加载封面图片到磁盘缓存，防止切换时白屏
+void _preloadArtwork(String? url) {
+  if (url == null || url.isEmpty) return;
+  CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+}
+
 const List<AudioQuality> _audioQualities = [
   AudioQuality.standard,
   AudioQuality.high,
@@ -45,6 +51,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   String? _lastSongId;
   // 当前歌词格式（KRC / LRC / plaintext），用于底部标注；null 表示尚未检测
   LyricFormat? _lyricFormat;
+
+  // 封面 + 背景淡入淡出动画
+  late final AnimationController _artworkFadeController;
+  late final Animation<double> _artworkFadeAnimation;
+  String? _previousArtworkUrl;
 
   // Pad 模式：左侧已有封面，隐藏"封面"Tab，只保留 2 个 Tab
   bool _isPadMode = false;
@@ -77,6 +88,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 3, vsync: this);
+    _artworkFadeController = AnimationController(
+      duration: const Duration(milliseconds: 1000),
+      vsync: this,
+    );
+    _artworkFadeAnimation = CurvedAnimation(
+      parent: _artworkFadeController,
+      curve: Curves.easeInOut,
+    );
+    _artworkFadeController.value = 1.0;
     // 进入播放器时根据当前方向应用沉浸模式
     applyImmersiveForOrientation();
     // 创建弹簧驱动 ticker（muted 机制自动处理路由不可见时暂停）
@@ -128,9 +148,26 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
   void _onPlayerSongChanged() {
     if (!mounted) return;
-    final song = context.read<PlayerProvider>().currentSong;
+    final player = context.read<PlayerProvider>();
+    final song = player.currentSong;
     if (song != null && song.id != _lastSongId) {
+      // 封面 + 背景淡入淡出
+      if (_previousArtworkUrl != null && _previousArtworkUrl != song.artworkUri) {
+        final newUrl = song.artworkUri;
+        _artworkFadeController
+          ..reset()
+          ..forward().then((_) {
+            if (mounted) _previousArtworkUrl = newUrl;
+          });
+      } else {
+        _previousArtworkUrl = song.artworkUri;
+      }
       _fetchLyrics(song);
+      // 预加载上一首和下一首的封面，防止切换时白屏
+      final playlist = player.playlist;
+      final idx = player.currentIndex;
+      if (idx > 0) _preloadArtwork(playlist[idx - 1].artworkUri);
+      if (idx < playlist.length - 1) _preloadArtwork(playlist[idx + 1].artworkUri);
     }
   }
 
@@ -158,6 +195,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     } catch (_) {}
     WidgetsBinding.instance.removeObserver(this);
     _springTicker.dispose();
+    _artworkFadeController.dispose();
     _tabController.dispose();
     // 退出播放器时立即恢复系统栏，确保从横屏沉浸模式正确退出
     restoreSystemUi();
@@ -204,6 +242,103 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         });
       }
     }
+  }
+
+  /// 封面淡入淡出（AM 风格：白色占位）
+  Widget _buildCrossfadeArtwork(
+    String? artworkUrl,
+    ColorScheme colorScheme, {
+    double iconSize = 48.0,
+  }) {
+    return AnimatedBuilder(
+      animation: _artworkFadeAnimation,
+      builder: (context, _) {
+        final oldOpacity = 1.0 - _artworkFadeAnimation.value;
+        final newOpacity = _artworkFadeAnimation.value;
+        return Stack(
+          children: [
+            if (_previousArtworkUrl != null && _previousArtworkUrl!.isNotEmpty)
+              Positioned.fill(
+                child: Opacity(
+                  opacity: oldOpacity,
+                  child: CachedNetworkImage(
+                    imageUrl: _previousArtworkUrl!,
+                    fit: BoxFit.cover,
+                    placeholder: (_, _) => _artworkPlaceholder(iconSize),
+                    errorWidget: (_, _, _) => _artworkPlaceholder(iconSize),
+                  ),
+                ),
+              ),
+            Positioned.fill(
+              child: Opacity(
+                opacity: newOpacity,
+                child: artworkUrl != null && artworkUrl.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: artworkUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (_, _) => _artworkPlaceholder(iconSize),
+                        errorWidget: (_, _, _) => _artworkPlaceholder(iconSize),
+                      )
+                    : _artworkPlaceholder(iconSize),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _artworkPlaceholder(double iconSize) {
+    return Container(
+      color: Colors.white12,
+      child: Center(
+        child: Icon(Icons.music_note, size: iconSize, color: Colors.white54),
+      ),
+    );
+  }
+
+  /// 模糊背景淡入淡出
+  Widget _buildCrossfadeBlurredBackground(String? artworkUrl) {
+    return AnimatedBuilder(
+      animation: _artworkFadeAnimation,
+      builder: (context, _) {
+        final oldOpacity = 1.0 - _artworkFadeAnimation.value;
+        final newOpacity = _artworkFadeAnimation.value;
+        return Stack(
+          children: [
+            if (_previousArtworkUrl != null && _previousArtworkUrl!.isNotEmpty)
+              Positioned.fill(
+                child: Opacity(
+                  opacity: oldOpacity,
+                  child: ImageFiltered(
+                    imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
+                    child: Image.network(
+                      _previousArtworkUrl!,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black),
+                    ),
+                  ),
+                ),
+              ),
+            Positioned.fill(
+              child: Opacity(
+                opacity: newOpacity,
+                child: artworkUrl != null && artworkUrl.isNotEmpty
+                    ? ImageFiltered(
+                        imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
+                        child: Image.network(
+                          artworkUrl,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black),
+                        ),
+                      )
+                    : const ColoredBox(color: Colors.black),
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   // === Task 19: 弹簧驱动方法 ===
@@ -265,6 +400,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       );
     }
 
+    // 初始化封面 URL（首次进入或 null→有值）
+    if (_previousArtworkUrl == null && currentSong.artworkUri != null) {
+      _previousArtworkUrl = currentSong.artworkUri;
+    }
+
     // Spring 驱动的展开进度：1.0=全屏，0.0=迷你条
     final expansion = _expansionSpring.position.clamp(0.0, 1.0);
     final fullOpacity = expansion;
@@ -317,8 +457,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       extendBody: true,
       body: Stack(
         children: [
-          // 1. 模糊封面背景层（Apple Music 风格）
-          _buildBlurredBackground(currentSong),
+          // 1. 模糊封面背景层（Apple Music 风格，带淡入淡出）
+          _buildCrossfadeBlurredBackground(currentSong.artworkUri),
           // 2. 半透明蒙版 rgba(0,0,0,0.35)
           _buildDarkOverlay(),
           // 3. 主体内容（保留原有 compact/landscape/expanded 三套布局）
@@ -429,35 +569,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     child: SizedBox(
                       width: 44,
                       height: 44,
-                      child: currentSong.artworkUri != null
-                          ? CachedNetworkImage(
-                              imageUrl: currentSong.artworkUri!,
-                              fit: BoxFit.cover,
-                              placeholder: (_, _) => Container(
-                                color: colorScheme.surfaceContainerHighest,
-                                child: Icon(
-                                  Icons.music_note,
-                                  size: 20,
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                              errorWidget: (_, _, _) => Container(
-                                color: colorScheme.surfaceContainerHighest,
-                                child: Icon(
-                                  Icons.music_note,
-                                  size: 20,
-                                  color: colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            )
-                          : Container(
-                              color: colorScheme.surfaceContainerHighest,
-                              child: Icon(
-                                Icons.music_note,
-                                size: 20,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
+                      child: _buildCrossfadeArtwork(
+                        currentSong.artworkUri,
+                        colorScheme,
+                        iconSize: 20,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -604,38 +720,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                             curve: Curves.easeOutBack,
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(16),
-                              child: currentSong.artworkUri != null
-                                  ? CachedNetworkImage(
-                                      imageUrl: currentSong.artworkUri!,
-                                      fit: BoxFit.cover,
-                                      placeholder: (_, _) => Container(
-                                        color: Colors.white12,
-                                        child: Icon(
-                                          Icons.music_note,
-                                          size: 48,
-                                          color: Colors.white54,
-                                        ),
-                                      ),
-                                      errorWidget: (_, _, _) => Container(
-                                        color: Colors.white12,
-                                        child: Icon(
-                                          Icons.music_note,
-                                          size: 48,
-                                          color: Colors.white54,
-                                        ),
-                                      ),
-                                    )
-                                  : Container(
-                                      decoration: BoxDecoration(
-                                        color: Colors.white12,
-                                        borderRadius: BorderRadius.circular(16),
-                                      ),
-                                      child: Icon(
-                                        Icons.music_note,
-                                        size: 48,
-                                        color: Colors.white54,
-                                      ),
-                                    ),
+                              child: _buildCrossfadeArtwork(
+                                currentSong.artworkUri,
+                                colorScheme,
+                                iconSize: 48,
+                              ),
                             ),
                           ),
                         ),
@@ -785,38 +874,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               curve: Curves.easeOutBack,
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(16),
-                                child: currentSong.artworkUri != null
-                                    ? CachedNetworkImage(
-                                        imageUrl: currentSong.artworkUri!,
-                                        fit: BoxFit.cover,
-                                        placeholder: (_, _) => Container(
-                                          color: Colors.white12,
-                                          child: Icon(
-                                            Icons.music_note,
-                                            size: 48,
-                                            color: Colors.white54,
-                                          ),
-                                        ),
-                                        errorWidget: (_, _, _) => Container(
-                                          color: Colors.white12,
-                                          child: Icon(
-                                            Icons.music_note,
-                                            size: 48,
-                                            color: Colors.white54,
-                                          ),
-                                        ),
-                                      )
-                                    : Container(
-                                        decoration: BoxDecoration(
-                                          color: Colors.white12,
-                                          borderRadius: BorderRadius.circular(16),
-                                        ),
-                                        child: Icon(
-                                          Icons.music_note,
-                                          size: 48,
-                                          color: Colors.white54,
-                                        ),
-                                      ),
+                                child: _buildCrossfadeArtwork(
+                                  currentSong.artworkUri,
+                                  colorScheme,
+                                  iconSize: 48,
+                                ),
                               ),
                             ),
                           ),
@@ -1030,38 +1092,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                       curve: Curves.easeOutBack,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(16),
-                        child: currentSong.artworkUri != null
-                            ? CachedNetworkImage(
-                                imageUrl: currentSong.artworkUri!,
-                                fit: BoxFit.cover,
-                                placeholder: (_, _) => Container(
-                                  color: Colors.white12,
-                                  child: Icon(
-                                    Icons.music_note,
-                                    size: iconSize,
-                                    color: Colors.white54,
-                                  ),
-                                ),
-                                errorWidget: (_, _, _) => Container(
-                                  color: Colors.white12,
-                                  child: Icon(
-                                    Icons.music_note,
-                                    size: iconSize,
-                                    color: Colors.white54,
-                                  ),
-                                ),
-                              )
-                            : Container(
-                                decoration: BoxDecoration(
-                                  color: Colors.white12,
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                                child: Icon(
-                                  Icons.music_note,
-                                  size: iconSize,
-                                  color: Colors.white54,
-                                ),
-                              ),
+                        child: _buildCrossfadeArtwork(
+                          currentSong.artworkUri,
+                          colorScheme,
+                          iconSize: iconSize,
+                        ),
                       ),
                     ),
                   ),
@@ -1075,38 +1110,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 aspectRatio: 1,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: currentSong.artworkUri != null
-                      ? CachedNetworkImage(
-                          imageUrl: currentSong.artworkUri!,
-                          fit: BoxFit.cover,
-                          placeholder: (_, _) => Container(
-                            color: Colors.white12,
-                            child: Icon(
-                              Icons.music_note,
-                              size: iconSize,
-                              color: Colors.white54,
-                            ),
-                          ),
-                          errorWidget: (_, _, _) => Container(
-                            color: Colors.white12,
-                            child: Icon(
-                              Icons.music_note,
-                              size: iconSize,
-                              color: Colors.white54,
-                            ),
-                          ),
-                        )
-                      : Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white12,
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: Icon(
-                            Icons.music_note,
-                            size: iconSize,
-                            color: Colors.white54,
-                          ),
-                        ),
+                  child: _buildCrossfadeArtwork(
+                    currentSong.artworkUri,
+                    colorScheme,
+                    iconSize: iconSize,
+                  ),
                 ),
               ),
             ),

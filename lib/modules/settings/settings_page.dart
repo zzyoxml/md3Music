@@ -551,19 +551,6 @@ class _SettingsPageState extends State<SettingsPage> {
               labelText: '在线登录接口地址',
               hintText: 'http://115.29.236.96:5621',
               border: const OutlineInputBorder(),
-              suffixIcon: IconButton(
-                icon: _isTestingConnection
-                    ? SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: colorScheme.primary,
-                        ),
-                      )
-                    : const Icon(Icons.wifi_find),
-                onPressed: _isTestingConnection ? null : _testConnection,
-              ),
             ),
             onSubmitted: (_) => _testConnection(),
           ),

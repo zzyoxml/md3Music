@@ -239,6 +239,7 @@ class KugouProvider extends ChangeNotifier {
   KugouQrKey? get qrKey => _qrKey;
   KugouQrCreate? get qrData => _qrData;
   bool get isLoggedIn => _isLoggedIn;
+  String? get userid => _apiClient.userid;
   KugouUserDetail? get userInfo => _userInfo;
   List<KugouSongDetail> get rankSongs => _rankSongs;
   List<KugouSongDetail> get currentPlaylistSongs => _currentPlaylistSongs;
