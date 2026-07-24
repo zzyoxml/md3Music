@@ -9,7 +9,6 @@ import 'package:record/record.dart';
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
-import '../player/mini_player.dart';
 
 class SongRecognitionPage extends StatefulWidget {
   const SongRecognitionPage({super.key});
@@ -172,32 +171,25 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       appBar: AppBar(
         title: const Text('听歌识曲'),
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 32),
-                  _buildPulseCircle(colorScheme),
-                  const SizedBox(height: 32),
-                  _buildStatusText(textTheme, colorScheme),
-                  const SizedBox(height: 32),
-                  if (_result != null) _buildResult(colorScheme, textTheme),
-                  if (_error != null) _buildError(colorScheme, textTheme),
-                  if (_isRecognizing)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 24),
-                      child: CircularProgressIndicator(),
-                    ),
-                ],
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(height: 32),
+            _buildPulseCircle(colorScheme),
+            const SizedBox(height: 32),
+            _buildStatusText(textTheme, colorScheme),
+            const SizedBox(height: 32),
+            if (_result != null) _buildResult(colorScheme, textTheme),
+            if (_error != null) _buildError(colorScheme, textTheme),
+            if (_isRecognizing)
+              const Padding(
+                padding: EdgeInsets.only(top: 24),
+                child: CircularProgressIndicator(),
               ),
-            ),
-          ),
-          const MiniPlayer(),
-        ],
+          ],
+        ),
       ),
     );
   }
