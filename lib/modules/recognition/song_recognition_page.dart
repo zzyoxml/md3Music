@@ -242,33 +242,56 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       appBar: AppBar(
         title: const Text('听歌识曲'),
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight - 48),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 32),
-                  _buildPulseCircle(colorScheme),
-                  const SizedBox(height: 32),
-                  _buildStatusText(textTheme, colorScheme),
-                  const SizedBox(height: 32),
-                  if (_result != null) _buildResult(colorScheme, textTheme),
-                  if (_error != null) _buildError(colorScheme, textTheme),
-                  if (_isRecognizing)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 24),
-                      child: CircularProgressIndicator(),
-                    ),
-                ],
-              ),
+      body: Column(
+        children: [
+          // 开发中标记
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            color: colorScheme.tertiaryContainer,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.construction, size: 16, color: colorScheme.onTertiaryContainer),
+                const SizedBox(width: 8),
+                Text(
+                  '开发中 — 听歌识曲功能正在开发，暂不可用',
+                  style: textTheme.labelMedium?.copyWith(color: colorScheme.onTertiaryContainer),
+                ),
+              ],
             ),
-          );
-        },
+          ),
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(minHeight: constraints.maxHeight - 48),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 32),
+                        _buildPulseCircle(colorScheme),
+                        const SizedBox(height: 32),
+                        _buildStatusText(textTheme, colorScheme),
+                        const SizedBox(height: 32),
+                        if (_result != null) _buildResult(colorScheme, textTheme),
+                        if (_error != null) _buildError(colorScheme, textTheme),
+                        if (_isRecognizing)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 24),
+                            child: CircularProgressIndicator(),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
