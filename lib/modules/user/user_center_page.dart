@@ -516,26 +516,29 @@ class _UserCenterPageState extends State<UserCenterPage> {
   Widget _buildWeekdayHeader(ColorScheme cs) {
     const labels = ['一', '二', '三', '四', '五', '六', '日'];
     return Container(
+      width: double.infinity,
       decoration: BoxDecoration(
         color: cs.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
       padding: const EdgeInsets.symmetric(vertical: 6),
       child: Row(
-        children: labels.map((l) {
-          return Expanded(
-            child: Center(
-              child: Text(
-                l,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  color: cs.onSurfaceVariant,
+        children: [
+          for (final l in labels)
+            SizedBox(
+              width: 40, // 与 _buildCalendarGrid 中的 cellSize 保持一致
+              child: Center(
+                child: Text(
+                  l,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: cs.onSurfaceVariant,
+                  ),
                 ),
               ),
             ),
-          );
-        }).toList(),
+        ],
       ),
     );
   }

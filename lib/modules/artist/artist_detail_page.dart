@@ -128,7 +128,9 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                     SliverAppBar(
                       expandedHeight: 200,
                       pinned: true,
+                      centerTitle: true,
                       flexibleSpace: FlexibleSpaceBar(
+                        centerTitle: true,
                         title: Text(
                           widget.artistName,
                           maxLines: 1,
