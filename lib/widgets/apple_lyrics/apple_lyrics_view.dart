@@ -121,7 +121,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
   /// 每行偏移弹簧（行索引 → Spring）。
   ///
-  /// 当前行切换时，下方行的弹簧从负偏移动画到 0，
+  /// 当前行切换时，下方行的弹簧从正偏移（行在下方）动画到 0（行到自然位置），
   /// 形成逐级延迟上拉效果。
   final Map<int, Spring> _perLineSprings = {};
 
@@ -134,8 +134,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 级联延迟：相邻行间延迟毫秒数。
   static const double _perLineDelayMs = 50.0;
 
-  /// 级联偏移：每行初始向下偏移量（负值 = 向下，弹簧拉回 0 = 向上）。
-  static const double _perLineOffset = -40.0;
+  /// 级联偏移系数：每行初始向下偏移 = lineHeight × 此系数。
+  /// 正值 = 向下偏移，弹簧拉回 0 = 向上回到自然位置。
+  static const double _perLineOffsetFactor = 0.6;
 
   /// 预计算每行实际高度（含自动换行）。
   ///
@@ -442,11 +443,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 9. 级联弹簧延迟：检测当前行切换，为下方行设置延迟偏移
     if (_currentLineIndex >= 0 && _currentLineIndex != _previousLineIndex) {
       final now = _lastElapsed.inMicroseconds / 1000.0;
-      // 为当前行下方的行设置延迟和弹簧初始偏移
+      final fontSize = LyricLayout.fontSize(context);
+      final mainLineHeight = fontSize * LyricLayout.lineHeight;
+      final perLineOffset = mainLineHeight * _perLineOffsetFactor;
+      // 为当前行下方的行设置延迟和弹簧初始偏移（正值 = 向下偏移）
       for (int i = _currentLineIndex + 1; i < widget.lines.length; i++) {
         _delayStartTimes[i] = now;
         final spring = _perLineSpringFor(i);
-        spring.setPosition(_perLineOffset, 0);
+        spring.setPosition(perLineOffset, 0);
         spring.setTarget(0);
       }
       // 清除已过行的延迟记录
