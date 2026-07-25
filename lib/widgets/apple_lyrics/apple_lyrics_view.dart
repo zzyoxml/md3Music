@@ -110,6 +110,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   int _currentLineIndex = -1;
   Offset? _tapDownPosition;
 
+  /// 模糊渐隐系数（1.0=正常模糊，0.0=无模糊）。
+  /// 用户滚动时淡出到0，松手等待期间保持0，回弹开始后淡入到1。
+  double _blurFade = 1.0;
+
   // ============== 级联弹簧延迟 ==============
 
   /// 每行偏移弹簧（行索引 → Spring）。
@@ -467,7 +471,18 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       }
     }
 
-    // 10. 触发重绘
+    // 10. 模糊渐隐动画：滚动/等待时淡出到0，回弹开始后淡入到1
+    final bool shouldBlurFadeOut = _scrollController.isUserScrolling ||
+        _scrollController.isWaitingForAutoReturn;
+    final double blurFadeTarget = shouldBlurFadeOut ? 0.0 : 1.0;
+    final double blurFadeSpeed = shouldBlurFadeOut ? 6.0 : 4.0;
+    _blurFade += (blurFadeTarget - _blurFade) *
+        (1 - math.exp(-blurFadeSpeed * dt));
+    if ((_blurFade - blurFadeTarget).abs() < 0.01) {
+      _blurFade = blurFadeTarget;
+    }
+
+    // 11. 触发重绘
     setState(() {});
   }
 
@@ -683,14 +698,16 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// - 用户滚动时：0
   int _computeLineBlur(int lineIndex) {
     if (_currentLineIndex < 0 || lineIndex == _currentLineIndex) return 0;
-    if (_scrollController.isUserScrolling) return 0;
+    // 模糊渐隐：滚动/等待期间无模糊，回弹后恢复
+    if (_blurFade < 0.01) return 0;
     int blurLevel = 1;
     if (lineIndex < _currentLineIndex) {
       blurLevel += (_currentLineIndex - lineIndex).abs() + 1;
     } else {
       blurLevel += (lineIndex - _currentLineIndex).abs();
     }
-    return blurLevel > 5 ? 5 : blurLevel;
+    // 应用渐隐系数，四舍五入到整数
+    return (blurLevel * _blurFade).round().clamp(0, 5);
   }
 
   /// 构建基于距离驱动的高斯模糊层。
