@@ -118,8 +118,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   int _cachedBlurLineIndex = -1;
   Map<int, int> _cachedBlurLevels = const {};
 
-  /// Per-Line 模糊缓存：每行独立缓存模糊图片
-  final Map<int, ui.Image> _lineBlurImages = {};
+  /// Per-Line 模糊缓存：每行独立缓存模糊图片和对应的 blurLevel
+  final Map<int, (ui.Image image, int blurLevel)> _lineBlurImages = {};
   double _viewportWidth = 0;
 
   /// 最大 sigma 限制
@@ -304,8 +304,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   void dispose() {
     _ticker.dispose();
     _scrollController.dispose();
-    for (final image in _lineBlurImages.values) {
-      image.dispose();
+    for (final entry in _lineBlurImages.values) {
+      entry.$1.dispose();
     }
     _lineBlurImages.clear();
     LyricPreferences.instance.removeListener(_onPreferencesChanged);
@@ -491,7 +491,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final bool shouldBlurFadeOut = _scrollController.isUserScrolling ||
         _scrollController.isWaitingForAutoReturn;
     final double blurFadeTarget = shouldBlurFadeOut ? 0.0 : 1.0;
-    final double blurFadeSpeed = shouldBlurFadeOut ? 6.0 : 4.0;
+    final double blurFadeSpeed = shouldBlurFadeOut ? 15.0 : 4.0;
     final double oldBlurFade = _blurFade;
     _blurFade += (blurFadeTarget - _blurFade) *
         (1 - math.exp(-blurFadeSpeed * dt));
@@ -681,8 +681,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
                     builder: (context) {
                       // 检测视口宽度变化，清除模糊缓存
                       if (_viewportWidth != constraints.maxWidth && _viewportWidth > 0) {
-                        for (final image in _lineBlurImages.values) {
-                          image.dispose();
+                        for (final entry in _lineBlurImages.values) {
+                          entry.$1.dispose();
                         }
                         _lineBlurImages.clear();
                         _cachedBlurLineIndex = -1;
@@ -738,13 +738,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 计算指定行的原始模糊级别（不含 fade，用于缓存）。
   int _computeLineBlurRaw(int lineIndex) {
     if (_currentLineIndex < 0 || lineIndex == _currentLineIndex) return 0;
-    int blurLevel = 1;
-    if (lineIndex < _currentLineIndex) {
-      blurLevel += (_currentLineIndex - lineIndex).abs() + 1;
-    } else {
-      blurLevel += (lineIndex - _currentLineIndex).abs();
-    }
-    return blurLevel.clamp(0, 5);
+    // 上下对称：相同距离的行使用相同模糊度，便于缓存复用
+    final int distance = (lineIndex - _currentLineIndex).abs();
+    return (1 + distance).clamp(0, 5);
   }
 
   /// 构建基于距离驱动的高斯模糊层（Per-Line 缓存版）。
@@ -789,8 +785,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       final double sigma = (entry.value * 1.0 * _blurFade).clamp(0.5, 5.0);
       if (sigma < 0.1) continue;
 
-      final image = _lineBlurImages[i];
-      if (image == null) continue;
+      final cached = _lineBlurImages[i];
+      if (cached == null) continue;
+      final image = cached.$1;
 
       final double lineTop = (i < _lineTops.length
               ? _lineTops[i]
@@ -810,22 +807,22 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       final bool isCurrentLine = i == _currentLineIndex;
       final double scale = isCurrentLine ? currentScale : LyricLayout.inactiveScale;
 
+      // 计算缩放后的尺寸
+      final double scaledWidth = _viewportWidth * scale;
+      final double scaledHeight = (lineHeight + padding * 2) * scale;
+
       layers.add(Positioned(
-        top: y - padding,
-        left: 0,
-        width: _viewportWidth,
-        height: lineHeight + padding * 2,
-        child: Transform(
-          alignment: Alignment.centerLeft,
-          transform: Matrix4.identity()..scale(scale, scale),
-          child: Opacity(
-            opacity: _blurFade,
-            child: RawImage(
-              image: image,
-              width: _viewportWidth,
-              height: lineHeight + padding * 2,
-              fit: BoxFit.fill,
-            ),
+        top: y - padding + (lineHeight + padding * 2) * (1 - scale) / 2,
+        left: (_viewportWidth - scaledWidth) / 2,
+        width: scaledWidth,
+        height: scaledHeight,
+        child: Opacity(
+          opacity: _blurFade,
+          child: RawImage(
+            image: image,
+            width: scaledWidth,
+            height: scaledHeight,
+            fit: BoxFit.fill,
           ),
         ),
       ));
@@ -839,12 +836,16 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     for (final entry in levels.entries) {
       final int lineIndex = entry.key;
       final int blurLevel = entry.value;
-      if (_lineBlurImages.containsKey(lineIndex)) continue;
+      // 检查缓存是否存在且 blurLevel 匹配
+      final cached = _lineBlurImages[lineIndex];
+      if (cached != null && cached.$2 == blurLevel) {
+        continue;
+      }
 
       _renderLineBlur(lineIndex, blurLevel, mainLineHeight).then((image) {
         if (image != null) {
-          _lineBlurImages[lineIndex]?.dispose();
-          _lineBlurImages[lineIndex] = image;
+          _lineBlurImages[lineIndex]?.$1.dispose();
+          _lineBlurImages[lineIndex] = (image, blurLevel);
         }
       });
     }
@@ -854,7 +855,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         .where((k) => !levels.containsKey(k))
         .toList();
     for (final key in keysToRemove) {
-      _lineBlurImages[key]?.dispose();
+      _lineBlurImages[key]?.$1.dispose();
       _lineBlurImages.remove(key);
     }
   }
