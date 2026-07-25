@@ -397,6 +397,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       final bool useWordRenderer = isActive && line.hasWordTiming;
       if (useWordRenderer) {
         final renderer = _wordRendererFor(i);
+        renderer.emphasizeEffect = _emphasizeEffect;
         renderer.setLineState(isActive: true, scale: scale);
         renderer.tick(dt, widget.currentTimeMs);
       } else {

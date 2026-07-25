@@ -106,9 +106,6 @@ class EmphasizeEffect {
   /// shadowBlurEm 封顶（spec.md：textShadow: 0 0 min(0.3, blur*0.3)em）
   static const double _shadowBlurEmCap = 0.3;
 
-  /// 字符错位 delay 分母常数（spec.md：du / 2.5 / anchorCharCount）
-  static const double _delayDivisor = 2.5;
-
   // ============== bezier 控制点 ==============
   //
   // spec.md："bezIn = bezier(0.2, 0.4, 0.58, 1.0)"、"bezOut = bezier(0.3, 0.0, 0.58, 1.0)"
@@ -176,14 +173,9 @@ class EmphasizeEffect {
     // 字起始时间
     final int de = word.startTime;
 
-    // 字符错位 delay：wordDe = de + (du / 2.5 / anchorCharCount) * i
-    // wordIndex 越大，字活跃起始时间越晚，造成"逐字波动"的视觉效果
-    final double delay =
-        (word.duration / _delayDivisor / anchorCharCount) * wordIndex;
-    final double wordDe = de + delay;
-
     // 字内进度 t（未 clamp，超出 [0,1] 视为未激活）
-    final double t = (currentTimeMs - wordDe) / word.duration;
+    // 与上浮动画同步：从 word.startTime 开始即触发辉光
+    final double t = (currentTimeMs - de) / word.duration;
 
     // 超出 [0, 1] 范围：字未激活或已结束，返回 idle
     if (t < 0 || t > 1) return EmphasizeState.idle;

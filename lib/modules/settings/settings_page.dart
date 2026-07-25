@@ -50,6 +50,7 @@ class _SettingsPageState extends State<SettingsPage> {
   // Apple Music 风格播放页开关（默认关闭，开启后用 AM 风格 FullPlayer）
   bool _useAmStylePlayer = false;
   bool _useGaussianBlur = true;
+  bool _useGlowEffect = true;
   String _appVersion = '';
   // Lyricon 词幕推送相关状态
   bool _lyriconEnabled = false;
@@ -136,6 +137,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _useDynamicColor = useDynamicColor;
       _useAmStylePlayer = useAmStylePlayer;
       _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
+      _useGlowEffect = LyricPreferences.instance.useGlowEffect;
       _deviceType = deviceType;
       _downloadDir = downloadDir;
       _uiScale = uiScale;
@@ -408,6 +410,17 @@ class _SettingsPageState extends State<SettingsPage> {
               ? (v) {
                   setState(() => _useGaussianBlur = v);
                   LyricPreferences.instance.setUseGaussianBlur(v);
+                }
+              : null,
+        ),
+        SwitchListTile(
+          title: const Text('歌词辉光效果'),
+          subtitle: const Text('持续时间较长的字触发发光缩放效果'),
+          value: _useGlowEffect,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  setState(() => _useGlowEffect = v);
+                  LyricPreferences.instance.setUseGlowEffect(v);
                 }
               : null,
         ),

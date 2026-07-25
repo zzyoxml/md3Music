@@ -12,11 +12,14 @@ library;
 
 import 'dart:collection';
 import 'dart:math';
+import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
 
 import '../layout/lyric_layout.dart';
+import '../layout/lyric_preferences.dart';
 import '../models/lyric_line.dart';
+import 'emphasize_effect.dart';
 
 /// 逐字 mask alpha 渲染器。
 ///
@@ -70,6 +73,12 @@ class WordRenderer {
   /// AMLL 上浮 RELEASE 速度：当前字回落指数衰减系数。
   static const double _liftReleaseSpeed = 10.0;
 
+  /// 强调辉光效果计算器（由外部注入）。
+  EmphasizeEffect? _emphasizeEffect;
+
+  /// 每个 word index 的当前辉光状态。
+  final Map<int, EmphasizeState> _emphasizeStates = <int, EmphasizeState>{};
+
   // ============== 状态查询 ==============
 
   /// 当前 alpha map（不可变视图，供测试断言）。
@@ -112,6 +121,9 @@ class WordRenderer {
     _isActive = isActive;
     _scale = scale;
   }
+
+  /// 设置强调辉光效果计算器。
+  set emphasizeEffect(EmphasizeEffect? effect) => _emphasizeEffect = effect;
 
   // ============== 动画推进 ==============
 
@@ -184,6 +196,25 @@ class WordRenderer {
         nextY = targetY;
       }
       _wordYOffsets[i] = nextY;
+
+      // 强调辉光效果：计算每个 word 的 EmphasizeState
+      final LyricWord emWord = words[i];
+      if (_emphasizeEffect != null && _isActive && LyricPreferences.instance.useGlowEffect) {
+        final bool shouldEm = EmphasizeEffect.shouldEmphasize(emWord);
+        if (shouldEm) {
+          _emphasizeStates[i] = _emphasizeEffect!.computeState(
+            word: emWord,
+            currentTimeMs: currentTimeMs,
+            isLastWord: i == wordCount - 1,
+            wordIndex: i,
+            anchorCharCount: emWord.text.runes.length,
+          );
+        } else {
+          _emphasizeStates[i] = EmphasizeState.idle;
+        }
+      } else {
+        _emphasizeStates[i] = EmphasizeState.idle;
+      }
     }
   }
 
@@ -264,6 +295,8 @@ class WordRenderer {
       final double alpha = _wordAlphas[i] ?? dark;
       // AMLL 上浮特效：当前字 Y 偏移（上浮）
       final double yOffset = _wordYOffsets[i] ?? 0;
+      // 强调辉光状态
+      final EmphasizeState emState = _emphasizeStates[i] ?? EmphasizeState.idle;
       // 用缓存宽度做换行判断（避免每帧 TextPainter.layout 测量）
       final double width =
           i < _wordWidths.length ? _wordWidths[i] : 0;
@@ -272,7 +305,12 @@ class WordRenderer {
         dx = 0;
         currentY += wrapLineHeight;
       }
-      // 复用 _painter 实例绘制（set text + layout + paint）
+
+      final double wordX = offset.dx + dx;
+      final double wordY = currentY + yOffset;
+      final Offset wordPos = Offset(wordX, wordY);
+
+      // 设置文字样式
       _painter.text = TextSpan(
         text: word.text,
         style: TextStyle(
@@ -282,7 +320,44 @@ class WordRenderer {
         ),
       );
       _painter.layout();
-      _painter.paint(canvas, Offset(offset.dx + dx, currentY + yOffset));
+
+      // 应用强调辉光效果：per-word scale + glow shadow
+      if (emState.scale != 1.0 || emState.glowLevel > 0) {
+        canvas.save();
+        // 以 word 中心为缩放锚点
+        final double centerX = wordX + width / 2;
+        final double centerY = wordY + fontSize * lineHeight / 2;
+        canvas.translate(centerX, centerY);
+        canvas.scale(emState.scale, emState.scale);
+        canvas.translate(-centerX, -centerY);
+
+        // 绘制辉光层：saveLayer + ImageFilter.blur
+        if (emState.glowLevel > 0) {
+          final double blurSigma = emState.shadowBlurEm * fontSize * 0.8;
+          if (blurSigma > 0) {
+            final glowRect = Rect.fromLTWH(
+              wordX - blurSigma * 2, wordY - blurSigma * 2,
+              width + blurSigma * 4, fontSize * lineHeight + blurSigma * 4,
+            );
+            canvas.saveLayer(
+              glowRect,
+              Paint()..imageFilter = ImageFilter.blur(
+                sigmaX: blurSigma, sigmaY: blurSigma,
+              ),
+            );
+            _painter.paint(canvas, wordPos);
+            canvas.restore();
+          }
+        }
+
+        // 绘制正常文字层
+        _painter.paint(canvas, wordPos);
+        canvas.restore();
+      } else {
+        // 无辉光：直接绘制
+        _painter.paint(canvas, wordPos);
+      }
+
       dx += width;
     }
   }
@@ -325,6 +400,7 @@ class WordRenderer {
     _boundFontSize = fontSize;
     _wordAlphas.clear();
     _wordYOffsets.clear();
+    _emphasizeStates.clear();
     final double dark = dynamicDarkAlpha;
     // 测量所有 word 宽度并缓存
     _wordWidths = List<double>.filled(line.words.length, 0);
@@ -352,5 +428,6 @@ class WordRenderer {
     _wordWidths = const <double>[];
     _wordAlphas.clear();
     _wordYOffsets.clear();
+    _emphasizeStates.clear();
   }
 }
