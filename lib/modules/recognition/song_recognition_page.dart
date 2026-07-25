@@ -38,8 +38,8 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
   static const int _targetSampleRate = 8000;
   /// 每段录制时长（秒）
   static const int _segmentDuration = 8;
-  /// 最大总录制时长（秒）
-  static const int _maxTotalDuration = 60;
+  /// 最大总录制时长（秒），54s = 7 轮（每轮 8s）
+  static const int _maxTotalDuration = 54;
 
   @override
   void initState() {
