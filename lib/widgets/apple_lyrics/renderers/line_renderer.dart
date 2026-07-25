@@ -70,12 +70,9 @@ class LineRenderer {
   ///
   /// [isActive] 为 true 时整行高亮（alpha 目标 dynamicBrightAlpha），
   /// 为 false 时整行 SOLID 暗态（alpha 目标 dynamicDarkAlpha）。
-  /// [scale] 是行缩放，0.97（inactive）~1.0（active），
-  /// 用于计算 dynamic alpha（与 [WordRenderer] 公式一致）：
-  /// - factor = clamp01((scale - 0.97) / 0.03)
-  /// - dynamicDarkAlpha = factor * 0.2 + 0.2（范围 0.2~0.4）
-  /// - dynamicBrightAlpha = factor * 0.8 + 0.2（范围 0.2~1.0）
-  void setLineState({required bool isActive, required double scale}) {
+  /// [scale] 是行缩放，0.97（inactive）~1.0（active）。
+  /// [blurFade] 控制非当前行透明度：1.0=透明（模糊图片覆盖），0.0=正常显示。
+  void setLineState({required bool isActive, required double scale, double blurFade = 1.0}) {
     _isActive = isActive;
     final double factor = ((scale - LyricLayout.inactiveScale) /
             (LyricLayout.activeScale - LyricLayout.inactiveScale))
@@ -83,7 +80,8 @@ class LineRenderer {
         .toDouble();
     final double dynamicDark = factor * 0.2 + 0.2;
     final double dynamicBright = factor * 0.8 + 0.2;
-    _targetAlpha = isActive ? dynamicBright : dynamicDark;
+    // 非当前行 alpha = dynamicDark * (1 - blurFade)
+    _targetAlpha = isActive ? dynamicBright : dynamicDark * (1.0 - blurFade);
   }
 
   // ============== 动画推进 ==============

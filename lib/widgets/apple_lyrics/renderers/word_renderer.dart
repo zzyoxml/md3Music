@@ -36,6 +36,9 @@ class WordRenderer {
   /// 当前行缩放，0.97（inactive）~1.0（active）。默认 inactive。
   double _scale = LyricLayout.inactiveScale;
 
+  /// 模糊淡入淡出系数：1.0=正常模糊，0.0=无模糊。
+  double _blurFade = 1.0;
+
   /// 当前绑定的 LyricLine。用于检测 line 切换并重置 alpha map。
   LyricLine? _boundLine;
 
@@ -117,9 +120,11 @@ class WordRenderer {
   /// [isActive] 为 true 时启用 GRADIENT 模式（已播亮 / 未播暗），
   /// 为 false 时启用 SOLID 模式（整行均匀暗）。
   /// [scale] 是行缩放，0.97（inactive）~1.0（active）。
-  void setLineState({required bool isActive, required double scale}) {
+  /// [blurFade] 控制非当前行透明度：1.0=透明（模糊图片覆盖），0.0=正常显示。
+  void setLineState({required bool isActive, required double scale, double blurFade = 1.0}) {
     _isActive = isActive;
     _scale = scale;
+    _blurFade = blurFade;
   }
 
   /// 设置强调辉光效果计算器。
@@ -239,14 +244,15 @@ class WordRenderer {
 
   /// 计算指定 word index 的目标 alpha，基于逐字时间戳。
   ///
-  /// - 非当前行：所有 word 目标 = [dynamicDarkAlpha]。
+  /// - 非当前行：alpha = dynamicDarkAlpha * (1 - blurFade)。
+  ///   blurFade=1 时 alpha=0（模糊图片覆盖），blurFade=0 时正常显示。
   /// - 当前行：
   ///   - 已播字（index < currentWordIdx）目标 = [dynamicBrightAlpha]。
   ///   - 未播字（index > currentWordIdx）目标 = [dynamicDarkAlpha]。
   ///   - 当前字（index == currentWordIdx）按 word 内进度在 dark~bright 之间线性插值。
   double _targetAlphaForExact(
       int index, int currentWordIdx, double intraWordProgress, double dark, double bright) {
-    if (!_isActive) return dark;
+    if (!_isActive) return dark * (1.0 - _blurFade);
     if (index < currentWordIdx) {
       return bright;
     } else if (index > currentWordIdx) {

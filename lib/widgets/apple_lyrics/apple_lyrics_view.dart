@@ -413,11 +413,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       if (useWordRenderer) {
         final renderer = _wordRendererFor(i);
         renderer.emphasizeEffect = _emphasizeEffect;
-        renderer.setLineState(isActive: true, scale: scale);
+        renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade);
         renderer.tick(dt, widget.currentTimeMs);
       } else {
         final renderer = _lineRendererFor(i);
-        renderer.setLineState(isActive: isActive, scale: scale);
+        renderer.setLineState(isActive: isActive, scale: scale, blurFade: _blurFade);
         renderer.tick(dt);
       }
     }
@@ -659,6 +659,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
               lastActiveAnchorIdx: _lastActiveAnchorIdx,
               interludeExpandProgress: _interludeExpandProgress,
               perLineOffsets: _buildPerLineOffsets(),
+              blurFade: _blurFade,
             ),
             size: Size.infinite,
           ),
@@ -677,6 +678,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
               ? ClipRect(
                   child: Builder(
                     builder: (context) {
+                      // 检测视口宽度变化，清除模糊缓存
+                      if (_viewportWidth != constraints.maxWidth && _viewportWidth > 0) {
+                        for (final image in _lineBlurImages.values) {
+                          image.dispose();
+                        }
+                        _lineBlurImages.clear();
+                        _cachedBlurLineIndex = -1;
+                      }
                       _viewportWidth = constraints.maxWidth;
                       return Stack(
                         children: [
@@ -793,11 +802,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         left: 0,
         width: _viewportWidth,
         height: lineHeight + padding * 2,
-        child: RawImage(
-          image: image,
-          width: _viewportWidth,
-          height: lineHeight + padding * 2,
-          fit: BoxFit.fill,
+        child: Opacity(
+          opacity: _blurFade,
+          child: RawImage(
+            image: image,
+            width: _viewportWidth,
+            height: lineHeight + padding * 2,
+            fit: BoxFit.fill,
+          ),
         ),
       ));
     }
@@ -837,7 +849,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     try {
       if (_viewportWidth <= 0) return null;
 
-      // sigma 范围放大：blurLevel 1-5 → sigma 1.0-5.0
+      // sigma 范围：blurLevel 1-5 → sigma 1.0-5.0，乘以 fade
       final double sigma = (blurLevel * 1.0 * _blurFade).clamp(0.5, 5.0);
       final double fontSize = LyricLayout.fontSize(context);
       final double lineHeight = (lineIndex < _lineHeights.length)
@@ -849,18 +861,17 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
 
-      // 绘制歌词文字（白色，与原歌词位置对齐）
+      // 先绘制 50% 透明度文字（模糊前降低透明度）
       final textPainter = TextPainter(textDirection: TextDirection.ltr);
       textPainter.text = TextSpan(
         text: widget.lines[lineIndex].text,
         style: TextStyle(
-          color: Colors.white,
+          color: Color.fromRGBO(255, 255, 255, 0.5),
           fontSize: fontSize,
           height: LyricLayout.lineHeight,
         ),
       );
       textPainter.layout(maxWidth: _viewportWidth - fontSize * 2);
-      textPainter.paint(canvas, Offset(fontSize, padding));
 
       // 对画布应用模糊
       final blurPaint = Paint()
@@ -869,7 +880,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         Rect.fromLTWH(0, 0, _viewportWidth, renderHeight),
         blurPaint,
       );
-      // 重新绘制文字（在 blur layer 内）
+      // 在 blur layer 内绘制文字
       textPainter.paint(canvas, Offset(fontSize, padding));
       canvas.restore();
 
@@ -935,6 +946,9 @@ class _LyricsPainter extends CustomPainter {
   /// 每行偏移量（级联弹簧延迟动画），正值=向下，负值=向上。
   final List<double> perLineOffsets;
 
+  /// 模糊淡入淡出系数。
+  final double blurFade;
+
   _LyricsPainter({
     required this.lines,
     required this.currentLineIndex,
@@ -959,6 +973,7 @@ class _LyricsPainter extends CustomPainter {
     required this.lastActiveAnchorIdx,
     required this.interludeExpandProgress,
     required this.perLineOffsets,
+    required this.blurFade,
   });
 
   /// 获取指定行 i 的实际高度（含换行），降级到 mainLineHeight。
@@ -1028,7 +1043,7 @@ class _LyricsPainter extends CustomPainter {
       if (useWordRenderer) {
         // 逐字模式：当前行的 KRC 行
         final renderer = wordRenderers[i] ?? WordRenderer();
-        renderer.setLineState(isActive: true, scale: scale);
+        renderer.setLineState(isActive: true, scale: scale, blurFade: blurFade);
         renderer.paintLine(
           canvas,
           Offset(startX, y),
@@ -1039,7 +1054,7 @@ class _LyricsPainter extends CustomPainter {
       } else {
         // 整行模式：LRC/纯文本行 + 非当前行的 KRC 行
         final renderer = lineRenderers[i] ?? LineRenderer();
-        renderer.setLineState(isActive: isActive, scale: scale);
+        renderer.setLineState(isActive: isActive, scale: scale, blurFade: blurFade);
         renderer.paintLine(
           canvas,
           Offset(startX, y),
