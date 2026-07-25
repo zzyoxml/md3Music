@@ -32,6 +32,8 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   bool _isFollowing = false;
   String? _description;
   bool _isDescriptionExpanded = false;
+  /// 搜索接口通常不返回歌手头像，用 getArtistDetail 接口补全的头像URL
+  String? _resolvedAvatarUrl;
 
   /// 滚动监听：用于 SliverAppBar pinned 后 fade-in 显示歌手名
   final ScrollController _scrollController = ScrollController();
@@ -93,11 +95,15 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       final detail = initial[0] as KugouArtistDetail?;
       final firstPage = initial[1] as KugouArtistAudios?;
 
-      // 获取歌手简介
-      if (detail != null &&
-          detail.description != null &&
-          detail.description!.isNotEmpty) {
-        _description = detail.description;
+      // 获取歌手简介和头像（搜索接口通常不返回头像，这里补全）
+      if (detail != null) {
+        if (detail.description != null &&
+            detail.description!.isNotEmpty) {
+          _description = detail.description;
+        }
+        if (detail.avatarUrl != null && detail.avatarUrl!.isNotEmpty) {
+          _resolvedAvatarUrl = detail.avatarUrl;
+        }
       }
 
       // 一次性拉取全部歌曲
@@ -219,7 +225,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final avatarUrl = _fixImageUrl(widget.avatarUrl);
+    final avatarUrl = _fixImageUrl(_resolvedAvatarUrl ?? widget.avatarUrl);
 
     return Scaffold(
       body: _isLoading

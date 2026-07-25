@@ -118,18 +118,23 @@ class KugouArtistBrief {
           '',
     );
 
+    final parsedId = _str(
+      json['singerid'] ??
+          json['artist_id'] ??
+          json['AuthorID'] ??
+          json['id'] ??
+          json['mix_singer_id'] ??
+          '',
+    );
+    print('[ArtistBrief.fromJson] json=$json');
+    print('[ArtistBrief.fromJson] parsedId=$parsedId, name=${extractFirstName(rawName)}');
+
     return KugouArtistBrief(
-      id: _str(
-        json['singerid'] ??
-            json['artist_id'] ??
-            json['AuthorID'] ??
-            json['id'] ??
-            json['mix_singer_id'] ??
-            '',
-      ),
+      id: parsedId,
       name: extractFirstName(rawName),
       avatarUrl: _resolveArtworkUri(
-        json['imgurl'] ??
+        json['sizable_avatar'] ??
+            json['imgurl'] ??
             json['avatar_url'] ??
             json['img'] ??
             json['pic'] ??
@@ -780,7 +785,8 @@ class KugouArtistDetail {
             '',
       ),
       avatarUrl: _resolveArtworkUri(
-        json['imgurl'] ??
+        json['sizable_avatar'] ??
+            json['imgurl'] ??
             json['img'] ??
             json['pic'] ??
             json['ImgUrl'] ??

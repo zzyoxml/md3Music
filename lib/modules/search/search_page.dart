@@ -7,6 +7,7 @@ import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/song_list_item.dart';
 import '../album/album_detail_page.dart';
@@ -492,11 +493,14 @@ class _SearchPageState extends State<SearchPage>
       results = searchResults.artists;
     }
 
+    print('[_buildArtistResults] results.count=${results.length}');
+    for (final a in results) {
+      print('[_buildArtistResults] artist: id="${a.id}", name="${a.name}", avatar="${a.avatarUrl}"');
+    }
+
     if (results.isEmpty) {
       return _buildNoResult();
     }
-
-    final colorScheme = Theme.of(context).colorScheme;
 
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
@@ -515,25 +519,10 @@ class _SearchPageState extends State<SearchPage>
               itemBuilder: (context, index) {
                 final artist = results[index];
                 return ListTile(
-                  leading: ClipOval(
-                    child: CachedNetworkImage(
-                      imageUrl: _fixImageUrl(artist.avatarUrl) ?? '',
-                      width: 48,
-                      height: 48,
-                      fit: BoxFit.cover,
-                      placeholder: (_, _) => Container(
-                        width: 48,
-                        height: 48,
-                        color: colorScheme.surfaceContainerHighest,
-                        child: Icon(Icons.person, color: colorScheme.onSurfaceVariant),
-                      ),
-                      errorWidget: (_, _, _) => Container(
-                        width: 48,
-                        height: 48,
-                        color: colorScheme.surfaceContainerHighest,
-                        child: Icon(Icons.person, color: colorScheme.onSurfaceVariant),
-                      ),
-                    ),
+                  leading: _ArtistAvatar(
+                    artistId: artist.id,
+                    avatarUrl: artist.avatarUrl,
+                    size: 48,
                   ),
                   title: Text(artist.name, maxLines: 1, overflow: TextOverflow.ellipsis),
                   subtitle: const Text('歌手'),
@@ -560,12 +549,6 @@ class _SearchPageState extends State<SearchPage>
         ],
       ),
     );
-  }
-
-  String? _fixImageUrl(String? url) {
-    if (url == null || url.isEmpty) return null;
-    if (url.startsWith('http://')) return url.replaceFirst('http://', 'https://');
-    return url;
   }
 
   Widget _buildPlaylistResults() {
@@ -696,6 +679,108 @@ class _SearchPageState extends State<SearchPage>
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// 搜索结果列表中的歌手头像：搜索接口通常不返回头像 URL，
+/// 这里用 getArtistDetail 接口异步补全。
+class _ArtistAvatar extends StatefulWidget {
+  final String artistId;
+  final String? avatarUrl;
+  final double size;
+
+  const _ArtistAvatar({
+    required this.artistId,
+    this.avatarUrl,
+    this.size = 48,
+  });
+
+  @override
+  State<_ArtistAvatar> createState() => _ArtistAvatarState();
+}
+
+class _ArtistAvatarState extends State<_ArtistAvatar> {
+  String? _resolvedUrl;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.avatarUrl != null && widget.avatarUrl!.isNotEmpty) {
+      // 搜索接口已经带了头像，直接用
+      _resolvedUrl = _fixUrl(widget.avatarUrl);
+      _loading = false;
+    } else {
+      _resolveAvatar();
+    }
+  }
+
+  Future<void> _resolveAvatar() async {
+    if (widget.artistId.isEmpty) {
+      print('[_ArtistAvatar] artistId 为空，跳过');
+      if (mounted) setState(() => _loading = false);
+      return;
+    }
+    print('[_ArtistAvatar] 开始获取头像, artistId=${widget.artistId}');
+    try {
+      final detail = await KugouApiClient().getArtistDetail(widget.artistId);
+      if (!mounted) return;
+      final url = _fixUrl(detail?.avatarUrl);
+      print('[_ArtistAvatar] 获取到头像 URL: $url');
+      setState(() {
+        _resolvedUrl = url;
+        _loading = false;
+      });
+    } catch (e) {
+      print('[_ArtistAvatar] 获取头像失败: $e');
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  static String? _fixUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    if (url.startsWith('http://')) {
+      return url.replaceFirst('http://', 'https://');
+    }
+    return url;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final size = widget.size;
+
+    Widget placeholder() => Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerHighest,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            Icons.person,
+            color: colorScheme.onSurfaceVariant,
+            size: size * 0.5,
+          ),
+        );
+
+    if (_loading) {
+      return SizedBox(width: size, height: size, child: placeholder());
+    }
+
+    final url = _resolvedUrl;
+    if (url == null) return placeholder();
+
+    return ClipOval(
+      child: CachedNetworkImage(
+        imageUrl: url,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        placeholder: (_, _) => placeholder(),
+        errorWidget: (_, _, _) => placeholder(),
       ),
     );
   }
