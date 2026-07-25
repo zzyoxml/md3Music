@@ -240,17 +240,18 @@ class _MainLayout extends StatefulWidget {
 class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   int _selectedIndex = 0;
 
-  final List<Widget> _pages = const [
-    DiscoverPage(),
-    ChartsPage(),
-    FavoritesPage(),
-    PersonalFmPage(),
-    UserCenterPage(),
-  ];
+  late final List<Widget> _pages;
 
   @override
   void initState() {
     super.initState();
+    _pages = [
+      DiscoverPage(onAvatarTap: () => setState(() => _selectedIndex = 4)),
+      const ChartsPage(),
+      const FavoritesPage(),
+      const PersonalFmPage(),
+      const UserCenterPage(),
+    ];
     // 未登录时尝试播放联网歌曲,弹出登录提示
     context.read<PlayerProvider>().onLoginRequired = _showLoginRequiredDialog;
     // 监听应用生命周期：detached（进程被系统销毁前的最后窗口）时尝试关停本地 Node.js
