@@ -2,6 +2,7 @@ import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/layout/responsive_layout.dart';
@@ -14,7 +15,9 @@ import '../../providers/downloads_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/apple_lyrics/apple_lyrics_view.dart';
+import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
+import '../../widgets/flowing_background.dart';
 import '../../widgets/apple_lyrics/models/lyric_line.dart';
 import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import '../../utils/landscape_immersive.dart';
@@ -424,25 +427,31 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     ColorScheme colorScheme,
   ) {
     // extendBody: true 让内容延伸到系统导航栏后面，实现沉浸效果
-    return Scaffold(
-      backgroundColor: Colors.black,
-      extendBody: true,
-      body: Stack(
-        children: [
-          // 1. 模糊封面背景层（Apple Music 风格，带淡入淡出）
-          _buildCrossfadeBlurredBackground(currentSong.artworkUri),
-          // 2. 半透明蒙版 rgba(0,0,0,0.35)
-          _buildDarkOverlay(),
-          // 3. 主体内容（保留原有 compact/landscape/expanded 三套布局）
-          ResponsiveLayout(
-            compact: (_) =>
-                _buildCompactLayout(playerProvider, currentSong, colorScheme),
-            medium: (_) =>
-                _buildLandscapeLayout(playerProvider, currentSong, colorScheme),
-            expanded: (_) =>
-                _buildExpandedLayout(playerProvider, currentSong, colorScheme),
-          ),
-        ],
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        extendBody: true,
+        body: Stack(
+          children: [
+            // 1. 模糊封面背景层（Apple Music 风格，带淡入淡出）
+            _buildCrossfadeBlurredBackground(currentSong.artworkUri),
+            // 2. 动态流光背景层（可选，从专辑封面提取色彩流动）
+            if (LyricPreferences.instance.useFlowingBackground)
+              FlowingBackground(artworkUrl: currentSong.artworkUri),
+            // 3. 半透明蒙版 rgba(0,0,0,0.35)
+            _buildDarkOverlay(),
+            // 4. 主体内容（保留原有 compact/landscape/expanded 三套布局）
+            ResponsiveLayout(
+              compact: (_) =>
+                  _buildCompactLayout(playerProvider, currentSong, colorScheme),
+              medium: (_) =>
+                  _buildLandscapeLayout(playerProvider, currentSong, colorScheme),
+              expanded: (_) =>
+                  _buildExpandedLayout(playerProvider, currentSong, colorScheme),
+            ),
+          ],
+        ),
       ),
     );
   }

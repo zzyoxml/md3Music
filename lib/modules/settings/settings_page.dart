@@ -51,6 +51,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _useAmStylePlayer = false;
   bool _useGaussianBlur = true;
   bool _useGlowEffect = true;
+  bool _useFlowingBackground = true;
   String _appVersion = '';
   // Lyricon 词幕推送相关状态
   bool _lyriconEnabled = false;
@@ -138,6 +139,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _useAmStylePlayer = useAmStylePlayer;
       _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
       _useGlowEffect = LyricPreferences.instance.useGlowEffect;
+      _useFlowingBackground = LyricPreferences.instance.useFlowingBackground;
       _deviceType = deviceType;
       _downloadDir = downloadDir;
       _uiScale = uiScale;
@@ -421,6 +423,17 @@ class _SettingsPageState extends State<SettingsPage> {
               ? (v) {
                   setState(() => _useGlowEffect = v);
                   LyricPreferences.instance.setUseGlowEffect(v);
+                }
+              : null,
+        ),
+        SwitchListTile(
+          title: const Text('背景动态流光'),
+          subtitle: const Text('专辑封面色彩流动效果'),
+          value: _useFlowingBackground,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  setState(() => _useFlowingBackground = v);
+                  LyricPreferences.instance.setUseFlowingBackground(v);
                 }
               : null,
         ),

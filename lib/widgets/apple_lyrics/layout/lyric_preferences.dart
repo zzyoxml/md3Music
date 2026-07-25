@@ -52,6 +52,7 @@ class LyricPreferences extends ChangeNotifier {
   static const String _keyLineSpacing = 'lyric_line_spacing';
   static const String _keyUseGaussianBlur = 'lyric_use_gaussian_blur';
   static const String _keyUseGlowEffect = 'lyric_use_glow_effect';
+  static const String _keyUseFlowingBackground = 'lyric_use_flowing_background';
 
   // ============== 当前值 ==============
 
@@ -59,12 +60,14 @@ class LyricPreferences extends ChangeNotifier {
   double _lineSpacing = defaultLineSpacing;
   bool _useGaussianBlur = true;
   bool _useGlowEffect = true;
+  bool _useFlowingBackground = true;
   bool _loaded = false;
 
   double get fontSize => _fontSize;
   double get lineSpacing => _lineSpacing;
   bool get useGaussianBlur => _useGaussianBlur;
   bool get useGlowEffect => _useGlowEffect;
+  bool get useFlowingBackground => _useFlowingBackground;
 
   /// 计算实际行高系数。
   ///
@@ -84,6 +87,7 @@ class LyricPreferences extends ChangeNotifier {
     _lineSpacing = prefs.getDouble(_keyLineSpacing) ?? defaultLineSpacing;
     _useGaussianBlur = prefs.getBool(_keyUseGaussianBlur) ?? true;
     _useGlowEffect = prefs.getBool(_keyUseGlowEffect) ?? true;
+    _useFlowingBackground = prefs.getBool(_keyUseFlowingBackground) ?? true;
     _loaded = true;
     notifyListeners();
   }
@@ -126,17 +130,28 @@ class LyricPreferences extends ChangeNotifier {
     await prefs.setBool(_keyUseGlowEffect, enabled);
   }
 
+  /// 设置动态流光背景开关并持久化。
+  Future<void> setUseFlowingBackground(bool enabled) async {
+    if (_useFlowingBackground == enabled) return;
+    _useFlowingBackground = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyUseFlowingBackground, enabled);
+  }
+
   /// 重置为默认值。
   Future<void> reset() async {
     _fontSize = defaultUserFontSize;
     _lineSpacing = defaultLineSpacing;
     _useGaussianBlur = true;
     _useGlowEffect = true;
+    _useFlowingBackground = true;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyFontSize, _fontSize);
     await prefs.setDouble(_keyLineSpacing, _lineSpacing);
     await prefs.setBool(_keyUseGaussianBlur, _useGaussianBlur);
     await prefs.setBool(_keyUseGlowEffect, _useGlowEffect);
+    await prefs.setBool(_keyUseFlowingBackground, _useFlowingBackground);
   }
 }
