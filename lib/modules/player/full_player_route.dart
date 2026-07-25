@@ -5,78 +5,129 @@ import '../../providers/theme_provider.dart';
 import 'full_player.dart';
 import 'full_player_am.dart';
 
-/// 全局标志：当前 FullPlayer 是否在路由栈顶。
+/// 全局过渡进度（0.0 = mini，1.0 = full）。
 ///
-/// 由 [fullPlayerRoute] 构造时设 true，pop 后清 false。
-/// 主页常驻的 [MiniPlayer] 监听此值，FullPlayer 打开时自动隐藏避免重复。
-final ValueNotifier<bool> isFullPlayerOnTop = ValueNotifier<bool>(false);
+/// 由 [DraggablePlayerRoute] 内部的 AnimationController 同步驱动，
+/// MiniPlayer 与 FullPlayer 通过 [ValueListenableBuilder] 监听此值，
+/// 实现淡入淡出效果与拖拽距离线性绑定。
+final ValueNotifier<double> playerExpansion = ValueNotifier<double>(0.0);
 
-/// 使用标准 [MaterialPageRoute] 打开 FullPlayer。
+/// 拖拽距离阈值（px）：拖动该距离即达到全进度。
+const double kPlayerDragThreshold = 220.0;
+
+/// 兼容旧引用：返回 true 表示当前 FullPlayer 在栈顶。
+/// 新代码应直接监听 [playerExpansion]。
+bool get isFullPlayerOnTop => playerExpansion.value > 0.5;
+
+/// 创建并返回可拖拽的 FullPlayer 路由。
 ///
-/// **动画方式**（与「热门歌单 → 上一级」一致）：
-/// - Android：FadeThrough（系统默认平台过渡）
-/// - iOS：水平 slide from right（系统默认平台过渡）
-/// - 不使用任何 spring 弹回 / 自定义 slide，避免浅色主题下显示硬编码的黑色背景
-///
-/// **之前的设计问题**（已修复）：
-/// 旧的 `BottomSlideMaterialPageRoute` 用自定义 SlideTransition 从底部垂直滑入，
-/// 在浅色主题下 pop 时 AM 风格 FullPlayer 内部的 `Colors.black` Scaffold 会
-/// 透出黑色块。改用标准平台过渡后，过渡期间 AM 路由上下层都保持自然背景，
-/// 黑色块消失。
-///
-/// **保留兼容**：旧类名 `BottomSlideMaterialPageRoute` 仍导出（`extends`
-/// [MaterialPageRoute]），外部代码可以继续用 `BottomSlideMaterialPageRoute(builder: ...)`，
-/// 行为与标准 MaterialPageRoute 完全一致。
-BottomSlideMaterialPageRoute<void> fullPlayerRoute(BuildContext context) {
+/// 调用方可在拖拽手势 start 时调用并 push，然后通过 `route.controller`
+/// 在拖动期间手动设置进度，释放时调用 `forward()`/`reverse()`/`fling()`。
+DraggablePlayerRoute<void> fullPlayerRoute(BuildContext context) {
   final useAm = context.read<ThemeProvider>().useAmStylePlayer;
-  // push 时立即标记，pop 后清除（见下方 listener）
-  isFullPlayerOnTop.value = true;
-  final route = BottomSlideMaterialPageRoute<void>(
+  return DraggablePlayerRoute<void>(
     builder: (_) => useAm ? const AmStyleFullPlayer() : const FullPlayer(),
   );
-  // popped Future 在路由出栈时 resolve；无论用户用系统返回手势、AppBar 返回按钮
-  // 还是代码 pop，都会触发，从而保证 MiniPlayer 不会永远隐藏。
-  route.popped.then((_) {
-    if (isFullPlayerOnTop.value) isFullPlayerOnTop.value = false;
-  });
-  return route;
 }
 
-/// 保留旧类名（兼容外部 import），现在是 [MaterialPageRoute] 的简单别名。
+/// 可拖拽的 FullPlayer 路由。
 ///
-/// **过渡动画**（自定义）：
-/// - 时长 420ms（forward） / 360ms（reverse），比 Material 默认 300ms 更从容
-/// - 垂直短距离 slide（8%）+ 透明度淡入，避免 AM 风格 `Colors.black` 在浅色
-///   主题下大面积出现黑色块
-/// - 曲线：`easeOutCubic`（forward）/ `easeInCubic`（reverse），符合"上推淡入"物理感
-/// - 保留 [MaterialPageRoute] 的系统预测返回手势对接（Android 14+ / iOS）
-class BottomSlideMaterialPageRoute<T> extends MaterialPageRoute<T> {
-  BottomSlideMaterialPageRoute({required super.builder});
+/// 设计要点：
+/// - [opaque] = false：路由背景透明，下层 MiniPlayer 可见，实现交叉淡入淡出
+/// - [buildTransitions]：用 [AnimationController.value] 驱动
+///   `Opacity + SlideTransition`，淡入为主、抽屉上滑为辅
+/// - [controller] 暴露给外部手势：拖动期间 `controller.stop()` + `controller.value = x`
+///   释放时 `controller.fling(velocity: v)` / `forward()` / `reverse()`
+class DraggablePlayerRoute<T> extends PageRoute<T> {
+  DraggablePlayerRoute({required this.builder});
 
+  final WidgetBuilder builder;
+
+  /// 由 [createAnimationController] 赋值，外部手势可读取此字段直接驱动。
+  /// 重写父类（[TransitionRoute]）的同名 getter（返回 `AnimationController?`），
+  /// 收窄为非空类型，便于调用方直接使用而无需 null-check。
   @override
-  bool didPop(T? result) {
-    // 返回动画一开始就提前让 mini bar 同步淡入：
-    // 避免 FullPlayer 上滑淡出过程中，底部露出下层页面主体，
-    // 在浅色主题下与 AM 黑色背景形成阴影/色块。
-    if (isFullPlayerOnTop.value) isFullPlayerOnTop.value = false;
-    return super.didPop(result);
+  late AnimationController controller;
+
+  /// Flutter 3.44 起 [TransitionRoute.createAnimationController] 不再接收
+  /// `vsync` 参数——框架内部直接使用 `navigator!` 作为 TickerProvider。
+  /// 我们在此重写仅是为了定制 `duration` / `reverseDuration`，并把创建的
+  /// 控制器赋值到 [controller]，供外部手势读取。
+  @override
+  AnimationController createAnimationController() {
+    controller = AnimationController(
+      vsync: navigator!,
+      duration: const Duration(milliseconds: 300),
+      reverseDuration: const Duration(milliseconds: 250),
+      lowerBound: 0.0,
+      upperBound: 1.0,
+    );
+    return controller;
   }
 
   @override
-  Duration get transitionDuration => Duration.zero;
+  Widget buildPage(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation) {
+    return builder(context);
+  }
 
   @override
-  Duration get reverseTransitionDuration => Duration.zero;
+  Widget buildTransitions(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation, Widget child) {
+    // 同步 controller 值到全局 playerExpansion，
+    // 让 MiniPlayer 等外部监听者感知进度
+    if (animation.value != playerExpansion.value) {
+      playerExpansion.value = animation.value;
+    }
+
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, _) {
+        final progress = animation.value.clamp(0.0, 1.0);
+        // 淡入：progress 0→1 时 opacity 0→1
+        // 滑动：progress 0→1 时从 15% 屏幕高度下方位移滑到 0（抽屉上滑感）
+        return Opacity(
+          opacity: progress,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.15),
+              end: Offset.zero,
+            ).animate(animation),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+
+  // PageRoute 必需重写项
+  @override
+  bool get opaque => false;
 
   @override
-  Widget buildTransitions(
-    BuildContext context,
-    Animation<double> animation,
-    Animation<double> secondaryAnimation,
-    Widget child,
-  ) {
-    // 不做任何过渡动画，直接返回 child。
-    // push / pop 立即切换，无上下左右 slide、无 fade、无 spring。
-    return child;
+  bool get barrierDismissible => false;
+
+  @override
+  Color? get barrierColor => null;
+
+  @override
+  String? get barrierLabel => null;
+
+  @override
+  bool get maintainState => true;
+
+  @override
+  Duration get transitionDuration => const Duration(milliseconds: 300);
+
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 250);
+
+  @override
+  bool didPop(T? result) {
+    // pop 时立即清零进度，让 MiniPlayer 立即恢复可见
+    if (playerExpansion.value != 0.0) {
+      playerExpansion.value = 0.0;
+    }
+    return super.didPop(result);
   }
 }

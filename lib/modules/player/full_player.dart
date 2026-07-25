@@ -15,6 +15,7 @@ import 'comments_view.dart';
 import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/player_playlist_dialog.dart';
+import 'full_player_route.dart';
 
 /// 预加载封面图片到磁盘缓存，防止切换时白屏
 void _preloadArtwork(String? url) {
@@ -55,6 +56,58 @@ class _FullPlayerState extends State<FullPlayer>
   bool _isPhoneLandscape = false;
   // 拖动进度条前的播放状态，用于拖动结束后恢复
   bool _wasPlayingBeforeDrag = false;
+
+  // === 拖拽收起手势：通过驱动路由 AnimationController 实现 ===
+  double _dragStartY = 0;
+
+  /// 获取当前路由的 AnimationController。
+  AnimationController? get _routeController {
+    final route = ModalRoute.of(context);
+    if (route is DraggablePlayerRoute) {
+      return route.controller;
+    }
+    return null;
+  }
+
+  void _onHandleDragStart(DragStartDetails details) {
+    _dragStartY = details.globalPosition.dy;
+  }
+
+  void _onHandleDragUpdate(DragUpdateDetails details) {
+    final controller = _routeController;
+    if (controller == null) return;
+    final dy = details.globalPosition.dy - _dragStartY;
+    if (dy <= 0) return;
+    final progress = 1.0 - (dy / kPlayerDragThreshold).clamp(0.0, 1.0);
+    controller.stop();
+    controller.value = progress;
+  }
+
+  void _onHandleDragEnd(DragEndDetails details) {
+    final controller = _routeController;
+    if (controller == null) return;
+    final currentProgress = controller.value;
+    final velocity = details.primaryVelocity ?? 0;
+
+    if (currentProgress < 0.5 || velocity > 300) {
+      controller.reverse().then((_) {
+        if (mounted) Navigator.of(context).maybePop();
+      });
+    } else {
+      controller.forward();
+    }
+  }
+
+  void _collapseByButton() {
+    final controller = _routeController;
+    if (controller == null) {
+      Navigator.of(context).maybePop();
+      return;
+    }
+    controller.reverse().then((_) {
+      if (mounted) Navigator.of(context).maybePop();
+    });
+  }
 
   @override
   void initState() {
@@ -620,28 +673,56 @@ class _FullPlayerState extends State<FullPlayer>
         ? const [Tab(text: '歌词'), Tab(text: '评论')]
         : const [Tab(text: '封面'), Tab(text: '歌词'), Tab(text: '评论')];
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.keyboard_arrow_down),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: TabBar(
-              controller: _tabController,
-              tabs: tabs,
-              labelStyle: Theme.of(context).textTheme.labelMedium,
-              indicatorSize: TabBarIndicatorSize.label,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 顶部下拉手柄：向下拖拽收起到 MiniPlayer，淡入淡出与拖拽距离线性绑定
+        GestureDetector(
+          onVerticalDragStart: _onHandleDragStart,
+          onVerticalDragUpdate: _onHandleDragUpdate,
+          onVerticalDragEnd: _onHandleDragEnd,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 12, bottom: 8),
+            child: Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurfaceVariant
+                      .withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.more_vert),
-            onPressed: () => _showMoreMenu(context),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.keyboard_arrow_down),
+                onPressed: _collapseByButton,
+              ),
+              Expanded(
+                child: TabBar(
+                  controller: _tabController,
+                  tabs: tabs,
+                  labelStyle: Theme.of(context).textTheme.labelMedium,
+                  indicatorSize: TabBarIndicatorSize.label,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.more_vert),
+                onPressed: () => _showMoreMenu(context),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
