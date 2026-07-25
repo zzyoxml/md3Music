@@ -239,6 +239,7 @@ class _MainLayout extends StatefulWidget {
 
 class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   int _selectedIndex = 0;
+  int _previousSelectedIndex = 0;
 
   late final List<Widget> _pages;
 
@@ -246,7 +247,10 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _pages = [
-      DiscoverPage(onAvatarTap: () => setState(() => _selectedIndex = 4)),
+      DiscoverPage(onAvatarTap: () => setState(() {
+        _previousSelectedIndex = _selectedIndex;
+        _selectedIndex = 4;
+      })),
       const ChartsPage(),
       const FavoritesPage(),
       const PersonalFmPage(),
@@ -408,6 +412,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
           setState(() {
+            _previousSelectedIndex = _selectedIndex;
             _selectedIndex = index;
           });
         },
@@ -420,22 +425,31 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   }
 
   Widget _buildBody() {
+    // 切换方向：左→右 tab = 向左滑，右→左 tab = 向右滑
+    final goingRight = _selectedIndex > _previousSelectedIndex;
+
     return Column(
       children: [
         Expanded(
           child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 300),
+            duration: const Duration(milliseconds: 400),
+            switchInCurve: const Interval(0.5, 1.0, curve: Curves.easeOut),
+            switchOutCurve: const Interval(0.0, 0.5, curve: Curves.easeIn),
             transitionBuilder: (child, animation) {
+              // 淡出方向：旧页面滑出的方向
+              // 淡入方向：新页面从相反方向滑入
+              final isEntering = child.key == ValueKey(_selectedIndex);
+              final slideDirection = isEntering
+                  ? (goingRight ? 0.12 : -0.12)  // 新页面从右/左滑入
+                  : (goingRight ? -0.12 : 0.12);  // 旧页面向左/右滑出
+
               return FadeTransition(
                 opacity: animation,
                 child: SlideTransition(
                   position: Tween<Offset>(
-                    begin: const Offset(0.08, 0.0),
+                    begin: Offset(slideDirection, 0.0),
                     end: Offset.zero,
-                  ).animate(CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOut,
-                  )),
+                  ).animate(animation),
                   child: child,
                 ),
               );
