@@ -118,6 +118,9 @@ class _AppView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final themeProvider = context.watch<ThemeProvider>();
+    // 当前生效的 fontFamily：system 模式为 null（让 Flutter 走系统字体链），
+    // bundled/custom 模式为对应字体名。加载失败时降级为 null。
+    final fontFamily = themeProvider.effectiveFontFamily;
 
     return MaterialApp(
       title: 'MD3Music',
@@ -125,10 +128,15 @@ class _AppView extends StatelessWidget {
       // 同时传 theme 和 darkTheme，并根据 ThemeProvider.effectiveSeedColor
       // 动态生成（支持「莫奈色」开关切换系统主色）。
       // darkTheme 额外接收 useOledBlack 开关，开启时 surface 系列覆盖为纯黑。
-      theme: AppTheme.lightThemeFromSeed(themeProvider.effectiveSeedColor),
+      // fontFamily 透传给 ThemeData，影响所有 Material Widget 的默认字体。
+      theme: AppTheme.lightThemeFromSeed(
+        themeProvider.effectiveSeedColor,
+        fontFamily: fontFamily,
+      ),
       darkTheme: AppTheme.darkThemeFromSeed(
         themeProvider.effectiveSeedColor,
         useOledBlack: themeProvider.useOledBlack,
+        fontFamily: fontFamily,
       ),
       themeMode: themeProvider.themeMode,
       // 根据主题设置系统导航栏颜色

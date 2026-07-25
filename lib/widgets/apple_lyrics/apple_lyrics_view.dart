@@ -192,6 +192,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   double _cachedViewportWidth = -1;
   int _cachedLinesLength = -1;
   Object? _cachedLinesRef;
+  // 字体缓存：字体变化时强制重算行高 + 失效所有模糊图片缓存
+  // （TextPainter 用 fontFamily 测量，旧缓存会与新字体渲染尺寸不一致）
+  String? _cachedFontFamily;
 
   /// 返回指定行索引上方所有激活间奏占位的累计高度。
   ///
@@ -219,17 +222,20 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 记录到 [_interludeAfterIndices]。占位高度动态展开/收起（不在这里固定）。
   void _recomputeLineHeightsIfNeeded(double fontSize, double viewportWidth) {
     final identitySame = identical(widget.lines, _cachedLinesRef);
+    final currentFontFamily = LyricLayout.fontFamily;
     if (fontSize == _cachedFontSize &&
         viewportWidth == _cachedViewportWidth &&
         widget.lines.length == _cachedLinesLength &&
         identitySame &&
-        _lineHeights.length == widget.lines.length) {
+        _lineHeights.length == widget.lines.length &&
+        currentFontFamily == _cachedFontFamily) {
       return; // 缓存命中
     }
     _cachedFontSize = fontSize;
     _cachedViewportWidth = viewportWidth;
     _cachedLinesLength = widget.lines.length;
     _cachedLinesRef = widget.lines;
+    _cachedFontFamily = currentFontFamily;
 
     final maxLineWidth = LyricLayout.maxLineWidth(viewportWidth, fontSize);
     final mainLineHeight = fontSize * LyricLayout.lineHeight;
@@ -286,7 +292,32 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
   /// 偏好变化时触发重绘（不需要 setState，因为 _onTick 每帧 setState），
   /// 但偏好变化时若 ticker 未启动（暂停状态），需要手动 setState 触发一次。
+  ///
+  /// **字体变化时的特殊处理**：失效所有缓存，强制下帧重算：
+  /// - 行高缓存：让 `_recomputeLineHeightsIfNeeded` 重测所有行高度
+  ///   （TextPainter 用新 fontFamily layout，行高/换行可能变化）
+  /// - 模糊图片缓存：dispose 所有缓存的 ui.Image 并清空 Map，
+  ///   `_updateLineBlurCache` 会用新 fontFamily 重新渲染模糊图片
+  /// - WordRenderer/LineRenderer 内部绑定：清空 _wordRenderers/_lineRenderers,
+  ///   让它们用新字体重新测量 word 宽度（_ensureBound）并重置 alpha 状态
   void _onPreferencesChanged() {
+    // 字体变化时失效所有依赖字体测量的缓存
+    final currentFontFamily = LyricLayout.fontFamily;
+    if (currentFontFamily != _cachedFontFamily) {
+      // 失效行高缓存（让 _recomputeLineHeightsIfNeeded 重算）
+      _cachedFontFamily = null;
+      // 失效模糊图片缓存（dispose 图片资源 + 清空 Map）
+      for (final entry in _lineBlurImages.values) {
+        entry.$1.dispose();
+      }
+      _lineBlurImages.clear();
+      _cachedBlurLineIndex = -1;
+      _cachedBlurLevels = const {};
+      // 失效 WordRenderer/LineRenderer 内部绑定（清空后下次 paint 会重新创建 +
+      // 重新 _ensureBound 测量 word 宽度，避免用旧字体宽度做换行判断）
+      _wordRenderers.clear();
+      _lineRenderers.clear();
+    }
     if (!_ticker.isActive) {
       setState(() {});
     }
@@ -887,6 +918,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           color: Color.fromRGBO(255, 255, 255, 0.5),
           fontSize: fontSize,
           height: LyricLayout.lineHeight,
+          // 显式注入歌词 fontFamily，与清晰层保持一致，
+          // 否则模糊层尺寸与清晰层不匹配
+          fontFamily: LyricLayout.fontFamily,
         ),
       );
       textPainter.layout(maxWidth: _viewportWidth - fontSize * 2);

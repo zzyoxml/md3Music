@@ -16,15 +16,19 @@ import io.flutter.plugin.common.MethodChannel
 import com.md3music.md3music.AudioPlaybackService
 import com.md3music.md3music.FloatingLyricService
 import io.github.proify.lyricon.lyric.model.Song
+import java.io.File
 
 class MainActivity : FlutterActivity() {
     private val FLOATING_CHANNEL = "com.md3music.md3music/floating_lyric"
     private val FOLDER_PICKER_CHANNEL = "com.md3music.md3music/folder_picker"
+    private val FONT_PICKER_CHANNEL = "com.md3music.md3music/font_picker"
     private var pendingDesktopLyricAction: String? = null
     private var folderPickerResult: MethodChannel.Result? = null
+    private var fontPickerResult: MethodChannel.Result? = null
 
     companion object {
         private const val FOLDER_PICKER_REQUEST_CODE = 9999
+        private const val FONT_PICKER_REQUEST_CODE = 10000
 
         // 静态引用：让 Service 也能调用 MethodChannel（无 FlutterEngine 缓存时走这里）
         private var cachedEngine: FlutterEngine? = null
@@ -344,6 +348,42 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // 注册字体文件选择器 MethodChannel
+        // 用 ACTION_OPEN_DOCUMENT 打开系统文件选择器，过滤 TTF/OTF 文件
+        // 选中后原生端把 content URI 流拷贝到 filesDir/fonts/user_custom.ttf
+        // 返回真实路径给 Dart 端用 FontLoader 加载
+        val fontPickerChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            FONT_PICKER_CHANNEL
+        )
+        fontPickerChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "pickFontFile" -> {
+                    fontPickerResult = result
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        // 主 MIME：font/ttf；EXTRA_MIME_TYPES 兼容 OTF 与未注册 MIME
+                        type = "font/ttf"
+                        putExtra(
+                            Intent.EXTRA_MIME_TYPES,
+                            arrayOf(
+                                "font/ttf",
+                                "font/otf",
+                                "font/sfnt",
+                                "application/x-font-ttf",
+                                "application/x-font-otf",
+                                "application/x-font-truetype",
+                                "application/octet-stream"
+                            )
+                        )
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivityForResult(intent, FONT_PICKER_REQUEST_CODE)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -364,6 +404,38 @@ class MainActivity : FlutterActivity() {
                 folderPickerResult?.success(null)
             }
             folderPickerResult = null
+        } else if (requestCode == FONT_PICKER_REQUEST_CODE) {
+            if (resultCode == RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                // 后台线程：把 content URI 流拷贝到 filesDir/fonts/user_custom.ttf
+                // 拷贝成功后在主线程返回真实路径给 Flutter
+                Thread {
+                    try {
+                        val targetDir = File(filesDir, "fonts").apply { mkdirs() }
+                        val targetFile = File(targetDir, "user_custom.ttf")
+                        contentResolver.openInputStream(uri).use { input ->
+                            targetFile.outputStream().use { output ->
+                                input?.copyTo(output)
+                            }
+                        }
+                        // 关键：success 与清空 fontPickerResult 必须在同一个主线程任务里原子完成
+                        // 否则子线程的 fontPickerResult = null 会在主线程处理 success 之前执行，
+                        // 导致 ?.success(...) 被空安全调用跳过，Dart 端 invokeMethod 永远收不到回调
+                        runOnUiThread {
+                            fontPickerResult?.success(targetFile.absolutePath)
+                            fontPickerResult = null
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            fontPickerResult?.error("COPY_FAILED", e.message, null)
+                            fontPickerResult = null
+                        }
+                    }
+                }.start()
+            } else {
+                fontPickerResult?.success(null)
+                fontPickerResult = null
+            }
         }
     }
 

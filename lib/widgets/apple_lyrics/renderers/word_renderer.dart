@@ -324,6 +324,8 @@ class WordRenderer {
           color: Color.fromRGBO(255, 255, 255, alpha),
           fontSize: fontSize,
           height: lineHeight,
+          // 显式注入歌词 fontFamily，与测量路径保持一致
+          fontFamily: LyricLayout.fontFamily,
         ),
       );
       _painter.layout();
@@ -384,6 +386,8 @@ class WordRenderer {
         color: Color.fromRGBO(255, 255, 255, alpha),
         fontSize: fontSize,
         height: LyricLayout.lineHeight,
+        // 显式注入歌词 fontFamily，与 paintLine 路径保持一致
+        fontFamily: LyricLayout.fontFamily,
       ),
     );
     _painter.layout(
@@ -417,6 +421,9 @@ class WordRenderer {
         style: TextStyle(
           fontSize: fontSize,
           height: LyricLayout.lineHeight,
+          // 显式注入歌词 fontFamily，必须与 paintLine 渲染路径一致，
+          // 否则 word 宽度测量会出错导致换行错位
+          fontFamily: LyricLayout.fontFamily,
         ),
       );
       _painter.layout();

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:material_color_utilities/material_color_utilities.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/services/custom_font_loader.dart';
 import '../core/theme/app_theme.dart';
 
 class ThemeProvider extends ChangeNotifier {
@@ -12,6 +13,8 @@ class ThemeProvider extends ChangeNotifier {
   static const String _manualSeedKey = 'manual_seed_color';
   static const String _oledBlackKey = 'use_oled_black';
   static const String _uiScaleKey = 'ui_scale';
+  static const String _fontSourceKey = 'font_source';
+  static const String _customFontPathKey = 'custom_font_path';
 
   ThemeMode _themeMode = ThemeMode.system;
   bool _useDynamicColor = false;
@@ -20,6 +23,12 @@ class ThemeProvider extends ChangeNotifier {
   Color? _manualSeedColor;
   bool _useOledBlack = false;
   double _uiScale = 1.0;
+  // 字体来源（system / bundled / custom）
+  FontSource _fontSource = FontSource.system;
+  // 用户选择的字体文件路径（原生端拷贝到 filesDir 后的真实路径）
+  String? _customFontPath;
+  // 运行时加载成功后填充的 fontFamily（仅在 custom 模式且加载成功时非 null）
+  String? _loadedCustomFontFamily;
 
   ThemeMode get themeMode => _themeMode;
   bool get useDynamicColor => _useDynamicColor;
@@ -28,6 +37,8 @@ class ThemeProvider extends ChangeNotifier {
   Color? get manualSeedColor => _manualSeedColor;
   bool get useOledBlack => _useOledBlack;
   double get uiScale => _uiScale;
+  FontSource get fontSource => _fontSource;
+  String? get customFontPath => _customFontPath;
 
   /// 当前生效的种子色优先级：
   /// 1. 启用系统主题色且成功取到 → 系统主色
@@ -38,6 +49,22 @@ class ThemeProvider extends ChangeNotifier {
           ? _systemSeedColor!
           : (_manualSeedColor ?? AppTheme.defaultSeedColor);
 
+  /// 当前生效的 fontFamily（传给 AppTheme）：
+  /// - [FontSource.system]：返回 null（让 Flutter 走系统字体链）
+  /// - [FontSource.bundled]：返回 'SimHei'
+  /// - [FontSource.custom]：返回 [_loadedCustomFontFamily]，
+  ///   加载失败时为 null（实际降级为 system 行为）
+  String? get effectiveFontFamily {
+    switch (_fontSource) {
+      case FontSource.system:
+        return null;
+      case FontSource.bundled:
+        return 'SimHei';
+      case FontSource.custom:
+        return _loadedCustomFontFamily;
+    }
+  }
+
   ThemeProvider() {
     _loadThemeMode();
     _loadDynamicColor();
@@ -45,6 +72,7 @@ class ThemeProvider extends ChangeNotifier {
     _loadManualSeedColor();
     _loadOledBlack();
     _loadUiScale();
+    _loadFontSource();
   }
 
   Future<void> _loadThemeMode() async {
@@ -225,5 +253,66 @@ class ThemeProvider extends ChangeNotifier {
     _themeMode = mode;
     notifyListeners();
     await _saveThemeMode(mode);
+  }
+
+  // ============== 字体来源 ==============
+
+  /// 加载持久化的字体来源与自定义字体路径。
+  /// 读完后若为 custom 模式，自动触发 FontLoader 注册（异步，不阻塞构造）。
+  Future<void> _loadFontSource() async {
+    final prefs = await SharedPreferences.getInstance();
+    _fontSource = CustomFontLoader.fromName(prefs.getString(_fontSourceKey));
+    _customFontPath = prefs.getString(_customFontPathKey);
+    notifyListeners();
+    // 若已配置自定义字体，立即尝试加载（Fire-and-forget，加载完成后会 notifyListeners）
+    if (_fontSource == FontSource.custom) {
+      await _tryLoadCustomFont();
+    }
+  }
+
+  /// 设置字体来源并持久化。
+  /// 切换到 custom 时若 [_loadedCustomFontFamily] 仍为 null（未加载成功），
+  /// 调用方应同时调用 [setCustomFontPath] 触发加载流程。
+  Future<void> setFontSource(FontSource source) async {
+    if (_fontSource == source) return;
+    _fontSource = source;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_fontSourceKey, source.name);
+  }
+
+  /// 设置自定义字体文件路径并立即尝试加载注册。
+  /// 传 null 清除路径并卸载已加载的字体（实际效果降级到 system）。
+  Future<void> setCustomFontPath(String? path) async {
+    if (_customFontPath == path) return;
+    _customFontPath = path;
+    final prefs = await SharedPreferences.getInstance();
+    if (path != null) {
+      await prefs.setString(_customFontPathKey, path);
+      // 立即尝试加载（路径变化时重新注册）
+      await _tryLoadCustomFont();
+    } else {
+      await prefs.remove(_customFontPathKey);
+      _loadedCustomFontFamily = null;
+      notifyListeners();
+    }
+  }
+
+  /// 启动时调用：若 fontSource == custom 且 path 存在，尝试加载注册。
+  /// 失败时静默降级（不修改持久化值，UI 表现等同 system）。
+  Future<void> loadCustomFontOnStartup() async {
+    if (_fontSource != FontSource.custom) return;
+    await _tryLoadCustomFont();
+  }
+
+  /// 内部：尝试用 FontLoader 加载 [_customFontPath] 指向的字体文件。
+  /// 加载成功则填充 [_loadedCustomFontFamily] 并 notifyListeners。
+  /// 失败时 [_loadedCustomFontFamily] 置 null，UI 自然降级为 system 行为。
+  Future<void> _tryLoadCustomFont() async {
+    final path = _customFontPath;
+    final family = await CustomFontLoader.loadIfAvailable(path);
+    final changed = family != _loadedCustomFontFamily;
+    _loadedCustomFontFamily = family;
+    if (changed) notifyListeners();
   }
 }

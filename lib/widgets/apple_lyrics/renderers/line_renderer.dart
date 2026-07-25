@@ -132,6 +132,8 @@ class LineRenderer {
         color: Color.fromRGBO(255, 255, 255, _currentAlpha),
         fontSize: fontSize,
         height: LyricLayout.lineHeight,
+        // 显式注入歌词 fontFamily（system 模式为 null，走系统字体链）
+        fontFamily: LyricLayout.fontFamily,
       ),
     );
     _painter.layout(

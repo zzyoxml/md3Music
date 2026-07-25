@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/services/custom_font_loader.dart';
 import '../../core/services/folder_picker_service.dart';
 import '../../core/services/lyricon_provider_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -259,6 +260,21 @@ class _SettingsPageState extends State<SettingsPage> {
             );
           },
         ),
+        // 歌词字体独立选择入口（与全局字体解耦）
+        // 用 AnimatedBuilder 监听 LyricPreferences，切换字体会立即刷新 subtitle
+        AnimatedBuilder(
+          animation: LyricPreferences.instance,
+          builder: (context, _) {
+            final prefs = LyricPreferences.instance;
+            return ListTile(
+              leading: const Icon(Icons.text_fields),
+              title: const Text('歌词字体'),
+              subtitle: Text(_lyricFontSourceLabel(prefs.fontSource)),
+              trailing: const Icon(Icons.chevron_right, size: 18),
+              onTap: () => _showLyricFontSourceSheet(prefs),
+            );
+          },
+        ),
         // Lyricon 词幕推送主开关
         SwitchListTile(
           title: const Text('Lyricon 词幕推送'),
@@ -300,6 +316,127 @@ class _SettingsPageState extends State<SettingsPage> {
               : null,
         ),
       ],
+    );
+  }
+
+  /// 歌词字体来源中文标签（用于"歌词字体"ListTile 的 subtitle）。
+  String _lyricFontSourceLabel(LyricFontSource source) {
+    switch (source) {
+      case LyricFontSource.system:
+        return '系统默认（手机字体优先）';
+      case LyricFontSource.bundled:
+        return '内置 SimHei';
+      case LyricFontSource.custom:
+        return '自定义字体';
+    }
+  }
+
+  /// 弹出歌词字体来源选择面板。
+  /// 与全局字体选择解耦：歌词字体独立配置，仅作用于歌词渲染路径。
+  /// 切换字体会触发 LyricPreferences.notifyListeners，
+  /// AppleLyricsView 监听到后会失效行高缓存 + 模糊图片缓存并重算。
+  void _showLyricFontSourceSheet(LyricPreferences prefs) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final current = prefs.fontSource;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '歌词字体来源',
+                    style: Theme.of(ctx).textTheme.titleMedium,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: Icon(
+                  current == LyricFontSource.system
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: Theme.of(ctx).colorScheme.primary,
+                ),
+                title: const Text('系统默认'),
+                subtitle: const Text('使用手机系统字体（推荐）'),
+                onTap: () async {
+                  await prefs.setFontSource(LyricFontSource.system);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  current == LyricFontSource.bundled
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: Theme.of(ctx).colorScheme.primary,
+                ),
+                title: const Text('内置 SimHei'),
+                subtitle: const Text('使用打包的黑体字体'),
+                onTap: () async {
+                  await prefs.setFontSource(LyricFontSource.bundled);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  current == LyricFontSource.custom
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: Theme.of(ctx).colorScheme.primary,
+                ),
+                title: const Text('自定义字体'),
+                subtitle: Text(
+                  prefs.customFontPath == null
+                      ? '点击从设备选择 .ttf / .otf 文件'
+                      : '已加载：${prefs.customFontPath}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () async {
+                  // 立即关闭面板，避免文件选择器与 BottomSheet 重叠
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  await _pickAndApplyLyricCustomFont(prefs);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 调用原生 SAF 文件选择器为歌词选字体文件，成功后保存并应用。
+  Future<void> _pickAndApplyLyricCustomFont(LyricPreferences prefs) async {
+    final path = await CustomFontLoader.pickFontFile();
+    if (path == null) {
+      // 用户取消
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('未选择字体文件'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    // 先保存路径并加载字体（_tryLoadCustomFont 内部会注册 FontLoader）
+    await prefs.setCustomFontPath(path);
+    // 再切换来源为 custom（即使加载失败也切换，UI 自然降级为系统字体）
+    await prefs.setFontSource(LyricFontSource.custom);
+    if (!mounted) return;
+    final loaded = prefs.effectiveFontFamily != null;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(loaded ? '已应用自定义字体到歌词' : '字体加载失败，已降级为系统字体'),
+        behavior: SnackBarBehavior.floating,
+      ),
     );
   }
 
@@ -353,6 +490,15 @@ class _SettingsPageState extends State<SettingsPage> {
               _settingsRepository.setThemeMode(mode);
             },
           ),
+        ),
+        // 字体入口：点击弹出三选一面板（系统 / 内置 SimHei / 自定义 TTF）
+        // 选择"自定义"时打开 Android SAF 文件选择器选 .ttf/.otf 文件
+        ListTile(
+          leading: const Icon(Icons.text_fields),
+          title: const Text('字体'),
+          subtitle: Text(_getFontSourceLabel(themeProvider.fontSource)),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => _showFontSourceSheet(themeProvider),
         ),
         // 主题色入口：点击弹出 8 色预设面板。
         // 系统色开启时用 IgnorePointer 禁用点击（不灰显，色块仍显示当前 effectiveSeedColor）。
@@ -565,6 +711,139 @@ class _SettingsPageState extends State<SettingsPage> {
           themeProvider.setManualSeedColor(color);
           Navigator.pop(ctx);
         },
+      ),
+    );
+  }
+
+  /// 字体来源中文标签。
+  String _getFontSourceLabel(FontSource source) {
+    switch (source) {
+      case FontSource.system:
+        return '系统默认（手机字体优先）';
+      case FontSource.bundled:
+        return '内置 SimHei';
+      case FontSource.custom:
+        return '自定义字体';
+    }
+  }
+
+  /// 弹出字体来源选择面板。
+  ///
+  /// 三个选项：
+  /// - 系统默认：UI 走系统字体链（Roboto + Noto Sans CJK 等）
+  /// - 内置 SimHei：使用打包的 assets/fonts/simhei.ttf
+  /// - 自定义字体：通过 Android SAF 选择 .ttf/.otf 文件，
+  ///   原生端拷贝到 filesDir/fonts/user_custom.ttf，Dart 端用 FontLoader 注册
+  void _showFontSourceSheet(ThemeProvider themeProvider) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final current = themeProvider.fontSource;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    '字体来源',
+                    style: Theme.of(ctx).textTheme.titleMedium,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: Icon(
+                  current == FontSource.system
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: Theme.of(ctx).colorScheme.primary,
+                ),
+                title: const Text('系统默认'),
+                subtitle: const Text('使用手机系统字体（推荐）'),
+                onTap: () async {
+                  await themeProvider.setFontSource(FontSource.system);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  current == FontSource.bundled
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: Theme.of(ctx).colorScheme.primary,
+                ),
+                title: const Text('内置 SimHei'),
+                subtitle: const Text('使用打包的黑体字体'),
+                onTap: () async {
+                  await themeProvider.setFontSource(FontSource.bundled);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  current == FontSource.custom
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                  color: Theme.of(ctx).colorScheme.primary,
+                ),
+                title: const Text('自定义字体'),
+                subtitle: Text(
+                  themeProvider.customFontPath == null
+                      ? '点击从设备选择 .ttf / .otf 文件'
+                      : '已加载：${themeProvider.customFontPath}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () async {
+                  // 立即关闭面板，避免文件选择器与 BottomSheet 重叠
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  await _pickAndApplyCustomFont(themeProvider);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 调用原生 SAF 文件选择器让用户选择字体文件，成功后保存并应用。
+  ///
+  /// 选择流程：
+  /// 1. CustomFontLoader.pickFontFile() 打开系统文件选择器
+  /// 2. 原生端把选中文件拷贝到 filesDir/fonts/user_custom.ttf，返回路径
+  /// 3. themeProvider.setCustomFontPath(path) 持久化路径 + 立即 FontLoader 注册
+  /// 4. themeProvider.setFontSource(FontSource.custom) 切换为 custom 模式
+  ///
+  /// 失败处理：用户取消（path=null）→ 不切换，弹提示；
+  /// 加载失败 → effectiveFontFamily 自动降级为 null（system 行为），弹错误提示。
+  Future<void> _pickAndApplyCustomFont(ThemeProvider themeProvider) async {
+    final path = await CustomFontLoader.pickFontFile();
+    if (path == null) {
+      // 用户取消
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('未选择字体文件'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    // 先保存路径并加载字体（_tryLoadCustomFont 内部会注册 FontLoader）
+    await themeProvider.setCustomFontPath(path);
+    // 再切换来源为 custom（即使加载失败也切换，UI 自然降级为系统字体）
+    await themeProvider.setFontSource(FontSource.custom);
+    if (!mounted) return;
+    final loaded = themeProvider.effectiveFontFamily != null;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(loaded ? '已应用自定义字体' : '字体加载失败，已降级为系统字体'),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }

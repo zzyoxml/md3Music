@@ -1,7 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// 歌词显示偏好设置（字号 + 行间距）。
+/// 歌词字体来源枚举（与全局 [FontSource] 解耦，允许歌词使用与 UI 不同的字体）。
+///
+/// - [LyricFontSource.system]：使用手机系统字体（默认，符合"优先展示用户手机字体"需求）
+/// - [LyricFontSource.bundled]：使用内置打包的 SimHei
+/// - [LyricFontSource.custom]：使用用户通过 SAF 选择的 TTF/OTF 文件
+enum LyricFontSource { system, bundled, custom }
+
+/// 歌词显示偏好设置（字号 + 行间距 + 字体）。
 ///
 /// 提供全局静态访问 + ChangeNotifier 通知，供 AppleLyricsView、
 /// 设置页滑块、长按菜单共同读写。
@@ -11,9 +21,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 字号范围：[minFontSize] ~ [maxFontSize]，默认 [defaultFontSize]。
 /// 行间距系数范围：[minLineSpacing] ~ [maxLineSpacing]，默认 [defaultLineSpacing]。
 /// 实际行高 = (fontSize / defaultFontSize) * lineSpacing。
+///
+/// 字体来源（[fontSource]）独立于全局 ThemeProvider，允许歌词使用专属字体。
+/// 自定义字体通过 Flutter [FontLoader] 动态注册，family 名固定为
+/// [lyricCustomFontFamily]；切换为 system/bundled 时该 family 不会被使用。
 class LyricPreferences extends ChangeNotifier {
   LyricPreferences._();
   static final LyricPreferences instance = LyricPreferences._();
+
+  /// 歌词自定义字体注册到 Flutter 的 family 名（固定）
+  static const String lyricCustomFontFamily = 'LyricUserCustomFont';
 
   // ============== 范围与默认值 ==============
 
@@ -53,6 +70,8 @@ class LyricPreferences extends ChangeNotifier {
   static const String _keyUseGaussianBlur = 'lyric_use_gaussian_blur';
   static const String _keyUseGlowEffect = 'lyric_use_glow_effect';
   static const String _keyUseFlowingBackground = 'lyric_use_flowing_background';
+  static const String _keyFontSource = 'lyric_font_source';
+  static const String _keyCustomFontPath = 'lyric_custom_font_path';
 
   // ============== 当前值 ==============
 
@@ -61,6 +80,10 @@ class LyricPreferences extends ChangeNotifier {
   bool _useGaussianBlur = true;
   bool _useGlowEffect = true;
   bool _useFlowingBackground = true;
+  LyricFontSource _fontSource = LyricFontSource.system;
+  String? _customFontPath;
+  // 运行时加载成功后填充的 family（仅 custom 模式且加载成功时非 null）
+  String? _loadedCustomFontFamily;
   bool _loaded = false;
 
   double get fontSize => _fontSize;
@@ -68,6 +91,24 @@ class LyricPreferences extends ChangeNotifier {
   bool get useGaussianBlur => _useGaussianBlur;
   bool get useGlowEffect => _useGlowEffect;
   bool get useFlowingBackground => _useFlowingBackground;
+  LyricFontSource get fontSource => _fontSource;
+  String? get customFontPath => _customFontPath;
+
+  /// 当前生效的 fontFamily（传给 TextPainter 的 TextStyle）：
+  /// - [LyricFontSource.system]：返回 null（让 Flutter 走系统字体链）
+  /// - [LyricFontSource.bundled]：返回 'SimHei'
+  /// - [LyricFontSource.custom]：返回 [_loadedCustomFontFamily]，
+  ///   加载失败时为 null（实际降级为 system 行为）
+  String? get effectiveFontFamily {
+    switch (_fontSource) {
+      case LyricFontSource.system:
+        return null;
+      case LyricFontSource.bundled:
+        return 'SimHei';
+      case LyricFontSource.custom:
+        return _loadedCustomFontFamily;
+    }
+  }
 
   /// 计算实际行高系数。
   ///
@@ -88,8 +129,14 @@ class LyricPreferences extends ChangeNotifier {
     _useGaussianBlur = prefs.getBool(_keyUseGaussianBlur) ?? true;
     _useGlowEffect = prefs.getBool(_keyUseGlowEffect) ?? true;
     _useFlowingBackground = prefs.getBool(_keyUseFlowingBackground) ?? true;
+    _fontSource = _fontSourceFromName(prefs.getString(_keyFontSource));
+    _customFontPath = prefs.getString(_keyCustomFontPath);
     _loaded = true;
     notifyListeners();
+    // 若已配置自定义字体，立即尝试加载（Fire-and-forget，加载完成后会 notifyListeners）
+    if (_fontSource == LyricFontSource.custom) {
+      await _tryLoadCustomFont();
+    }
   }
 
   /// 设置字号并持久化。会触发 [notifyListeners]。
@@ -139,6 +186,69 @@ class LyricPreferences extends ChangeNotifier {
     await prefs.setBool(_keyUseFlowingBackground, enabled);
   }
 
+  // ============== 歌词字体来源 ==============
+
+  /// 设置字体来源并持久化。
+  Future<void> setFontSource(LyricFontSource source) async {
+    if (_fontSource == source) return;
+    _fontSource = source;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyFontSource, source.name);
+  }
+
+  /// 设置自定义字体文件路径并立即尝试加载注册。
+  /// 传 null 清除路径并卸载已加载的字体（实际效果降级到 system）。
+  Future<void> setCustomFontPath(String? path) async {
+    if (_customFontPath == path) return;
+    _customFontPath = path;
+    final prefs = await SharedPreferences.getInstance();
+    if (path != null) {
+      await prefs.setString(_keyCustomFontPath, path);
+      await _tryLoadCustomFont();
+    } else {
+      await prefs.remove(_keyCustomFontPath);
+      _loadedCustomFontFamily = null;
+      notifyListeners();
+    }
+  }
+
+  /// 内部：尝试用 FontLoader 加载 [_customFontPath] 指向的字体文件。
+  /// 加载成功则填充 [_loadedCustomFontFamily] 并 notifyListeners。
+  Future<void> _tryLoadCustomFont() async {
+    final path = _customFontPath;
+    if (path == null || path.isEmpty) {
+      _loadedCustomFontFamily = null;
+      return;
+    }
+    final file = File(path);
+    if (!file.existsSync()) {
+      _loadedCustomFontFamily = null;
+      return;
+    }
+    try {
+      final bytes = await file.readAsBytes();
+      final loader = FontLoader(lyricCustomFontFamily);
+      loader.addFont(Future.value(bytes.buffer.asByteData()));
+      await loader.load();
+      _loadedCustomFontFamily = lyricCustomFontFamily;
+      notifyListeners();
+    } catch (_) {
+      _loadedCustomFontFamily = null;
+    }
+  }
+
+  static LyricFontSource _fontSourceFromName(String? name) {
+    switch (name) {
+      case 'bundled':
+        return LyricFontSource.bundled;
+      case 'custom':
+        return LyricFontSource.custom;
+      default:
+        return LyricFontSource.system;
+    }
+  }
+
   /// 重置为默认值。
   Future<void> reset() async {
     _fontSize = defaultUserFontSize;
@@ -146,6 +256,9 @@ class LyricPreferences extends ChangeNotifier {
     _useGaussianBlur = true;
     _useGlowEffect = true;
     _useFlowingBackground = true;
+    _fontSource = LyricFontSource.system;
+    _customFontPath = null;
+    _loadedCustomFontFamily = null;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyFontSize, _fontSize);
@@ -153,5 +266,7 @@ class LyricPreferences extends ChangeNotifier {
     await prefs.setBool(_keyUseGaussianBlur, _useGaussianBlur);
     await prefs.setBool(_keyUseGlowEffect, _useGlowEffect);
     await prefs.setBool(_keyUseFlowingBackground, _useFlowingBackground);
+    await prefs.remove(_keyFontSource);
+    await prefs.remove(_keyCustomFontPath);
   }
 }

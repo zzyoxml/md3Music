@@ -35,6 +35,15 @@ class LyricLayout {
   /// 之前是固定 1.2，现在支持跟随字号缩放 + 用户调节。
   static double get lineHeight => LyricPreferences.instance.lineHeightMultiplier;
 
+  /// 歌词 fontFamily：返回用户偏好的字体 family（system 模式为 null）。
+  ///
+  /// 所有歌词渲染/测量路径的 [TextStyle] 必须显式传入此值，否则
+  /// TextPainter + Canvas 直接绘制路径不会继承 [ThemeData.fontFamily]。
+  /// - null：Flutter 走系统字体链（Android 默认 Roboto + Noto Sans CJK）
+  /// - 'SimHei'：内置打包字体
+  /// - 'LyricUserCustomFont'：用户通过 SAF 选择并加载的自定义字体
+  static String? get fontFamily => LyricPreferences.instance.effectiveFontFamily;
+
   // ============== 行 wrapper 间距 ==============
 
   /// 行 wrapper padding（垂直 0.4em，水平 1em）
@@ -88,7 +97,9 @@ class LyricLayout {
       final painter = TextPainter(
         text: TextSpan(
           text: line.text,
-          style: TextStyle(fontSize: fontSize, height: lineHeight),
+          // 显式注入歌词 fontFamily，必须与 line_renderer 渲染路径一致，
+          // 否则行高测量与实际渲染不匹配会导致跳动
+          style: TextStyle(fontSize: fontSize, height: lineHeight, fontFamily: fontFamily),
         ),
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: maxWidth);
@@ -106,7 +117,8 @@ class LyricLayout {
       final painter = TextPainter(
         text: TextSpan(
           text: word.text,
-          style: TextStyle(fontSize: fontSize, height: lineHeight),
+          // 显式注入歌词 fontFamily，必须与 word_renderer 测量路径一致
+          style: TextStyle(fontSize: fontSize, height: lineHeight, fontFamily: fontFamily),
         ),
         textDirection: TextDirection.ltr,
       )..layout();
