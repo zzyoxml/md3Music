@@ -71,6 +71,10 @@ class LyricScrollController {
   /// 用户是否正在手动拖动歌词
   bool get isUserScrolling => _isUserScrolling;
 
+  /// 是否在等待自动回弹（用户松手后、倒计时结束前）
+  bool get isWaitingForAutoReturn =>
+      !_isUserScrolling && !_autoReturned && _autoReturnRemainingMs > 0;
+
   /// 当前 posY（用于绘制时偏移）
   double get posY => _posYSpring.position;
 

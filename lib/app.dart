@@ -35,11 +35,11 @@ import 'services/nodejs_server.dart';
 
 /// 主页（`/`）专用的 [MaterialPageRoute] 子类。
 ///
-/// 重写 [buildTransitions]：当 FullPlayer 在栈顶（[isFullPlayerOnTop] == true）
+/// 重写 [buildTransitions]：当 FullPlayer 在栈顶（[playerExpansion] > 0.5）
 /// 且 [secondaryAnimation] 驱动时，让 _MainLayout 向上偏移 15% + 淡出
 /// （Apple Music 经典效果）；其他路由 push 时走默认 transitions。
 ///
-/// 通过 [isFullPlayerOnTop] 全局 ValueNotifier 限制只对 FullPlayer 生效，
+/// 通过全局 [playerExpansion] 限制只对 FullPlayer 生效，
 /// 避免 /search /settings /playlist 等也触发 up-fade。
 class _UpFadeMainRoute<T> extends MaterialPageRoute<T> {
   _UpFadeMainRoute({required super.builder});
@@ -52,11 +52,11 @@ class _UpFadeMainRoute<T> extends MaterialPageRoute<T> {
     Widget child,
   ) {
     // 入场动画走默认（_MainLayout 是 initialRoute，入场无动画）
-    // 离场动画（被覆盖）：监听 isFullPlayerOnTop，true 时 up-fade，false 时默认
+    // 离场动画（被覆盖）：监听 playerExpansion，> 0.5 时 up-fade，否则默认
     return AnimatedBuilder(
-      animation: Listenable.merge([secondaryAnimation, isFullPlayerOnTop]),
+      animation: Listenable.merge([secondaryAnimation, playerExpansion]),
       builder: (context, _) {
-        if (!isFullPlayerOnTop.value) {
+        if (playerExpansion.value <= 0.5) {
           return super.buildTransitions(
             context,
             animation,
@@ -239,18 +239,23 @@ class _MainLayout extends StatefulWidget {
 
 class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   int _selectedIndex = 0;
+  int _previousSelectedIndex = 0;
 
-  final List<Widget> _pages = const [
-    DiscoverPage(),
-    ChartsPage(),
-    FavoritesPage(),
-    PersonalFmPage(),
-    UserCenterPage(),
-  ];
+  late final List<Widget> _pages;
 
   @override
   void initState() {
     super.initState();
+    _pages = [
+      DiscoverPage(onAvatarTap: () => setState(() {
+        _previousSelectedIndex = _selectedIndex;
+        _selectedIndex = 4;
+      })),
+      const ChartsPage(),
+      const FavoritesPage(),
+      const PersonalFmPage(),
+      const UserCenterPage(),
+    ];
     // 未登录时尝试播放联网歌曲,弹出登录提示
     context.read<PlayerProvider>().onLoginRequired = _showLoginRequiredDialog;
     // 监听应用生命周期：detached（进程被系统销毁前的最后窗口）时尝试关停本地 Node.js
@@ -407,34 +412,75 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
           setState(() {
+            _previousSelectedIndex = _selectedIndex;
             _selectedIndex = index;
           });
         },
-        body: Column(
-          children: [
-            Expanded(child: _pages[_selectedIndex]),
-            const MiniPlayer(),
-          ],
-        ),
-        compactBody: Column(
-          children: [
-            Expanded(child: _pages[_selectedIndex]),
-            const MiniPlayer(),
-          ],
-        ),
-        mediumBody: Column(
-          children: [
-            Expanded(child: _pages[_selectedIndex]),
-            const MiniPlayer(),
-          ],
-        ),
-        expandedBody: Column(
-          children: [
-            Expanded(child: _pages[_selectedIndex]),
-            const MiniPlayer(),
-          ],
-        ),
+        body: _buildBody(context),
+        compactBody: _buildBody(context),
+        mediumBody: _buildBody(context),
+        expandedBody: _buildBody(context),
       ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context) {
+    // 切换方向：pad 用上下淡入，手机用左右滑动
+    final isPad = context.read<DeviceProvider>().isPad;
+    final goingRight = _selectedIndex > _previousSelectedIndex;
+
+    return Column(
+      children: [
+        Expanded(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 400),
+            switchInCurve: const Interval(0.5, 1.0, curve: Curves.easeOut),
+            switchOutCurve: const Interval(0.0, 0.5, curve: Curves.easeIn),
+            transitionBuilder: (child, animation) {
+              final isEntering = child.key == ValueKey(_selectedIndex);
+
+              if (isPad) {
+                // Pad：基于 tab 顺序上下滑动
+                // tab 序号增大 → 旧页面向上滑出，新页面从下方滑入
+                // tab 序号减小 → 旧页面向下滑出，新页面从上方滑入
+                final slideY = isEntering
+                    ? (goingRight ? 0.1 : -0.1)
+                    : (goingRight ? -0.1 : 0.1);
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: Offset(0.0, slideY),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              } else {
+                // 手机：左右滑动淡入淡出
+                final slideX = isEntering
+                    ? (goingRight ? 0.12 : -0.12)
+                    : (goingRight ? -0.12 : 0.12);
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: Offset(slideX, 0.0),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              }
+            },
+            child: KeyedSubtree(
+              key: ValueKey(_selectedIndex),
+              child: _pages[_selectedIndex],
+            ),
+          ),
+        ),
+        const MiniPlayer(),
+      ],
     );
   }
 

@@ -15,6 +15,7 @@ import 'comments_view.dart';
 import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/player_playlist_dialog.dart';
+import 'full_player_route.dart';
 
 /// 预加载封面图片到磁盘缓存，防止切换时白屏
 void _preloadArtwork(String? url) {
@@ -55,6 +56,62 @@ class _FullPlayerState extends State<FullPlayer>
   bool _isPhoneLandscape = false;
   // 拖动进度条前的播放状态，用于拖动结束后恢复
   bool _wasPlayingBeforeDrag = false;
+
+  // === 拖拽收起手势：通过驱动路由 AnimationController 实现 ===
+  double _dragStartY = 0;
+  /// 防止 PopScope 回调与 dismiss() 重复触发。
+  bool _isDismissing = false;
+
+  /// 获取当前路由的 AnimationController。
+  AnimationController? get _routeController {
+    final route = ModalRoute.of(context);
+    if (route is DraggablePlayerRoute) {
+      return route.controller;
+    }
+    return null;
+  }
+
+  void _onHandleDragStart(DragStartDetails details) {
+    _dragStartY = details.globalPosition.dy;
+  }
+
+  void _onHandleDragUpdate(DragUpdateDetails details) {
+    final controller = _routeController;
+    if (controller == null) return;
+    final dy = details.globalPosition.dy - _dragStartY;
+    if (dy <= 0) return;
+    final progress = 1.0 - (dy / kPlayerDragThreshold).clamp(0.0, 1.0);
+    controller.stop();
+    controller.value = progress;
+  }
+
+  void _onHandleDragEnd(DragEndDetails details) {
+    final controller = _routeController;
+    if (controller == null) return;
+    final currentProgress = controller.value;
+    final velocity = details.primaryVelocity ?? 0;
+
+    if (currentProgress < 0.5 || velocity > 300) {
+      // 收起：用 dismiss() 走统一的 reverse + pop 流程
+      _isDismissing = true;
+      final route = ModalRoute.of(context);
+      if (route is DraggablePlayerRoute) {
+        route.dismiss();
+      }
+    } else {
+      controller.forward();
+    }
+  }
+
+  void _collapseByButton() {
+    final route = ModalRoute.of(context);
+    if (route is DraggablePlayerRoute) {
+      _isDismissing = true;
+      route.dismiss();
+    } else {
+      Navigator.of(context).maybePop();
+    }
+  }
 
   @override
   void initState() {
@@ -118,8 +175,10 @@ class _FullPlayerState extends State<FullPlayer>
 
   @override
   void didChangeMetrics() {
-    // 用户旋转设备时重新应用沉浸模式
-    applyImmersiveForOrientation();
+    // 延迟一帧再检测方向，确保 physicalSize 已更新为新方向
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) applyImmersiveForOrientation();
+    });
   }
 
   void _onPlayerSongChanged() {
@@ -275,7 +334,15 @@ class _FullPlayerState extends State<FullPlayer>
       );
     }
 
-    return Scaffold(
+    // 拦截系统返回键：先播放 reverse 动画（mini player 淡入），
+    // 动画完成后用 removeRoute 移除路由（绕过 PopScope 避免死循环）。
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || _isDismissing) return;
+        _collapseByButton();
+      },
+      child: Scaffold(
       backgroundColor: colorScheme.surface,
       body: ResponsiveLayout(
         compact: (_) =>
@@ -285,6 +352,7 @@ class _FullPlayerState extends State<FullPlayer>
         expanded: (_) =>
             _buildExpandedLayout(playerProvider, currentSong, colorScheme),
       ),
+    ),
     );
   }
 
@@ -618,28 +686,56 @@ class _FullPlayerState extends State<FullPlayer>
         ? const [Tab(text: '歌词'), Tab(text: '评论')]
         : const [Tab(text: '封面'), Tab(text: '歌词'), Tab(text: '评论')];
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.keyboard_arrow_down),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-          Expanded(
-            child: TabBar(
-              controller: _tabController,
-              tabs: tabs,
-              labelStyle: Theme.of(context).textTheme.labelMedium,
-              indicatorSize: TabBarIndicatorSize.label,
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // 顶部下拉手柄：向下拖拽收起到 MiniPlayer，淡入淡出与拖拽距离线性绑定
+        GestureDetector(
+          onVerticalDragStart: _onHandleDragStart,
+          onVerticalDragUpdate: _onHandleDragUpdate,
+          onVerticalDragEnd: _onHandleDragEnd,
+          behavior: HitTestBehavior.opaque,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 12, bottom: 8),
+            child: Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurfaceVariant
+                      .withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.more_vert),
-            onPressed: () => _showMoreMenu(context),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.keyboard_arrow_down),
+                onPressed: _collapseByButton,
+              ),
+              Expanded(
+                child: TabBar(
+                  controller: _tabController,
+                  tabs: tabs,
+                  labelStyle: Theme.of(context).textTheme.labelMedium,
+                  indicatorSize: TabBarIndicatorSize.label,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.more_vert),
+                onPressed: () => _showMoreMenu(context),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 

@@ -211,7 +211,7 @@ class LyricLayout {
   static const double clickThresholdPx = 10;
 
   /// 用户滚动后自动回弹到当前行的超时时间
-  static const int autoReturnMs = 5000;
+  static const int autoReturnMs = 3000;
 
   // ============== 弹簧参数：行缩放 ==============
 

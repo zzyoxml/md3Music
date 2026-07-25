@@ -12,11 +12,15 @@ import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/song_list_item.dart';
 import '../charts/charts_page.dart';
 import '../playlist/playlist_page.dart';
+import '../recognition/song_recognition_page.dart';
 import '../search/search_page.dart';
 import '../recognition/song_recognition_page.dart';
 
 class DiscoverPage extends StatefulWidget {
-  const DiscoverPage({super.key});
+  const DiscoverPage({super.key, this.onAvatarTap});
+
+  /// 点击头像时的回调（用于切换到"我的"tab）
+  final VoidCallback? onAvatarTap;
 
   @override
   State<DiscoverPage> createState() => _DiscoverPageState();
@@ -151,7 +155,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
             ).push(MaterialPageRoute(builder: (_) => const SearchPage())),
           ),
           IconButton(
-            icon: const Icon(Icons.mic),
+            icon: const Icon(Icons.mic_outlined),
             onPressed: () => Navigator.of(
               context,
             ).push(MaterialPageRoute(builder: (_) => const SongRecognitionPage())),
@@ -159,9 +163,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
           Consumer<KugouProvider>(
             builder: (context, kugou, _) => Padding(
               padding: const EdgeInsets.only(right: 8),
-              // 头像可点击：跳转到「我的」页面（push 独立路由）
+              // 头像可点击：切换到「我的」tab
               child: GestureDetector(
-                onTap: () => Navigator.of(context).pushNamed('/user'),
+                onTap: () => widget.onAvatarTap?.call(),
                 child: _buildAvatar(kugou, colorScheme),
               ),
             ),
