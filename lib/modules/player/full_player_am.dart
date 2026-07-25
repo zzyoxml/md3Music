@@ -66,6 +66,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
   // === 拖拽收起手势：通过驱动路由 AnimationController 实现 ===
   double _dragStartY = 0;
+  /// 防止 PopScope 回调与 dismiss() 重复触发。
+  bool _isDismissing = false;
 
   @override
   void initState() {
@@ -360,10 +362,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final velocity = details.primaryVelocity ?? 0;
 
     if (currentProgress < 0.5 || velocity > 300) {
-      // 收起：reverse 到 0，然后 pop
-      controller.reverse().then((_) {
-        if (mounted) Navigator.of(context).maybePop();
-      });
+      // 收起：用 dismiss() 走统一的 reverse + pop 流程
+      _isDismissing = true;
+      final route = ModalRoute.of(context);
+      if (route is DraggablePlayerRoute) {
+        route.dismiss();
+      }
     } else {
       // 回退展开：forward 到 1.0
       controller.forward();
@@ -372,14 +376,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
   /// 点击下拉按钮直接收起（保留原 _buildTopBar 的 IconButton 行为）。
   void _collapseByButton() {
-    final controller = _routeController;
-    if (controller == null) {
+    final route = ModalRoute.of(context);
+    if (route is DraggablePlayerRoute) {
+      _isDismissing = true;
+      route.dismiss();
+    } else {
       Navigator.of(context).maybePop();
-      return;
     }
-    controller.reverse().then((_) {
-      if (mounted) Navigator.of(context).maybePop();
-    });
   }
 
   @override
@@ -401,9 +404,16 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       _previousArtworkUrl = currentSong.artworkUri;
     }
 
-    // 直接构建全屏布局，外层 Opacity + SlideTransition 由
-    // DraggablePlayerRoute.buildTransitions 负责，此处不需要再包一层。
-    return _buildFullLayout(playerProvider, currentSong, colorScheme);
+    // 拦截系统返回键：先播放 reverse 动画（mini player 淡入），
+    // 动画完成后用 removeRoute 移除路由（绕过 PopScope 避免死循环）。
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || _isDismissing) return;
+        _collapseByButton();
+      },
+      child: _buildFullLayout(playerProvider, currentSong, colorScheme),
+    );
   }
 
   /// 全屏 Apple Music 风格布局：模糊封面背景 + 蒙版 + 三套响应式布局。

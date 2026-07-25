@@ -49,6 +49,22 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
   @override
   late AnimationController controller;
 
+  /// 是否正在执行 dismiss 流程（reverse 动画 + removeRoute），
+  /// 防止手势/按钮重复触发。
+  bool _isDismissing = false;
+
+  /// 收起播放器：播放 reverse 动画，完成后移除路由。
+  /// 供 FullPlayer 内部的按钮/手势调用。
+  void dismiss() {
+    if (_isDismissing) return;
+    _isDismissing = true;
+    controller.reverse().then((_) {
+      if (navigator?.mounted ?? false) {
+        navigator!.removeRoute(this);
+      }
+    });
+  }
+
   /// Flutter 3.44 起 [TransitionRoute.createAnimationController] 不再接收
   /// `vsync` 参数——框架内部直接使用 `navigator!` 作为 TickerProvider。
   /// 我们在此重写仅是为了定制 `duration` / `reverseDuration`，并把创建的
