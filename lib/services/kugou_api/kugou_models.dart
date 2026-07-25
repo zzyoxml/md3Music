@@ -101,6 +101,23 @@ class KugouArtistBrief {
       return s.replaceAll(RegExp(r'<[^>]*>'), '').trim();
     }
 
+    // 提取第一个歌手名（"周杰伦、袁咏琳" → "周杰伦"）
+    String extractFirstName(String s) {
+      if (s.isEmpty) return s;
+      // 按 "、" 或 "," 分割，取第一个
+      final parts = s.split(RegExp(r'[、,，]'));
+      return parts.first.trim();
+    }
+
+    final rawName = cleanName(
+      json['singername'] ??
+          json['artist_name'] ??
+          json['SingerName'] ??
+          json['author_name'] ??
+          json['name'] ??
+          '',
+    );
+
     return KugouArtistBrief(
       id: _str(
         json['singerid'] ??
@@ -110,14 +127,7 @@ class KugouArtistBrief {
             json['mix_singer_id'] ??
             '',
       ),
-      name: cleanName(
-        json['singername'] ??
-            json['artist_name'] ??
-            json['SingerName'] ??
-            json['author_name'] ??
-            json['name'] ??
-            '',
-      ),
+      name: extractFirstName(rawName),
       avatarUrl: _resolveArtworkUri(
         json['imgurl'] ??
             json['avatar_url'] ??

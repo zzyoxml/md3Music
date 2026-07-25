@@ -345,8 +345,12 @@ class KugouProvider extends ChangeNotifier {
       } else if (type == 'artist') {
         final artists = await _apiClient.searchArtists(keywords, page: 1, pagesize: 30);
         if (artists != null && artists.isNotEmpty) {
+          final keyword = keywords.toLowerCase();
+          // 只保留名字包含搜索关键词的歌手，按名字去重
           final seen = <String>{};
-          final unique = artists.where((a) => a.name.isNotEmpty && seen.add(a.name)).toList();
+          final unique = artists
+              .where((a) => a.name.isNotEmpty && a.name.toLowerCase().contains(keyword) && seen.add(a.name))
+              .toList();
           _searchResults = KugouSearchResult(artists: unique, total: unique.length);
         } else {
           _error = '搜索失败';
