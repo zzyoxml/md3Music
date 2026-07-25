@@ -416,16 +416,17 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
             _selectedIndex = index;
           });
         },
-        body: _buildBody(),
-        compactBody: _buildBody(),
-        mediumBody: _buildBody(),
-        expandedBody: _buildBody(),
+        body: _buildBody(context),
+        compactBody: _buildBody(context),
+        mediumBody: _buildBody(context),
+        expandedBody: _buildBody(context),
       ),
     );
   }
 
-  Widget _buildBody() {
-    // 切换方向：左→右 tab = 向左滑，右→左 tab = 向右滑
+  Widget _buildBody(BuildContext context) {
+    // 切换方向：pad 用上下淡入，手机用左右滑动
+    final isPad = context.read<DeviceProvider>().isPad;
     final goingRight = _selectedIndex > _previousSelectedIndex;
 
     return Column(
@@ -436,23 +437,37 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
             switchInCurve: const Interval(0.5, 1.0, curve: Curves.easeOut),
             switchOutCurve: const Interval(0.0, 0.5, curve: Curves.easeIn),
             transitionBuilder: (child, animation) {
-              // 淡出方向：旧页面滑出的方向
-              // 淡入方向：新页面从相反方向滑入
               final isEntering = child.key == ValueKey(_selectedIndex);
-              final slideDirection = isEntering
-                  ? (goingRight ? 0.12 : -0.12)  // 新页面从右/左滑入
-                  : (goingRight ? -0.12 : 0.12);  // 旧页面向左/右滑出
 
-              return FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: Offset(slideDirection, 0.0),
-                    end: Offset.zero,
-                  ).animate(animation),
-                  child: child,
-                ),
-              );
+              if (isPad) {
+                // Pad：上下淡入淡出
+                final slideY = isEntering ? 0.1 : -0.1;
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: Offset(0.0, slideY),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              } else {
+                // 手机：左右滑动淡入淡出
+                final slideX = isEntering
+                    ? (goingRight ? 0.12 : -0.12)
+                    : (goingRight ? -0.12 : 0.12);
+                return FadeTransition(
+                  opacity: animation,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: Offset(slideX, 0.0),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                );
+              }
             },
             child: KeyedSubtree(
               key: ValueKey(_selectedIndex),
