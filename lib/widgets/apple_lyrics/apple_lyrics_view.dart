@@ -117,11 +117,13 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 模糊级别缓存：只在当前行变化时重算
   int _cachedBlurLineIndex = -1;
   Map<int, int> _cachedBlurLevels = const {};
-  bool _blurLevelsDirty = true;
-  int _blurFrameCounter = 0;
 
-  /// 模糊 widget 缓存
-  List<Widget> _cachedBlurWidgets = const [];
+  /// Per-Line 模糊缓存：每行独立缓存模糊图片
+  final Map<int, ui.Image> _lineBlurImages = {};
+  double _viewportWidth = 0;
+
+  /// 最大 sigma 限制
+  static const double _maxSigma = 2.0;
 
   // ============== 级联弹簧延迟 ==============
 
@@ -302,6 +304,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   void dispose() {
     _ticker.dispose();
     _scrollController.dispose();
+    for (final image in _lineBlurImages.values) {
+      image.dispose();
+    }
+    _lineBlurImages.clear();
     LyricPreferences.instance.removeListener(_onPreferencesChanged);
     super.dispose();
   }
@@ -492,8 +498,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     if ((_blurFade - blurFadeTarget).abs() < 0.01) {
       _blurFade = blurFadeTarget;
     }
-    // fade 变化时失效 widget 缓存（sigma 依赖 fade）
-    if (_blurFade != oldBlurFade) _blurLevelsDirty = true;
 
     // 11. 触发重绘
     setState(() {});
@@ -671,14 +675,19 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           onVerticalDragEnd: _onVerticalDragEnd,
           child: useGaussian
               ? ClipRect(
-                  child: Stack(
-                    children: [
-                      lyricsContent,
-                      ..._buildBlurLayers(
-                        constraints.maxHeight,
-                        mainLineHeight,
-                      ),
-                    ],
+                  child: Builder(
+                    builder: (context) {
+                      _viewportWidth = constraints.maxWidth;
+                      return Stack(
+                        children: [
+                          lyricsContent,
+                          ..._buildBlurLayers(
+                            constraints.maxHeight,
+                            mainLineHeight,
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 )
               : ShaderMask(
@@ -728,16 +737,16 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     return blurLevel.clamp(0, 5);
   }
 
-  /// 构建基于距离驱动的高斯模糊层。
+  /// 构建基于距离驱动的高斯模糊层（Per-Line 缓存版）。
   ///
-  /// 使用 BackdropFilter 实现，每 2 帧更新一次以降低 GPU 开销。
+  /// 每行歌词独立缓存模糊图片，位置变化时只重定位，不重新计算模糊。
+  /// 模糊图片替代歌词显示（而非叠加）。
   List<Widget> _buildBlurLayers(double viewportHeight, double mainLineHeight) {
     if (_currentLineIndex < 0) return const [];
 
-    // 缓存原始 blur level：只在当前行变化时重算
+    // 当前行变化时重新计算 blur levels 并更新缓存
     if (_currentLineIndex != _cachedBlurLineIndex) {
       _cachedBlurLineIndex = _currentLineIndex;
-      _blurLevelsDirty = true;
 
       final double visibleRange = viewportHeight / mainLineHeight;
       final int halfRange = (visibleRange / 2).ceil() + 1;
@@ -751,21 +760,20 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         if (blurLevel > 0) levels[i] = blurLevel;
       }
       _cachedBlurLevels = levels;
+
+      // 异步渲染变化行的模糊图片
+      _updateLineBlurCache(levels, mainLineHeight);
     }
 
-    // 每 2 帧才更新一次模糊层
-    _blurFrameCounter++;
-    if (_blurFrameCounter % 2 != 0 && _cachedBlurWidgets.isNotEmpty) {
-      return _cachedBlurWidgets;
-    }
-    _blurLevelsDirty = false;
-
-    // 构建 BackdropFilter 列表
+    // 从缓存绘制模糊层
     final List<Widget> layers = [];
     for (final entry in _cachedBlurLevels.entries) {
       final int i = entry.key;
-      final double sigma = entry.value * 0.35 * _blurFade;
-      if (sigma < 0.01) continue;
+      final double sigma = (entry.value * 1.0 * _blurFade).clamp(0.5, 5.0);
+      if (sigma < 0.1) continue;
+
+      final image = _lineBlurImages[i];
+      if (image == null) continue;
 
       final double lineTop = (i < _lineTops.length
               ? _lineTops[i]
@@ -778,28 +786,102 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
       if (y + lineHeight < 0 || y > viewportHeight) continue;
 
-      final double clampedTop = y < 0 ? 0.0 : y;
-      final double clampedBottom =
-          y + lineHeight > viewportHeight ? viewportHeight : y + lineHeight;
-      final double height = clampedBottom - clampedTop;
-      if (height <= 0) continue;
+      final double padding = sigma * 3;
 
       layers.add(Positioned(
-        top: clampedTop,
+        top: y - padding,
         left: 0,
-        right: 0,
-        height: height,
-        child: ClipRect(
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-            child: const SizedBox.expand(),
-          ),
+        width: _viewportWidth,
+        height: lineHeight + padding * 2,
+        child: RawImage(
+          image: image,
+          width: _viewportWidth,
+          height: lineHeight + padding * 2,
+          fit: BoxFit.fill,
         ),
       ));
     }
 
-    _cachedBlurWidgets = layers;
     return layers;
+  }
+
+  /// 异步更新模糊缓存：为变化的行渲染模糊图片。
+  void _updateLineBlurCache(Map<int, int> levels, double mainLineHeight) {
+    for (final entry in levels.entries) {
+      final int lineIndex = entry.key;
+      final int blurLevel = entry.value;
+      if (_lineBlurImages.containsKey(lineIndex)) continue;
+
+      _renderLineBlur(lineIndex, blurLevel, mainLineHeight).then((image) {
+        if (image != null) {
+          _lineBlurImages[lineIndex]?.dispose();
+          _lineBlurImages[lineIndex] = image;
+        }
+      });
+    }
+
+    // 清理不再需要的缓存
+    final keysToRemove = _lineBlurImages.keys
+        .where((k) => !levels.containsKey(k))
+        .toList();
+    for (final key in keysToRemove) {
+      _lineBlurImages[key]?.dispose();
+      _lineBlurImages.remove(key);
+    }
+  }
+
+  /// 异步渲染单行模糊图片。
+  ///
+  /// 渲染歌词文字到 Picture，应用 ImageFilter.blur，转为 ui.Image 缓存。
+  Future<ui.Image?> _renderLineBlur(int lineIndex, int blurLevel, double mainLineHeight) async {
+    try {
+      if (_viewportWidth <= 0) return null;
+
+      // sigma 范围放大：blurLevel 1-5 → sigma 1.0-5.0
+      final double sigma = (blurLevel * 1.0 * _blurFade).clamp(0.5, 5.0);
+      final double fontSize = LyricLayout.fontSize(context);
+      final double lineHeight = (lineIndex < _lineHeights.length)
+          ? _lineHeights[lineIndex]
+          : mainLineHeight;
+      final double padding = sigma * 3;
+      final double renderHeight = lineHeight + padding * 2;
+
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+
+      // 绘制歌词文字（白色，与原歌词位置对齐）
+      final textPainter = TextPainter(textDirection: TextDirection.ltr);
+      textPainter.text = TextSpan(
+        text: widget.lines[lineIndex].text,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: fontSize,
+          height: LyricLayout.lineHeight,
+        ),
+      );
+      textPainter.layout(maxWidth: _viewportWidth - fontSize * 2);
+      textPainter.paint(canvas, Offset(fontSize, padding));
+
+      // 对画布应用模糊
+      final blurPaint = Paint()
+        ..imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma);
+      canvas.saveLayer(
+        Rect.fromLTWH(0, 0, _viewportWidth, renderHeight),
+        blurPaint,
+      );
+      // 重新绘制文字（在 blur layer 内）
+      textPainter.paint(canvas, Offset(fontSize, padding));
+      canvas.restore();
+
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(
+        _viewportWidth.toInt(),
+        renderHeight.toInt(),
+      );
+      return image;
+    } catch (_) {
+      return null;
+    }
   }
 }
 
