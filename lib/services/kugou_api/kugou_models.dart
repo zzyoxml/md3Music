@@ -338,7 +338,7 @@ class KugouSongDetail {
   });
 
   factory KugouSongDetail.fromJson(Map<String, dynamic> json) {
-    // 处理 singerinfo 数组格式
+    // 处理 singerinfo / authors 数组格式
     String? artistName;
     String? artistIdFromSingerInfo;
     final singerinfo = json['singerinfo'];
@@ -347,6 +347,19 @@ class KugouSongDetail {
       if (firstSinger is Map) {
         artistName = firstSinger['name']?.toString();
         artistIdFromSingerInfo = firstSinger['id']?.toString();
+      }
+    }
+    // kmr/v2 API 返回 authors 数组，兼容处理
+    if (artistName == null || artistName.isEmpty) {
+      final authors = json['authors'];
+      if (authors is List && authors.isNotEmpty) {
+        artistName = authors
+            .map((a) => (a is Map ? a['author_name']?.toString() : '') ?? '')
+            .where((s) => s.isNotEmpty)
+            .join(',');
+        if (artistIdFromSingerInfo == null && authors.first is Map) {
+          artistIdFromSingerInfo = authors.first['author_id']?.toString();
+        }
       }
     }
 
@@ -358,14 +371,21 @@ class KugouSongDetail {
             json['SQFileHash'] ??
             json['HQFileHash'] ??
             json['trans_param']?['ogg_128_hash'] ??
+            json['audio_info']?['hash'] ??
             '',
       ),
-      albumId: _strNull(json['album_id'] ?? json['AlbumID'] ?? json['albumid']),
+      albumId: _strNull(
+        json['album_id'] ??
+            json['AlbumID'] ??
+            json['albumid'] ??
+            json['base']?['album_id'],
+      ),
       albumName: _strNull(
         json['album_name'] ??
             json['AlbumName'] ??
             json['albumname'] ??
-            json['albuminfo']?['name'],
+            json['albuminfo']?['name'] ??
+            json['album_info']?['album_name'],
       ),
       artistId: _strNull(
         artistIdFromSingerInfo ??
@@ -390,6 +410,7 @@ class KugouSongDetail {
             json['ori_audio_name'] ??
             json['FileName'] ??
             json['filename'] ??
+            json['base']?['audio_name'] ??
             '',
       ),
       // 不同时长字段单位不统一：部分接口（如搜索）返回毫秒，部分返回秒。
@@ -400,6 +421,7 @@ class KugouSongDetail {
               json['HQDuration'] ??
               json['Duration'] ??
               json['duration'] ??
+              json['audio_info']?['duration'] ??
               json['SuperDuration'] ??
               json['timelength'] ??
               (() {
@@ -459,7 +481,9 @@ class KugouSongDetail {
             json['img'] ??
             json['pic'] ??
             json['cover'] ??
-            json['trans_param']?['union_cover'],
+            json['trans_param']?['union_cover'] ??
+            json['album_info']?['sizable_cover'] ??
+            json['album_info']?['cover'],
       ),
       fileName: _strNull(
         json['filename'] ?? json['FileName'] ?? json['ori_audio_name'],

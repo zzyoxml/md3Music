@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 class AppTheme {
   AppTheme._();
@@ -120,6 +121,16 @@ class AppTheme {
         scrolledUnderElevation: isLight ? 3 : 1,
         surfaceTintColor: colorScheme.surfaceTint,
         centerTitle: false,
+        // 显式设置状态栏样式，避免 ScrollAwareAppBar 透明背景时
+        // Flutter 根据 Colors.transparent（luminance=0）误判为深色背景，
+        // 导致浅色主题下状态栏图标变白看不清。
+        systemOverlayStyle: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness:
+              isLight ? Brightness.dark : Brightness.light,
+          statusBarBrightness:
+              isLight ? Brightness.light : Brightness.dark,
+        ),
         titleTextStyle: _buildTextStyle(
           colorScheme.onSurface,
           22,
