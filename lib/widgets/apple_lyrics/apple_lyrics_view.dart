@@ -114,6 +114,15 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 用户滚动时淡出到0，松手等待期间保持0，回弹开始后淡入到1。
   double _blurFade = 1.0;
 
+  /// 模糊级别缓存：只在当前行变化时重算
+  int _cachedBlurLineIndex = -1;
+  Map<int, int> _cachedBlurLevels = const {};
+  bool _blurLevelsDirty = true;
+  int _blurFrameCounter = 0;
+
+  /// 模糊 widget 缓存
+  List<Widget> _cachedBlurWidgets = const [];
+
   // ============== 级联弹簧延迟 ==============
 
   /// 每行偏移弹簧（行索引 → Spring）。
@@ -477,11 +486,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         _scrollController.isWaitingForAutoReturn;
     final double blurFadeTarget = shouldBlurFadeOut ? 0.0 : 1.0;
     final double blurFadeSpeed = shouldBlurFadeOut ? 6.0 : 4.0;
+    final double oldBlurFade = _blurFade;
     _blurFade += (blurFadeTarget - _blurFade) *
         (1 - math.exp(-blurFadeSpeed * dt));
     if ((_blurFade - blurFadeTarget).abs() < 0.01) {
       _blurFade = blurFadeTarget;
     }
+    // fade 变化时失效 widget 缓存（sigma 依赖 fade）
+    if (_blurFade != oldBlurFade) _blurLevelsDirty = true;
 
     // 11. 触发重绘
     setState(() {});
@@ -697,36 +709,64 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// - 已过行：1 + |currentLine - lineIndex| + 1
   /// - 未到行：1 + |lineIndex - currentLine|
   /// - 用户滚动时：0
+  /// 计算指定行的模糊级别（含 fade）。
   int _computeLineBlur(int lineIndex) {
     if (_currentLineIndex < 0 || lineIndex == _currentLineIndex) return 0;
-    // 模糊渐隐：滚动/等待期间无模糊，回弹后恢复
     if (_blurFade < 0.01) return 0;
+    return (_computeLineBlurRaw(lineIndex) * _blurFade).round().clamp(0, 5);
+  }
+
+  /// 计算指定行的原始模糊级别（不含 fade，用于缓存）。
+  int _computeLineBlurRaw(int lineIndex) {
+    if (_currentLineIndex < 0 || lineIndex == _currentLineIndex) return 0;
     int blurLevel = 1;
     if (lineIndex < _currentLineIndex) {
       blurLevel += (_currentLineIndex - lineIndex).abs() + 1;
     } else {
       blurLevel += (lineIndex - _currentLineIndex).abs();
     }
-    // 应用渐隐系数，四舍五入到整数
-    return (blurLevel * _blurFade).round().clamp(0, 5);
+    return blurLevel.clamp(0, 5);
   }
 
   /// 构建基于距离驱动的高斯模糊层。
   ///
-  /// 参考 applemusic-like-lyrics 的模糊机制：每行独立计算 blur level，
-  /// 转换为 sigma 后用 BackdropFilter 实现。
-  /// sigma = blurLevel × 0.5（CSS blur px → Flutter sigma 换算）。
+  /// 使用 BackdropFilter 实现，每 2 帧更新一次以降低 GPU 开销。
   List<Widget> _buildBlurLayers(double viewportHeight, double mainLineHeight) {
     if (_currentLineIndex < 0) return const [];
 
-    final List<Widget> layers = [];
-    // 遍历所有行，在其屏幕位置放置 BackdropFilter
-    for (int i = 0; i < widget.lines.length; i++) {
-      final int blurLevel = _computeLineBlur(i);
-      if (blurLevel <= 0) continue;
+    // 缓存原始 blur level：只在当前行变化时重算
+    if (_currentLineIndex != _cachedBlurLineIndex) {
+      _cachedBlurLineIndex = _currentLineIndex;
+      _blurLevelsDirty = true;
 
-      final double sigma = blurLevel * 0.5;
-      // 计算行的屏幕 Y 位置
+      final double visibleRange = viewportHeight / mainLineHeight;
+      final int halfRange = (visibleRange / 2).ceil() + 1;
+      final int aboveRange = (halfRange * 0.7).ceil();
+      final int startIdx = math.max(0, _currentLineIndex - aboveRange);
+      final int endIdx = math.min(widget.lines.length, _currentLineIndex + halfRange + 1);
+
+      final Map<int, int> levels = {};
+      for (int i = startIdx; i < endIdx; i++) {
+        final int blurLevel = _computeLineBlurRaw(i);
+        if (blurLevel > 0) levels[i] = blurLevel;
+      }
+      _cachedBlurLevels = levels;
+    }
+
+    // 每 2 帧才更新一次模糊层
+    _blurFrameCounter++;
+    if (_blurFrameCounter % 2 != 0 && _cachedBlurWidgets.isNotEmpty) {
+      return _cachedBlurWidgets;
+    }
+    _blurLevelsDirty = false;
+
+    // 构建 BackdropFilter 列表
+    final List<Widget> layers = [];
+    for (final entry in _cachedBlurLevels.entries) {
+      final int i = entry.key;
+      final double sigma = entry.value * 0.35 * _blurFade;
+      if (sigma < 0.01) continue;
+
       final double lineTop = (i < _lineTops.length
               ? _lineTops[i]
               : i * mainLineHeight) +
@@ -736,7 +776,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           ? _lineHeights[i]
           : mainLineHeight;
 
-      // 跳过视口外的行
       if (y + lineHeight < 0 || y > viewportHeight) continue;
 
       final double clampedTop = y < 0 ? 0.0 : y;
@@ -745,51 +784,22 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       final double height = clampedBottom - clampedTop;
       if (height <= 0) continue;
 
-      layers.add(_buildBlurRect(top: clampedTop, height: height, sigma: sigma));
+      layers.add(Positioned(
+        top: clampedTop,
+        left: 0,
+        right: 0,
+        height: height,
+        child: ClipRect(
+          child: BackdropFilter(
+            filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ));
     }
 
+    _cachedBlurWidgets = layers;
     return layers;
-  }
-
-  /// 构建一个水平全宽的模糊矩形（垂直定位）。
-  Widget _buildBlurRect({
-    required double top,
-    required double height,
-    required double sigma,
-  }) {
-    return Positioned(
-      top: top,
-      left: 0,
-      right: 0,
-      height: height,
-      child: ClipRect(
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-          child: const SizedBox.expand(),
-        ),
-      ),
-    );
-  }
-
-  /// 构建一个垂直全高的模糊矩形（水平定位）。
-  Widget _buildBlurRectHorizontal({
-    required double left,
-    required double width,
-    required double sigma,
-    required double viewportHeight,
-  }) {
-    return Positioned(
-      top: 0,
-      bottom: 0,
-      left: left,
-      width: width,
-      child: ClipRect(
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
-          child: const SizedBox.expand(),
-        ),
-      ),
-    );
   }
 }
 

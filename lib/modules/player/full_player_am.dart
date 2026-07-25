@@ -438,7 +438,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             _buildCrossfadeBlurredBackground(currentSong.artworkUri),
             // 2. 动态流光背景层（可选，从专辑封面提取色彩流动）
             if (LyricPreferences.instance.useFlowingBackground)
-              FlowingBackground(artworkUrl: currentSong.artworkUri),
+              FlowingBackground(
+                artworkUrl: currentSong.artworkUri,
+                isPlaying: playerProvider.isPlaying,
+              ),
             // 3. 半透明蒙版 rgba(0,0,0,0.35)
             _buildDarkOverlay(),
             // 4. 主体内容（保留原有 compact/landscape/expanded 三套布局）

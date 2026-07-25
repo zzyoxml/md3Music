@@ -10,10 +10,12 @@ import 'package:palette_generator/palette_generator.dart';
 /// 从专辑封面提取主色调，用多层径向渐变叠加 + 动画偏移模拟"色彩流动"。
 class FlowingBackground extends StatefulWidget {
   final String? artworkUrl;
+  final bool isPlaying;
 
   const FlowingBackground({
     super.key,
     this.artworkUrl,
+    this.isPlaying = true,
   });
 
   @override
@@ -41,6 +43,15 @@ class _FlowingBackgroundState extends State<FlowingBackground>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.artworkUrl != widget.artworkUrl) {
       _extractColors();
+    }
+    // 播放状态变化时控制 ticker
+    if (oldWidget.isPlaying != widget.isPlaying) {
+      if (widget.isPlaying) {
+        _lastElapsed = Duration.zero;
+        _ticker?.start();
+      } else {
+        _ticker?.stop();
+      }
     }
   }
 
