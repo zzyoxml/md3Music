@@ -25,11 +25,21 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
   final AudioRecorder _recorder = AudioRecorder();
   bool _isRecording = false;
   bool _isRecognizing = false;
+  bool _isLooping = false;
+  int _attemptCount = 0;
   String? _error;
   Map<String, dynamic>? _result;
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
-  Timer? _autoStopTimer;
+
+  /// 录音采样率（44100Hz，安卓原生支持率）
+  static const int _recordSampleRate = 44100;
+  /// 目标采样率（酷狗指纹接口要求 8000Hz）
+  static const int _targetSampleRate = 8000;
+  /// 每段录制时长（秒）
+  static const int _segmentDuration = 8;
+  /// 最大总录制时长（秒）
+  static const int _maxTotalDuration = 60;
 
   @override
   void initState() {
@@ -46,20 +56,19 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
   @override
   void dispose() {
     _pulseController.dispose();
-    _autoStopTimer?.cancel();
     _recorder.dispose();
     super.dispose();
   }
 
   Future<void> _toggleRecording() async {
-    if (_isRecording) {
-      await _stopRecording();
+    if (_isLooping) {
+      await _stopLoop();
     } else {
-      await _startRecording();
+      await _startRecognitionLoop();
     }
   }
 
-  Future<void> _startRecording() async {
+  Future<void> _startRecognitionLoop() async {
     if (!await _recorder.hasPermission()) {
       try {
         final status = await Permission.microphone.request();
@@ -76,160 +85,298 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
     setState(() {
       _error = null;
       _result = null;
+      _isLooping = true;
+      _attemptCount = 0;
     });
 
+    // 切换音频会话为录音模式
     try {
-      // 切换音频会话为录音模式（暂停播放器释放音频焦点）
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration(
         avAudioSessionCategory: AVAudioSessionCategory.playAndRecord,
         avAudioSessionMode: AVAudioSessionMode.defaultMode,
         androidAudioAttributes: AndroidAudioAttributes(
-          contentType: AndroidAudioContentType.speech,
-          usage: AndroidAudioUsage.voiceCommunication,
+          contentType: AndroidAudioContentType.music,
+          usage: AndroidAudioUsage.media,
         ),
         androidWillPauseWhenDucked: false,
       ));
+    } catch (_) {}
 
-      final dir = await getTemporaryDirectory();
-      final filePath = '${dir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.wav';
+    await _recordAndRecognizeSegment();
+  }
+
+  Future<void> _recordAndRecognizeSegment() async {
+    if (!_isLooping) return;
+
+    final elapsed = _attemptCount * _segmentDuration;
+    if (elapsed >= _maxTotalDuration) {
+      await _stopLoop();
+      if (_result == null && _error == null) {
+        setState(() => _error = '未能识别出歌曲，请换个环境重试');
+      }
+      return;
+    }
+
+    _attemptCount++;
+    print('[SongRecognition] === 第 $_attemptCount 轮，已用 ${elapsed}s / ${_maxTotalDuration}s ===');
+
+    final dir = await getTemporaryDirectory();
+    final filePath = '${dir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.wav';
+    try {
       await _recorder.start(
         RecordConfig(
           encoder: AudioEncoder.wav,
-          sampleRate: 44100,
+          sampleRate: _recordSampleRate,
           numChannels: 1,
+          autoGain: false,
+          echoCancel: false,
+          noiseSuppress: false,
+          androidConfig: const AndroidRecordConfig(
+            // 使用 unprocessed 源获取原始麦克风信号，不经过系统降噪/增益处理
+            audioSource: AndroidAudioSource.unprocessed,
+            audioManagerMode: AudioManagerMode.modeNormal,
+          ),
         ),
         path: filePath,
       );
-      setState(() {
-        _isRecording = true;
-        _error = null;
-      });
-      _pulseController.repeat(reverse: true);
-
-      _autoStopTimer = Timer(const Duration(seconds: 8), () async {
-        if (_isRecording) {
-          await _stopRecording();
-        }
-      });
     } catch (e) {
-      setState(() => _error = '录音启动失败: $e');
+      // unprocessed 可能在部分设备不支持，回退到 mic
+      try {
+        await _recorder.start(
+          RecordConfig(
+            encoder: AudioEncoder.wav,
+            sampleRate: _recordSampleRate,
+            numChannels: 1,
+            autoGain: false,
+            echoCancel: false,
+            noiseSuppress: false,
+            androidConfig: const AndroidRecordConfig(
+              audioSource: AndroidAudioSource.mic,
+              audioManagerMode: AudioManagerMode.modeNormal,
+            ),
+          ),
+          path: filePath,
+        );
+      } catch (e2) {
+        setState(() {
+          _isLooping = false;
+          _error = '录音启动失败: $e2';
+        });
+        return;
+      }
     }
-  }
 
-  Future<void> _stopRecording() async {
+    setState(() {
+      _isRecording = true;
+      _isRecognizing = false;
+      _error = null;
+    });
+    _pulseController.repeat(reverse: true);
+
+    await Future.delayed(const Duration(seconds: _segmentDuration));
+
+    if (!_isLooping) return;
+
+    String? path;
+    try {
+      path = await _recorder.stop();
+    } catch (e) {
+      print('[SongRecognition] stop recorder error: $e');
+    }
+
     _pulseController.stop();
-    _pulseController.reset();
-    _autoStopTimer?.cancel();
-
-    final path = await _recorder.stop();
     setState(() {
       _isRecording = false;
       _isRecognizing = true;
     });
 
-    // 恢复音频会话为播放模式
-    try {
-      final session = await AudioSession.instance;
-      await session.configure(const AudioSessionConfiguration.music());
-    } catch (_) {}
-
     if (path == null || path.isEmpty) {
-      setState(() {
-        _isRecognizing = false;
-        _error = '录音数据为空，请重试';
-      });
+      await _recordAndRecognizeSegment();
       return;
     }
 
+    final recognized = await _processAndRecognize(path);
+
+    if (!_isLooping) return;
+
+    if (recognized) {
+      await _stopLoop();
+    } else {
+      await _recordAndRecognizeSegment();
+    }
+  }
+
+  Future<bool> _processAndRecognize(String path) async {
     try {
       final file = File(path);
       final exists = await file.exists();
-      if (!exists) {
-        setState(() {
-          _isRecognizing = false;
-          _error = '录音文件不存在，请重试';
-        });
-        return;
-      }
+      if (!exists) return false;
 
       final fileBytes = await file.readAsBytes();
       await file.delete().catchError((_) {});
 
-      if (fileBytes.isEmpty) {
-        setState(() {
-          _isRecognizing = false;
-          _error = '录音数据为空，请重试';
-        });
-        return;
-      }
+      if (fileBytes.isEmpty) return false;
 
-      // 尝试发送完整 WAV 文件给 API
-      final pcmData = _extractPcmFromWav(fileBytes);
-      print('[SongRecognition] fileBytes=${fileBytes.length}, pcmData=${pcmData.length}');
-      print('[SongRecognition] wav header: ${fileBytes.take(4).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
+      // 提取原始 PCM 数据（44100Hz）
+      final rawPcm = _extractPcmFromWav(fileBytes);
+      print('[SongRecognition] fileBytes=${fileBytes.length}, rawPcm=${rawPcm.length} (${_recordSampleRate}Hz)');
 
-      // 分析 PCM 数据：采样检查实际音频内容
+      // 降采样到 8000Hz
+      final pcmData = _downsample(rawPcm, _recordSampleRate, _targetSampleRate);
+      print('[SongRecognition] downsampled: ${pcmData.length} bytes (${_targetSampleRate}Hz)');
+
+      // 检查音量
       int maxAmplitude = 0;
-      int nonZeroSamples = 0;
       for (int i = 0; i < pcmData.length - 1; i += 2) {
         final sample = (pcmData[i] | (pcmData[i + 1] << 8)).toSigned(16);
         final abs = sample.abs();
         if (abs > maxAmplitude) maxAmplitude = abs;
-        if (abs > 100) nonZeroSamples++;
       }
-      print('[SongRecognition] PCM analysis: maxAmplitude=$maxAmplitude, nonZeroSamples=$nonZeroSamples/${pcmData.length ~/ 2}');
+      print('[SongRecognition] maxAmplitude=$maxAmplitude');
       if (maxAmplitude < 100) {
-        setState(() {
-          _isRecognizing = false;
-          _error = '录音为静音，请检查麦克风权限或确保周围有声音';
-        });
-        return;
+        print('[SongRecognition] 本段为静音，跳过');
+        return false;
       }
+
+      // 增益归一化：提升音量到目标振幅，改善指纹识别率
+      final normalizedPcm = _normalizeGain(pcmData, maxAmplitude);
+      print('[SongRecognition] gain normalized, sending ${normalizedPcm.length} bytes');
 
       final api = KugouApiClient();
-      // 先试裸 PCM，如果不行再试完整 WAV
-      final response = await api.audioMatch(pcmData);
+      final response = await api.audioMatch(normalizedPcm);
 
-      if (!mounted) return;
+      if (!mounted || !_isLooping) return false;
 
-      print('[SongRecognition] raw response: $response');
+      print('[SongRecognition] 第 $_attemptCount 轮响应: $response');
 
       if (response != null && _hasSongData(response)) {
         setState(() {
           _result = response;
           _isRecognizing = false;
         });
-      } else if (response != null) {
-        // PCM 无效，尝试发送完整 WAV 文件
-        print('[SongRecognition] PCM failed, trying full WAV...');
-        final wavResponse = await api.audioMatch(Uint8List.fromList(fileBytes));
-        if (!mounted) return;
-        print('[SongRecognition] WAV response: $wavResponse');
-        if (wavResponse != null && _hasSongData(wavResponse)) {
-          setState(() {
-            _result = wavResponse;
-            _isRecognizing = false;
-          });
-        } else {
-          setState(() {
-            _isRecognizing = false;
-            _error = '未能识别出歌曲，请换个片段重试';
-          });
-        }
-      } else {
-        setState(() {
-          _isRecognizing = false;
-          _error = '识别失败，请重试';
-        });
+        return true;
       }
+      return false;
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _isRecognizing = false;
-          _error = '识别出错: $e';
-        });
+      print('[SongRecognition] 识别出错: $e');
+      return false;
+    }
+  }
+
+  /// 将 PCM 数据从 fromHz 降采样到 toHz
+  /// 使用均值抗混叠滤波器（anti-aliasing filter），防止高于 toHz/2 的频率混叠
+  Uint8List _downsample(Uint8List input, int fromHz, int toHz) {
+    if (fromHz == toHz) return input;
+
+    final inputSamples = input.length ~/ 2;
+    final ratio = fromHz / toHz;
+    final outputSamples = (inputSamples * toHz / fromHz).round();
+    final output = Uint8List(outputSamples * 2);
+
+    // 抗混叠窗口大小：取 ratio 的向上取整
+    // 对于 44100→8000，ratio≈5.51，窗口=6，半窗=3，每次平均 7 个采样点
+    final windowSize = ratio.ceil();
+    final halfWindow = windowSize ~/ 2;
+
+    for (int i = 0; i < outputSamples; i++) {
+      final centerSrcIdx = (i * ratio).floor();
+
+      // 以 centerSrcIdx 为中心，对窗口内采样点取均值（低通滤波）
+      int sum = 0;
+      int count = 0;
+      for (int j = -halfWindow; j <= halfWindow; j++) {
+        final idx = centerSrcIdx + j;
+        if (idx >= 0 && idx < inputSamples) {
+          final byteIdx = idx * 2;
+          final sample = (input[byteIdx] | (input[byteIdx + 1] << 8)).toSigned(16);
+          sum += sample;
+          count++;
+        }
       }
+
+      final avg = count > 0 ? sum ~/ count : 0;
+      final clamped = avg.clamp(-32768, 32767);
+      output[i * 2] = clamped & 0xFF;
+      output[i * 2 + 1] = (clamped >> 8) & 0xFF;
+    }
+
+    return output;
+  }
+
+  /// 增益归一化：去除 DC 偏移并放大到目标振幅，提升指纹识别率
+  Uint8List _normalizeGain(Uint8List input, int currentMaxAmplitude,
+      {int targetAmplitude = 25000}) {
+    if (input.isEmpty || input.length < 2) return input;
+
+    // 1. 计算 DC 偏移（直流分量）
+    int sum = 0;
+    int sampleCount = input.length ~/ 2;
+    for (int i = 0; i < input.length - 1; i += 2) {
+      final sample = (input[i] | (input[i + 1] << 8)).toSigned(16);
+      sum += sample;
+    }
+    final dcOffset = sampleCount > 0 ? (sum / sampleCount).round() : 0;
+
+    // 2. 去除 DC 偏移后重新计算最大振幅
+    int adjustedMax = 0;
+    for (int i = 0; i < input.length - 1; i += 2) {
+      final sample =
+          (input[i] | (input[i + 1] << 8)).toSigned(16) - dcOffset;
+      final abs = sample.abs();
+      if (abs > adjustedMax) adjustedMax = abs;
+    }
+
+    if (adjustedMax < 1) return input;
+
+    // 3. 计算增益因子
+    final gain = targetAmplitude / adjustedMax;
+    if (gain <= 1.0) {
+      print('[SongRecognition] gain=$gain (already loud enough, no boost)');
+      return input;
+    }
+
+    print('[SongRecognition] applying gain=$gain (${adjustedMax} -> $targetAmplitude)');
+
+    // 4. 应用增益
+    final output = Uint8List(input.length);
+    for (int i = 0; i < input.length - 1; i += 2) {
+      final sample =
+          (input[i] | (input[i + 1] << 8)).toSigned(16) - dcOffset;
+      final amplified = (sample * gain).round().clamp(-32768, 32767);
+      output[i] = amplified & 0xFF;
+      output[i + 1] = (amplified >> 8) & 0xFF;
+    }
+
+    return output;
+  }
+
+  Future<void> _stopLoop() async {
+    _isLooping = false;
+    _pulseController.stop();
+    _pulseController.reset();
+
+    try {
+      await _recorder.stop();
+    } catch (_) {}
+
+    try {
+      final session = await AudioSession.instance;
+      await session.configure(const AudioSessionConfiguration.music());
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() {
+        _isRecording = false;
+        if (_result == null) {
+          _isRecognizing = false;
+          if (_error == null) {
+            _error = '已停止识别';
+          }
+        } else {
+          _isRecognizing = false;
+        }
+      });
     }
   }
 
@@ -242,56 +389,28 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       appBar: AppBar(
         title: const Text('听歌识曲'),
       ),
-      body: Column(
-        children: [
-          // 开发中标记
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            color: colorScheme.tertiaryContainer,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.construction, size: 16, color: colorScheme.onTertiaryContainer),
-                const SizedBox(width: 8),
-                Text(
-                  '开发中 — 听歌识曲功能正在开发，暂不可用',
-                  style: textTheme.labelMedium?.copyWith(color: colorScheme.onTertiaryContainer),
-                ),
-              ],
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight - 48),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  const SizedBox(height: 32),
+                  _buildPulseCircle(colorScheme),
+                  const SizedBox(height: 32),
+                  _buildStatusText(textTheme, colorScheme),
+                  const SizedBox(height: 32),
+                  if (_result != null) _buildResult(colorScheme, textTheme),
+                  if (_error != null) _buildError(colorScheme, textTheme),
+                ],
+              ),
             ),
-          ),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                return SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(minHeight: constraints.maxHeight - 48),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        const SizedBox(height: 32),
-                        _buildPulseCircle(colorScheme),
-                        const SizedBox(height: 32),
-                        _buildStatusText(textTheme, colorScheme),
-                        const SizedBox(height: 32),
-                        if (_result != null) _buildResult(colorScheme, textTheme),
-                        if (_error != null) _buildError(colorScheme, textTheme),
-                        if (_isRecognizing)
-                          const Padding(
-                            padding: EdgeInsets.only(top: 24),
-                            child: CircularProgressIndicator(),
-                          ),
-                      ],
-                    ),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -299,7 +418,7 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
   Widget _buildPulseCircle(ColorScheme colorScheme) {
     return Center(
       child: GestureDetector(
-        onTap: _isRecognizing ? null : _toggleRecording,
+        onTap: _toggleRecording,
         child: ScaleTransition(
           scale: _isRecording ? _pulseAnimation : const AlwaysStoppedAnimation(1.0),
           child: Container(
@@ -309,7 +428,7 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
               shape: BoxShape.circle,
               color: _isRecording
                   ? colorScheme.error
-                  : _isRecognizing
+                  : _isLooping
                       ? colorScheme.tertiary
                       : colorScheme.primaryContainer,
               boxShadow: _isRecording
@@ -324,11 +443,13 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
             ),
             child: Center(
               child: Icon(
-                _isRecording ? Icons.mic : Icons.mic_none,
+                _isRecording ? Icons.mic : (_isLooping ? Icons.stop : Icons.mic_none),
                 size: 56,
                 color: _isRecording
                     ? colorScheme.onError
-                    : colorScheme.onPrimaryContainer,
+                    : _isLooping
+                        ? colorScheme.onTertiary
+                        : colorScheme.onPrimaryContainer,
               ),
             ),
           ),
@@ -340,9 +461,12 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
   Widget _buildStatusText(TextTheme textTheme, ColorScheme colorScheme) {
     String text;
     if (_isRecording) {
-      text = '正在聆听...';
+      final elapsed = _attemptCount * _segmentDuration;
+      text = '正在聆听... ${elapsed}s / ${_maxTotalDuration}s';
     } else if (_isRecognizing) {
-      text = '正在识别...';
+      text = '正在识别第 $_attemptCount 段...';
+    } else if (_isLooping) {
+      text = '准备录制第 $_attemptCount 段...';
     } else {
       text = '点击开始听歌识曲';
     }
@@ -356,12 +480,17 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
 
   Widget _buildResult(ColorScheme colorScheme, TextTheme textTheme) {
     final data = _result!;
-    final audioid = data['data'];
+    final responseData = data['data'];
     Map<String, dynamic>? audioInfo;
 
-    if (audioid is Map<String, dynamic>) {
-      audioInfo = audioid;
-    } else if (data is Map<String, dynamic>) {
+    if (responseData is List && responseData.isNotEmpty) {
+      final first = responseData.first;
+      if (first is Map) {
+        audioInfo = Map<String, dynamic>.from(first);
+      }
+    } else if (responseData is Map) {
+      audioInfo = Map<String, dynamic>.from(responseData);
+    } else if (data is Map) {
       audioInfo = data;
     }
 
@@ -440,49 +569,38 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
     );
   }
 
-  /// 检查 PCM 数据是否为静音
-  bool _isSilentAudio(Uint8List pcmData) {
-    // 采样检查：每隔 1000 个样本检查一次
-    int nonZeroCount = 0;
-    final step = 2000; // 每 2000 字节（1000 个 16bit 样本）检查一次
-    final checkCount = (pcmData.length / step).floor().clamp(1, 100);
-    for (int i = 0; i < checkCount; i++) {
-      final offset = i * step;
-      if (offset + 1 < pcmData.length) {
-        final sample = (pcmData[offset] | (pcmData[offset + 1] << 8)).toSigned(16);
-        if (sample.abs() > 500) {
-          nonZeroCount++;
-        }
-      }
-    }
-    // 如果 10% 以上的采样点有声音，认为不是静音
-    return nonZeroCount < (checkCount * 0.1);
-  }
-
-  /// 检查 API 响应是否包含有效歌曲数据
   bool _hasSongData(Map<String, dynamic> response) {
     final data = response['data'];
     if (data is List && data.isNotEmpty) {
       final first = data.first;
-      if (first is Map<String, dynamic>) {
-        // 检查是否有实际的歌曲字段
-        final hasName = first.containsKey('songname') || first.containsKey('song_name') || first.containsKey('name');
-        final hasHash = first.containsKey('hash') || first.containsKey('FileHash');
+      if (first is Map) {
+        final hasName = first.containsKey('songname') ||
+            first.containsKey('song_name') ||
+            first.containsKey('name') ||
+            first.containsKey('SongName');
+        final hasHash = first.containsKey('hash') ||
+            first.containsKey('FileHash') ||
+            first.containsKey('album_audio_id');
         return hasName || hasHash;
       }
+    }
+    if (data is Map) {
+      final hasName = data.containsKey('songname') ||
+          data.containsKey('song_name') ||
+          data.containsKey('name');
+      final hasHash = data.containsKey('hash') ||
+          data.containsKey('FileHash') ||
+          data.containsKey('album_audio_id');
+      return hasName || hasHash;
     }
     return false;
   }
 
-  /// 从 WAV 文件中提取纯 PCM 数据（去掉 WAV 头）
   Uint8List _extractPcmFromWav(List<int> bytes) {
     if (bytes.length < 44) return Uint8List.fromList(bytes);
-    // 检查 RIFF 头
     if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46) {
-      // 找到 "data" 标记：遍历查找 "data" 字符串
       for (int i = 12; i < bytes.length - 4; i++) {
         if (bytes[i] == 0x64 && bytes[i + 1] == 0x61 && bytes[i + 2] == 0x74 && bytes[i + 3] == 0x61) {
-          // data chunk: 4 bytes "data" + 4 bytes size + PCM data
           final pcmStart = i + 8;
           if (pcmStart < bytes.length) {
             return Uint8List.fromList(bytes.sublist(pcmStart));
@@ -490,7 +608,6 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
         }
       }
     }
-    // 非标准 WAV，直接返回全部数据
     return Uint8List.fromList(bytes);
   }
 
@@ -508,9 +625,12 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
   void _playRecognizedSong(Map<String, dynamic>? audioInfo) {
     if (audioInfo == null) return;
     final songName = _extractField(audioInfo, ['songname', 'song_name', 'name', 'SongName']) ?? '';
-    final singerName = _extractField(audioInfo, ['singername', 'singer_name', 'SingerName']) ?? '';
-    final albumAudioId = audioInfo['album_audio_id']?.toString() ?? audioInfo['MixSongID']?.toString();
-    final hash = audioInfo['hash']?.toString() ?? audioInfo['FileHash']?.toString();
+    final singerName = _extractField(audioInfo, ['singername', 'singer_name', 'SingerName', 'author_name']) ?? '';
+    final albumAudioId = audioInfo['album_audio_id']?.toString() ??
+        audioInfo['MixSongID']?.toString() ??
+        audioInfo['mixsongid']?.toString();
+    final hash = audioInfo['hash']?.toString() ??
+        audioInfo['FileHash']?.toString();
 
     if (hash != null && hash.isNotEmpty) {
       final song = Song(
@@ -519,7 +639,9 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
         artist: singerName,
         album: '',
         duration: Duration.zero,
-        artworkUri: audioInfo['imgurl']?.toString(),
+        artworkUri: audioInfo['imgurl']?.toString() ??
+            audioInfo['sizable_cover']?.toString(),
+        albumAudioId: albumAudioId,
         isOnline: true,
       );
       context.read<PlayerProvider>().playOnlinePlaylist([song], 0);

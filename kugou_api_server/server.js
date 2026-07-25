@@ -393,6 +393,8 @@ async function consturctServer(moduleDefs) {
    */
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
+  // 解析 application/octet-stream 类型的二进制请求体（用于听歌识曲 /audio/match）
+  app.use(express.raw({ type: 'application/octet-stream', limit: '10mb' }));
 
   /**
    * ============================================================
@@ -460,6 +462,11 @@ async function consturctServer(moduleDefs) {
       //   - params: query 中除 cookie 外的其余参数
       //   - body: 请求体（POST 数据）
       const query = Object.assign({}, { cookie: Object.assign({}, req.cookies, cookie) }, params, { body: req.body });
+
+      // 二进制请求体（如听歌识曲 PCM 数据）通过 data 字段传给模块
+      if (Buffer.isBuffer(req.body)) {
+        query.data = req.body;
+      }
 
       // Step 4: 如果请求携带了 Authorization 头，将其解析为 Cookie 并合并
       // 这样客户端可以通过 Authorization 头传递认证信息，例如: token=xxx;userid=xxx

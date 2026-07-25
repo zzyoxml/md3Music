@@ -79,7 +79,11 @@ const createRequest = (options) => {
       params['key'] = signKey(params['hash'], params['mid'], params['userid'], params['appid']);
     }
 
-    const data = typeof options?.data === 'object' ? JSON.stringify(options.data) : options?.data || '';
+    // 签名数据：Buffer 类型直接传入（在 helper.js 中用增量 MD5 处理），
+    // 其他类型转为字符串
+    const sigData = Buffer.isBuffer(options?.data)
+      ? options.data
+      : (typeof options?.data === 'object' ? JSON.stringify(options.data) : options?.data || '');
 
     if (!params['signature'] && !options.notSignature) {
       switch (options?.encryptType) {
@@ -91,7 +95,7 @@ const createRequest = (options) => {
           break;
         case 'android':
         default:
-          params['signature'] = signatureAndroidParams(params, data);
+          params['signature'] = signatureAndroidParams(params, sigData);
           break;
       }
     }

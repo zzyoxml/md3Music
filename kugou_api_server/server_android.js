@@ -152,6 +152,8 @@ async function consturctServer() {
 
   app.use(express.json());
   app.use(express.urlencoded({ extended: false }));
+  // 解析 application/octet-stream 类型的二进制请求体（用于听歌识曲 /audio/match）
+  app.use(express.raw({ type: 'application/octet-stream', limit: '10mb' }));
   app.use(cache('2 minutes', (_, res) => res.statusCode === 200));
 
   for (const moduleDef of moduleDefs) {
@@ -160,12 +162,16 @@ async function consturctServer() {
         return res.status(403).json({ error: 'Audio proxy disabled.' });
       }
       [req.query, req.body].forEach((item) => {
-        if (typeof item.cookie === 'string') {
+        if (typeof item?.cookie === 'string') {
           item.cookie = cookieToJson(decode(item.cookie));
         }
       });
       const { cookie, ...params } = req.query;
       const query = Object.assign({}, { cookie: Object.assign({}, req.cookies, cookie) }, params, { body: req.body });
+      // 二进制请求体（如听歌识曲 PCM 数据）通过 data 字段传给模块
+      if (Buffer.isBuffer(req.body)) {
+        query.data = req.body;
+      }
       const authHeader = req.headers['authorization'];
       if (authHeader) {
         const authCookie = cookieToJson(authHeader);

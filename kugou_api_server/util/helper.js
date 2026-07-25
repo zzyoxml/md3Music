@@ -1,4 +1,5 @@
-const { cryptoMd5 } = require('./crypto');
+const CryptoJS = require('crypto-js');
+const { cryptoMd5, wordArrayFromBuffer } = require('./crypto');
 const { appid: useAppid, liteAppid, clientver: useClientver, liteClientver } = require('./config.json');
 const { isPlatformLite } = require('./platform');
 
@@ -30,6 +31,17 @@ const signatureAndroidParams = (params, data, cookie) => {
     .sort()
     .map((key) => `${key}=${typeof params[key] === 'object' ? JSON.stringify(params[key]) : params[key]}`)
     .join('');
+
+  // Buffer 类型（二进制 PCM 数据等）：使用增量 MD5 将二进制数据纳入签名
+  if (Buffer.isBuffer(data)) {
+    const hasher = CryptoJS.algo.MD5.create();
+    hasher.update(CryptoJS.enc.Utf8.parse(str));
+    hasher.update(CryptoJS.enc.Utf8.parse(paramsString));
+    hasher.update(wordArrayFromBuffer(data));
+    hasher.update(CryptoJS.enc.Utf8.parse(str));
+    return hasher.finalize().toString(CryptoJS.enc.Hex);
+  }
+
   return cryptoMd5(`${str}${paramsString}${data || ''}${str}`);
 };
 
