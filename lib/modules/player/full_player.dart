@@ -118,8 +118,10 @@ class _FullPlayerState extends State<FullPlayer>
 
   @override
   void didChangeMetrics() {
-    // 用户旋转设备时重新应用沉浸模式
-    applyImmersiveForOrientation();
+    // 延迟一帧再检测方向，确保 physicalSize 已更新为新方向
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) applyImmersiveForOrientation();
+    });
   }
 
   void _onPlayerSongChanged() {
