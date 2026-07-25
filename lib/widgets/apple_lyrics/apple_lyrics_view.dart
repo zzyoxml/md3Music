@@ -413,11 +413,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       if (useWordRenderer) {
         final renderer = _wordRendererFor(i);
         renderer.emphasizeEffect = _emphasizeEffect;
-        renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade);
+        renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade, blurActive: LyricPreferences.instance.useGaussianBlur);
         renderer.tick(dt, widget.currentTimeMs);
       } else {
         final renderer = _lineRendererFor(i);
-        renderer.setLineState(isActive: isActive, scale: scale, blurFade: _blurFade);
+        renderer.setLineState(isActive: isActive, scale: scale, blurFade: _blurFade, blurActive: LyricPreferences.instance.useGaussianBlur);
         renderer.tick(dt);
       }
     }
@@ -633,6 +633,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         // 之前每帧都跑 N 次 TextPainter.layout 是 CPU 瓶颈（UI 线程 70%+）
         _recomputeLineHeightsIfNeeded(fontSize, constraints.maxWidth);
 
+        // 根据偏好选择高斯模糊或 alpha 渐变淡出
+        final useGaussian = LyricPreferences.instance.useGaussianBlur;
+
         final lyricsContent = ClipRect(
           child: CustomPaint(
             painter: _LyricsPainter(
@@ -660,13 +663,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
               interludeExpandProgress: _interludeExpandProgress,
               perLineOffsets: _buildPerLineOffsets(),
               blurFade: _blurFade,
+              blurActive: useGaussian,
             ),
             size: Size.infinite,
           ),
         );
-
-        // 根据偏好选择高斯模糊或 alpha 渐变淡出
-        final useGaussian = LyricPreferences.instance.useGaussianBlur;
 
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -965,6 +966,9 @@ class _LyricsPainter extends CustomPainter {
   /// 模糊淡入淡出系数。
   final double blurFade;
 
+  /// 是否启用高斯模糊。
+  final bool blurActive;
+
   _LyricsPainter({
     required this.lines,
     required this.currentLineIndex,
@@ -990,6 +994,7 @@ class _LyricsPainter extends CustomPainter {
     required this.interludeExpandProgress,
     required this.perLineOffsets,
     required this.blurFade,
+    required this.blurActive,
   });
 
   /// 获取指定行 i 的实际高度（含换行），降级到 mainLineHeight。
@@ -1059,7 +1064,7 @@ class _LyricsPainter extends CustomPainter {
       if (useWordRenderer) {
         // 逐字模式：当前行的 KRC 行
         final renderer = wordRenderers[i] ?? WordRenderer();
-        renderer.setLineState(isActive: true, scale: scale, blurFade: blurFade);
+        renderer.setLineState(isActive: true, scale: scale, blurFade: blurFade, blurActive: blurActive);
         renderer.paintLine(
           canvas,
           Offset(startX, y),
@@ -1070,7 +1075,7 @@ class _LyricsPainter extends CustomPainter {
       } else {
         // 整行模式：LRC/纯文本行 + 非当前行的 KRC 行
         final renderer = lineRenderers[i] ?? LineRenderer();
-        renderer.setLineState(isActive: isActive, scale: scale, blurFade: blurFade);
+        renderer.setLineState(isActive: isActive, scale: scale, blurFade: blurFade, blurActive: blurActive);
         renderer.paintLine(
           canvas,
           Offset(startX, y),

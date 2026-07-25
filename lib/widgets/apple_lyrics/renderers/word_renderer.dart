@@ -121,10 +121,11 @@ class WordRenderer {
   /// 为 false 时启用 SOLID 模式（整行均匀暗）。
   /// [scale] 是行缩放，0.97（inactive）~1.0（active）。
   /// [blurFade] 控制非当前行透明度：1.0=透明（模糊图片覆盖），0.0=正常显示。
-  void setLineState({required bool isActive, required double scale, double blurFade = 1.0}) {
+  /// [blurActive] 是否启用高斯模糊：false 时不降低非当前行透明度。
+  void setLineState({required bool isActive, required double scale, double blurFade = 1.0, bool blurActive = true}) {
     _isActive = isActive;
     _scale = scale;
-    _blurFade = blurFade;
+    _blurFade = blurActive ? blurFade : 0.0;
   }
 
   /// 设置强调辉光效果计算器。

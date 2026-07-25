@@ -72,7 +72,8 @@ class LineRenderer {
   /// 为 false 时整行 SOLID 暗态（alpha 目标 dynamicDarkAlpha）。
   /// [scale] 是行缩放，0.97（inactive）~1.0（active）。
   /// [blurFade] 控制非当前行透明度：1.0=透明（模糊图片覆盖），0.0=正常显示。
-  void setLineState({required bool isActive, required double scale, double blurFade = 1.0}) {
+  /// [blurActive] 是否启用高斯模糊：false 时不降低非当前行透明度。
+  void setLineState({required bool isActive, required double scale, double blurFade = 1.0, bool blurActive = true}) {
     _isActive = isActive;
     final double factor = ((scale - LyricLayout.inactiveScale) /
             (LyricLayout.activeScale - LyricLayout.inactiveScale))
@@ -80,8 +81,9 @@ class LineRenderer {
         .toDouble();
     final double dynamicDark = factor * 0.2 + 0.2;
     final double dynamicBright = factor * 0.8 + 0.2;
-    // 非当前行 alpha = dynamicDark * (1 - blurFade)
-    _targetAlpha = isActive ? dynamicBright : dynamicDark * (1.0 - blurFade);
+    // 非当前行 alpha = dynamicDark * (1 - blurFade)，blurActive=false 时不降低
+    final double effectiveFade = blurActive ? blurFade : 0.0;
+    _targetAlpha = isActive ? dynamicBright : dynamicDark * (1.0 - effectiveFade);
   }
 
   // ============== 动画推进 ==============
