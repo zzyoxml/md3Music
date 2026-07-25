@@ -753,8 +753,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   List<Widget> _buildBlurLayers(double viewportHeight, double mainLineHeight) {
     if (_currentLineIndex < 0) return const [];
 
-    // 当前行变化时重新计算 blur levels 并更新缓存
-    if (_currentLineIndex != _cachedBlurLineIndex) {
+    // 滑动时不更新缓存，等松手后再更新
+    final bool isScrolling = _blurFade < 0.99;
+
+    // 当前行变化时重新计算 blur levels 并更新缓存（滑动时跳过）
+    if (_currentLineIndex != _cachedBlurLineIndex && !isScrolling) {
       _cachedBlurLineIndex = _currentLineIndex;
 
       final double visibleRange = viewportHeight / mainLineHeight;
@@ -776,6 +779,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
     // 从缓存绘制模糊层
     final List<Widget> layers = [];
+    final double currentScale = widget.enableScale
+        ? _scaleController.currentScale
+        : LyricLayout.activeScale;
+
     for (final entry in _cachedBlurLevels.entries) {
       final int i = entry.key;
       final double sigma = (entry.value * 1.0 * _blurFade).clamp(0.5, 5.0);
@@ -788,7 +795,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
               ? _lineTops[i]
               : i * mainLineHeight) +
           _interludeOffsetBefore(i);
-      final double y = lineTop + _scrollController.posY;
+      // 应用弹簧偏移
+      final List<double> offsets = _buildPerLineOffsets();
+      final double springOffset = (i < offsets.length) ? offsets[i] : 0.0;
+      final double y = lineTop + _scrollController.posY + springOffset;
       final double lineHeight = (i < _lineHeights.length)
           ? _lineHeights[i]
           : mainLineHeight;
@@ -796,19 +806,25 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       if (y + lineHeight < 0 || y > viewportHeight) continue;
 
       final double padding = sigma * 3;
+      final bool isCurrentLine = i == _currentLineIndex;
+      final double scale = isCurrentLine ? currentScale : LyricLayout.inactiveScale;
 
       layers.add(Positioned(
         top: y - padding,
         left: 0,
         width: _viewportWidth,
         height: lineHeight + padding * 2,
-        child: Opacity(
-          opacity: _blurFade,
-          child: RawImage(
-            image: image,
-            width: _viewportWidth,
-            height: lineHeight + padding * 2,
-            fit: BoxFit.fill,
+        child: Transform(
+          alignment: Alignment.centerLeft,
+          transform: Matrix4.identity()..scale(scale, scale),
+          child: Opacity(
+            opacity: _blurFade,
+            child: RawImage(
+              image: image,
+              width: _viewportWidth,
+              height: lineHeight + padding * 2,
+              fit: BoxFit.fill,
+            ),
           ),
         ),
       ));
