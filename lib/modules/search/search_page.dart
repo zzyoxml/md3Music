@@ -101,11 +101,12 @@ class _SearchPageState extends State<SearchPage>
     setState(() {
       _query = query.trim();
       _hasSearched = true;
+      _currentSearchType = 'song';
     });
+    _tabController.animateTo(0);
     _saveSearchHistory(_query);
 
     final kugouProvider = context.read<KugouProvider>();
-    _currentSearchType = 'song';
     await kugouProvider.search(_query, type: 'song');
   }
 

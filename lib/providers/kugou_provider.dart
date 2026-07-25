@@ -322,6 +322,12 @@ class KugouProvider extends ChangeNotifier {
       notifyListeners();
       return;
     }
+
+    // 新关键词时清除旧的按类型缓存，避免混淆
+    if (_lastSearchKeyword != keywords) {
+      _searchResultsByType.clear();
+    }
+
     _beginLoading();
     _error = null;
     try {
