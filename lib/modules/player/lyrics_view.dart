@@ -251,8 +251,10 @@ class LyricsViewState extends State<LyricsView> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
+    // 排除全局 UI 缩放，歌词保持原始大小
+    Widget content;
     if (_parsedLyrics.isEmpty) {
-      return Center(
+      content = Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -271,9 +273,8 @@ class LyricsViewState extends State<LyricsView> {
           ],
         ),
       );
-    }
-
-    return Listener(
+    } else {
+      content = Listener(
       onPointerDown: _onPointerDown,
       onPointerUp: _onPointerUp,
       onPointerCancel: (_) => _onPointerUp(PointerUpEvent()),
@@ -312,6 +313,12 @@ class LyricsViewState extends State<LyricsView> {
           );
         },
       ),
+    );
+    }
+
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(textScaler: TextScaler.noScaling),
+      child: content,
     );
   }
 }

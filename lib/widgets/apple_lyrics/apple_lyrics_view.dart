@@ -13,6 +13,7 @@
 library;
 
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -20,6 +21,7 @@ import 'package:flutter/widgets.dart';
 
 import 'controllers/line_scale_controller.dart';
 import 'controllers/lyric_scroll_controller.dart';
+import 'animation/spring.dart';
 import 'layout/lyric_layout.dart';
 import 'layout/lyric_preferences.dart';
 import 'models/lyric_line.dart';
@@ -107,6 +109,27 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
   int _currentLineIndex = -1;
   Offset? _tapDownPosition;
+
+  // ============== 级联弹簧延迟 ==============
+
+  /// 每行偏移弹簧（行索引 → Spring）。
+  ///
+  /// 当前行切换时，下方行的弹簧从正偏移（行在下方）动画到 0（行到自然位置），
+  /// 形成逐级延迟上拉效果。
+  final Map<int, Spring> _perLineSprings = {};
+
+  /// 每行延迟开始时间戳（行索引 → 毫秒）。
+  final Map<int, double> _delayStartTimes = {};
+
+  /// 上一帧的当前行索引，用于检测行切换。
+  int _previousLineIndex = -1;
+
+  /// 级联延迟：相邻行间延迟毫秒数。
+  static const double _perLineDelayMs = 50.0;
+
+  /// 级联偏移系数：每行初始向下偏移 = lineHeight × 此系数。
+  /// 正值 = 向下偏移，弹簧拉回 0 = 向上回到自然位置。
+  static const double _perLineOffsetFactor = 0.2;
 
   /// 预计算每行实际高度（含自动换行）。
   ///
@@ -240,6 +263,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _ticker = createTicker(_onTick);
     _ticker.start();
     _lastElapsed = Duration.zero;
+    // 自动回弹触发时恢复模糊（由 _computeLineBlur 自动处理）
+    _scrollController.onAutoReturn = () {};
     // 监听字号/行间距偏好变化，实时刷新（设置页滑块、长按菜单调节后立即生效）
     LyricPreferences.instance.addListener(_onPreferencesChanged);
   }
@@ -277,6 +302,23 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 获取或创建指定行的 [LineRenderer]。
   LineRenderer _lineRendererFor(int index) =>
       _lineRenderers.putIfAbsent(index, () => LineRenderer());
+
+  /// 获取或创建指定行的偏移弹簧。
+  Spring _perLineSpringFor(int index) => _perLineSprings.putIfAbsent(
+      index,
+      () => Spring(
+            mass: 1.0,
+            damping: 15.0,
+            stiffness: 100.0,
+            initialPosition: 0,
+          ));
+
+  /// 构建每行的偏移量列表，传给 _LyricsPainter。
+  List<double> _buildPerLineOffsets() {
+    return List.generate(widget.lines.length, (i) {
+      return _perLineSprings[i]?.position ?? 0.0;
+    });
+  }
 
   // ============== 动画推进 ==============
 
@@ -379,7 +421,53 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       _interludeExpandProgress = 0;
     }
 
-    // 8. 触发重绘
+    // 8. 级联弹簧延迟：检测当前行切换，为下方行设置延迟偏移
+    if (_currentLineIndex >= 0 && _currentLineIndex != _previousLineIndex) {
+      final now = _lastElapsed.inMicroseconds / 1000.0;
+      // 使用当前行的实际高度（含换行），而非理论 mainLineHeight
+      final currentLineHeight = (_currentLineIndex < _lineHeights.length
+          ? _lineHeights[_currentLineIndex]
+          : LyricLayout.fontSize(context) * LyricLayout.lineHeight);
+      // 为当前行下方的行设置延迟和弹簧初始偏移
+      // 偏移量与距离成正比，但递增幅度逐行衰减，避免过远的行偏移过大
+      for (int i = _currentLineIndex + 1; i < widget.lines.length; i++) {
+        final distance = i - _currentLineIndex;
+        // 衰减公式：offset = lineHeight * factor * (1 - 1/distance)
+        // distance=1 → 0, distance=2 → 0.5*factor, distance=3 → 0.67*factor, ...
+        // 这样相邻行偏移小，远处行偏移趋近上限
+        final offset = currentLineHeight * _perLineOffsetFactor *
+            (1 - 1.0 / distance);
+        _delayStartTimes[i] = now;
+        final spring = _perLineSpringFor(i);
+        spring.setPosition(offset, 0);
+        spring.setTarget(0);
+      }
+      // 清除已过行的延迟记录
+      _delayStartTimes.removeWhere((k, _) => k <= _currentLineIndex);
+    }
+    _previousLineIndex = _currentLineIndex;
+
+    // 推进每行偏移弹簧
+    for (final entry in Map.of(_perLineSprings).entries) {
+      final i = entry.key;
+      final spring = entry.value;
+      if (i < _currentLineIndex || i >= widget.lines.length) {
+        // 上方或超出范围：直接归零
+        spring.setPosition(0, 0);
+        continue;
+      }
+      final delayStart = _delayStartTimes[i];
+      if (delayStart != null) {
+        final elapsedMs = (_lastElapsed.inMicroseconds / 1000.0) - delayStart;
+        final delayMs = (i - _currentLineIndex) * _perLineDelayMs;
+        if (elapsedMs >= delayMs) {
+          spring.tick(dt);
+        }
+        // 延迟未到：保持初始偏移（setPosition 已设置）
+      }
+    }
+
+    // 10. 触发重绘
     setState(() {});
   }
 
@@ -513,64 +601,176 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         // 之前每帧都跑 N 次 TextPainter.layout 是 CPU 瓶颈（UI 线程 70%+）
         _recomputeLineHeightsIfNeeded(fontSize, constraints.maxWidth);
 
+        final lyricsContent = ClipRect(
+          child: CustomPaint(
+            painter: _LyricsPainter(
+              lines: widget.lines,
+              currentLineIndex: _currentLineIndex,
+              posY: _scrollController.posY,
+              fontSize: fontSize,
+              mainLineHeight: mainLineHeight,
+              lineHeights: _lineHeights,
+              lineTops: _lineTops,
+              viewportHeight: constraints.maxHeight,
+              viewportWidth: constraints.maxWidth,
+              maxLineWidth: maxLineWidth,
+              currentTimeMs: widget.currentTimeMs,
+              enableScale: widget.enableScale,
+              wordRenderers: _wordRenderers,
+              lineRenderers: _lineRenderers,
+              scaleController: _scaleController,
+              emphasizeEffect: _emphasizeEffect,
+              interludeDots: _interludeDots,
+              interludeAfterIndices: _interludeAfterIndices,
+              interludePlaceholderHeight: _interludePlaceholderHeight,
+              activeInterludeIdx: _activeInterludeIdx,
+              lastActiveAnchorIdx: _lastActiveAnchorIdx,
+              interludeExpandProgress: _interludeExpandProgress,
+              perLineOffsets: _buildPerLineOffsets(),
+            ),
+            size: Size.infinite,
+          ),
+        );
+
+        // 根据偏好选择高斯模糊或 alpha 渐变淡出
+        final useGaussian = LyricPreferences.instance.useGaussianBlur;
+
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapDown: _onTapDown,
           onTapUp: _onTapUp,
-          // 挂载垂直拖动手势：用户可上下滑动歌词，5s 后自动回弹到当前行。
           onVerticalDragUpdate: _onVerticalDragUpdate,
           onVerticalDragEnd: _onVerticalDragEnd,
-          // AMLL 上下渐变 mask：顶部底部各 15% 视口高度 alpha 渐变（黑→透明→黑）
-          // 用户确认（grill-me Q6）：按 AMLL 规范来。
-          // 用 ShaderMask + LinearGradient 实现，blendMode: dstIn
-          // 让歌词在两端淡出，营造无限滚动感。
-          child: ShaderMask(
-            shaderCallback: (Rect bounds) {
-              return LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: const <Color>[
-                  Color(0x00000000),
-                  Color(0xFF000000),
-                  Color(0xFF000000),
-                  Color(0x00000000),
-                ],
-                stops: const <double>[0.0, 0.15, 0.85, 1.0],
-              ).createShader(bounds);
-            },
-            blendMode: BlendMode.dstIn,
-            child: ClipRect(
-              child: CustomPaint(
-                painter: _LyricsPainter(
-                  lines: widget.lines,
-                  currentLineIndex: _currentLineIndex,
-                  posY: _scrollController.posY,
-                  fontSize: fontSize,
-                  mainLineHeight: mainLineHeight,
-                  lineHeights: _lineHeights,
-                  lineTops: _lineTops,
-                  viewportHeight: constraints.maxHeight,
-                  viewportWidth: constraints.maxWidth,
-                  maxLineWidth: maxLineWidth,
-                  currentTimeMs: widget.currentTimeMs,
-                  enableScale: widget.enableScale,
-                  wordRenderers: _wordRenderers,
-                  lineRenderers: _lineRenderers,
-                  scaleController: _scaleController,
-                  emphasizeEffect: _emphasizeEffect,
-                  interludeDots: _interludeDots,
-                  interludeAfterIndices: _interludeAfterIndices,
-                  interludePlaceholderHeight: _interludePlaceholderHeight,
-                  activeInterludeIdx: _activeInterludeIdx,
-                  lastActiveAnchorIdx: _lastActiveAnchorIdx,
-                  interludeExpandProgress: _interludeExpandProgress,
+          child: useGaussian
+              ? ClipRect(
+                  child: Stack(
+                    children: [
+                      lyricsContent,
+                      ..._buildBlurLayers(
+                        constraints.maxHeight,
+                        mainLineHeight,
+                      ),
+                    ],
+                  ),
+                )
+              : ShaderMask(
+                  shaderCallback: (Rect bounds) {
+                    return LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: const <Color>[
+                        Color(0x00000000),
+                        Color(0xFF000000),
+                        Color(0xFF000000),
+                        Color(0x00000000),
+                      ],
+                      stops: const <double>[0.0, 0.15, 0.85, 1.0],
+                    ).createShader(bounds);
+                  },
+                  blendMode: BlendMode.dstIn,
+                  child: lyricsContent,
                 ),
-                size: Size.infinite,
-              ),
-            ),
-          ),
         );
       },
+    );
+  }
+
+  /// 计算指定行的模糊等级（参考 applemusic-like-lyrics 的 computeLineBlur）。
+  ///
+  /// - 当前行：0
+  /// - 已过行：1 + |currentLine - lineIndex| + 1
+  /// - 未到行：1 + |lineIndex - currentLine|
+  /// - 用户滚动时：0
+  int _computeLineBlur(int lineIndex) {
+    if (_currentLineIndex < 0 || lineIndex == _currentLineIndex) return 0;
+    if (_scrollController.isUserScrolling) return 0;
+    int blurLevel = 1;
+    if (lineIndex < _currentLineIndex) {
+      blurLevel += (_currentLineIndex - lineIndex).abs() + 1;
+    } else {
+      blurLevel += (lineIndex - _currentLineIndex).abs();
+    }
+    return blurLevel > 5 ? 5 : blurLevel;
+  }
+
+  /// 构建基于距离驱动的高斯模糊层。
+  ///
+  /// 参考 applemusic-like-lyrics 的模糊机制：每行独立计算 blur level，
+  /// 转换为 sigma 后用 BackdropFilter 实现。
+  /// sigma = blurLevel × 0.5（CSS blur px → Flutter sigma 换算）。
+  List<Widget> _buildBlurLayers(double viewportHeight, double mainLineHeight) {
+    if (_currentLineIndex < 0) return const [];
+
+    final List<Widget> layers = [];
+    // 遍历所有行，在其屏幕位置放置 BackdropFilter
+    for (int i = 0; i < widget.lines.length; i++) {
+      final int blurLevel = _computeLineBlur(i);
+      if (blurLevel <= 0) continue;
+
+      final double sigma = blurLevel * 0.5;
+      // 计算行的屏幕 Y 位置
+      final double lineTop = (i < _lineTops.length
+              ? _lineTops[i]
+              : i * mainLineHeight) +
+          _interludeOffsetBefore(i);
+      final double y = lineTop + _scrollController.posY;
+      final double lineHeight = (i < _lineHeights.length)
+          ? _lineHeights[i]
+          : mainLineHeight;
+
+      // 跳过视口外的行
+      if (y + lineHeight < 0 || y > viewportHeight) continue;
+
+      final double clampedTop = y < 0 ? 0.0 : y;
+      final double clampedBottom =
+          y + lineHeight > viewportHeight ? viewportHeight : y + lineHeight;
+      final double height = clampedBottom - clampedTop;
+      if (height <= 0) continue;
+
+      layers.add(_buildBlurRect(top: clampedTop, height: height, sigma: sigma));
+    }
+
+    return layers;
+  }
+
+  /// 构建一个水平全宽的模糊矩形（垂直定位）。
+  Widget _buildBlurRect({
+    required double top,
+    required double height,
+    required double sigma,
+  }) {
+    return Positioned(
+      top: top,
+      left: 0,
+      right: 0,
+      height: height,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+          child: const SizedBox.expand(),
+        ),
+      ),
+    );
+  }
+
+  /// 构建一个垂直全高的模糊矩形（水平定位）。
+  Widget _buildBlurRectHorizontal({
+    required double left,
+    required double width,
+    required double sigma,
+    required double viewportHeight,
+  }) {
+    return Positioned(
+      top: 0,
+      bottom: 0,
+      left: left,
+      width: width,
+      child: ClipRect(
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+          child: const SizedBox.expand(),
+        ),
+      ),
     );
   }
 }
@@ -622,6 +822,9 @@ class _LyricsPainter extends CustomPainter {
   /// 占位高度 = interludePlaceholderHeight * interludeExpandProgress
   final double interludeExpandProgress;
 
+  /// 每行偏移量（级联弹簧延迟动画），正值=向下，负值=向上。
+  final List<double> perLineOffsets;
+
   _LyricsPainter({
     required this.lines,
     required this.currentLineIndex,
@@ -645,6 +848,7 @@ class _LyricsPainter extends CustomPainter {
     required this.activeInterludeIdx,
     required this.lastActiveAnchorIdx,
     required this.interludeExpandProgress,
+    required this.perLineOffsets,
   });
 
   /// 获取指定行 i 的实际高度（含换行），降级到 mainLineHeight。
@@ -681,8 +885,9 @@ class _LyricsPainter extends CustomPainter {
     for (int i = 0; i < lines.length; i++) {
       final line = lines[i];
       final double lineHeight = _heightOf(i);
-      // 行顶部 y 坐标 = lineTops[i] + 该行上方间奏占位偏移 + posY
-      final double y = _topOf(i) + _interludeOffsetBefore(i) + posY;
+      // 行顶部 y 坐标 = lineTops[i] + 该行上方间奏占位偏移 + posY + 级联偏移
+      final double offset = (i < perLineOffsets.length) ? perLineOffsets[i] : 0.0;
+      final double y = _topOf(i) + _interludeOffsetBefore(i) + posY + offset;
 
       // 跳过视口外（含 overscan=300px 上下缓冲）的行，避免不必要的绘制
       if (y + lineHeight < -LyricLayout.overscanPx) continue;

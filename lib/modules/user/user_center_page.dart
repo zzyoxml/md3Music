@@ -396,9 +396,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
         delayMs: 80,
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 360),
+            constraints: const BoxConstraints(maxWidth: 380),
             child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
               decoration: BoxDecoration(
                 color: cs.surfaceContainerLow,
@@ -454,6 +453,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
             child: Text(
               monthLabel,
               textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
               style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
           ),
@@ -466,30 +467,32 @@ class _UserCenterPageState extends State<UserCenterPage> {
             onPressed: () {},
           ),
           const SizedBox(width: 4),
-          FilledButton.tonalIcon(
-            style: FilledButton.styleFrom(
-              visualDensity: VisualDensity.compact,
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              minimumSize: const Size(0, 32),
-              textStyle: const TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+          Flexible(
+            child: FilledButton.tonalIcon(
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                minimumSize: const Size(0, 32),
+                textStyle: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-            ),
-            onPressed: kugou.manualSignInRunning
-                ? null
-                : () => _handleManualSignIn(context, kugou),
-            icon: kugou.manualSignInRunning
-                ? SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: cs.onPrimaryContainer,
+              onPressed: kugou.manualSignInRunning
+                  ? null
+                  : () => _handleManualSignIn(context, kugou),
+              icon: kugou.manualSignInRunning
+                  ? SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: cs.onPrimaryContainer,
                     ),
                   )
                 : const Icon(Icons.check_circle_outline, size: 16),
             label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
+           ),
           ),
         ],
       ),

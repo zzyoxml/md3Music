@@ -11,16 +11,15 @@ class ThemeProvider extends ChangeNotifier {
   static const String _amStylePlayerKey = 'use_am_style_player';
   static const String _manualSeedKey = 'manual_seed_color';
   static const String _oledBlackKey = 'use_oled_black';
+  static const String _uiScaleKey = 'ui_scale';
 
   ThemeMode _themeMode = ThemeMode.system;
   bool _useDynamicColor = false;
   Color? _systemSeedColor;
-  // Apple Music 风格播放页开关，默认关闭；开启后用 AM 风格 FullPlayer，关闭用原版 MD3
   bool _useAmStylePlayer = false;
-  // 用户手动选择的种子色；null 表示未选择，使用默认紫色
   Color? _manualSeedColor;
-  // OLED 纯黑深色模式开关，默认关闭；开启时 darkTheme 的 surface 系列覆盖为纯黑
   bool _useOledBlack = false;
+  double _uiScale = 1.0;
 
   ThemeMode get themeMode => _themeMode;
   bool get useDynamicColor => _useDynamicColor;
@@ -28,6 +27,7 @@ class ThemeProvider extends ChangeNotifier {
   bool get useAmStylePlayer => _useAmStylePlayer;
   Color? get manualSeedColor => _manualSeedColor;
   bool get useOledBlack => _useOledBlack;
+  double get uiScale => _uiScale;
 
   /// 当前生效的种子色优先级：
   /// 1. 启用系统主题色且成功取到 → 系统主色
@@ -44,6 +44,7 @@ class ThemeProvider extends ChangeNotifier {
     _loadAmStylePlayer();
     _loadManualSeedColor();
     _loadOledBlack();
+    _loadUiScale();
   }
 
   Future<void> _loadThemeMode() async {
@@ -186,6 +187,23 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_oledBlackKey, enabled);
+  }
+
+  /// 加载 UI 缩放倍率持久化值，默认 1.0。
+  Future<void> _loadUiScale() async {
+    final prefs = await SharedPreferences.getInstance();
+    _uiScale = prefs.getDouble(_uiScaleKey) ?? 1.0;
+    notifyListeners();
+  }
+
+  /// 设置 UI 缩放倍率（0.5 ~ 2.0）。
+  Future<void> setUiScale(double scale) async {
+    final clamped = scale.clamp(0.5, 2.0);
+    if (_uiScale == clamped) return;
+    _uiScale = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_uiScaleKey, clamped);
   }
 
   void toggleTheme() {

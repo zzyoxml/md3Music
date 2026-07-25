@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
@@ -16,6 +17,7 @@ import '../../data/repositories/settings_repository.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/apple_lyrics/preview/lyrics_preview_page.dart';
 import '../../widgets/seed_color_picker.dart';
@@ -47,6 +49,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _useDynamicColor = false;
   // Apple Music 风格播放页开关（默认关闭，开启后用 AM 风格 FullPlayer）
   bool _useAmStylePlayer = false;
+  bool _useGaussianBlur = true;
   String _appVersion = '';
   // Lyricon 词幕推送相关状态
   bool _lyriconEnabled = false;
@@ -55,6 +58,7 @@ class _SettingsPageState extends State<SettingsPage> {
   String? _downloadDir;
   // 设备类型选择
   DeviceType _deviceType = DeviceType.auto;
+  double _uiScale = 1.0;
 
   @override
   void initState() {
@@ -121,6 +125,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final deviceType = context.read<DeviceProvider>().deviceType;
     // 读取自定义下载目录
     final downloadDir = await _settingsRepository.getDownloadDir();
+    // 从 ThemeProvider 同步 UI 缩放
+    final uiScale = context.read<ThemeProvider>().uiScale;
 
     setState(() {
       _themeMode = themeMode;
@@ -129,8 +135,10 @@ class _SettingsPageState extends State<SettingsPage> {
       _apiServerController.text = apiServerUrl;
       _useDynamicColor = useDynamicColor;
       _useAmStylePlayer = useAmStylePlayer;
+      _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
       _deviceType = deviceType;
       _downloadDir = downloadDir;
+      _uiScale = uiScale;
     });
   }
 
@@ -392,6 +400,17 @@ class _SettingsPageState extends State<SettingsPage> {
             context.read<ThemeProvider>().setUseAmStylePlayer(v);
           },
         ),
+        SwitchListTile(
+          title: const Text('歌词高斯模糊'),
+          subtitle: const Text('开启为高斯模糊渐变，关闭为 alpha 淡出'),
+          value: _useGaussianBlur,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  setState(() => _useGaussianBlur = v);
+                  LyricPreferences.instance.setUseGaussianBlur(v);
+                }
+              : null,
+        ),
         const Divider(),
         // 设备类型选择
         Padding(
@@ -451,6 +470,58 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
         ),
         const SizedBox(height: 8),
+        // UI 缩放滑块
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Row(
+            children: [
+              Icon(Icons.format_size, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Expanded(
+                child: SliderTheme(
+                  data: SliderTheme.of(context).copyWith(
+                    trackHeight: 4,
+                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                  ),
+                  child: Slider(
+                    value: _uiScale,
+                    min: 0.5,
+                    max: 2.0,
+                    divisions: 15,
+                    label: '${_uiScale.toStringAsFixed(1)}x',
+                    onChanged: (v) {
+                      setState(() => _uiScale = v);
+                      HapticFeedback.lightImpact();
+                    },
+                    onChangeEnd: (v) {
+                      context.read<ThemeProvider>().setUiScale(v);
+                    },
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 40,
+                child: Text(
+                  '${_uiScale.toStringAsFixed(1)}x',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            '调整全局界面大小（歌词界面不受影响）',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
       ],
     );
   }

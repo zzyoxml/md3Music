@@ -33,12 +33,36 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   String? _description;
   bool _isDescriptionExpanded = false;
 
+  /// 滚动监听：用于 SliverAppBar pinned 后 fade-in 显示歌手名
+  final ScrollController _scrollController = ScrollController();
+  double _scrollOffset = 0;
+  double _lastReportedOffset = 0;
+
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchArtistSongs();
     });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  /// 滚动监听：减少无意义 setState，仅在偏移变化超过 1px 时更新
+  void _onScroll() {
+    if (!mounted) return;
+    final offset = _scrollController.offset;
+    if ((offset - _lastReportedOffset).abs() > 1.0) {
+      _lastReportedOffset = offset;
+      _scrollOffset = offset;
+      setState(() {});
+    }
   }
 
   Future<void> _fetchArtistSongs() async {
@@ -203,19 +227,35 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
           : _error != null
               ? _buildError(context, colorScheme)
               : CustomScrollView(
+                  controller: _scrollController,
                   slivers: [
                     SliverAppBar(
-                      expandedHeight: 200,
+                      expandedHeight: 180,
                       pinned: true,
-                      centerTitle: true,
-                      flexibleSpace: FlexibleSpaceBar(
-                        centerTitle: true,
-                        title: Text(
+                      centerTitle: false,
+                      // pinned 后顶栏背景色：滚动到 expandedHeight - kToolbarHeight
+                      // 之后从透明渐变到 surface
+                      backgroundColor: Color.lerp(
+                        Colors.transparent,
+                        colorScheme.surface,
+                        (_scrollOffset - (180 - kToolbarHeight))
+                            .clamp(0.0, 60.0) / 60,
+                      )!,
+                      surfaceTintColor: Colors.transparent,
+                      scrolledUnderElevation: 0,
+                      // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示歌手名
+                      title: Opacity(
+                        opacity: ((_scrollOffset - (180 - kToolbarHeight)) /
+                                60.0)
+                            .clamp(0.0, 1.0),
+                        child: Text(
                           widget.artistName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
+                      ),
+                      flexibleSpace: FlexibleSpaceBar(
                         background: Container(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
@@ -227,52 +267,89 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                               ],
                             ),
                           ),
-                          child: Center(
-                            child: avatarUrl != null
-                                ? ClipOval(
-                                    child: CachedNetworkImage(
-                                      imageUrl: avatarUrl,
-                                      width: 120,
-                                      height: 120,
-                                      fit: BoxFit.cover,
-                                      placeholder: (_, _) => Container(
-                                        width: 120,
-                                        height: 120,
-                                        color: colorScheme.surfaceContainerHighest,
-                                        child: Icon(
-                                          Icons.person,
-                                          size: 48,
-                                          color: colorScheme.onSurfaceVariant,
+                          child: SafeArea(
+                            bottom: false,
+                            child: Align(
+                              alignment: Alignment.bottomLeft,
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                              child: Row(
+                                children: [
+                                  avatarUrl != null
+                                      ? ClipOval(
+                                          child: CachedNetworkImage(
+                                            imageUrl: avatarUrl,
+                                            width: 100,
+                                            height: 100,
+                                            fit: BoxFit.cover,
+                                            placeholder: (_, _) => Container(
+                                              width: 100,
+                                              height: 100,
+                                              color: colorScheme.surfaceContainerHighest,
+                                              child: Icon(
+                                                Icons.person,
+                                                size: 40,
+                                                color: colorScheme.onSurfaceVariant,
+                                              ),
+                                            ),
+                                            errorWidget: (_, _, _) => Container(
+                                              width: 100,
+                                              height: 100,
+                                              color: colorScheme.surfaceContainerHighest,
+                                              child: Icon(
+                                                Icons.person,
+                                                size: 40,
+                                                color: colorScheme.onSurfaceVariant,
+                                              ),
+                                            ),
+                                          ),
+                                        )
+                                      : Container(
+                                          width: 100,
+                                          height: 100,
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            color: colorScheme.surfaceContainerHighest,
+                                          ),
+                                          child: Icon(
+                                            Icons.person,
+                                            size: 40,
+                                            color: colorScheme.onSurfaceVariant,
+                                          ),
                                         ),
-                                      ),
-                                      errorWidget: (_, _, _) => Container(
-                                        width: 120,
-                                        height: 120,
-                                        color: colorScheme.surfaceContainerHighest,
-                                        child: Icon(
-                                          Icons.person,
-                                          size: 48,
-                                          color: colorScheme.onSurfaceVariant,
+                                  const SizedBox(width: 16),
+                                  Expanded(
+                                    child: Column(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          widget.artistName,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
-                                      ),
-                                    ),
-                                  )
-                                : Container(
-                                    width: 120,
-                                    height: 120,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: colorScheme.surfaceContainerHighest,
-                                    ),
-                                    child: Icon(
-                                      Icons.person,
-                                      size: 48,
-                                      color: colorScheme.onSurfaceVariant,
+                                        if (_songs.isNotEmpty) ...[
+                                          const SizedBox(height: 4),
+                                          Text(
+                                            '${_songs.length} 首歌曲',
+                                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                              color: colorScheme.onSurfaceVariant,
+                                            ),
+                                          ),
+                                        ],
+                                      ],
                                     ),
                                   ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
                       ),
+                    ),
                     ),
                     SliverToBoxAdapter(
                       child: Padding(
