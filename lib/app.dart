@@ -411,31 +411,43 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
             _selectedIndex = index;
           });
         },
-        body: Column(
-          children: [
-            Expanded(child: _pages[_selectedIndex]),
-            const MiniPlayer(),
-          ],
-        ),
-        compactBody: Column(
-          children: [
-            Expanded(child: _pages[_selectedIndex]),
-            const MiniPlayer(),
-          ],
-        ),
-        mediumBody: Column(
-          children: [
-            Expanded(child: _pages[_selectedIndex]),
-            const MiniPlayer(),
-          ],
-        ),
-        expandedBody: Column(
-          children: [
-            Expanded(child: _pages[_selectedIndex]),
-            const MiniPlayer(),
-          ],
-        ),
+        body: _buildBody(),
+        compactBody: _buildBody(),
+        mediumBody: _buildBody(),
+        expandedBody: _buildBody(),
       ),
+    );
+  }
+
+  Widget _buildBody() {
+    return Column(
+      children: [
+        Expanded(
+          child: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            transitionBuilder: (child, animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0.08, 0.0),
+                    end: Offset.zero,
+                  ).animate(CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOut,
+                  )),
+                  child: child,
+                ),
+              );
+            },
+            child: KeyedSubtree(
+              key: ValueKey(_selectedIndex),
+              child: _pages[_selectedIndex],
+            ),
+          ),
+        ),
+        const MiniPlayer(),
+      ],
     );
   }
 
