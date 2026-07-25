@@ -13,6 +13,7 @@ import '../../widgets/song_list_item.dart';
 import '../charts/charts_page.dart';
 import '../playlist/playlist_page.dart';
 import '../search/search_page.dart';
+import '../recognition/song_recognition_page.dart';
 
 class DiscoverPage extends StatefulWidget {
   const DiscoverPage({super.key});
@@ -148,6 +149,12 @@ class _DiscoverPageState extends State<DiscoverPage> {
             onPressed: () => Navigator.of(
               context,
             ).push(MaterialPageRoute(builder: (_) => const SearchPage())),
+          ),
+          IconButton(
+            icon: const Icon(Icons.mic),
+            onPressed: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const SongRecognitionPage())),
           ),
           Consumer<KugouProvider>(
             builder: (context, kugou, _) => Padding(
