@@ -440,8 +440,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
               final isEntering = child.key == ValueKey(_selectedIndex);
 
               if (isPad) {
-                // Pad：上下淡入淡出
-                final slideY = isEntering ? 0.1 : -0.1;
+                // Pad：基于 tab 顺序上下滑动
+                // tab 序号增大 → 旧页面向上滑出，新页面从下方滑入
+                // tab 序号减小 → 旧页面向下滑出，新页面从上方滑入
+                final slideY = isEntering
+                    ? (goingRight ? 0.1 : -0.1)
+                    : (goingRight ? -0.1 : 0.1);
                 return FadeTransition(
                   opacity: animation,
                   child: SlideTransition(
