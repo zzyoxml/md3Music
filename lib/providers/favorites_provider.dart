@@ -76,18 +76,42 @@ class FavoritesProvider extends ChangeNotifier {
       final playlist = await _getMyFavoritePlaylist();
       if (playlist == null) return;
       final api = KugouApiClient();
-      final result = await api.getPlaylistSongs(
-        playlist.globalCollectionId ?? playlist.id,
-        pagesize: 500,
-      );
-      if (result != null && result.songs.isNotEmpty) {
-        for (final s in result.songs) {
-          _favoriteIds.add(s.hash);
+
+      // 优先用 listid 接口（与 PlaylistPage 一致），确保 hash 匹配。
+      // "我喜欢"是用户私有歌单，globalCollectionId 可能为空，
+      // 用 getPlaylistSongs(/playlist/track/all) 会拉取失败或返回不一致的数据。
+      final listid = playlist.listId;
+      if (listid.isNotEmpty) {
+        const int pageSize = 200;
+        const int maxPages = 10;
+        for (int page = 1; page <= maxPages; page++) {
+          final r = await api.getPlaylistSongsByListid(
+            listid: listid,
+            page: page,
+            pagesize: pageSize,
+          );
+          if (r == null) break;
+          for (final s in r.songs) {
+            _favoriteIds.add(s.hash);
+          }
+          if (r.songs.length < pageSize) break;
         }
         notifyListeners();
+      } else {
+        // 回退：用 globalCollectionId 接口
+        final gid = playlist.globalCollectionId ?? playlist.id;
+        if (gid.isNotEmpty) {
+          final result = await api.getPlaylistSongs(gid, pagesize: 500);
+          if (result != null && result.songs.isNotEmpty) {
+            for (final s in result.songs) {
+              _favoriteIds.add(s.hash);
+            }
+            notifyListeners();
+          }
+        }
       }
     } catch (e) {
-          }
+    }
   }
 
   Future<void> toggleFavorite(Song song) async {
