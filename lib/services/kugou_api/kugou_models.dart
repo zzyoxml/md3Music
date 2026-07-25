@@ -343,11 +343,15 @@ class KugouSongDetail {
     String? artistIdFromSingerInfo;
     final singerinfo = json['singerinfo'];
     if (singerinfo is List && singerinfo.isNotEmpty) {
-      final firstSinger = singerinfo.first;
-      if (firstSinger is Map) {
-        artistName = firstSinger['name']?.toString();
-        artistIdFromSingerInfo = firstSinger['id']?.toString();
+      final names = <String>[];
+      for (final s in singerinfo) {
+        if (s is Map) {
+          final n = s['name']?.toString();
+          if (n != null && n.isNotEmpty) names.add(n);
+          artistIdFromSingerInfo ??= s['id']?.toString();
+        }
       }
+      if (names.isNotEmpty) artistName = names.join('、');
     }
     // kmr/v2 API 返回 authors 数组，兼容处理
     if (artistName == null || artistName.isEmpty) {
@@ -356,7 +360,7 @@ class KugouSongDetail {
         artistName = authors
             .map((a) => (a is Map ? a['author_name']?.toString() : '') ?? '')
             .where((s) => s.isNotEmpty)
-            .join(',');
+            .join('、');
         if (artistIdFromSingerInfo == null && authors.first is Map) {
           artistIdFromSingerInfo = authors.first['author_id']?.toString();
         }
@@ -500,11 +504,14 @@ class KugouSongDetail {
   Song toSong() {
     // 清理 title：API 的 filename/songname 常返回 "歌手 - 歌曲名" 格式，
     // 去掉前缀，只保留纯歌曲名（subtitle 已单独显示歌手和专辑）。
+    // 用正则兼容 "歌手A/歌手B - 歌曲名"、"歌手A、歌手B - 歌曲名" 等多种分隔符。
     var cleanTitle = songName;
-    if (artistName != null && artistName!.isNotEmpty) {
-      final prefix = '$artistName - ';
-      if (cleanTitle.startsWith(prefix)) {
-        cleanTitle = cleanTitle.substring(prefix.length);
+    final separatorPattern = RegExp(r'^.+\s*[-–—]\s*');
+    final match = separatorPattern.firstMatch(cleanTitle);
+    if (match != null) {
+      final afterSep = cleanTitle.substring(match.end);
+      if (afterSep.trim().isNotEmpty) {
+        cleanTitle = afterSep;
       }
     }
     return Song(

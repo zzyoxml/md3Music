@@ -382,6 +382,19 @@ class AudioPlaybackService : Service() {
         }
     }
 
+    private fun resizeBitmap(source: Bitmap, maxSize: Int): Bitmap {
+        val w = source.width
+        val h = source.height
+        if (w <= maxSize && h <= maxSize) return source
+        val ratio = maxSize.toDouble() / maxOf(w, h)
+        return Bitmap.createScaledBitmap(
+            source,
+            (w * ratio).toInt(),
+            (h * ratio).toInt(),
+            true
+        )
+    }
+
     private fun showNotification(
         title: String,
         artist: String,
@@ -449,10 +462,30 @@ class AudioPlaybackService : Service() {
         if (!artUrl.isNullOrEmpty()) {
             Thread {
                 try {
-                    val bitmap = BitmapFactory.decodeStream(java.net.URL(artUrl).openStream())
-                    if (bitmap != null) builder.setLargeIcon(bitmap)
-                } catch (_: Exception) {}
-                startForeground(NOTIFICATION_ID, builder.build())
+                    val originalBitmap = BitmapFactory.decodeStream(java.net.URL(artUrl).openStream())
+                    if (originalBitmap != null) {
+                        // 通知 LargeIcon：缩放到 192px（~64dp @ xxhdpi）
+                        val iconBitmap = resizeBitmap(originalBitmap, 192)
+                        builder.setLargeIcon(iconBitmap)
+                        startForeground(NOTIFICATION_ID, builder.build())
+
+                        // MediaSession Metadata：用原始分辨率 bitmap + URI
+                        mediaSession?.setMetadata(
+                            MediaMetadataCompat.Builder()
+                                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+                                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
+                                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
+                                .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, originalBitmap)
+                                .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, originalBitmap)
+                                .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artUrl)
+                                .build()
+                        )
+                    } else {
+                        startForeground(NOTIFICATION_ID, builder.build())
+                    }
+                } catch (_: Exception) {
+                    startForeground(NOTIFICATION_ID, builder.build())
+                }
             }.start()
         } else {
             startForeground(NOTIFICATION_ID, builder.build())
@@ -494,25 +527,6 @@ class AudioPlaybackService : Service() {
         try {
             lyriconProvider?.player?.setPlaybackState(isPlaying)
         } catch (_: Exception) {}
-
-        mediaSession?.setMetadata(
-            MediaMetadataCompat.Builder()
-                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
-                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
-                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
-                .also { builder ->
-                    if (!artUrl.isNullOrEmpty()) {
-                        try {
-                            val bitmap = BitmapFactory.decodeStream(java.net.URL(artUrl).openStream())
-                            if (bitmap != null) {
-                                builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, bitmap)
-                                builder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, bitmap)
-                            }
-                        } catch (_: Exception) {}
-                    }
-                }
-                .build()
-        )
     }
 
     override fun onDestroy() {
