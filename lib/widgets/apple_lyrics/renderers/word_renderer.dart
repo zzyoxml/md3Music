@@ -61,10 +61,9 @@ class WordRenderer {
   /// 每个 word index 的当前 alpha 值。
   final Map<int, double> _wordAlphas = <int, double>{};
 
-  /// v3 优化：缓存每个 word 上次 paint 时设置的 alpha。
-  /// 仅在 alpha 变化时才重新 set text + layout，避免每帧 N 次 layout。
-  /// line 切换时由 [_ensureBound] 清空，强制下次 paintLine 重新 layout。
-  final Map<int, double> _lastSetAlphas = <int, double>{};
+  /// v3 优化：renderer 是否已收敛（alpha 和 Y offset 都不再变化）。
+  /// 用于 AppleLyricsView 判断是否可以停止 Ticker。
+  bool _isConverged = true;
 
   /// 每个 word index 的当前 Y 轴偏移（上浮特效）。
   ///
@@ -117,6 +116,10 @@ class WordRenderer {
 
   /// 当前是否为当前行。
   bool get isActive => _isActive;
+
+  /// v3 优化：renderer 是否已收敛（alpha 和 Y offset 都不再变化）。
+  /// 用于 AppleLyricsView 判断是否可以停止 Ticker。
+  bool get isConverged => _isConverged;
 
   // ============== 状态设置 ==============
 
@@ -182,6 +185,7 @@ class WordRenderer {
       intraWordProgress = 0.0;
     }
 
+    bool anyChanged = false;
     for (int i = 0; i < wordCount; i++) {
       final double target = _targetAlphaForExact(i, currentWordIdx, intraWordProgress, dark, bright);
       final double current = _wordAlphas[i] ?? dark;
@@ -193,6 +197,7 @@ class WordRenderer {
       if ((next - target).abs() < LyricLayout.alphaEpsilon) {
         next = target;
       }
+      if ((next - current).abs() > 1e-6) anyChanged = true;
       _wordAlphas[i] = next;
 
       // AMLL 上浮特效
@@ -206,6 +211,7 @@ class WordRenderer {
       if ((nextY - targetY).abs() < LyricLayout.alphaEpsilon) {
         nextY = targetY;
       }
+      if ((nextY - currentY).abs() > 1e-6) anyChanged = true;
       _wordYOffsets[i] = nextY;
 
       // 强调辉光效果：计算每个 word 的 EmphasizeState
@@ -227,6 +233,8 @@ class WordRenderer {
         _emphasizeStates[i] = EmphasizeState.idle;
       }
     }
+    // v3 优化：跟踪 alpha/Y offset 是否仍在变化（用于 AppleLyricsView 判断停止 Ticker）
+    _isConverged = !anyChanged;
   }
 
   /// 计算指定 word index 的目标 Y 偏移（AMLL 上浮特效），基于逐字时间戳。
@@ -322,25 +330,22 @@ class WordRenderer {
       final double wordY = currentY + yOffset;
       final Offset wordPos = Offset(wordX, wordY);
 
-      // 设置文字样式
-      // v3 优化：仅在 alpha 变化时才重新 set text + layout，
-      // 避免每帧 N 次 layout（N=当前行 word 数，通常 5-15）。
-      // TextPainter.paint 要求 set text 后必须 layout，否则断言失败；
-      // alpha 不变时直接复用上次 painter 状态调用 .paint() 即可。
-      if (_lastSetAlphas[i] != alpha) {
-        _painter.text = TextSpan(
-          text: word.text,
-          style: TextStyle(
-            color: Color.fromRGBO(255, 255, 255, alpha),
-            fontSize: fontSize,
-            height: lineHeight,
-            // 显式注入歌词 fontFamily，与测量路径保持一致
-            fontFamily: LyricLayout.fontFamily,
-          ),
-        );
-        _painter.layout();
-        _lastSetAlphas[i] = alpha;
-      }
+      // 设置文字样式 + layout。
+      // 注意：_painter 在循环里被多个 word 共用，每次循环到新 word 都必须重新
+      // set text + layout，否则 painter 仍保留上一个 word 的 text。
+      // v3 实测发现按 alpha 缓存跳过 set text 会引入"当前行重复显示同一字"的 bug，
+      // 已回滚到 v2 行为（每次 set text + layout）。
+      _painter.text = TextSpan(
+        text: word.text,
+        style: TextStyle(
+          color: Color.fromRGBO(255, 255, 255, alpha),
+          fontSize: fontSize,
+          height: lineHeight,
+          // 显式注入歌词 fontFamily，与测量路径保持一致
+          fontFamily: LyricLayout.fontFamily,
+        ),
+      );
+      _painter.layout();
 
       // 应用强调辉光效果：per-word scale + glow shadow
       if (emState.scale != 1.0 || emState.glowLevel > 0) {
@@ -424,7 +429,6 @@ class WordRenderer {
     _wordAlphas.clear();
     _wordYOffsets.clear();
     _emphasizeStates.clear();
-    _lastSetAlphas.clear(); // v3 优化：清空 alpha 缓存，强制下次 paintLine 重新 layout
     final double dark = dynamicDarkAlpha;
     // 测量所有 word 宽度并缓存
     _wordWidths = List<double>.filled(line.words.length, 0);

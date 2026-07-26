@@ -46,6 +46,10 @@ class LineRenderer {
   /// 目标 alpha 值。isActive=true 时 1.0，false 时 0.2。
   double _targetAlpha = LyricLayout.currentDarkAlpha;
 
+  /// v3 优化：alpha 是否已收敛到 target（最近一次 tick 中 alpha 变化 < 1e-6）。
+  /// 用于 AppleLyricsView 判断是否可以停止 Ticker。
+  bool _isConverged = true;
+
   /// 复用的 TextPainter 实例（避免每帧创建对象）。
   ///
   /// **性能优化**：之前每帧 paintLine 都创建新 TextPainter + GC，
@@ -59,6 +63,10 @@ class LineRenderer {
 
   /// 当前是否为当前行。
   bool get isActive => _isActive;
+
+  /// v3 优化：alpha 是否已收敛（最近一次 tick 无变化）。
+  /// 用于 AppleLyricsView 判断是否可以停止 Ticker。
+  bool get isConverged => _isConverged;
 
   /// 目标 alpha（用于测试断言）。
   @visibleForTesting
@@ -106,6 +114,8 @@ class LineRenderer {
     if ((next - _targetAlpha).abs() < LyricLayout.alphaEpsilon) {
       next = _targetAlpha;
     }
+    // v3 优化：跟踪 alpha 是否仍在变化（用于 AppleLyricsView 判断停止 Ticker）
+    _isConverged = (next - _currentAlpha).abs() < 1e-6;
     _currentAlpha = next;
   }
 

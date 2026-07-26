@@ -94,6 +94,10 @@ class LineScaleController {
   /// 是否在动画中
   bool get isAnimating => !_scaleSpring.isSettled;
 
+  /// v3 优化：弹簧是否已收敛到目标（位移/速度/加速度都 < 0.01）。
+  /// 用于 AppleLyricsView 判断是否可以停止 Ticker。
+  bool get isConverged => _scaleSpring.isSettled;
+
   /// 重置：弹簧回到 1.0
   void reset() {
     _scaleSpring.setPosition(LyricLayout.activeScale, 0);
