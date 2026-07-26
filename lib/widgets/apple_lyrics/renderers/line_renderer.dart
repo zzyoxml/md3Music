@@ -56,6 +56,15 @@ class LineRenderer {
   /// 现在复用实例，只重新 set text + layout（alpha 变了需要重新 layout）。
   final TextPainter _painter = TextPainter(textDirection: TextDirection.ltr);
 
+  /// v4 优化：上次 set text + layout 时的 alpha。
+  /// 仅在 alpha 变化 > 0.001 时才 set text + layout，避免每帧 N 次 layout。
+  /// LineRenderer 每行独立实例（`Map<int, LineRenderer>`），无 v3 共享 painter bug 风险。
+  double _lastSetAlpha = -1;
+
+  /// v4 优化：上次 set text + layout 时的 maxWidth。
+  /// maxWidth 变化时也需重新 layout（视口宽度变化导致换行变化）。
+  double _lastSetMaxWidth = -1;
+
   // ============== 状态查询 ==============
 
   /// 当前 alpha（用于测试与外部协调）。
@@ -81,6 +90,10 @@ class LineRenderer {
   /// [scale] 是行缩放，0.97（inactive）~1.0（active）。
   /// [blurFade] 控制非当前行透明度：1.0=透明（模糊图片覆盖），0.0=正常显示。
   /// [blurActive] 是否启用高斯模糊：false 时不降低非当前行透明度。
+  ///
+  /// **v4 bug 修复**：检测 _targetAlpha 变化时重置 _isConverged=false。
+  /// 之前 setLineState 修改 _targetAlpha 但不重置 _isConverged，
+  /// 导致后续 tick 调用时 _isConverged=true（来自上次收敛）即便 target 已变也不会重新计算。
   void setLineState({required bool isActive, required double scale, double blurFade = 1.0, bool blurActive = true}) {
     _isActive = isActive;
     final double factor = ((scale - LyricLayout.inactiveScale) /
@@ -91,7 +104,12 @@ class LineRenderer {
     final double dynamicBright = factor * 0.8 + 0.2;
     // 非当前行 alpha = dynamicDark * (1 - blurFade)，blurActive=false 时不降低
     final double effectiveFade = blurActive ? blurFade : 0.0;
-    _targetAlpha = isActive ? dynamicBright : dynamicDark * (1.0 - effectiveFade);
+    final double newTargetAlpha = isActive ? dynamicBright : dynamicDark * (1.0 - effectiveFade);
+    // v4 修复：target 变化时重置 _isConverged，让 tick 重新计算 alpha
+    if ((newTargetAlpha - _targetAlpha).abs() > 1e-6) {
+      _isConverged = false;
+    }
+    _targetAlpha = newTargetAlpha;
   }
 
   // ============== 动画推进 ==============
@@ -102,8 +120,12 @@ class LineRenderer {
   /// 用指数衰减公式 `_currentAlpha += (_targetAlpha - _currentAlpha) * (1 - exp(-speed * dt))`
   /// 平滑过渡：变亮用 [LyricLayout.attackSpeed]（50.0），变暗用 [LyricLayout.releaseSpeed]（7.0）。
   /// 差值小于 [LyricLayout.alphaEpsilon]（0.001）时吸附到目标。
+  ///
+  /// **v4 优化**：isConverged=true 时早 return 跳过已收敛行的指数衰减计算。
+  /// setLineState 检测 target 变化时会重置 _isConverged=false，确保 target 变化后能重新计算。
   void tick(double dt) {
     if (dt <= 0) return;
+    if (_isConverged) return; // v4 优化：已收敛的行跳过 tick
     // 变亮用 ATTACK（快），变暗用 RELEASE（慢）
     final double speed = _targetAlpha >= _currentAlpha
         ? LyricLayout.attackSpeed
@@ -129,32 +151,45 @@ class LineRenderer {
   ///
   /// [maxWidth] 为可用最大文字宽度，超出时 TextPainter 自动换行（默认不换行）。
   ///
-  /// **性能优化**：复用 [_painter] 实例，避免每帧创建 TextPainter 对象 + GC。
-  /// layout 仍需每帧执行（alpha 变化需重新 set TextSpan）。
+  /// **性能优化**：
+  /// - 复用 [_painter] 实例，避免每帧创建 TextPainter 对象 + GC
+  /// - **v4 优化**：alpha 变化 < 0.001 且 maxWidth 未变时跳过 set text + layout
+  ///   （layout 结果与 alpha 无关，复用上次的 layout 结果直接 paint）
   void paintLine(
       Canvas canvas, Offset offset, LyricLine line, double fontSize,
       {double maxWidth = double.infinity}) {
     if (line.text.isEmpty) return;
-    _painter.text = TextSpan(
-      text: line.text,
-      style: TextStyle(
-        // 文字颜色固定白色，alpha 整行统一（无 mask 渐变）
-        color: Color.fromRGBO(255, 255, 255, _currentAlpha),
-        fontSize: fontSize,
-        height: LyricLayout.lineHeight,
-        // 显式注入歌词 fontFamily（system 模式为 null，走系统字体链）
-        fontFamily: LyricLayout.fontFamily,
-      ),
-    );
-    _painter.layout(
-        maxWidth: maxWidth == double.infinity ? double.infinity : maxWidth);
+    // v4 优化：alpha 变化 < 0.001 且 maxWidth 未变时跳过 set text + layout
+    if ((_currentAlpha - _lastSetAlpha).abs() > 0.001 ||
+        maxWidth != _lastSetMaxWidth) {
+      _painter.text = TextSpan(
+        text: line.text,
+        style: TextStyle(
+          // 文字颜色固定白色，alpha 整行统一（无 mask 渐变）
+          color: Color.fromRGBO(255, 255, 255, _currentAlpha),
+          fontSize: fontSize,
+          height: LyricLayout.lineHeight,
+          // 显式注入歌词 fontFamily（system 模式为 null，走系统字体链）
+          fontFamily: LyricLayout.fontFamily,
+        ),
+      );
+      _painter.layout(
+          maxWidth: maxWidth == double.infinity ? double.infinity : maxWidth);
+      _lastSetAlpha = _currentAlpha;
+      _lastSetMaxWidth = maxWidth;
+    }
     _painter.paint(canvas, offset);
   }
 
   /// 重置状态：alpha 回到初始值（0.2），isActive=false。
+  ///
+  /// **v4 优化**：重置 alpha 缓存字段，下次 paintLine 会重新 set text + layout。
   void reset() {
     _isActive = false;
     _currentAlpha = LyricLayout.currentDarkAlpha;
     _targetAlpha = LyricLayout.currentDarkAlpha;
+    _isConverged = true;
+    _lastSetAlpha = -1;
+    _lastSetMaxWidth = -1;
   }
 }

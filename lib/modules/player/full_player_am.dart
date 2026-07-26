@@ -405,32 +405,42 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
   @override
   Widget build(BuildContext context) {
-    final playerProvider = context.watch<PlayerProvider>();
-    final currentSong = playerProvider.currentSong;
-    final colorScheme = Theme.of(context).colorScheme;
+    // v4 优化：父级 build 只在切歌（currentSong.id 变化）或播放/暂停（isPlaying）时执行。
+    // position 更新（200ms）通过 AppleLyricsView 与进度条自身的 Selector 注入，不触发父级重建。
+    return Selector<PlayerProvider, ({String? songId, bool isPlaying})>(
+      selector: (_, p) => (
+        songId: p.currentSong?.id,
+        isPlaying: p.isPlaying,
+      ),
+      builder: (context, _, __) {
+        final playerProvider = context.read<PlayerProvider>();
+        final currentSong = playerProvider.currentSong;
+        final colorScheme = Theme.of(context).colorScheme;
 
-    if (currentSong == null) {
-      return Scaffold(
-        backgroundColor: colorScheme.surface,
-        appBar: AppBar(leading: const BackButton()),
-        body: const Center(child: Text('暂无播放')),
-      );
-    }
+        if (currentSong == null) {
+          return Scaffold(
+            backgroundColor: colorScheme.surface,
+            appBar: AppBar(leading: const BackButton()),
+            body: const Center(child: Text('暂无播放')),
+          );
+        }
 
-    // 初始化封面 URL（首次进入或 null→有值）
-    if (_previousArtworkUrl == null && currentSong.artworkUri != null) {
-      _previousArtworkUrl = currentSong.artworkUri;
-    }
+        // 初始化封面 URL（首次进入或 null→有值）
+        if (_previousArtworkUrl == null && currentSong.artworkUri != null) {
+          _previousArtworkUrl = currentSong.artworkUri;
+        }
 
-    // 拦截系统返回键：先播放 reverse 动画（mini player 淡入），
-    // 动画完成后用 removeRoute 移除路由（绕过 PopScope 避免死循环）。
-    return PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop || _isDismissing) return;
-        _collapseByButton();
+        // 拦截系统返回键：先播放 reverse 动画（mini player 淡入），
+        // 动画完成后用 removeRoute 移除路由（绕过 PopScope 避免死循环）。
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop || _isDismissing) return;
+            _collapseByButton();
+          },
+          child: _buildFullLayout(playerProvider, currentSong, colorScheme),
+        );
       },
-      child: _buildFullLayout(playerProvider, currentSong, colorScheme),
     );
   }
 
@@ -529,13 +539,18 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   child: RepaintBoundary(
                     child: _isLoadingLyrics
                         ? const Center(child: CircularProgressIndicator())
-                        : AppleLyricsView(
-                            lines: _parsedLyrics,
-                            currentTimeMs:
-                                playerProvider.position.inMilliseconds,
-                            isPlaying: playerProvider.isPlaying,
-                            onSeek: (ms) => playerProvider
-                                .seek(Duration(milliseconds: ms)),
+                        // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
+                        : Selector<PlayerProvider, int>(
+                            selector: (_, p) =>
+                                p.position.inMilliseconds,
+                            builder: (context, positionMs, _) =>
+                                AppleLyricsView(
+                              lines: _parsedLyrics,
+                              currentTimeMs: positionMs,
+                              isPlaying: playerProvider.isPlaying,
+                              onSeek: (ms) => playerProvider
+                                  .seek(Duration(milliseconds: ms)),
+                            ),
                           ),
                   ),
                 ),
@@ -692,13 +707,18 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                       _isLoadingLyrics
                           ? const Center(child: CircularProgressIndicator())
                           : RepaintBoundary(
-                              child: AppleLyricsView(
-                                lines: _parsedLyrics,
-                                currentTimeMs:
-                                    playerProvider.position.inMilliseconds,
-                                isPlaying: playerProvider.isPlaying,
-                                onSeek: (ms) => playerProvider.seek(
-                                  Duration(milliseconds: ms),
+                              // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
+                              child: Selector<PlayerProvider, int>(
+                                selector: (_, p) =>
+                                    p.position.inMilliseconds,
+                                builder: (context, positionMs, _) =>
+                                    AppleLyricsView(
+                                  lines: _parsedLyrics,
+                                  currentTimeMs: positionMs,
+                                  isPlaying: playerProvider.isPlaying,
+                                  onSeek: (ms) => playerProvider.seek(
+                                    Duration(milliseconds: ms),
+                                  ),
                                 ),
                               ),
                             ),
@@ -858,13 +878,18 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                       _isLoadingLyrics
                           ? const Center(child: CircularProgressIndicator())
                           : RepaintBoundary(
-                              child: AppleLyricsView(
-                                lines: _parsedLyrics,
-                                currentTimeMs:
-                                    playerProvider.position.inMilliseconds,
-                                isPlaying: playerProvider.isPlaying,
-                                onSeek: (ms) => playerProvider.seek(
-                                  Duration(milliseconds: ms),
+                              // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
+                              child: Selector<PlayerProvider, int>(
+                                selector: (_, p) =>
+                                    p.position.inMilliseconds,
+                                builder: (context, positionMs, _) =>
+                                    AppleLyricsView(
+                                  lines: _parsedLyrics,
+                                  currentTimeMs: positionMs,
+                                  isPlaying: playerProvider.isPlaying,
+                                  onSeek: (ms) => playerProvider.seek(
+                                    Duration(milliseconds: ms),
+                                  ),
                                 ),
                               ),
                             ),
@@ -1107,8 +1132,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     ColorScheme colorScheme, {
     bool isExpanded = false,
   }) {
-    final duration = playerProvider.duration ?? Duration.zero;
-    final position = playerProvider.position;
     final horizontalPadding = isExpanded ? 16.0 : 24.0;
     final verticalSpacing = isExpanded ? 4.0 : 8.0;
 
@@ -1117,8 +1140,21 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // 进度条需要 200ms 刷新（Slider value 依赖 position）
-          _buildProgressBar(playerProvider, position, duration, colorScheme),
+          // v4 优化：进度条用 Selector 注入 position + duration，
+          // 避免父级每 200ms position 更新触发 _buildControls 整体重建。
+          Selector<PlayerProvider,
+              ({Duration position, Duration? duration})>(
+            selector: (_, p) => (
+              position: p.position,
+              duration: p.duration,
+            ),
+            builder: (context, state, _) => _buildProgressBar(
+              playerProvider,
+              state.position,
+              state.duration ?? Duration.zero,
+              colorScheme,
+            ),
+          ),
           SizedBox(height: verticalSpacing),
           // Selector 让主控制按钮仅在 isPlaying / loopMode / shuffle 变化时重建
           // 不再每 200ms 因 position 变化重建

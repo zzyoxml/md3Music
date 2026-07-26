@@ -52,11 +52,20 @@ class WordRenderer {
   /// 10 word/行 × 60fps = 每秒 600 次 layout → 缓存后降为 0 次/帧。
   List<double> _wordWidths = const <double>[];
 
-  /// 复用的 TextPainter 实例（避免每帧创建对象）。
+  /// v4 优化：per-word TextPainter 实例列表。
   ///
-  /// 注意：text setter 会标记需要 layout，所以 layout 还是要做，
-  /// 但省了 TextPainter 对象创建+GC 的开销。
-  final TextPainter _painter = TextPainter(textDirection: TextDirection.ltr);
+  /// **背景**：v3 Task 1 用单实例 _painter + _lastSetAlphas 缓存导致"当前行重复显示同一字"bug
+  /// （commit b56b7e9 已回滚）。根因：单实例 _painter 在循环中被多个 word 共用，下一个 word 的
+  /// set text 会覆盖 painter.text，导致 _lastSetAlphas[i] 比较时基于"上次循环的最后一个 word"
+  /// 状态而非该 word 自身上次状态。
+  /// **v4 解决方案**：每个 word 独占一个 TextPainter 实例，alpha 不变时跳过 set text + layout 是安全的。
+  /// 10 word/行 × 60fps = 每秒 600 次 layout → 缓存后降到 ~100-200 次/秒
+  /// （仅当前字 + 边界附近 word 在过渡）。
+  List<TextPainter> _wordPainters = const <TextPainter>[];
+
+  /// v4 优化：每个 word index 上次设置的 alpha。
+  /// 仅在 alpha 变化时才 set text + layout，避免每帧 N 次 layout。
+  final Map<int, double> _lastSetAlphas = <int, double>{};
 
   /// 每个 word index 的当前 alpha 值。
   final Map<int, double> _wordAlphas = <int, double>{};
@@ -290,8 +299,10 @@ class WordRenderer {
   /// **性能优化**：
   /// - word 宽度用 [_wordWidths] 缓存（[_ensureBound] 时一次性测量），
   ///   换行判断不再每帧创建 TextPainter + layout
-  /// - 复用 [_painter] 实例，避免每帧创建对象（layout 还是要做，
-  ///   因为 alpha 变了需要重新设置 TextSpan，但省了对象创建+GC）
+  /// - **v4 优化**：per-word TextPainter 实例 + alpha 缓存。
+  ///   仅在 alpha 变化时才 set text + layout，alpha 不变时直接 paint。
+  ///   这与 v3 Task 1 共享 painter 不同：每个 word 独占一个 TextPainter 实例，
+  ///   不会出现"下一个 word 覆盖 painter.text 导致 _lastSetAlphas[i] 错乱"的 bug。
   void paintLine(
       Canvas canvas, Offset offset, LyricLine line, double fontSize,
       {double maxWidth = double.infinity}) {
@@ -330,22 +341,23 @@ class WordRenderer {
       final double wordY = currentY + yOffset;
       final Offset wordPos = Offset(wordX, wordY);
 
-      // 设置文字样式 + layout。
-      // 注意：_painter 在循环里被多个 word 共用，每次循环到新 word 都必须重新
-      // set text + layout，否则 painter 仍保留上一个 word 的 text。
-      // v3 实测发现按 alpha 缓存跳过 set text 会引入"当前行重复显示同一字"的 bug，
-      // 已回滚到 v2 行为（每次 set text + layout）。
-      _painter.text = TextSpan(
-        text: word.text,
-        style: TextStyle(
-          color: Color.fromRGBO(255, 255, 255, alpha),
-          fontSize: fontSize,
-          height: lineHeight,
-          // 显式注入歌词 fontFamily，与测量路径保持一致
-          fontFamily: LyricLayout.fontFamily,
-        ),
-      );
-      _painter.layout();
+      // **v4 性能优化**：per-word TextPainter + alpha 缓存。
+      // 仅在 alpha 变化时才 set text + layout，alpha 不变时直接 paint。
+      final painter = _wordPainters[i];
+      if (_lastSetAlphas[i] != alpha) {
+        painter.text = TextSpan(
+          text: word.text,
+          style: TextStyle(
+            color: Color.fromRGBO(255, 255, 255, alpha),
+            fontSize: fontSize,
+            height: lineHeight,
+            // 显式注入歌词 fontFamily，与测量路径保持一致
+            fontFamily: LyricLayout.fontFamily,
+          ),
+        );
+        painter.layout();
+        _lastSetAlphas[i] = alpha;
+      }
 
       // 应用强调辉光效果：per-word scale + glow shadow
       if (emState.scale != 1.0 || emState.glowLevel > 0) {
@@ -371,17 +383,17 @@ class WordRenderer {
                 sigmaX: blurSigma, sigmaY: blurSigma,
               ),
             );
-            _painter.paint(canvas, wordPos);
+            painter.paint(canvas, wordPos);
             canvas.restore();
           }
         }
 
         // 绘制正常文字层
-        _painter.paint(canvas, wordPos);
+        painter.paint(canvas, wordPos);
         canvas.restore();
       } else {
         // 无辉光：直接绘制
-        _painter.paint(canvas, wordPos);
+        painter.paint(canvas, wordPos);
       }
 
       dx += width;
@@ -391,13 +403,14 @@ class WordRenderer {
   /// 整行降级绘制（无 word 时间戳时使用）。
   ///
   /// [maxWidth] 用于自动换行（默认 [double.infinity] 不换行）。
-  /// 复用 [_painter] 实例避免对象创建。
+  /// 用临时 TextPainter 实例（仅在 fallback 路径，频率低不缓存）。
   void _paintSolidFallback(
       Canvas canvas, Offset offset, LyricLine line, double fontSize,
       {double maxWidth = double.infinity}) {
     if (line.text.isEmpty) return;
     final double alpha = dynamicDarkAlpha;
-    _painter.text = TextSpan(
+    final painter = TextPainter(textDirection: TextDirection.ltr);
+    painter.text = TextSpan(
       text: line.text,
       style: TextStyle(
         color: Color.fromRGBO(255, 255, 255, alpha),
@@ -407,9 +420,10 @@ class WordRenderer {
         fontFamily: LyricLayout.fontFamily,
       ),
     );
-    _painter.layout(
+    painter.layout(
         maxWidth: maxWidth == double.infinity ? double.infinity : maxWidth);
-    _painter.paint(canvas, offset);
+    painter.paint(canvas, offset);
+    painter.dispose();
   }
 
   /// 检测 line 切换并重置 alpha map，同时测量并缓存所有 word 宽度。
@@ -418,22 +432,37 @@ class WordRenderer {
   /// 或 fontSize 变化，重新初始化每个 word 的 alpha 为 [dynamicDarkAlpha]，
   /// 并测量每个 word 的宽度缓存到 [_wordWidths]。
   ///
-  /// **性能优化**：word 宽度只在此时测量一次，paintLine 用缓存宽度做换行判断，
-  /// 避免每帧创建 N 个 TextPainter + layout。
+  /// **v4 性能优化**：
+  /// - 用 per-word TextPainter 实例列表替代共享 _painter
+  /// - word 宽度只在此时测量一次，paintLine 用缓存宽度做换行判断
+  /// - _lastSetAlphas 在 line 切换时清空，强制下次 paintLine 重新 set text + layout
   void _ensureBound(LyricLine line, double fontSize) {
     final sameLine = identical(_boundLine, line);
     final sameFontSize = _boundFontSize == fontSize;
-    if (sameLine && sameFontSize) return;
+    if (sameLine && sameFontSize && _wordPainters.length == line.words.length) {
+      return; // 缓存命中
+    }
     _boundLine = line;
     _boundFontSize = fontSize;
     _wordAlphas.clear();
     _wordYOffsets.clear();
     _emphasizeStates.clear();
+    _lastSetAlphas.clear(); // v4 优化：line 切换时清空 alpha 缓存
+
+    // 释放旧 _wordPainters（line 缩短时避免泄漏）
+    for (final painter in _wordPainters) {
+      painter.dispose();
+    }
+
     final double dark = dynamicDarkAlpha;
-    // 测量所有 word 宽度并缓存
+    // 测量所有 word 宽度并初始化 per-word TextPainter
     _wordWidths = List<double>.filled(line.words.length, 0);
+    _wordPainters = List<TextPainter>.generate(
+      line.words.length,
+      (_) => TextPainter(textDirection: TextDirection.ltr),
+    );
     for (int i = 0; i < line.words.length; i++) {
-      _painter.text = TextSpan(
+      _wordPainters[i].text = TextSpan(
         text: line.words[i].text,
         style: TextStyle(
           fontSize: fontSize,
@@ -443,22 +472,31 @@ class WordRenderer {
           fontFamily: LyricLayout.fontFamily,
         ),
       );
-      _painter.layout();
-      _wordWidths[i] = _painter.width;
+      _wordPainters[i].layout();
+      _wordWidths[i] = _wordPainters[i].width;
       _wordAlphas[i] = dark;
       _wordYOffsets[i] = 0;
+      // _lastSetAlphas[i] 不设置（默认 null），下次 paintLine 会重新 set text + layout
     }
   }
 
   /// 重置状态：清空 alpha map、Y 偏移、归零 progress、scale 回到 inactive、isActive=false、解绑 line。
+  ///
+  /// **v4 优化**：dispose 所有 per-word TextPainter 实例避免内存泄漏。
   void reset() {
     _isActive = false;
     _scale = LyricLayout.inactiveScale;
     _boundLine = null;
     _boundFontSize = -1;
     _wordWidths = const <double>[];
+    // v4 优化：dispose per-word TextPainter 实例
+    for (final painter in _wordPainters) {
+      painter.dispose();
+    }
+    _wordPainters = const <TextPainter>[];
     _wordAlphas.clear();
     _wordYOffsets.clear();
     _emphasizeStates.clear();
+    _lastSetAlphas.clear();
   }
 }
