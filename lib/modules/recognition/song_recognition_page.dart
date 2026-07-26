@@ -12,6 +12,7 @@ import 'package:record/record.dart';
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
+import '../../services/kugou_api/kugou_models.dart';
 
 class SongRecognitionPage extends StatefulWidget {
   const SongRecognitionPage({super.key});
@@ -624,27 +625,100 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
 
   void _playRecognizedSong(Map<String, dynamic>? audioInfo) {
     if (audioInfo == null) return;
+    print('[SongRecognition] 播放按钮点击，audioInfo=$audioInfo');
     final songName = _extractField(audioInfo, ['songname', 'song_name', 'name', 'SongName']) ?? '';
     final singerName = _extractField(audioInfo, ['singername', 'singer_name', 'SingerName', 'author_name']) ?? '';
     final albumAudioId = audioInfo['album_audio_id']?.toString() ??
         audioInfo['MixSongID']?.toString() ??
         audioInfo['mixsongid']?.toString();
     final hash = audioInfo['hash']?.toString() ??
-        audioInfo['FileHash']?.toString();
+        audioInfo['FileHash']?.toString() ??
+        audioInfo['file_hash']?.toString();
+
+    print('[SongRecognition] songName=$songName, singerName=$singerName, hash=$hash, albumAudioId=$albumAudioId');
 
     if (hash != null && hash.isNotEmpty) {
+      // 有 hash，直接播放
+      _playWithHash(hash, songName, singerName, albumAudioId, audioInfo);
+    } else if (albumAudioId != null && albumAudioId.isNotEmpty) {
+      // 没有 hash 但有 album_audio_id，通过搜索获取 hash
+      _playBySearchingHash(songName, singerName, albumAudioId, audioInfo);
+    } else {
+      // 既没有 hash 也没有 album_audio_id，尝试通过歌曲名搜索
+      _playBySearchingHash(songName, singerName, null, audioInfo);
+    }
+  }
+
+  void _playWithHash(String hash, String songName, String singerName,
+      String? albumAudioId, Map<String, dynamic> audioInfo) {
+    final song = Song(
+      id: hash,
+      title: songName,
+      artist: singerName,
+      album: '',
+      duration: Duration.zero,
+      artworkUri: audioInfo['imgurl']?.toString() ??
+          audioInfo['sizable_cover']?.toString() ??
+          audioInfo['union_cover']?.toString()?.replaceAll('{size}', '480'),
+      albumAudioId: albumAudioId,
+      isOnline: true,
+    );
+    context.read<PlayerProvider>().playOnlinePlaylist([song], 0);
+  }
+
+  Future<void> _playBySearchingHash(String songName, String singerName,
+      String? albumAudioId, Map<String, dynamic> audioInfo) async {
+    if (songName.isEmpty) {
+      setState(() => _error = '无法获取播放信息：缺少歌曲名');
+      return;
+    }
+    setState(() => _isRecognizing = true);
+    try {
+      final query = singerName.isNotEmpty ? '$singerName $songName' : songName;
+      print('[SongRecognition] 搜索歌曲获取 hash: $query');
+      final api = KugouApiClient();
+      final result = await api.search(query, pagesize: 5);
+      if (result == null || result.songs.isEmpty) {
+        setState(() {
+          _isRecognizing = false;
+          _error = '未找到可播放的歌曲源';
+        });
+        return;
+      }
+      // 优先匹配 album_audio_id，否则取第一个结果
+      KugouSongDetail? matched;
+      if (albumAudioId != null) {
+        for (final s in result.songs) {
+          if (s.albumAudioId == albumAudioId) {
+            matched = s;
+            break;
+          }
+        }
+      }
+      matched ??= result.songs.first;
+      print('[SongRecognition] 搜索到歌曲: ${matched.songName}, hash=${matched.hash}');
+
       final song = Song(
-        id: albumAudioId ?? hash,
+        id: matched.hash,
         title: songName,
         artist: singerName,
-        album: '',
-        duration: Duration.zero,
-        artworkUri: audioInfo['imgurl']?.toString() ??
-            audioInfo['sizable_cover']?.toString(),
-        albumAudioId: albumAudioId,
+        album: matched.albumName ?? '',
+        duration: Duration(milliseconds: matched.duration),
+        artworkUri: matched.artworkUri ?? audioInfo['imgurl']?.toString(),
+        albumAudioId: matched.albumAudioId ?? albumAudioId,
+        albumId: matched.albumId,
         isOnline: true,
       );
+      if (!mounted) return;
+      setState(() => _isRecognizing = false);
       context.read<PlayerProvider>().playOnlinePlaylist([song], 0);
+    } catch (e) {
+      print('[SongRecognition] 搜索播放失败: $e');
+      if (!mounted) return;
+      setState(() {
+        _isRecognizing = false;
+        _error = '播放失败: $e';
+      });
     }
   }
 

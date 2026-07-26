@@ -215,6 +215,10 @@ class LyricPreferences extends ChangeNotifier {
 
   /// 内部：尝试用 FontLoader 加载 [_customFontPath] 指向的字体文件。
   /// 加载成功则填充 [_loadedCustomFontFamily] 并 notifyListeners。
+  ///
+  /// 注意：Flutter 的 FontLoader 不支持对同一 family name 重复调用 load()，
+  /// 否则会抛异常。因此每次加载使用带计数器的唯一 family name。
+  int _fontLoadCounter = 0;
   Future<void> _tryLoadCustomFont() async {
     final path = _customFontPath;
     if (path == null || path.isEmpty) {
@@ -223,18 +227,24 @@ class LyricPreferences extends ChangeNotifier {
     }
     final file = File(path);
     if (!file.existsSync()) {
+      print('[LyricPreferences] 字体文件不存在: $path');
       _loadedCustomFontFamily = null;
       return;
     }
     try {
       final bytes = await file.readAsBytes();
-      final loader = FontLoader(lyricCustomFontFamily);
-      loader.addFont(Future.value(bytes.buffer.asByteData()));
+      // 每次使用唯一的 family name，避免 FontLoader 重复注册同一 family 抛异常
+      _fontLoadCounter++;
+      final familyName = '$lyricCustomFontFamily#$_fontLoadCounter';
+      final loader = FontLoader(familyName);
+      loader.addFont(Future.value(ByteData.sublistView(bytes)));
       await loader.load();
-      _loadedCustomFontFamily = lyricCustomFontFamily;
+      _loadedCustomFontFamily = familyName;
       notifyListeners();
-    } catch (_) {
+    } catch (e) {
+      print('[LyricPreferences] 字体加载失败: $e');
       _loadedCustomFontFamily = null;
+      notifyListeners();
     }
   }
 

@@ -24,8 +24,9 @@ enum FontSource {
 /// 使用 Flutter 内置的 [FontLoader] 动态注册字体，
 /// 无需新增 pubspec 依赖。每次 app 启动需重新注册。
 class CustomFontLoader {
-  /// 注册到 Flutter 的自定义字体 family 名（固定）
+  /// 注册到 Flutter 的自定义字体 family 名前缀（每次加载追加计数器）
   static const String customFontFamily = 'UserCustomFont';
+  static int _loadCounter = 0;
 
   static const String _channel = 'com.md3music.md3music/font_picker';
 
@@ -52,15 +53,21 @@ class CustomFontLoader {
   static Future<String?> loadIfAvailable(String? fontPath) async {
     if (fontPath == null || fontPath.isEmpty) return null;
     final file = File(fontPath);
-    if (!file.existsSync()) return null;
+    if (!file.existsSync()) {
+      print('[CustomFontLoader] 字体文件不存在: $fontPath');
+      return null;
+    }
     try {
       final bytes = await file.readAsBytes();
-      final loader = FontLoader(customFontFamily);
-      // addFont 接收 Future<ByteData>，这里用 Future.value 同步包装
-      loader.addFont(Future.value(bytes.buffer.asByteData()));
+      // 每次使用唯一的 family name，避免 FontLoader 重复注册同一 family 抛异常
+      _loadCounter++;
+      final familyName = '$customFontFamily#$_loadCounter';
+      final loader = FontLoader(familyName);
+      loader.addFont(Future.value(ByteData.sublistView(bytes)));
       await loader.load();
-      return customFontFamily;
-    } catch (_) {
+      return familyName;
+    } catch (e) {
+      print('[CustomFontLoader] 字体加载失败: $e');
       return null;
     }
   }
