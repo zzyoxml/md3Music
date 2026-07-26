@@ -61,6 +61,11 @@ class WordRenderer {
   /// 每个 word index 的当前 alpha 值。
   final Map<int, double> _wordAlphas = <int, double>{};
 
+  /// v3 优化：缓存每个 word 上次 paint 时设置的 alpha。
+  /// 仅在 alpha 变化时才重新 set text + layout，避免每帧 N 次 layout。
+  /// line 切换时由 [_ensureBound] 清空，强制下次 paintLine 重新 layout。
+  final Map<int, double> _lastSetAlphas = <int, double>{};
+
   /// 每个 word index 的当前 Y 轴偏移（上浮特效）。
   ///
   /// AMLL 规范：当前字会轻微上浮（最大约 -3px），用指数衰减平滑过渡。
@@ -318,17 +323,24 @@ class WordRenderer {
       final Offset wordPos = Offset(wordX, wordY);
 
       // 设置文字样式
-      _painter.text = TextSpan(
-        text: word.text,
-        style: TextStyle(
-          color: Color.fromRGBO(255, 255, 255, alpha),
-          fontSize: fontSize,
-          height: lineHeight,
-          // 显式注入歌词 fontFamily，与测量路径保持一致
-          fontFamily: LyricLayout.fontFamily,
-        ),
-      );
-      _painter.layout();
+      // v3 优化：仅在 alpha 变化时才重新 set text + layout，
+      // 避免每帧 N 次 layout（N=当前行 word 数，通常 5-15）。
+      // TextPainter.paint 要求 set text 后必须 layout，否则断言失败；
+      // alpha 不变时直接复用上次 painter 状态调用 .paint() 即可。
+      if (_lastSetAlphas[i] != alpha) {
+        _painter.text = TextSpan(
+          text: word.text,
+          style: TextStyle(
+            color: Color.fromRGBO(255, 255, 255, alpha),
+            fontSize: fontSize,
+            height: lineHeight,
+            // 显式注入歌词 fontFamily，与测量路径保持一致
+            fontFamily: LyricLayout.fontFamily,
+          ),
+        );
+        _painter.layout();
+        _lastSetAlphas[i] = alpha;
+      }
 
       // 应用强调辉光效果：per-word scale + glow shadow
       if (emState.scale != 1.0 || emState.glowLevel > 0) {
@@ -412,6 +424,7 @@ class WordRenderer {
     _wordAlphas.clear();
     _wordYOffsets.clear();
     _emphasizeStates.clear();
+    _lastSetAlphas.clear(); // v3 优化：清空 alpha 缓存，强制下次 paintLine 重新 layout
     final double dark = dynamicDarkAlpha;
     // 测量所有 word 宽度并缓存
     _wordWidths = List<double>.filled(line.words.length, 0);
