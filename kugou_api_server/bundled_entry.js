@@ -18,6 +18,7 @@ const modules = {
   'audio': require('./module/audio.js'),
   'audio_accompany_matching': require('./module/audio_accompany_matching.js'),
   'audio_ktv_total': require('./module/audio_ktv_total.js'),
+  'audio_match': require('./module/audio_match.js'),
   'audio_related': require('./module/audio_related.js'),
   'brush': require('./module/brush.js'),
   'captcha_sent': require('./module/captcha_sent.js'),

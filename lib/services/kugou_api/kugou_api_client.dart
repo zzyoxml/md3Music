@@ -222,13 +222,15 @@ class KugouApiClient {
         body: body,
       );
       print('[API _postBinary] status=${response.statusCode}');
-      if (response.statusCode == 200) {
+      // 酷狗指纹接口在"未匹配"时返回 502 + JSON body（含 error_code），
+      // 需要解析 body 以区分"未识别"和"真正的服务错误"
+      try {
         final json = jsonDecode(response.body);
         if (json is Map<String, dynamic>) {
           return json;
         }
-      }
-      print('[API _postBinary] Non-200 or non-map: status=${response.statusCode} body=${response.body.substring(0, response.body.length.clamp(0, 200))}');
+      } catch (_) {}
+      print('[API _postBinary] Non-JSON body: status=${response.statusCode} body=${response.body.substring(0, response.body.length.clamp(0, 200))}');
       return null;
     } catch (e) {
       print('[API _postBinary] Error: $e');

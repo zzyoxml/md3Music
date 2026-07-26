@@ -396,7 +396,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
         delayMs: 80,
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 380),
+            constraints: const BoxConstraints(maxWidth: 420),
             child: Container(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
               decoration: BoxDecoration(
@@ -528,8 +528,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
       child: Row(
         children: [
           for (final l in labels)
-            SizedBox(
-              width: 40, // 与 _buildCalendarGrid 中的 cellSize 保持一致
+            Expanded(
               child: Center(
                 child: Text(
                   l,
@@ -598,7 +597,6 @@ class _UserCenterPageState extends State<UserCenterPage> {
     Set<int> receivedDays,
     DateTime now,
   ) {
-    const cellSize = 40.0;
     final rows = <Widget>[];
     var cells = <Widget>[];
 
@@ -610,36 +608,47 @@ class _UserCenterPageState extends State<UserCenterPage> {
       }
     }
 
+    Widget buildEmptyCell() {
+      return Expanded(
+        child: AspectRatio(
+          aspectRatio: 1,
+          child: const SizedBox(),
+        ),
+      );
+    }
+
     for (var i = 0; i < leading; i++) {
-      addCell(const SizedBox(width: cellSize, height: cellSize));
+      addCell(buildEmptyCell());
     }
     for (var day = 1; day <= daysInMonth; day++) {
       final isReceived = receivedDays.contains(day);
       final isToday = day == now.day;
       addCell(
-        SizedBox(
-          width: cellSize,
-          height: cellSize,
-          child: Center(
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: isReceived ? cs.primary : Colors.transparent,
-                border: isToday && !isReceived
-                    ? Border.all(color: cs.primary, width: 1.5)
-                    : null,
-              ),
-              alignment: Alignment.center,
-              child: Text(
-                '$day',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: isToday || isReceived
-                      ? FontWeight.w600
-                      : FontWeight.normal,
-                  color: isReceived ? cs.onPrimary : cs.onSurface,
+        Expanded(
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: Center(
+              child: Container(
+                width: double.infinity,
+                height: double.infinity,
+                margin: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isReceived ? cs.primary : Colors.transparent,
+                  border: isToday && !isReceived
+                      ? Border.all(color: cs.primary, width: 1.5)
+                      : null,
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  '$day',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: isToday || isReceived
+                        ? FontWeight.w600
+                        : FontWeight.normal,
+                    color: isReceived ? cs.onPrimary : cs.onSurface,
+                  ),
                 ),
               ),
             ),
@@ -648,7 +657,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
       );
     }
     while (cells.isNotEmpty && cells.length < 7) {
-      addCell(const SizedBox(width: cellSize, height: cellSize));
+      addCell(buildEmptyCell());
     }
 
     return Column(
