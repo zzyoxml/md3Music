@@ -539,11 +539,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           ),
                   ),
                 ),
-                CommentsView(
-                  songHash: currentSong.id,
-                  albumAudioId: currentSong.albumAudioId,
-                  artworkUri: currentSong.artworkUri,
-                  isAmStyle: true,
+                // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
+                Selector<PlayerProvider, String?>(
+                  selector: (_, p) => p.currentSong?.id,
+                  builder: (_, _, __) => CommentsView(
+                    songHash: currentSong.id,
+                    albumAudioId: currentSong.albumAudioId,
+                    artworkUri: currentSong.artworkUri,
+                    isAmStyle: true,
+                  ),
                 ),
               ],
             ),
@@ -698,11 +702,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 ),
                               ),
                             ),
-                      CommentsView(
-                        songHash: currentSong.id,
-                        albumAudioId: currentSong.albumAudioId,
-                        artworkUri: currentSong.artworkUri,
-                        isAmStyle: true,
+                      // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
+                      Selector<PlayerProvider, String?>(
+                        selector: (_, p) => p.currentSong?.id,
+                        builder: (_, _, __) => CommentsView(
+                          songHash: currentSong.id,
+                          albumAudioId: currentSong.albumAudioId,
+                          artworkUri: currentSong.artworkUri,
+                          isAmStyle: true,
+                        ),
                       ),
                     ],
                   ),
@@ -860,11 +868,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 ),
                               ),
                             ),
-                      CommentsView(
-                        songHash: currentSong.id,
-                        albumAudioId: currentSong.albumAudioId,
-                        artworkUri: currentSong.artworkUri,
-                        isAmStyle: true,
+                      // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
+                      Selector<PlayerProvider, String?>(
+                        selector: (_, p) => p.currentSong?.id,
+                        builder: (_, _, __) => CommentsView(
+                          songHash: currentSong.id,
+                          albumAudioId: currentSong.albumAudioId,
+                          artworkUri: currentSong.artworkUri,
+                          isAmStyle: true,
+                        ),
                       ),
                     ],
                   ),
