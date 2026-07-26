@@ -28,6 +28,8 @@ class ArtistDetailPage extends StatefulWidget {
   State<ArtistDetailPage> createState() => _ArtistDetailPageState();
 }
 
+enum _SortBy { time, title, duration }
+
 class _ArtistDetailPageState extends State<ArtistDetailPage> {
   List<Song> _songs = [];
   bool _isLoading = true;
@@ -43,6 +45,73 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   final ScrollController _scrollController = ScrollController();
   double _scrollOffset = 0;
   double _lastReportedOffset = 0;
+
+  // 歌曲内搜索
+  bool _isSearching = false;
+  String _searchQuery = '';
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+
+  // 排序
+  _SortBy _sortBy = _SortBy.time;
+  bool _sortAscending = false;
+
+  // 定位正在播放歌曲
+  String? _highlightSongId;
+
+  // 缓存的过滤/排序结果
+  List<Song>? _cachedDisplaySongs;
+  String? _lastSearchQuery;
+  _SortBy? _lastSortBy;
+  bool? _lastSortAscending;
+
+  List<Song> get _displaySongs {
+    if (_cachedDisplaySongs != null &&
+        _lastSearchQuery == _searchQuery &&
+        _lastSortBy == _sortBy &&
+        _lastSortAscending == _sortAscending) {
+      return _cachedDisplaySongs!;
+    }
+    _rebuildDisplaySongs();
+    return _cachedDisplaySongs!;
+  }
+
+  void _rebuildDisplaySongs() {
+    List<Song> list;
+    if (_searchQuery.isEmpty) {
+      list = List.of(_songs);
+    } else {
+      final q = _searchQuery.toLowerCase();
+      list = _songs.where((s) {
+        return s.title.toLowerCase().contains(q) ||
+            s.artist.toLowerCase().contains(q) ||
+            (s.album?.toLowerCase().contains(q) ?? false);
+      }).toList();
+    }
+    list.sort((a, b) {
+      int cmp;
+      switch (_sortBy) {
+        case _SortBy.time:
+          cmp = _songs.indexOf(a).compareTo(_songs.indexOf(b));
+          break;
+        case _SortBy.title:
+          cmp = a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
+          break;
+        case _SortBy.duration:
+          cmp = a.duration.compareTo(b.duration);
+          break;
+      }
+      return _sortAscending ? cmp : -cmp;
+    });
+    _cachedDisplaySongs = list;
+    _lastSearchQuery = _searchQuery;
+    _lastSortBy = _sortBy;
+    _lastSortAscending = _sortAscending;
+  }
+
+  void _invalidateDisplaySongs() {
+    _cachedDisplaySongs = null;
+  }
 
   @override
   void initState() {
@@ -60,6 +129,8 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -72,6 +143,44 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       _scrollOffset = offset;
       setState(() {});
     }
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _isSearching = !_isSearching;
+      if (!_isSearching) {
+        _searchQuery = '';
+        _searchController.clear();
+        _invalidateDisplaySongs();
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _searchFocusNode.requestFocus();
+        });
+      }
+    });
+  }
+
+  void _scrollToPlayingSong() {
+    final player = context.read<PlayerProvider>();
+    final currentSong = player.currentSong;
+    if (currentSong == null) return;
+
+    final displayList = _displaySongs;
+    final index = displayList.indexWhere((s) => s.id == currentSong.id);
+    if (index == -1) return;
+
+    setState(() => _highlightSongId = currentSong.id);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _highlightSongId = null);
+    });
+
+    const itemHeight = 72.0;
+    final targetOffset = index * itemHeight;
+    _scrollController.animateTo(
+      targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOut,
+    );
   }
 
   Future<void> _fetchArtistSongs() async {
@@ -159,6 +268,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       setState(() {
         _songs = allSongs.map((s) => s.toSong()).toList();
         _isLoading = false;
+        _invalidateDisplaySongs();
       });
     } catch (e) {
       if (mounted) {
@@ -324,6 +434,77 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                       centerTitle: false,
                       // pinned 后顶栏背景色：滚动到 expandedHeight - kToolbarHeight
                       // 之后从透明渐变到 surface
+                      actions: [
+                        if (_songs.isNotEmpty)
+                          IconButton(
+                            icon: Icon(_isSearching ? Icons.close : Icons.search),
+                            onPressed: _toggleSearch,
+                            tooltip: '搜索',
+                          ),
+                        if (_songs.isNotEmpty)
+                          IconButton(
+                            icon: const Icon(Icons.my_location),
+                            onPressed: _scrollToPlayingSong,
+                            tooltip: '定位正在播放',
+                          ),
+                        if (_songs.isNotEmpty)
+                          PopupMenuButton<_SortBy>(
+                            icon: const Icon(Icons.sort),
+                            tooltip: '排序',
+                            onSelected: (value) {
+                              setState(() {
+                                if (_sortBy == value) {
+                                  _sortAscending = !_sortAscending;
+                                } else {
+                                  _sortBy = value;
+                                  _sortAscending = value == _SortBy.time ? false : true;
+                                }
+                                _invalidateDisplaySongs();
+                              });
+                            },
+                            itemBuilder: (context) => [
+                              CheckedPopupMenuItem<_SortBy>(
+                                value: _SortBy.time,
+                                checked: _sortBy == _SortBy.time,
+                                child: Row(
+                                  children: [
+                                    const Text('添加时间'),
+                                    if (_sortBy == _SortBy.time) ...[
+                                      const Spacer(),
+                                      Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 16),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              CheckedPopupMenuItem<_SortBy>(
+                                value: _SortBy.title,
+                                checked: _sortBy == _SortBy.title,
+                                child: Row(
+                                  children: [
+                                    const Text('歌曲名称'),
+                                    if (_sortBy == _SortBy.title) ...[
+                                      const Spacer(),
+                                      Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 16),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              CheckedPopupMenuItem<_SortBy>(
+                                value: _SortBy.duration,
+                                checked: _sortBy == _SortBy.duration,
+                                child: Row(
+                                  children: [
+                                    const Text('时长'),
+                                    if (_sortBy == _SortBy.duration) ...[
+                                      const Spacer(),
+                                      Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 16),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
                       backgroundColor: Color.lerp(
                         Colors.transparent,
                         colorScheme.surface,
@@ -447,23 +628,25 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           children: [
                             Expanded(
                               child: FilledButton.icon(
-                                onPressed: _songs.isNotEmpty
+                                onPressed: _displaySongs.isNotEmpty
                                     ? () {
                                         context
                                             .read<PlayerProvider>()
-                                            .playOnlinePlaylist(_songs, 0);
+                                            .playOnlinePlaylist(_displaySongs, 0);
                                       }
                                     : null,
                                 icon: const Icon(Icons.play_arrow),
-                                label: const Text('播放全部'),
+                                label: Text(
+                                  '播放全部${_isSearching && _searchQuery.isNotEmpty ? ' (${_displaySongs.length})' : ''}',
+                                ),
                               ),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: _songs.isNotEmpty
+                                onPressed: _displaySongs.isNotEmpty
                                     ? () {
-                                        final shuffled = List<Song>.from(_songs)
+                                        final shuffled = List<Song>.from(_displaySongs)
                                           ..shuffle();
                                         context
                                             .read<PlayerProvider>()
@@ -583,7 +766,64 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           ),
                         ),
                       ),
-                    if (_songs.isEmpty)
+                    // 搜索栏
+                    if (_isSearching)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                          child: TextField(
+                            controller: _searchController,
+                            focusNode: _searchFocusNode,
+                            decoration: InputDecoration(
+                              hintText: '搜索歌手的歌曲...',
+                              prefixIcon: const Icon(Icons.search),
+                              suffixIcon: _searchQuery.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear),
+                                      onPressed: () {
+                                        _searchController.clear();
+                                        setState(() {
+                                          _searchQuery = '';
+                                          _invalidateDisplaySongs();
+                                        });
+                                      },
+                                    )
+                                  : null,
+                              filled: true,
+                              fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(28),
+                                borderSide: BorderSide.none,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            ),
+                            onChanged: (value) {
+                              setState(() {
+                                _searchQuery = value;
+                                _invalidateDisplaySongs();
+                              });
+                            },
+                          ),
+                        ),
+                      ),
+                    // 搜索无结果
+                    if (_isSearching && _displaySongs.isEmpty && _songs.isNotEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.all(32),
+                          child: Column(
+                            children: [
+                              Icon(Icons.search_off, size: 48, color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5)),
+                              const SizedBox(height: 8),
+                              Text(
+                                '没有找到「$_searchQuery」相关的歌曲',
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+                              ),
+                            ],
+                          ),
+                        ),
+                      )
+                    else if (_songs.isEmpty)
                       SliverToBoxAdapter(
                         child: Center(
                           child: Padding(
@@ -612,18 +852,26 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                       SliverList(
                         delegate: SliverChildBuilderDelegate(
                           (context, index) {
-                            return SongListItem(
-                              song: _songs[index],
-                              onTap: () {
-                                context.read<PlayerProvider>().playOnlinePlaylist(
-                                      _songs,
-                                      index,
-                                    );
-                              },
-                              onMoreTap: () {},
+                            final song = _displaySongs[index];
+                            final isHighlighted = _highlightSongId == song.id;
+                            return AnimatedContainer(
+                              duration: const Duration(milliseconds: 300),
+                              color: isHighlighted
+                                  ? colorScheme.primaryContainer.withValues(alpha: 0.5)
+                                  : Colors.transparent,
+                              child: SongListItem(
+                                song: song,
+                                onTap: () {
+                                  context.read<PlayerProvider>().playOnlinePlaylist(
+                                        _displaySongs,
+                                        index,
+                                      );
+                                },
+                                onMoreTap: () {},
+                              ),
                             );
                           },
-                          childCount: _songs.length,
+                          childCount: _displaySongs.length,
                         ),
                       ),
                     ],
