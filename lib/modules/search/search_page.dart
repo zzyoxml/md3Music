@@ -836,8 +836,7 @@ class _SearchAlbumCard extends StatelessWidget {
                       name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w500,
                         color: colorScheme.onSurface,
                       ),
@@ -848,8 +847,7 @@ class _SearchAlbumCard extends StatelessWidget {
                         artist,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: colorScheme.onSurfaceVariant,
                         ),
                       ),

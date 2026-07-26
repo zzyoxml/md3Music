@@ -449,40 +449,21 @@ class _PlaylistHorizontalCard extends StatelessWidget {
       padding: const EdgeInsets.only(right: 12),
       child: SizedBox(
         width: 150,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(12),
+        child: Material(
+          color: colorScheme.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(16),
           clipBehavior: Clip.antiAlias,
-          child: Material(
-            color: colorScheme.surfaceContainerLow,
-            child: InkWell(
-              onTap: onTap,
-              child: Column(
-                children: [
-                  Expanded(
-                    child: artworkUri != null
-                        ? CachedNetworkImage(
-                            imageUrl: artworkUri!,
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                            placeholder: (_, _) => Container(
-                              color: colorScheme.surfaceContainerHighest,
-                              child: Icon(
-                                Icons.queue_music,
-                                size: 40,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                            errorWidget: (_, _, _) => Container(
-                              color: colorScheme.surfaceContainerHighest,
-                              child: Icon(
-                                Icons.queue_music,
-                                size: 40,
-                                color: colorScheme.onSurfaceVariant,
-                              ),
-                            ),
-                          )
-                        : Container(
-                            width: double.infinity,
+          child: InkWell(
+            onTap: onTap,
+            child: Column(
+              children: [
+                Expanded(
+                  child: artworkUri != null
+                      ? CachedNetworkImage(
+                          imageUrl: artworkUri!,
+                          fit: BoxFit.cover,
+                          width: double.infinity,
+                          placeholder: (_, _) => Container(
                             color: colorScheme.surfaceContainerHighest,
                             child: Icon(
                               Icons.queue_music,
@@ -490,31 +471,46 @@ class _PlaylistHorizontalCard extends StatelessWidget {
                               color: colorScheme.onSurfaceVariant,
                             ),
                           ),
-                  ),
-                  SizedBox(
-                    height: 44,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Text(
-                            name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                              color: colorScheme.onSurface,
+                          errorWidget: (_, _, _) => Container(
+                            color: colorScheme.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.queue_music,
+                              size: 40,
+                              color: colorScheme.onSurfaceVariant,
                             ),
                           ),
-                        ],
-                      ),
+                        )
+                      : Container(
+                          width: double.infinity,
+                          color: colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.queue_music,
+                            size: 40,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                ),
+                SizedBox(
+                  height: 44,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                                color: colorScheme.onSurface,
+                              ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),

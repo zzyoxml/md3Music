@@ -1448,8 +1448,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 onPressed: () => _showSpeedDialog(playerProvider),
                 child: Text(
                   '${playerProvider.speed}x',
-                  style: TextStyle(
-                    fontSize: isExpanded ? 12 : 14,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontSize: isExpanded ? 12 : null,
                     color: Colors.white,
                   ),
                 ),
@@ -1459,8 +1459,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 onPressed: () => _showQualityDialog(playerProvider),
                 child: Text(
                   playerProvider.audioQualityLabel,
-                  style: TextStyle(
-                    fontSize: isExpanded ? 12 : 14,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontSize: isExpanded ? 12 : null,
                     color: Colors.white,
                   ),
                 ),
@@ -1585,12 +1585,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           final isSelected = s == speeds[currentIndex];
                           return Text(
                             s == 1.0 ? '1x' : '${s}x',
-                            style: TextStyle(
-                              fontSize: 10,
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
                               color: isSelected
                                   ? Theme.of(context).colorScheme.primary
                                   : Theme.of(context).colorScheme.onSurfaceVariant,
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              fontWeight: isSelected ? FontWeight.bold : null,
                             ),
                           );
                         }).toList(),
@@ -1627,7 +1626,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               child: Text(
                 quality.label,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: playerProvider.audioQuality == quality
                       ? Theme.of(context).colorScheme.primary
                       : null,

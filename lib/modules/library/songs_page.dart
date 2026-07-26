@@ -57,7 +57,7 @@ class _SongsPageState extends State<SongsPage> {
                   const SizedBox(width: 12),
                   Text(
                     '按标题',
-                    style: TextStyle(
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: _sortBy == SongSortBy.title
                           ? Theme.of(context).colorScheme.primary
                           : null,
@@ -82,7 +82,7 @@ class _SongsPageState extends State<SongsPage> {
                   const SizedBox(width: 12),
                   Text(
                     '按歌手',
-                    style: TextStyle(
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: _sortBy == SongSortBy.artist
                           ? Theme.of(context).colorScheme.primary
                           : null,
@@ -107,7 +107,7 @@ class _SongsPageState extends State<SongsPage> {
                   const SizedBox(width: 12),
                   Text(
                     '按添加时间',
-                    style: TextStyle(
+                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: _sortBy == SongSortBy.dateAdded
                           ? Theme.of(context).colorScheme.primary
                           : null,

@@ -183,9 +183,8 @@ class _CommentsViewState extends State<CommentsView> {
               const SizedBox(height: 12),
               Text(
                 '加载评论失败',
-                style: TextStyle(
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: secondaryTextColor,
-                  fontSize: 16,
                 ),
               ),
               const SizedBox(height: 16),
@@ -213,7 +212,9 @@ class _CommentsViewState extends State<CommentsView> {
             const SizedBox(height: 12),
             Text(
               '暂无评论',
-              style: TextStyle(color: secondaryTextColor, fontSize: 16),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: secondaryTextColor,
+              ),
             ),
           ],
         ),
@@ -311,9 +312,8 @@ class _CommentsViewState extends State<CommentsView> {
                     Flexible(
                       child: Text(
                         comment.username,
-                        style: TextStyle(
+                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
                           color: usernameColor,
-                          fontSize: 12,
                           fontWeight: FontWeight.w500,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -322,9 +322,8 @@ class _CommentsViewState extends State<CommentsView> {
                     const SizedBox(width: 8),
                     Text(
                       _formatTime(comment.time),
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: secondaryTextColor.withValues(alpha: 0.6),
-                        fontSize: 11,
                       ),
                     ),
                   ],
@@ -332,9 +331,8 @@ class _CommentsViewState extends State<CommentsView> {
                 const SizedBox(height: 4),
                 Text(
                   comment.content,
-                  style: TextStyle(
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: primaryTextColor,
-                    fontSize: 14,
                     height: 1.4,
                   ),
                 ),
@@ -350,9 +348,8 @@ class _CommentsViewState extends State<CommentsView> {
                       const SizedBox(width: 4),
                       Text(
                         '${comment.likes}',
-                        style: TextStyle(
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: secondaryTextColor.withValues(alpha: 0.5),
-                          fontSize: 11,
                         ),
                       ),
                     ],
@@ -397,9 +394,8 @@ class _CommentsViewState extends State<CommentsView> {
       backgroundColor: usernameColor.withValues(alpha: 0.15),
       child: Text(
         comment.username.isNotEmpty ? comment.username[0] : '?',
-        style: TextStyle(
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
           color: usernameColor,
-          fontSize: 14,
         ),
       ),
     );

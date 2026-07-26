@@ -200,9 +200,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            gradient: LinearGradient(
-              colors: [cs.primaryContainer, cs.tertiaryContainer],
-            ),
+            color: cs.primaryContainer,
           ),
           child: Row(
             children: [
@@ -215,16 +213,14 @@ class _UserCenterPageState extends State<UserCenterPage> {
                     Text(
                       kugou.userInfo?.nickname ?? '用户',
                       style: tt.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w600,
                         color: cs.onPrimaryContainer,
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'ID: ${kugou.userid ?? ''}',
-                      style: TextStyle(
+                      style: tt.labelSmall?.copyWith(
                         color: cs.onPrimaryContainer.withValues(alpha: 0.7),
-                        fontSize: 12,
                       ),
                     ),
                   ],
@@ -240,6 +236,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
 
   Widget _buildVipCard(ColorScheme cs, TextTheme tt, KugouProvider kugou) {
     final vip = kugou.vipInfo;
+    final isVip = vip?.isVip == true;
     return SliverToBoxAdapter(
       child: FadeInUp(
         delayMs: 50,
@@ -256,16 +253,16 @@ class _UserCenterPageState extends State<UserCenterPage> {
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
-                  color: vip?.isVip == true
-                      ? Colors.amber.withValues(alpha: 0.2)
+                  color: isVip
+                      ? cs.secondaryContainer
                       : cs.surfaceContainerHighest,
                 ),
                 child: Icon(
-                  vip?.isVip == true
+                  isVip
                       ? Icons.workspace_premium
                       : Icons.workspace_premium_outlined,
-                  color: vip?.isVip == true
-                      ? Colors.amber
+                  color: isVip
+                      ? cs.onSecondaryContainer
                       : cs.onSurfaceVariant,
                 ),
               ),
@@ -275,15 +272,16 @@ class _UserCenterPageState extends State<UserCenterPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      vip?.isVip == true ? 'VIP会员' : '开通VIP会员',
-                      style: const TextStyle(fontWeight: FontWeight.w600),
+                      isVip ? 'VIP会员' : '开通VIP会员',
+                      style: tt.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
                     ),
                     Text(
-                      vip?.isVip == true
+                      isVip
                           ? '有效期至: ${vip?.expireTime ?? '永久'}'
                           : '畅享无损音质、个性皮肤等',
-                      style: TextStyle(
-                        fontSize: 12,
+                      style: tt.bodySmall?.copyWith(
                         color: cs.onSurfaceVariant,
                       ),
                     ),
@@ -345,7 +343,9 @@ class _UserCenterPageState extends State<UserCenterPage> {
           const SizedBox(height: 6),
           Text(
             label,
-            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: cs.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -398,16 +398,23 @@ class _UserCenterPageState extends State<UserCenterPage> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
               decoration: BoxDecoration(
                 color: cs.surfaceContainerLow,
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(24),
+                boxShadow: [
+                  BoxShadow(
+                    color: cs.shadow.withValues(alpha: 0.06),
+                    blurRadius: 20,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _buildCalendarHeader(cs, tt, monthLabel, kugou, context),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 12),
                   _buildWeekdayHeader(cs),
                   const SizedBox(height: 4),
                   _buildCalendarGrid(
@@ -419,7 +426,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                     receivedDays,
                     now,
                   ),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   _buildStatFooter(cs, tt, receivedDays.length),
                 ],
               ),
@@ -473,8 +480,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                 visualDensity: VisualDensity.compact,
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                 minimumSize: const Size(0, 32),
-                textStyle: const TextStyle(
-                  fontSize: 12,
+                textStyle: tt.labelMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -487,7 +493,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                       height: 14,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: cs.onPrimaryContainer,
+                        color: cs.onSecondaryContainer,
                     ),
                   )
                 : const Icon(Icons.check_circle_outline, size: 16),
@@ -518,13 +524,9 @@ class _UserCenterPageState extends State<UserCenterPage> {
 
   Widget _buildWeekdayHeader(ColorScheme cs) {
     const labels = ['一', '二', '三', '四', '五', '六', '日'];
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      padding: const EdgeInsets.symmetric(vertical: 6),
+    final tt = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
       child: Row(
         children: [
           for (final l in labels)
@@ -532,10 +534,9 @@ class _UserCenterPageState extends State<UserCenterPage> {
               child: Center(
                 child: Text(
                   l,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: cs.onSurfaceVariant,
+                  style: tt.labelSmall?.copyWith(
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -546,43 +547,108 @@ class _UserCenterPageState extends State<UserCenterPage> {
   }
 
   Widget _buildStatFooter(ColorScheme cs, TextTheme tt, int receivedCount) {
+    final now = DateTime.now();
+    final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+    final progress = receivedCount / daysInMonth;
+
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
       decoration: BoxDecoration(
         color: cs.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
       ),
-      child: Column(
+      child: Row(
         children: [
-          Text(
-            '截至目前，你已坚持打卡',
-            style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-          ),
-          const SizedBox(height: 4),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                '$receivedCount',
-                style: tt.displaySmall?.copyWith(
-                  color: cs.primary,
-                  fontWeight: FontWeight.w600,
+          // 进度环
+          SizedBox(
+            width: 56,
+            height: 56,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 56,
+                  height: 56,
+                  child: CircularProgressIndicator(
+                    value: progress,
+                    strokeWidth: 4,
+                    backgroundColor: cs.surfaceContainerLow,
+                    color: cs.primary,
+                  ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                '天',
-                style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant),
-              ),
-            ],
+                Text(
+                  '${(progress * 100).round()}%',
+                  style: tt.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: cs.primary,
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 2),
-          Text(
-            '请再接再厉，继续努力',
-            style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+          const SizedBox(width: 16),
+          // 文字统计
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '本月已打卡',
+                  style: tt.labelMedium?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(
+                      '$receivedCount',
+                      style: tt.headlineMedium?.copyWith(
+                        color: cs.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '/ $daysInMonth 天',
+                      style: tt.labelMedium?.copyWith(
+                        color: cs.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
+          // 连续打卡激励
+          if (receivedCount > 0)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(999),
+                color: cs.secondaryContainer,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.local_fire_department,
+                    size: 14,
+                    color: cs.onSecondaryContainer,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '坚持中',
+                    style: tt.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: cs.onSecondaryContainer,
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -597,6 +663,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
     Set<int> receivedDays,
     DateTime now,
   ) {
+    final tt = Theme.of(context).textTheme;
     final rows = <Widget>[];
     var cells = <Widget>[];
 
@@ -623,33 +690,72 @@ class _UserCenterPageState extends State<UserCenterPage> {
     for (var day = 1; day <= daysInMonth; day++) {
       final isReceived = receivedDays.contains(day);
       final isToday = day == now.day;
+      final isFuture = day > now.day;
       addCell(
         Expanded(
           child: AspectRatio(
             aspectRatio: 1,
             child: Center(
-              child: Container(
-                width: double.infinity,
-                height: double.infinity,
-                margin: const EdgeInsets.all(2),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: isReceived ? cs.primary : Colors.transparent,
-                  border: isToday && !isReceived
-                      ? Border.all(color: cs.primary, width: 1.5)
-                      : null,
-                ),
+              child: Stack(
                 alignment: Alignment.center,
-                child: Text(
-                  '$day',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: isToday || isReceived
-                        ? FontWeight.w600
-                        : FontWeight.normal,
-                    color: isReceived ? cs.onPrimary : cs.onSurface,
+                children: [
+                  // 背景圆
+                  Container(
+                    width: double.infinity,
+                    height: double.infinity,
+                    margin: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: isReceived
+                          ? cs.primary
+                          : (isToday
+                                ? cs.primary.withValues(alpha: 0.1)
+                                : Colors.transparent),
+                      border: isToday && !isReceived
+                          ? Border.all(color: cs.primary, width: 2)
+                          : null,
+                    ),
                   ),
-                ),
+                  // 签到勾选图标覆盖层
+                  if (isReceived)
+                    Positioned(
+                      bottom: -1,
+                      right: -1,
+                      child: Container(
+                        width: 16,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: cs.secondary,
+                          border: Border.all(
+                            color: cs.surface,
+                            width: 1.5,
+                          ),
+                        ),
+                        child: Icon(
+                          Icons.check,
+                          size: 10,
+                          color: cs.onSecondary,
+                        ),
+                      ),
+                    ),
+                  // 日期文字
+                  Text(
+                    '$day',
+                    style: tt.bodyMedium?.copyWith(
+                      fontWeight: isToday || isReceived
+                          ? FontWeight.w700
+                          : null,
+                      color: isReceived
+                          ? cs.onPrimary
+                          : (isToday
+                                ? cs.primary
+                                : (isFuture
+                                      ? cs.onSurfaceVariant.withValues(alpha: 0.35)
+                                      : cs.onSurface)),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

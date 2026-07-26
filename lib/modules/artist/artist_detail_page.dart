@@ -835,9 +835,8 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                 const SizedBox(height: 12),
                                 Text(
                                   '暂无歌曲',
-                                  style: TextStyle(
+                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                     color: colorScheme.onSurfaceVariant,
-                                    fontSize: 14,
                                   ),
                                 ),
                               ],

@@ -179,9 +179,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
               const SizedBox(height: 12),
               Text(
                 '加载评论失败',
-                style: TextStyle(
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
-                  fontSize: 14,
                 ),
               ),
               const SizedBox(height: 12),
@@ -210,9 +209,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
               const SizedBox(height: 12),
               Text(
                 '暂无评论',
-                style: TextStyle(
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
-                  fontSize: 14,
                 ),
               ),
             ],
@@ -269,9 +267,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                     Flexible(
                       child: Text(
                         comment.username,
-                        style: TextStyle(
+                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
                           color: colorScheme.primary,
-                          fontSize: 13,
                           fontWeight: FontWeight.w500,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -280,9 +277,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                     const SizedBox(width: 8),
                     Text(
                       _formatTime(comment.time),
-                      style: TextStyle(
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
                         color: colorScheme.onSurfaceVariant.withValues(alpha: 0.6),
-                        fontSize: 11,
                       ),
                     ),
                   ],
@@ -290,9 +286,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                 const SizedBox(height: 6),
                 Text(
                   comment.content,
-                  style: TextStyle(
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: colorScheme.onSurface,
-                    fontSize: 14,
                     height: 1.4,
                   ),
                 ),
@@ -308,9 +303,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                       const SizedBox(width: 4),
                       Text(
                         '${comment.likes}',
-                        style: TextStyle(
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-                          fontSize: 11,
                         ),
                       ),
                     ],
@@ -355,9 +349,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
       backgroundColor: colorScheme.primary.withValues(alpha: 0.15),
       child: Text(
         comment.username.isNotEmpty ? comment.username[0] : '?',
-        style: TextStyle(
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
           color: colorScheme.primary,
-          fontSize: 13,
         ),
       ),
     );

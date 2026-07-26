@@ -60,6 +60,7 @@ class _ChartsPageState extends State<ChartsPage> {
   }
 
   Widget _buildRankList(BuildContext context, ColorScheme cs) {
+    final tt = Theme.of(context).textTheme;
     return Consumer<KugouProvider>(
       builder: (context, kugou, _) {
         if (kugou.isLoading) {
@@ -77,7 +78,12 @@ class _ChartsPageState extends State<ChartsPage> {
                   color: cs.onSurfaceVariant.withValues(alpha: 0.5),
                 ),
                 const SizedBox(height: 12),
-                Text('暂无排行榜数据', style: TextStyle(color: cs.onSurfaceVariant)),
+                Text(
+                  '暂无排行榜数据',
+                  style: tt.bodyLarge?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 FilledButton.tonal(
                   onPressed: () => kugou.getRankList(forceRefresh: true),
@@ -91,47 +97,97 @@ class _ChartsPageState extends State<ChartsPage> {
           onRefresh: () => kugou.getRankList(forceRefresh: true),
           child: ListView.builder(
             controller: _scrollController,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
             itemCount: ranks.ranks.length,
             itemBuilder: (context, i) {
               final rank = ranks.ranks[i];
               return AnimatedListWrapper(
                 index: i,
-                child: Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: SizedBox(
-                        width: 60,
-                        height: 60,
-                        child: rank.coverUrl != null
-                            ? CachedNetworkImage(
-                                imageUrl: rank.coverUrl!,
-                                fit: BoxFit.cover,
-                              )
-                            : Container(
-                                color: cs.surfaceContainerHighest,
-                                child: Icon(
-                                  Icons.album,
-                                  color: cs.onSurfaceVariant,
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: cs.surfaceContainerLow,
+                  ),
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(16),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              _RankSongPage(rankId: rank.id, rankName: rank.name),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        child: Row(
+                          children: [
+                            // 排名徽章
+                            Container(
+                              width: 28,
+                              height: 28,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: i < 3
+                                    ? cs.primary.withValues(alpha: 0.12)
+                                    : cs.surfaceContainerHighest,
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(
+                                '${i + 1}',
+                                style: tt.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: i < 3
+                                      ? cs.primary
+                                      : cs.onSurfaceVariant,
                                 ),
                               ),
-                      ),
-                    ),
-                    title: Text(
-                      rank.name,
-                      style: const TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            _RankSongPage(rankId: rank.id, rankName: rank.name),
+                            ),
+                            const SizedBox(width: 12),
+                            // 封面
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: SizedBox(
+                                width: 52,
+                                height: 52,
+                                child: rank.coverUrl != null
+                                    ? CachedNetworkImage(
+                                        imageUrl: rank.coverUrl!,
+                                        fit: BoxFit.cover,
+                                      )
+                                    : Container(
+                                        color: cs.surfaceContainerHighest,
+                                        child: Icon(
+                                          Icons.album,
+                                          color: cs.onSurfaceVariant,
+                                          size: 24,
+                                        ),
+                                      ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            // 标题
+                            Expanded(
+                              child: Text(
+                                rank.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: tt.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            Icon(
+                              Icons.chevron_right,
+                              color: cs.onSurfaceVariant.withValues(alpha: 0.5),
+                              size: 22,
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -163,7 +219,12 @@ class _ChartsPageState extends State<ChartsPage> {
                   color: cs.onSurfaceVariant.withValues(alpha: 0.5),
                 ),
                 const SizedBox(height: 12),
-                Text('暂无排行榜数据', style: TextStyle(color: cs.onSurfaceVariant)),
+                Text(
+                  '暂无排行榜数据',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    color: cs.onSurfaceVariant,
+                  ),
+                ),
                 const SizedBox(height: 16),
                 FilledButton.tonal(
                   onPressed: () => kugou.getRankList(forceRefresh: true),
@@ -258,8 +319,7 @@ class _RankGridCard extends StatelessWidget {
                       name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 13,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
                         fontWeight: FontWeight.w600,
                         color: colorScheme.onSurface,
                       ),
@@ -270,8 +330,7 @@ class _RankGridCard extends StatelessWidget {
                         '$songCount 首',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 11,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
                           color: colorScheme.onSurfaceVariant,
                         ),
                       ),
@@ -319,8 +378,15 @@ class _RankSongPageState extends State<_RankSongPage> {
 
   @override
   Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: Text(widget.rankName)),
+      appBar: AppBar(
+        title: Text(
+          widget.rankName,
+          style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
+      ),
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (kugou.isLoading) {
@@ -332,7 +398,18 @@ class _RankSongPageState extends State<_RankSongPage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('暂无数据'),
+                  Icon(
+                    Icons.music_off,
+                    size: 48,
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.5),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    '暂无数据',
+                    style: tt.bodyLarge?.copyWith(
+                      color: cs.onSurfaceVariant,
+                    ),
+                  ),
                   const SizedBox(height: 16),
                   FilledButton.tonal(
                     onPressed: () => kugou.getRankSongs(

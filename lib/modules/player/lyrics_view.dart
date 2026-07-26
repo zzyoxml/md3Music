@@ -294,7 +294,7 @@ class LyricsViewState extends State<LyricsView> {
               child: AnimatedDefaultTextStyle(
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeInOut,
-                style: TextStyle(
+                style: DefaultTextStyle.of(context).style.copyWith(
                   fontSize: isCurrent ? 18 : 15,
                   fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400,
                   color: isCurrent

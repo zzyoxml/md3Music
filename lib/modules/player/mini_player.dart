@@ -142,14 +142,12 @@ class _MiniPlayerState extends State<MiniPlayer> {
     double progress,
   ) {
     return Container(
-      // Container 在外提供整体背景色与顶部 border：
-      // 颜色会自然填充 SafeArea 在底部留出的系统手势条区域，
-      // 避免手势条区域露出 Scaffold 背景色与主体形成颜色断层
+      // Container 在外提供整体背景色：
+      // 使用 surfaceContainerHigh 比 NavigationBar 的 surface 更深，
+      // 形成明确的层级关系（mini player 浮于内容之上，NavigationBar 之下）
+      // 颜色会自然填充 SafeArea 在底部留出的系统手势条区域
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerLow,
-        border: Border(
-          top: BorderSide(color: colorScheme.outlineVariant, width: 0.5),
-        ),
+        color: colorScheme.surfaceContainerHigh,
       ),
       child: SafeArea(
         // 仅吸收底部系统手势条/Home Indicator 高度

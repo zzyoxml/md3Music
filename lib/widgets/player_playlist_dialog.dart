@@ -219,9 +219,8 @@ class _PlayerPlaylistDialogState extends State<PlayerPlaylistDialog> {
               // 操作提示文字：字号小一点，颜色淡一点
               Text(
                 '长按拖拽 · 左滑删除',
-                style: theme.textTheme.bodySmall?.copyWith(
+                style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
-                  fontSize: 11,
                 ),
               ),
               TextButton(
@@ -311,7 +310,7 @@ class _PlayerPlaylistDialogState extends State<PlayerPlaylistDialog> {
                 widget.useDisplayName ? song.displayName : song.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(
+                style: theme.textTheme.bodyLarge?.copyWith(
                   fontWeight: isCurrent ? FontWeight.bold : null,
                   color: isCurrent ? theme.colorScheme.primary : null,
                 ),

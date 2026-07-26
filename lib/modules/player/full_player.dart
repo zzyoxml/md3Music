@@ -1165,7 +1165,9 @@ class _FullPlayerState extends State<FullPlayer>
                 onPressed: () => _showSpeedDialog(playerProvider),
                 child: Text(
                   '${playerProvider.speed}x',
-                  style: TextStyle(fontSize: isExpanded ? 12 : 14),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontSize: isExpanded ? 12 : null,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1173,7 +1175,9 @@ class _FullPlayerState extends State<FullPlayer>
                 onPressed: () => _showQualityDialog(playerProvider),
                 child: Text(
                   playerProvider.audioQualityLabel,
-                  style: TextStyle(fontSize: isExpanded ? 12 : 14),
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontSize: isExpanded ? 12 : null,
+                  ),
                 ),
               ),
             ],
@@ -1296,12 +1300,11 @@ class _FullPlayerState extends State<FullPlayer>
                           final isSelected = s == speeds[currentIndex];
                           return Text(
                             s == 1.0 ? '1x' : '${s}x',
-                            style: TextStyle(
-                              fontSize: 10,
+                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
                               color: isSelected
                                   ? Theme.of(context).colorScheme.primary
                                   : Theme.of(context).colorScheme.onSurfaceVariant,
-                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              fontWeight: isSelected ? FontWeight.bold : null,
                             ),
                           );
                         }).toList(),
@@ -1338,7 +1341,7 @@ class _FullPlayerState extends State<FullPlayer>
               child: Text(
                 quality.label,
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: playerProvider.audioQuality == quality
                       ? Theme.of(context).colorScheme.primary
                       : null,

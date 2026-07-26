@@ -16,6 +16,7 @@ class AlbumCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
@@ -29,7 +30,7 @@ class AlbumCard extends StatelessWidget {
               Expanded(
                 child: _buildImage(colorScheme),
               ),
-              _buildInfo(colorScheme),
+              _buildInfo(colorScheme, textTheme),
             ],
           ),
         ),
@@ -62,7 +63,7 @@ class AlbumCard extends StatelessWidget {
     );
   }
 
-  Widget _buildInfo(ColorScheme colorScheme) {
+  Widget _buildInfo(ColorScheme colorScheme, TextTheme textTheme) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       child: Column(
@@ -73,8 +74,7 @@ class AlbumCard extends StatelessWidget {
             album.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 13,
+            style: textTheme.labelMedium?.copyWith(
               fontWeight: FontWeight.w500,
               color: colorScheme.onSurface,
             ),
@@ -84,8 +84,7 @@ class AlbumCard extends StatelessWidget {
             album.artist,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontSize: 11,
+            style: textTheme.labelSmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
             ),
           ),

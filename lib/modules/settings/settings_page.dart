@@ -27,7 +27,7 @@ import '../../widgets/seed_color_picker.dart';
 /// Fallback display when runtime PackageInfo read fails.
 const String kBuildAppVersion = String.fromEnvironment(
   'APP_VERSION',
-  defaultValue: '3.4.0',
+  defaultValue: '3.5.0',
 );
 
 class SettingsPage extends StatefulWidget {
@@ -955,7 +955,7 @@ class _SettingsPageState extends State<SettingsPage> {
               _connectionResult!,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: _connectionResult == '连接成功'
-                    ? Colors.green
+                    ? colorScheme.primary
                     : colorScheme.error,
               ),
             ),
@@ -981,20 +981,24 @@ class _SettingsPageState extends State<SettingsPage> {
           trailing: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: Colors.green.withValues(alpha: 0.1),
+              color: colorScheme.primaryContainer,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Text(
+            child: Text(
               '运行中',
-              style: TextStyle(color: Colors.green, fontSize: 12),
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: colorScheme.onPrimaryContainer,
+              ),
             ),
           ),
         ),
-        const Padding(
-          padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Text(
             '本地 Node.js 服务器运行中，推荐/排行/搜索/播放等数据接口均通过本地处理',
-            style: TextStyle(fontSize: 12, color: Colors.grey),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       ],
@@ -1174,7 +1178,7 @@ class _SettingsPageState extends State<SettingsPage> {
               },
               child: Text(
                 q.$2,
-                style: TextStyle(
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: _defaultQuality == q.$1
                       ? Theme.of(context).colorScheme.primary
                       : null,

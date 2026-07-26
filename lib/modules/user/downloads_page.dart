@@ -32,9 +32,13 @@ class _DownloadsPageState extends State<DownloadsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('下载管理'),
+        title: Text(
+          '下载管理',
+          style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
       ),
       body: Consumer<DownloadsProvider>(
         builder: (context, downloads, _) {
@@ -99,7 +103,9 @@ class _DownloadsPageState extends State<DownloadsPage> {
             task.artist,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: cs.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 4),
           LinearProgressIndicator(
@@ -128,7 +134,9 @@ class _DownloadsPageState extends State<DownloadsPage> {
         task.artist,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+          color: cs.onSurfaceVariant,
+        ),
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,

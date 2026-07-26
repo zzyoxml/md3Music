@@ -127,9 +127,9 @@ class AppTheme {
       fontFamilyFallback: _cjkFontFallback,
       scaffoldBackgroundColor: colorScheme.surface,
       cardTheme: CardThemeData(
-        elevation: isLight ? 1 : 0,
+        elevation: isLight ? 1 : 1,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        color: colorScheme.surfaceContainerLow,
+        color: colorScheme.surfaceContainer,
         surfaceTintColor: colorScheme.surfaceTint,
       ),
       appBarTheme: AppBarTheme(
@@ -138,7 +138,7 @@ class AppTheme {
         elevation: 0,
         scrolledUnderElevation: isLight ? 3 : 1,
         surfaceTintColor: colorScheme.surfaceTint,
-        centerTitle: false,
+        centerTitle: true,
         // 显式设置状态栏样式，避免 ScrollAwareAppBar 透明背景时
         // Flutter 根据 Colors.transparent（luminance=0）误判为深色背景，
         // 导致浅色主题下状态栏图标变白看不清。
@@ -348,7 +348,7 @@ class AppTheme {
       ),
       titleLarge: TextStyle(
         fontSize: 22,
-        fontWeight: FontWeight.w400,
+        fontWeight: FontWeight.w600,
         height: 1.27,
         letterSpacing: 0,
         color: colorScheme.onSurface,

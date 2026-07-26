@@ -465,27 +465,16 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                 decoration: isActive
                     ? BoxDecoration(
                         borderRadius: BorderRadius.circular(999),
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF0d8fff), Color(0xFF2fb4ff)],
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: const Color(
-                              0xFF0d8fff,
-                            ).withValues(alpha: 0.22),
-                            blurRadius: 10,
-                            offset: const Offset(0, 10),
-                          ),
-                        ],
+                        color: cs.primary,
                       )
                     : null,
                 child: Text(
                   option['label'],
-                  style: TextStyle(
-                    fontSize: isSmallScreen ? 11 : 12,
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    fontSize: isSmallScreen ? 11 : null,
                     fontWeight: FontWeight.w700,
                     color: isActive
-                        ? Colors.white
+                        ? cs.onPrimary
                         : cs.onSurfaceVariant.withValues(alpha: 0.62),
                   ),
                 ),
@@ -613,18 +602,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
       height: height,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(18),
-        gradient: const LinearGradient(
-          colors: [Color(0xFF0d3951), Color(0xFF0f5a7a), Color(0xFF0b1620)],
-          begin: Alignment(-0.84, -0.82),
-          end: Alignment.bottomRight,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.18),
-            blurRadius: 34,
-            offset: const Offset(0, 18),
-          ),
-        ],
+        color: cs.primaryContainer,
       ),
       padding: EdgeInsets.fromLTRB(
         isUltraSmall ? 6 : (isVerySmall ? 8 : 10),
@@ -655,7 +633,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                   _getModeLabel(_selectedMode),
                   style: textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w800,
-                    color: Colors.white,
+                    color: cs.onPrimaryContainer,
                     letterSpacing: -0.04,
                     fontSize:
                         (isUltraSmall
@@ -669,7 +647,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               Text(
                 currentTrack != null ? currentTrack.songName : '暂无推荐',
                 style: textTheme.bodySmall?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.9),
+                  color: cs.onPrimaryContainer.withValues(alpha: 0.9),
                   fontWeight: FontWeight.w600,
                   fontSize: 9 * textSizeMultiplier,
                 ),
@@ -680,7 +658,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               Text(
                 currentTrack?.artistName ?? '',
                 style: textTheme.bodySmall?.copyWith(
-                  color: Colors.white.withValues(alpha: 0.6),
+                  color: cs.onPrimaryContainer.withValues(alpha: 0.6),
                   fontWeight: FontWeight.w500,
                   fontSize: 8 * textSizeMultiplier,
                 ),
@@ -690,7 +668,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               SizedBox(height: height * 0.08),
               Row(
                 children: [
-                  _buildAudioBars(isSmall: isVerySmall, isUltraSmall: isUltraSmall),
+                  _buildAudioBars(cs, isSmall: isVerySmall, isUltraSmall: isUltraSmall),
                   const Spacer(),
                   FittedBox(
                     fit: BoxFit.scaleDown,
@@ -729,7 +707,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         padding: const EdgeInsets.all(1),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(999),
-          color: Colors.white.withValues(alpha: 0.14),
+          color: cs.onPrimaryContainer.withValues(alpha: 0.14),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -746,17 +724,17 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                 decoration: isActive
                     ? BoxDecoration(
                         borderRadius: BorderRadius.circular(999),
-                        color: Colors.white.withValues(alpha: 0.22),
+                        color: cs.onPrimaryContainer.withValues(alpha: 0.22),
                       )
                     : null,
                 child: Text(
                   option['label'],
-                  style: TextStyle(
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
                     fontSize: fontSize,
                     fontWeight: FontWeight.w700,
                     color: isActive
-                        ? Colors.white
-                        : Colors.white.withValues(alpha: 0.74),
+                        ? cs.onPrimaryContainer
+                        : cs.onPrimaryContainer.withValues(alpha: 0.74),
                   ),
                 ),
               ),
@@ -767,7 +745,11 @@ class _PersonalFmPageState extends State<PersonalFmPage>
     );
   }
 
-  Widget _buildAudioBars({bool isSmall = false, bool isUltraSmall = false}) {
+  Widget _buildAudioBars(
+    ColorScheme cs, {
+    bool isSmall = false,
+    bool isUltraSmall = false,
+  }) {
     final scale = isUltraSmall ? 0.6 : (isSmall ? 0.75 : 1.0);
     final heights = [6, 9, 5, 11, 8].map((h) => h * scale).toList();
     final width = isUltraSmall ? 1.2 : (isSmall ? 1.5 : 2.0);
@@ -785,7 +767,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
           margin: margin,
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(999),
-            color: Colors.white.withValues(alpha: 0.4),
+            color: cs.onPrimaryContainer.withValues(alpha: 0.4),
           ),
         );
       }),
@@ -817,12 +799,14 @@ class _PersonalFmPageState extends State<PersonalFmPage>
             height: likeButtonSize,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
-              color: Colors.white.withValues(alpha: 0.12),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
+              color: cs.onPrimaryContainer.withValues(alpha: 0.12),
+              border: Border.all(
+                color: cs.onPrimaryContainer.withValues(alpha: 0.06),
+              ),
             ),
             child: Icon(
               Icons.favorite_border,
-              color: Colors.white.withValues(alpha: 0.86),
+              color: cs.onPrimaryContainer.withValues(alpha: 0.86),
               size: likeIconSize,
             ),
           ),
@@ -836,25 +820,16 @@ class _PersonalFmPageState extends State<PersonalFmPage>
             height: playButtonSize,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(999),
-              gradient: const LinearGradient(
-                colors: [Color(0xFF0d8fff), Color(0xFF2fb4ff)],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFF0276c6).withValues(alpha: 0.35),
-                  blurRadius: 14,
-                  offset: const Offset(0, 14),
-                ),
-              ],
+              color: cs.primary,
             ),
             child: _isLoading
-                ? const CircularProgressIndicator(
-                    color: Colors.white,
+                ? CircularProgressIndicator(
+                    color: cs.onPrimary,
                     strokeWidth: 2,
                   )
                 : Icon(
                     isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: Colors.white,
+                    color: cs.onPrimary,
                     size: playIconSize,
                   ),
           ),
@@ -900,7 +875,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           border: Border.all(
-            color: const Color(0xFF482E35),
+            color: cs.outlineVariant,
             width: borderWidth,
           ),
           boxShadow: [
@@ -998,7 +973,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             border: Border.all(
-              color: const Color(0xFF482E35),
+              color: cs.surfaceContainerHighest,
               width: borderWidth,
             ),
             boxShadow: [
@@ -1070,13 +1045,13 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                         ),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(8),
-                          color: Colors.white,
+                          color: cs.primaryContainer,
                         ),
                         child: Text(
                           '${_getModeLabel(_selectedMode)} 实时推荐',
                           style: textTheme.bodySmall?.copyWith(
                             fontWeight: FontWeight.w700,
-                            color: const Color(0xFF1677ff),
+                            color: cs.onPrimaryContainer,
                             fontSize: isSmallScreen ? 11 : 12,
                           ),
                           maxLines: 1,
@@ -1209,8 +1184,8 @@ class _PersonalFmPageState extends State<PersonalFmPage>
           ),
           child: Text(
             chip,
-            style: TextStyle(
-              fontSize: isSmallScreen ? 10 : 11,
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+              fontSize: isSmallScreen ? 10 : null,
               fontWeight: FontWeight.w700,
               color: cs.onSurfaceVariant.withValues(alpha: 0.68),
             ),
@@ -1226,7 +1201,9 @@ class _PersonalFmPageState extends State<PersonalFmPage>
       alignment: Alignment.center,
       child: Text(
         _isLoading ? '正在获取推荐内容...' : '暂时没有可展示的推荐内容。',
-        style: TextStyle(color: cs.onSurfaceVariant.withValues(alpha: 0.58)),
+        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+          color: cs.onSurfaceVariant.withValues(alpha: 0.58),
+        ),
       ),
     );
   }

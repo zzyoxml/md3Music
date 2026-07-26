@@ -283,29 +283,26 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Widget _buildBannerSection(ColorScheme cs) {
+    final tt = Theme.of(context).textTheme;
     return SliverToBoxAdapter(
       child: FadeInUp(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 160),
+          constraints: const BoxConstraints(minHeight: 140),
           child: Container(
           margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            gradient: LinearGradient(
-              colors: [cs.primaryContainer, cs.tertiaryContainer],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+            color: cs.primaryContainer,
           ),
           child: Stack(
             children: [
               Positioned(
-                right: -20,
-                top: -20,
+                right: -12,
+                top: -12,
                 child: Icon(
                   Icons.music_note,
-                  size: 120,
-                  color: cs.onPrimaryContainer.withValues(alpha: 0.15),
+                  size: 80,
+                  color: cs.onPrimaryContainer.withValues(alpha: 0.1),
                 ),
               ),
               Padding(
@@ -315,16 +312,15 @@ class _DiscoverPageState extends State<DiscoverPage> {
                   children: [
                     Text(
                       _getGreeting(),
-                      style: Theme.of(context).textTheme.headlineMedium
-                          ?.copyWith(
-                            color: cs.onPrimaryContainer,
-                            fontWeight: FontWeight.bold,
-                          ),
+                      style: tt.headlineMedium?.copyWith(
+                        color: cs.onPrimaryContainer,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       '发现你喜欢的音乐',
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      style: tt.bodyLarge?.copyWith(
                         color: cs.onPrimaryContainer.withValues(alpha: 0.8),
                       ),
                     ),
@@ -357,9 +353,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                     children: [
                       Text(
                         '每日推荐',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
                       TextButton(
                         onPressed: () {
@@ -389,16 +383,12 @@ class _DiscoverPageState extends State<DiscoverPage> {
                             backgroundColor: cs.primaryContainer,
                             child: Text(
                               '${i + 1}',
-                              style: TextStyle(
-                                fontSize: 11,
+                              style: Theme.of(context).textTheme.labelSmall?.copyWith(
                                 color: cs.onPrimaryContainer,
                               ),
                             ),
                           ),
-                          label: Text(
-                            s.songName,
-                            style: const TextStyle(fontSize: 12),
-                          ),
+                          label: Text(s.songName),
                           onPressed: () =>
                               context.read<PlayerProvider>().playOnlinePlaylist(
                                 songs.map((e) => e.toSong()).toList(),
@@ -435,9 +425,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                     children: [
                       Text(
                         '主题歌单',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
                       TextButton(onPressed: () {}, child: const Text('查看更多')),
                     ],
@@ -486,8 +474,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                                 themes[i].name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 12,
+                                style: Theme.of(context).textTheme.labelMedium?.copyWith(
                                   fontWeight: FontWeight.w500,
                                   color: cs.onSurface,
                                 ),
@@ -528,9 +515,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                   padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
                   child: Text(
                     '场景音乐',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
                 SizedBox(
@@ -562,8 +547,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                                 item['name']?.toString() ?? '',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 11,
+                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
                                   color: cs.onSurface,
                                 ),
                               ),
@@ -600,9 +584,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                     children: [
                       Text(
                         '热门歌单',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
                       TextButton(
                         onPressed: () => Navigator.of(context).push(
@@ -677,9 +659,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                     children: [
                       Text(
                         '排行榜',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
+                        style: Theme.of(context).textTheme.titleLarge,
                       ),
                       TextButton(
                         onPressed: () => Navigator.of(context).push(

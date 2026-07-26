@@ -45,13 +45,13 @@ class SongListItem extends StatelessWidget {
           children: [
             ListTile(
               leading: const Icon(Icons.music_note),
-              title: Text(song.displayName, style: const TextStyle(fontSize: 14)),
-              subtitle: Text(song.artist, style: const TextStyle(fontSize: 12)),
+              title: Text(song.displayName),
+              subtitle: Text(song.artist),
             ),
             const Divider(height: 1),
             ListTile(
               leading: const Icon(Icons.download),
-              title: const Text('下载', style: TextStyle(fontSize: 14)),
+              title: const Text('下载'),
               onTap: () {
                 Navigator.pop(ctx);
                 _showDownloadDialog(context);
@@ -59,7 +59,7 @@ class SongListItem extends StatelessWidget {
             ),
             ListTile(
               leading: const Icon(Icons.playlist_add),
-              title: const Text('下一首播放', style: TextStyle(fontSize: 14)),
+              title: const Text('下一首播放'),
               onTap: () {
                 Navigator.pop(ctx);
                 final player = context.read<PlayerProvider>();
@@ -75,7 +75,7 @@ class SongListItem extends StatelessWidget {
             if (downloadsProvider.isDownloaded(song.id))
               ListTile(
                 leading: const Icon(Icons.delete_outline),
-                title: const Text('删除下载', style: TextStyle(fontSize: 14)),
+                title: const Text('删除下载'),
                 onTap: () {
                   Navigator.pop(ctx);
                   downloadsProvider.removeTask(song.id);
@@ -142,7 +142,7 @@ class SongListItem extends StatelessWidget {
     return ListTile(
       dense: true,
       leading: const Icon(Icons.music_note, size: 20),
-      title: Text(label, style: const TextStyle(fontSize: 14)),
+      title: Text(label),
       onTap: () {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
@@ -164,6 +164,7 @@ class SongListItem extends StatelessWidget {
     final isCurrentSong = playerProvider.currentSong?.id == song.id;
     final isFavorited = forceFavorited || favoritesProvider.isFavorite(song.id);
     final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
 
     const imgSize = 52.0; // 正方形封面，不被 ListTile 压缩
 
@@ -222,8 +223,7 @@ class SongListItem extends StatelessWidget {
                     song.displayName,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 14,
+                    style: textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w500,
                       color: isCurrentSong ? colorScheme.primary : null,
                     ),
@@ -233,8 +233,7 @@ class SongListItem extends StatelessWidget {
                     '${song.artist} - ${song.album}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11.5,
+                    style: textTheme.labelSmall?.copyWith(
                       color: isCurrentSong
                           ? colorScheme.primary.withValues(alpha: 0.7)
                           : colorScheme.onSurfaceVariant,
@@ -265,7 +264,7 @@ class SongListItem extends StatelessWidget {
                   if (showDuration)
                     Padding(
                       padding: const EdgeInsets.only(right: 4),
-                      child: Text(song.displayDuration, style: const TextStyle(fontSize: 11)),
+                      child: Text(song.displayDuration, style: textTheme.labelSmall),
                     ),
                   GestureDetector(
                     onTap: () => favoritesProvider.toggleFavorite(song),

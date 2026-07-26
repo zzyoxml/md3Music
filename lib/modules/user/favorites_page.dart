@@ -319,7 +319,9 @@ class _FavoritesPageState extends State<FavoritesPage>
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
             child: const Text('删除'),
           ),
         ],
@@ -345,9 +347,13 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   @override
   Widget build(BuildContext context) {
+    final textTheme = Theme.of(context).textTheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('我的收藏'),
+        title: Text(
+          '我的收藏',
+          style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
         actions: [
           if (_isManaging)
             IconButton(
