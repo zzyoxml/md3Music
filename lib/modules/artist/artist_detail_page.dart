@@ -429,7 +429,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                   controller: _scrollController,
                   slivers: [
                     SliverAppBar(
-                      expandedHeight: 180,
+                      expandedHeight: 240,
                       pinned: true,
                       centerTitle: false,
                       // pinned 后顶栏背景色：滚动到 expandedHeight - kToolbarHeight
@@ -508,14 +508,14 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                       backgroundColor: Color.lerp(
                         Colors.transparent,
                         colorScheme.surface,
-                        (_scrollOffset - (180 - kToolbarHeight))
+                        (_scrollOffset - (240 - kToolbarHeight))
                             .clamp(0.0, 60.0) / 60,
                       )!,
                       surfaceTintColor: Colors.transparent,
                       scrolledUnderElevation: 0,
                       // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示歌手名
                       title: Opacity(
-                        opacity: ((_scrollOffset - (180 - kToolbarHeight)) /
+                        opacity: ((_scrollOffset - (240 - kToolbarHeight)) /
                                 60.0)
                             .clamp(0.0, 1.0),
                         child: Text(
@@ -539,11 +539,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           ),
                           child: SafeArea(
                             bottom: false,
-                            child: Align(
-                              alignment: Alignment.bottomLeft,
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(24, 48, 24, 16),
                               child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.end,
                                 children: [
                                   avatarUrl != null
                                       ? ClipOval(
@@ -590,7 +589,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                   const SizedBox(width: 16),
                                   Expanded(
                                     child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      mainAxisAlignment: MainAxisAlignment.end,
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text(
@@ -619,7 +618,6 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           ),
                         ),
                       ),
-                    ),
                     ),
                     SliverToBoxAdapter(
                       child: Padding(
@@ -671,16 +669,15 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                       ),
                                     ),
                                   )
-                                : IconButton(
+                                : IconButton.filledTonal(
                                     onPressed: _toggleFollow,
                                     icon: Icon(
                                       _isFollowing
                                           ? Icons.favorite
                                           : Icons.favorite_border,
                                       color: _isFollowing
-                                          ? colorScheme.primary
-                                          : colorScheme.onSurfaceVariant,
-                                      size: 28,
+                                          ? colorScheme.error
+                                          : null,
                                     ),
                                     tooltip: _isFollowing ? '取消关注' : '关注歌手',
                                   ),
