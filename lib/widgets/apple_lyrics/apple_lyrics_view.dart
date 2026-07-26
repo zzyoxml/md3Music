@@ -566,10 +566,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     for (int i = startIdx; i < endIdx; i++) {
       final line = widget.lines[i];
       final isActive = i == _currentLineIndex;
+      // 文字层不再使用 scale 弹簧，当前行瞬移到 activeScale
       final scale = isActive
-          ? (widget.enableScale
-              ? _scaleController.currentScale
-              : LyricLayout.activeScale)
+          ? LyricLayout.activeScale
           : (widget.enableScale
               ? LyricLayout.inactiveScale
               : LyricLayout.activeScale);
@@ -1278,8 +1277,8 @@ class _LyricsPainter extends CustomPainter {
     for (int i = 0; i < lines.length; i++) {
       final line = lines[i];
       final double lineHeight = _heightOf(i);
-      // 行顶部 y 坐标 = lineTops[i] + 该行上方间奏占位偏移 + posY + 级联偏移
-      final double offset = (i < perLineOffsets.length) ? perLineOffsets[i] : 0.0;
+      // 行顶部 y 坐标 = lineTops[i] + 该行上方间奏占位偏移 + posY（文字层不再使用 perLine 弹簧偏移）
+      final double offset = 0.0;
       final double y = _topOf(i) + _interludeOffsetBefore(i) + posY + offset;
 
       // 跳过视口外（含 overscan=300px 上下缓冲）的行，避免不必要的绘制
@@ -1287,11 +1286,9 @@ class _LyricsPainter extends CustomPainter {
       if (y > viewportHeight + LyricLayout.overscanPx) break;
 
       final bool isActive = i == currentLineIndex;
-      // 当前行用 LineScaleController 的弹簧 scale，非当前行用 inactiveScale
+      // 文字层不再使用 scale 弹簧，当前行瞬移到 activeScale
       final double scale = isActive
-          ? (enableScale
-              ? scaleController.currentScale
-              : LyricLayout.activeScale)
+          ? LyricLayout.activeScale
           : (enableScale
               ? LyricLayout.inactiveScale
               : LyricLayout.activeScale);
