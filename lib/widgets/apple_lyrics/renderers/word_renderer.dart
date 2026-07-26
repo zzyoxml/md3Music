@@ -61,6 +61,10 @@ class WordRenderer {
   /// 每个 word index 的当前 alpha 值。
   final Map<int, double> _wordAlphas = <int, double>{};
 
+  /// v3 优化：renderer 是否已收敛（alpha 和 Y offset 都不再变化）。
+  /// 用于 AppleLyricsView 判断是否可以停止 Ticker。
+  bool _isConverged = true;
+
   /// 每个 word index 的当前 Y 轴偏移（上浮特效）。
   ///
   /// AMLL 规范：当前字会轻微上浮（最大约 -3px），用指数衰减平滑过渡。
@@ -112,6 +116,10 @@ class WordRenderer {
 
   /// 当前是否为当前行。
   bool get isActive => _isActive;
+
+  /// v3 优化：renderer 是否已收敛（alpha 和 Y offset 都不再变化）。
+  /// 用于 AppleLyricsView 判断是否可以停止 Ticker。
+  bool get isConverged => _isConverged;
 
   // ============== 状态设置 ==============
 
@@ -177,6 +185,7 @@ class WordRenderer {
       intraWordProgress = 0.0;
     }
 
+    bool anyChanged = false;
     for (int i = 0; i < wordCount; i++) {
       final double target = _targetAlphaForExact(i, currentWordIdx, intraWordProgress, dark, bright);
       final double current = _wordAlphas[i] ?? dark;
@@ -188,6 +197,7 @@ class WordRenderer {
       if ((next - target).abs() < LyricLayout.alphaEpsilon) {
         next = target;
       }
+      if ((next - current).abs() > 1e-6) anyChanged = true;
       _wordAlphas[i] = next;
 
       // AMLL 上浮特效
@@ -201,6 +211,7 @@ class WordRenderer {
       if ((nextY - targetY).abs() < LyricLayout.alphaEpsilon) {
         nextY = targetY;
       }
+      if ((nextY - currentY).abs() > 1e-6) anyChanged = true;
       _wordYOffsets[i] = nextY;
 
       // 强调辉光效果：计算每个 word 的 EmphasizeState
@@ -222,6 +233,8 @@ class WordRenderer {
         _emphasizeStates[i] = EmphasizeState.idle;
       }
     }
+    // v3 优化：跟踪 alpha/Y offset 是否仍在变化（用于 AppleLyricsView 判断停止 Ticker）
+    _isConverged = !anyChanged;
   }
 
   /// 计算指定 word index 的目标 Y 偏移（AMLL 上浮特效），基于逐字时间戳。
@@ -317,7 +330,11 @@ class WordRenderer {
       final double wordY = currentY + yOffset;
       final Offset wordPos = Offset(wordX, wordY);
 
-      // 设置文字样式
+      // 设置文字样式 + layout。
+      // 注意：_painter 在循环里被多个 word 共用，每次循环到新 word 都必须重新
+      // set text + layout，否则 painter 仍保留上一个 word 的 text。
+      // v3 实测发现按 alpha 缓存跳过 set text 会引入"当前行重复显示同一字"的 bug，
+      // 已回滚到 v2 行为（每次 set text + layout）。
       _painter.text = TextSpan(
         text: word.text,
         style: TextStyle(

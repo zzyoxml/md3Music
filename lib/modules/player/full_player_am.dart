@@ -506,31 +506,49 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 GestureDetector(
                   onTap: () => _tabController.animateTo(1),
                   behavior: HitTestBehavior.opaque,
-                  child: _buildArtworkView(
-                    playerProvider,
-                    currentSong,
-                    colorScheme,
-                    isExpanded: true,
+                  // Selector 让 _buildArtworkView 仅在 currentSong / isPlaying 变化时重建，
+                  // 不再每 200ms 因 position 变化重建（封面 AnimatedScale 是隐式动画，需要 isPlaying 触发）
+                  child: Selector<PlayerProvider,
+                      ({String? songId, bool isPlaying})>(
+                    selector: (_, p) => (
+                      songId: p.currentSong?.id,
+                      isPlaying: p.isPlaying,
+                    ),
+                    builder: (context, _, __) => _buildArtworkView(
+                      playerProvider,
+                      currentSong,
+                      colorScheme,
+                      isExpanded: true,
+                    ),
                   ),
                 ),
                 GestureDetector(
                   onTap: () => _tabController.animateTo(0),
                   behavior: HitTestBehavior.translucent,
-                  child: _isLoadingLyrics
-                      ? const Center(child: CircularProgressIndicator())
-                      : AppleLyricsView(
-                          lines: _parsedLyrics,
-                          currentTimeMs: playerProvider.position.inMilliseconds,
-                          isPlaying: playerProvider.isPlaying,
-                          onSeek: (ms) =>
-                              playerProvider.seek(Duration(milliseconds: ms)),
-                        ),
+                  // RepaintBoundary 隔离 AppleLyricsView 每帧 setState 的重绘范围，
+                  // 避免父级 TabBarView/Column 被牵连重建
+                  child: RepaintBoundary(
+                    child: _isLoadingLyrics
+                        ? const Center(child: CircularProgressIndicator())
+                        : AppleLyricsView(
+                            lines: _parsedLyrics,
+                            currentTimeMs:
+                                playerProvider.position.inMilliseconds,
+                            isPlaying: playerProvider.isPlaying,
+                            onSeek: (ms) => playerProvider
+                                .seek(Duration(milliseconds: ms)),
+                          ),
+                  ),
                 ),
-                CommentsView(
-                  songHash: currentSong.id,
-                  albumAudioId: currentSong.albumAudioId,
-                  artworkUri: currentSong.artworkUri,
-                  isAmStyle: true,
+                // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
+                Selector<PlayerProvider, String?>(
+                  selector: (_, p) => p.currentSong?.id,
+                  builder: (_, _, __) => CommentsView(
+                    songHash: currentSong.id,
+                    albumAudioId: currentSong.albumAudioId,
+                    artworkUri: currentSong.artworkUri,
+                    isAmStyle: true,
+                  ),
                 ),
               ],
             ),
@@ -579,10 +597,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                             curve: Curves.easeOutBack,
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(16),
-                              child: _buildCrossfadeArtwork(
-                                currentSong.artworkUri,
-                                colorScheme,
-                                iconSize: 48,
+                              // Selector 让封面仅在 artworkUri 变化时重建
+                              child: Selector<PlayerProvider, String?>(
+                                selector: (_, p) => p.currentSong?.artworkUri,
+                                builder: (context, artworkUri, __) =>
+                                    _buildCrossfadeArtwork(
+                                  artworkUri,
+                                  colorScheme,
+                                  iconSize: 48,
+                                ),
                               ),
                             ),
                           ),
@@ -653,28 +676,42 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         GestureDetector(
                           onTap: () => _tabController.animateTo(1),
                           behavior: HitTestBehavior.opaque,
-                          child: _buildSongInfo(
-                            playerProvider,
-                            currentSong,
-                            colorScheme,
+                          // Selector 让 _buildSongInfo 仅在 currentSong 变化时重建（切歌时）
+                          child: Selector<PlayerProvider, String?>(
+                            selector: (_, p) => p.currentSong?.id,
+                            builder: (context, songId, __) {
+                              final song = playerProvider.currentSong;
+                              if (song == null) return const SizedBox.shrink();
+                              return _buildSongInfo(
+                                playerProvider,
+                                song,
+                                colorScheme,
+                              );
+                            },
                           ),
                         ),
                       _isLoadingLyrics
                           ? const Center(child: CircularProgressIndicator())
-                          : AppleLyricsView(
-                              lines: _parsedLyrics,
-                              currentTimeMs:
-                                  playerProvider.position.inMilliseconds,
-                              isPlaying: playerProvider.isPlaying,
-                              onSeek: (ms) => playerProvider.seek(
-                                Duration(milliseconds: ms),
+                          : RepaintBoundary(
+                              child: AppleLyricsView(
+                                lines: _parsedLyrics,
+                                currentTimeMs:
+                                    playerProvider.position.inMilliseconds,
+                                isPlaying: playerProvider.isPlaying,
+                                onSeek: (ms) => playerProvider.seek(
+                                  Duration(milliseconds: ms),
+                                ),
                               ),
                             ),
-                      CommentsView(
-                        songHash: currentSong.id,
-                        albumAudioId: currentSong.albumAudioId,
-                        artworkUri: currentSong.artworkUri,
-                        isAmStyle: true,
+                      // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
+                      Selector<PlayerProvider, String?>(
+                        selector: (_, p) => p.currentSong?.id,
+                        builder: (_, _, __) => CommentsView(
+                          songHash: currentSong.id,
+                          albumAudioId: currentSong.albumAudioId,
+                          artworkUri: currentSong.artworkUri,
+                          isAmStyle: true,
+                        ),
                       ),
                     ],
                   ),
@@ -733,10 +770,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               curve: Curves.easeOutBack,
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(16),
-                                child: _buildCrossfadeArtwork(
-                                  currentSong.artworkUri,
-                                  colorScheme,
-                                  iconSize: 48,
+                                // Selector 让封面仅在 artworkUri 变化时重建
+                                child: Selector<PlayerProvider, String?>(
+                                  selector: (_, p) => p.currentSong?.artworkUri,
+                                  builder: (context, artworkUri, __) =>
+                                      _buildCrossfadeArtwork(
+                                    artworkUri,
+                                    colorScheme,
+                                    iconSize: 48,
+                                  ),
                                 ),
                               ),
                             ),
@@ -801,23 +843,41 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     controller: _tabController,
                     children: [
                       if (!_isPadMode || _isPhoneLandscape)
-                        _buildSongInfo(playerProvider, currentSong, colorScheme),
+                        // Selector 让 _buildSongInfo 仅在 currentSong 变化时重建（切歌时）
+                        Selector<PlayerProvider, String?>(
+                          selector: (_, p) => p.currentSong?.id,
+                          builder: (context, songId, __) {
+                            final song = playerProvider.currentSong;
+                            if (song == null) return const SizedBox.shrink();
+                            return _buildSongInfo(
+                              playerProvider,
+                              song,
+                              colorScheme,
+                            );
+                          },
+                        ),
                       _isLoadingLyrics
                           ? const Center(child: CircularProgressIndicator())
-                          : AppleLyricsView(
-                              lines: _parsedLyrics,
-                              currentTimeMs:
-                                  playerProvider.position.inMilliseconds,
-                              isPlaying: playerProvider.isPlaying,
-                              onSeek: (ms) => playerProvider.seek(
-                                Duration(milliseconds: ms),
+                          : RepaintBoundary(
+                              child: AppleLyricsView(
+                                lines: _parsedLyrics,
+                                currentTimeMs:
+                                    playerProvider.position.inMilliseconds,
+                                isPlaying: playerProvider.isPlaying,
+                                onSeek: (ms) => playerProvider.seek(
+                                  Duration(milliseconds: ms),
+                                ),
                               ),
                             ),
-                      CommentsView(
-                        songHash: currentSong.id,
-                        albumAudioId: currentSong.albumAudioId,
-                        artworkUri: currentSong.artworkUri,
-                        isAmStyle: true,
+                      // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
+                      Selector<PlayerProvider, String?>(
+                        selector: (_, p) => p.currentSong?.id,
+                        builder: (_, _, __) => CommentsView(
+                          songHash: currentSong.id,
+                          albumAudioId: currentSong.albumAudioId,
+                          artworkUri: currentSong.artworkUri,
+                          isAmStyle: true,
+                        ),
                       ),
                     ],
                   ),
@@ -1058,18 +1118,41 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 进度条需要 200ms 刷新（Slider value 依赖 position）
           _buildProgressBar(playerProvider, position, duration, colorScheme),
           SizedBox(height: verticalSpacing),
-          _buildMainControls(
-            playerProvider,
-            colorScheme,
-            isExpanded: isExpanded,
+          // Selector 让主控制按钮仅在 isPlaying / loopMode / shuffle 变化时重建
+          // 不再每 200ms 因 position 变化重建
+          Selector<PlayerProvider,
+              ({bool isPlaying, AppLoopMode loopMode, bool shuffleEnabled})>(
+            selector: (_, p) => (
+              isPlaying: p.isPlaying,
+              loopMode: p.loopMode,
+              shuffleEnabled: p.shuffleEnabled,
+            ),
+            builder: (context, state, __) => _buildMainControls(
+              playerProvider,
+              colorScheme,
+              isExpanded: isExpanded,
+              isPlaying: state.isPlaying,
+              loopMode: state.loopMode,
+              shuffleEnabled: state.shuffleEnabled,
+            ),
           ),
           SizedBox(height: verticalSpacing),
-          _buildSecondaryControls(
-            playerProvider,
-            colorScheme,
-            isExpanded: isExpanded,
+          // Selector 让副控制按钮仅在 currentSong / speed / audioQuality 变化时重建
+          Selector<PlayerProvider,
+              ({String? songId, double speed, String audioQualityLabel})>(
+            selector: (_, p) => (
+              songId: p.currentSong?.id,
+              speed: p.speed,
+              audioQualityLabel: p.audioQualityLabel,
+            ),
+            builder: (context, _, __) => _buildSecondaryControls(
+              playerProvider,
+              colorScheme,
+              isExpanded: isExpanded,
+            ),
           ),
         ],
       ),
@@ -1221,6 +1304,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     PlayerProvider playerProvider,
     ColorScheme colorScheme, {
     bool isExpanded = false,
+    required bool isPlaying,
+    required AppLoopMode loopMode,
+    required bool shuffleEnabled,
   }) {
     // Apple Music HIG 风格：大按钮居中，白色图标，圆形白色播放按钮
     final spacing = isExpanded ? 4.0 : 8.0;
@@ -1232,11 +1318,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       children: [
         IconButton(
           icon: Icon(
-            playerProvider.shuffleEnabled
+            shuffleEnabled
                 ? Icons.shuffle
                 : Icons.shuffle_outlined,
             // 深色背景下：启用时纯白，未启用时半透明白
-            color: playerProvider.shuffleEnabled
+            color: shuffleEnabled
                 ? Colors.white
                 : Colors.white70,
           ),
@@ -1252,9 +1338,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         // Apple Music 标志性白色圆形播放按钮，黑色图标
         IconButton.filled(
           iconSize: playIconSize,
-          icon: Icon(playerProvider.isPlaying ? Icons.pause : Icons.play_arrow),
+          icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
           onPressed: () {
-            if (playerProvider.isPlaying) {
+            if (isPlaying) {
               playerProvider.pause();
             } else {
               playerProvider.resume();
@@ -1274,8 +1360,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         SizedBox(width: spacing),
         IconButton(
           icon: Icon(
-            _getLoopModeIcon(playerProvider.loopMode),
-            color: playerProvider.loopMode != AppLoopMode.off
+            _getLoopModeIcon(loopMode),
+            color: loopMode != AppLoopMode.off
                 ? Colors.white
                 : Colors.white70,
           ),

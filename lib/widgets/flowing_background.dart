@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:palette_generator/palette_generator.dart';
@@ -23,9 +24,17 @@ class FlowingBackground extends StatefulWidget {
 }
 
 class _FlowingBackgroundState extends State<FlowingBackground>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   Ticker? _ticker;
-  double _time = 0;
+  // 时间累积通过 ValueNotifier 驱动 CustomPainter 重绘，避免每帧 setState
+  // 触发 widget 重建
+  final ValueNotifier<double> _timeNotifier = ValueNotifier<double>(0);
+  // 帧率节流累积器：dt 累积到 >= _frameInterval 才更新 _timeNotifier
+  double _accumulatedDt = 0;
+  // 目标帧间隔：1/24 秒（约 41.7ms）。
+  // 24fps 是电影工业标准帧率，对人眼缓慢色彩流动足够流畅；
+  // 相比 60fps 减少 60% 帧数，CPU/GPU 工作量同步下降。
+  static const double _frameInterval = 1 / 24;
   Duration _lastElapsed = Duration.zero;
   List<Color> _colors = const [Colors.deepPurple, Colors.indigo, Colors.teal];
   String? _lastArtworkUrl;
@@ -48,6 +57,7 @@ class _FlowingBackgroundState extends State<FlowingBackground>
     _isRunning = running;
     if (running) {
       _lastElapsed = Duration.zero;
+      _accumulatedDt = 0;
       _ticker?.start();
     } else {
       _ticker?.stop();
@@ -58,6 +68,8 @@ class _FlowingBackgroundState extends State<FlowingBackground>
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick);
+    // 注册生命周期监听：后台时停止 Ticker，前台时按 isPlaying 决定是否恢复
+    WidgetsBinding.instance.addObserver(this);
     // 根据初始 isPlaying 决定是否启动 Ticker
     // （避免 didUpdateWidget 后再次 start 触发 "started twice" 断言）
     _setRunning(widget.isPlaying);
@@ -76,6 +88,24 @@ class _FlowingBackgroundState extends State<FlowingBackground>
     }
   }
 
+  /// 响应 App 生命周期：后台时停止 Ticker 节省功耗。
+  ///
+  /// 不依赖 Flutter TickerMode 的原因：部分 Android ROM 在后台仍触发 vsync，
+  /// 导致 Ticker 持续运行。显式停止 Ticker 可确保后台零功耗。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.detached) {
+      _setRunning(false);
+    } else if (state == AppLifecycleState.resumed) {
+      // 重置 _lastElapsed 避免 resumed 后 dt 跳变（累积后台时间）
+      _lastElapsed = Duration.zero;
+      _accumulatedDt = 0;
+      _setRunning(widget.isPlaying);
+    }
+  }
+
   /// widget 从树中移除时（如路由收起）立即停止 Ticker。
   ///
   /// 关键修复：路由 dismiss 时 removeRoute 会触发子树 deactivate，
@@ -90,13 +120,24 @@ class _FlowingBackgroundState extends State<FlowingBackground>
   }
 
   void _onTick(Duration elapsed) {
-    // 防御性检查：widget 已销毁或不活跃时跳过 setState
+    // 防御性检查：widget 已销毁或不活跃时跳过
     if (!mounted || _disposed) return;
+    // _lastElapsed 在 start/resume 时重置为 zero，首帧 dt 会被跳过
+    if (_lastElapsed == Duration.zero) {
+      _lastElapsed = elapsed;
+      return;
+    }
     final dt = (elapsed - _lastElapsed).inMicroseconds / 1000000.0;
     _lastElapsed = elapsed;
-    // 累积时间，sin/cos 自然周期性，无跳变
-    _time += dt * 0.5; // 0.5 倍速，4秒一个周期
-    setState(() {});
+    // 累积时间，达到 _frameInterval 才推进 _time 并触发重绘
+    _accumulatedDt += dt;
+    if (_accumulatedDt >= _frameInterval) {
+      // 与原实现一致：_time += dt * 0.5（0.5 倍速，4秒一个周期）
+      // 这里用累积的 dt 计算，保持视觉速度不变
+      _timeNotifier.value = _timeNotifier.value + _accumulatedDt * 0.5;
+      _accumulatedDt = 0;
+      // 不需要 setState：CustomPainter 通过 _timeNotifier 自动重绘
+    }
   }
 
   Future<void> _extractColors() async {
@@ -128,8 +169,10 @@ class _FlowingBackgroundState extends State<FlowingBackground>
   @override
   void dispose() {
     _disposed = true;
+    WidgetsBinding.instance.removeObserver(this);
     _setRunning(false); // 幂等停止（deactivate 已停过则直接 return）
     _ticker?.dispose();
+    _timeNotifier.dispose();
     super.dispose();
   }
 
@@ -139,7 +182,7 @@ class _FlowingBackgroundState extends State<FlowingBackground>
       child: CustomPaint(
         painter: _FlowingGradientPainter(
           colors: _colors,
-          time: _time,
+          timeNotifier: _timeNotifier,
         ),
         size: Size.infinite,
       ),
@@ -152,13 +195,19 @@ class _FlowingBackgroundState extends State<FlowingBackground>
 /// 3 层径向渐变叠加，每层中心点随时间偏移，模拟色彩流动。
 class _FlowingGradientPainter extends CustomPainter {
   final List<Color> colors;
-  final double time;
+  final ValueNotifier<double> timeNotifier;
 
-  _FlowingGradientPainter({required this.colors, required this.time});
+  _FlowingGradientPainter({
+    required this.colors,
+    required this.timeNotifier,
+  }) : super(repaint: timeNotifier);
 
   @override
   void paint(Canvas canvas, Size size) {
     if (colors.isEmpty) return;
+
+    // 从 ValueNotifier 读取当前时间（由 _onTick 节流后更新）
+    final time = timeNotifier.value;
 
     final rect = Offset.zero & size;
 
@@ -220,6 +269,9 @@ class _FlowingGradientPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _FlowingGradientPainter oldDelegate) {
-    return oldDelegate.time != time;
+    // time 变化由 Listenable (super(repaint: timeNotifier)) 自动驱动重绘，
+    // 这里只需检查 colors 是否变化以触发 painter 重建（_extractColors 后）
+    // 用 listEquals 避免逐元素比较的样板代码
+    return !listEquals(colors, oldDelegate.colors);
   }
 }

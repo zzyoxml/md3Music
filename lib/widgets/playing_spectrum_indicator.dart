@@ -10,6 +10,9 @@ import 'package:flutter/scheduler.dart';
 ///
 /// 仅是装饰性动画（不订阅 amplitudeStream / 不需要任何权限），
 /// 用来替代 [CircularProgressIndicator] loading 圈作为歌曲列表「正在播放」标识。
+///
+/// **性能优化**：用 [ValueNotifier] 驱动 [CustomPainter] 重绘，
+/// 避免 _onTick 每帧 setState 触发 widget 重建。
 class PlayingSpectrumIndicator extends StatefulWidget {
   final Color color;
 
@@ -35,7 +38,10 @@ class _PlayingSpectrumIndicatorState extends State<PlayingSpectrumIndicator>
     with SingleTickerProviderStateMixin {
   late final Ticker _ticker;
   Duration _lastElapsed = Duration.zero;
-  double _t = 0;
+
+  /// 时间累积通过 ValueNotifier 驱动 CustomPainter 重绘，
+  /// 避免 _onTick 每帧 setState 触发 widget 重建
+  final ValueNotifier<double> _tNotifier = ValueNotifier<double>(0);
 
   @override
   void initState() {
@@ -52,7 +58,7 @@ class _PlayingSpectrumIndicatorState extends State<PlayingSpectrumIndicator>
     super.didUpdateWidget(oldWidget);
     // isPlaying 状态变化时启停 ticker：
     // - false → true：重置 _lastElapsed 避免 dt 跳跃，然后 start
-    // - true → false：stop 保留最后一帧（setState 不再调用，画面冻结）
+    // - true → false：stop 保留最后一帧（_tNotifier 不再更新，画面冻结）
     if (widget.isPlaying != oldWidget.isPlaying) {
       if (widget.isPlaying) {
         _lastElapsed = Duration.zero;
@@ -66,39 +72,29 @@ class _PlayingSpectrumIndicatorState extends State<PlayingSpectrumIndicator>
   void _onTick(Duration elapsed) {
     final dt = (elapsed - _lastElapsed).inMicroseconds / 1000000.0;
     _lastElapsed = elapsed;
-    _t += dt;
-    setState(() {});
+    // 推进时间并通过 ValueNotifier 触发 CustomPainter 重绘
+    // 不需要 setState：painter 通过 _tNotifier 自动重绘
+    _tNotifier.value = _tNotifier.value + dt;
   }
 
   @override
   void dispose() {
     _ticker.dispose();
+    _tNotifier.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final size = widget.size;
-    // 3 根柱基础高度 + 振幅
-    final baseHeight = size * 0.4;
-    final ampHeight = size * 0.5;
-    // 周期 800ms = 0.8s
-    final period = 0.8;
-
-    final barHeights = List<double>.generate(3, (i) {
-      // 相位错开 0 / 0.4 / 0.8
-      final phase = i * 0.4;
-      final s = (math.sin((_t / period + phase) * 2 * math.pi) + 1) / 2;
-      return baseHeight + ampHeight * s;
-    });
-
     return SizedBox(
       width: size,
       height: size,
       child: CustomPaint(
         painter: _SpectrumPainter(
           color: widget.color,
-          barHeights: barHeights,
+          tNotifier: _tNotifier,
+          size: size,
           barWidth: size / 4.5,
           spacing: size / 6,
         ),
@@ -109,26 +105,38 @@ class _PlayingSpectrumIndicatorState extends State<PlayingSpectrumIndicator>
 
 class _SpectrumPainter extends CustomPainter {
   final Color color;
-  final List<double> barHeights;
+  final ValueNotifier<double> tNotifier;
+  final double size;
   final double barWidth;
   final double spacing;
 
-  const _SpectrumPainter({
+  _SpectrumPainter({
     required this.color,
-    required this.barHeights,
+    required this.tNotifier,
+    required this.size,
     required this.barWidth,
     required this.spacing,
-  });
+  }) : super(repaint: tNotifier);
 
   @override
-  void paint(Canvas canvas, Size size) {
+  void paint(Canvas canvas, Size canvasSize) {
+    final t = tNotifier.value;
+    // 3 根柱基础高度 + 振幅
+    final baseHeight = size * 0.4;
+    final ampHeight = size * 0.5;
+    // 周期 800ms = 0.8s
+    const period = 0.8;
+
     final paint = Paint()..color = color;
     final totalWidth = 3 * barWidth + 2 * spacing;
-    final startX = (size.width - totalWidth) / 2;
+    final startX = (canvasSize.width - totalWidth) / 2;
     for (int i = 0; i < 3; i++) {
+      // 相位错开 0 / 0.4 / 0.8
+      final phase = i * 0.4;
+      final s = (math.sin((t / period + phase) * 2 * math.pi) + 1) / 2;
+      final h = baseHeight + ampHeight * s;
       final x = startX + i * (barWidth + spacing);
-      final h = barHeights[i];
-      final y = (size.height - h) / 2;
+      final y = (canvasSize.height - h) / 2;
       canvas.drawRRect(
         RRect.fromRectAndRadius(
           Rect.fromLTWH(x, y, barWidth, h),
@@ -140,7 +148,12 @@ class _SpectrumPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_SpectrumPainter oldDelegate) =>
-      oldDelegate.color != color ||
-      oldDelegate.barHeights != barHeights;
+  bool shouldRepaint(covariant _SpectrumPainter oldDelegate) {
+    // t 变化由 Listenable (super(repaint: tNotifier)) 自动驱动重绘，
+    // 这里只需检查不变的参数是否变化（color/size 等）
+    return oldDelegate.color != color ||
+        oldDelegate.size != size ||
+        oldDelegate.barWidth != barWidth ||
+        oldDelegate.spacing != spacing;
+  }
 }

@@ -75,6 +75,12 @@ class LyricScrollController {
   bool get isWaitingForAutoReturn =>
       !_isUserScrolling && !_autoReturned && _autoReturnRemainingMs > 0;
 
+  /// v3 优化：scroll controller 是否已收敛
+  /// （无用户滚动、无等待回弹、posY 弹簧已稳定）。
+  /// 用于 AppleLyricsView 判断是否可以停止 Ticker。
+  bool get isConverged =>
+      !isUserScrolling && !isWaitingForAutoReturn && _posYSpring.isSettled;
+
   /// 当前 posY（用于绘制时偏移）
   double get posY => _posYSpring.position;
 
