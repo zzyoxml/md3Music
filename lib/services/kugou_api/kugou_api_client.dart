@@ -182,6 +182,11 @@ class KugouApiClient {
       print(
         '[API _post] DioException: ${e.type} ${e.message} response=${e.response?.statusCode} ${e.response?.data}',
       );
+      // 酷狗服务器在 4xx/5xx 响应体中通常仍返回 JSON（含 error_code），
+      // 保留这些信息供调用方判断业务错误
+      if (e.response?.data is Map<String, dynamic>) {
+        return e.response?.data as Map<String, dynamic>;
+      }
       return null;
     } catch (e) {
       print('[API _post] Error: $e');
@@ -1692,14 +1697,16 @@ class KugouApiClient {
   Future<Map<String, dynamic>?> followArtist(String artistId) async {
     return await _post(
       KugouEndpoints.artistFollow,
-      data: {'singerid': artistId},
+      queryParameters: {'id': artistId},
+      noCache: true,
     );
   }
 
   Future<Map<String, dynamic>?> unfollowArtist(String artistId) async {
     return await _post(
       KugouEndpoints.artistUnfollow,
-      data: {'singerid': artistId},
+      queryParameters: {'id': artistId},
+      noCache: true,
     );
   }
 

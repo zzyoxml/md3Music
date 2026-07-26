@@ -5,6 +5,7 @@ const { parseCookieString } = require('./util');
 const { isPlatformLite } = require('./platform');
 const { appid, clientver, liteAppid, liteClientver } = require('./config.json');
 const { resolveProxy } = require('./runtime');
+const { generateSimulate } = require('./generate_simulate');
 
 /**
  * @typedef {{status: number;body: any, cookie: string[], headers?: Record<string, string>}} UseAxiosResponse
@@ -139,14 +140,43 @@ const createRequest = (options) => {
 
     const answer = { status: 500, body: {}, cookie: [], headers: {} };
     try {
-      const response = await axios(requestOptions);
+      let response = await axios(requestOptions);
+      let ssaCode = response.headers['ssa-code'] || response.headers['SSA-CODE'];
+
+      // ========== SSA 安全验证重试 ==========
+      // 当酷狗返回 ssa-code 且请求失败时（如 error_code 20028 "需进行验证"），
+      // 生成模拟行为指纹（edt/sid）并重试一次
+      const isError = response.data?.status === 0 || (response.data?.error_code && response.data.error_code !== 0);
+      if (isError && ssaCode && !options._ssaRetried) {
+        console.log(`[SSA] ssa-code detected (url=${options.url}, error_code=${response.data?.error_code}), generating fingerprint for retry...`);
+        const webglHash = options?.cookie?.KUGOU_API_WEBGL;
+        const { edt, sid } = generateSimulate(mid, userid, dfid, webglHash);
+
+        // 在请求头中添加 edt/sid 进行重试
+        requestOptions.headers['edt'] = edt;
+        requestOptions.headers['sid'] = sid;
+        options._ssaRetried = true;
+
+        response = await axios(requestOptions);
+        ssaCode = response.headers['ssa-code'] || response.headers['SSA-CODE'];
+        console.log(`[SSA] Retry result: status=${response.data?.status}, error_code=${response.data?.error_code}`);
+      }
+
+      // ========== 诊断日志：关注歌手接口失败时打印详细信息 ==========
+      if (options.url?.includes('follow_singer') && isError) {
+        console.log(`[FOLLOW_SINGER] url=${options.url}`);
+        console.log(`[FOLLOW_SINGER] response headers=`, JSON.stringify(response.headers));
+        console.log(`[FOLLOW_SINGER] response body=`, JSON.stringify(response.data));
+        console.log(`[FOLLOW_SINGER] cookie keys=`, Object.keys(options?.cookie || {}));
+        console.log(`[FOLLOW_SINGER] dfid=${dfid}, mid=${mid}, userid=${userid}, token=${token ? 'yes' : 'no'}`);
+      }
 
       const body = response.data;
 
       answer.cookie = (response.headers['set-cookie'] || []).map((x) => parseCookieString(x));
 
-      if (response.headers['ssa-code']) {
-        answer.headers['ssa-code'] = response.headers['ssa-code'];
+      if (ssaCode) {
+        answer.headers['ssa-code'] = ssaCode;
       }
 
       try {
@@ -161,6 +191,14 @@ const createRequest = (options) => {
           resolve(answer);
         } else {
           answer.status = 502;
+          // 如果仍有 ssa-code，附加 edt/sid 到响应体（供客户端后续使用）
+          if (ssaCode) {
+            const webglHash = options?.cookie?.KUGOU_API_WEBGL;
+            const { edt, sid } = generateSimulate(mid, userid, dfid, webglHash);
+            if (edt) answer.body.edt = edt;
+            if (sid) answer.body.sid = sid;
+            answer.body.ssaCode = ssaCode;
+          }
           reject(answer);
         }
       } else {

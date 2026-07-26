@@ -30,6 +30,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   bool _isLoading = true;
   String? _error;
   bool _isFollowing = false;
+  bool _isFollowLoading = false;
   String? _description;
   bool _isDescriptionExpanded = false;
   /// 搜索接口通常不返回歌手头像，用 getArtistDetail 接口补全的头像URL
@@ -104,6 +105,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
         if (detail.avatarUrl != null && detail.avatarUrl!.isNotEmpty) {
           _resolvedAvatarUrl = detail.avatarUrl;
         }
+        _isFollowing = detail.isFollowed;
       }
 
       // 一次性拉取全部歌曲
@@ -220,6 +222,77 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       return url.replaceFirst('http://', 'https://');
     }
     return url;
+  }
+
+  /// 关注/取消关注歌手
+  Future<void> _toggleFollow() async {
+    if (_isFollowLoading) return;
+    final api = KugouApiClient();
+    if (!api.isLoggedIn) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('请先登录'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _isFollowLoading = true);
+
+    final wasFollowing = _isFollowing;
+    // 乐观更新：先切换 UI 状态
+    setState(() => _isFollowing = !wasFollowing);
+
+    try {
+      final result = wasFollowing
+          ? await api.unfollowArtist(widget.artistId)
+          : await api.followArtist(widget.artistId);
+
+      if (!mounted) return;
+
+      // 检查 API 返回是否成功
+      // result 为 null（网络错误），或 status/error_code 表示失败时，回滚
+      final status = result?['status'];
+      final errCode = result?['error_code'];
+      final isFailed = result == null ||
+          (status != null && status != 1) ||
+          (errCode != null && errCode != 0);
+
+      if (isFailed) {
+        // 失败，回滚
+        setState(() => _isFollowing = wasFollowing);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(result?['msg'] ??
+                result?['message'] ??
+                '操作失败，请重试'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(wasFollowing ? '已取消关注' : '已关注'),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 1),
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      // 异常，回滚
+      setState(() => _isFollowing = wasFollowing);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('网络错误: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isFollowLoading = false);
+    }
   }
 
   @override
@@ -391,6 +464,33 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                 label: const Text('随机播放'),
                               ),
                             ),
+                            const SizedBox(width: 12),
+                            // 关注/取消关注按钮
+                            _isFollowLoading
+                                ? const SizedBox(
+                                    width: 44,
+                                    height: 44,
+                                    child: Center(
+                                      child: SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      ),
+                                    ),
+                                  )
+                                : IconButton(
+                                    onPressed: _toggleFollow,
+                                    icon: Icon(
+                                      _isFollowing
+                                          ? Icons.favorite
+                                          : Icons.favorite_border,
+                                      color: _isFollowing
+                                          ? colorScheme.primary
+                                          : colorScheme.onSurfaceVariant,
+                                      size: 28,
+                                    ),
+                                    tooltip: _isFollowing ? '取消关注' : '关注歌手',
+                                  ),
                           ],
                         ),
                       ),

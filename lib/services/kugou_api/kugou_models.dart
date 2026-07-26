@@ -789,6 +789,7 @@ class KugouArtistDetail {
   final String? description;
   final int songCount;
   final int albumCount;
+  final bool isFollowed;
 
   const KugouArtistDetail({
     required this.id,
@@ -797,6 +798,7 @@ class KugouArtistDetail {
     this.description,
     this.songCount = 0,
     this.albumCount = 0,
+    this.isFollowed = false,
   });
 
   factory KugouArtistDetail.fromJson(Map<String, dynamic> json) {
@@ -828,6 +830,9 @@ class KugouArtistDetail {
       ),
       songCount: _parseInt(json['songcount'] ?? json['song_count'] ?? 0),
       albumCount: _parseInt(json['albumcount'] ?? json['album_count'] ?? 0),
+      isFollowed: json['is_follow'] == 1 ||
+          json['isfollow'] == 1 ||
+          json['followed'] == 1,
     );
   }
 
