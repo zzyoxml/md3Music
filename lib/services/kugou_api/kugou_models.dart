@@ -790,6 +790,8 @@ class KugouArtistDetail {
   final int songCount;
   final int albumCount;
   final bool isFollowed;
+  /// 接口是否返回了关注状态字段（用于区分"未关注"和"接口没返回"）
+  final bool hasFollowStatus;
 
   const KugouArtistDetail({
     required this.id,
@@ -799,9 +801,13 @@ class KugouArtistDetail {
     this.songCount = 0,
     this.albumCount = 0,
     this.isFollowed = false,
+    this.hasFollowStatus = false,
   });
 
   factory KugouArtistDetail.fromJson(Map<String, dynamic> json) {
+    final hasFollow = json['is_follow'] != null ||
+        json['isfollow'] != null ||
+        json['followed'] != null;
     return KugouArtistDetail(
       id: _str(
         json['singerid'] ??
@@ -833,6 +839,7 @@ class KugouArtistDetail {
       isFollowed: json['is_follow'] == 1 ||
           json['isfollow'] == 1 ||
           json['followed'] == 1,
+      hasFollowStatus: hasFollow,
     );
   }
 

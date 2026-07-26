@@ -820,6 +820,7 @@ class _FavoritesPageState extends State<FavoritesPage>
               artistId: id,
               artistName: name.toString(),
               avatarUrl: avatar,
+              initialIsFollowed: true,
             ),
           ),
         );

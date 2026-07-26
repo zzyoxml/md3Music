@@ -13,12 +13,15 @@ class ArtistDetailPage extends StatefulWidget {
   final String artistId;
   final String artistName;
   final String? avatarUrl;
+  /// 初始关注状态（从收藏列表进入时传 true）
+  final bool initialIsFollowed;
 
   const ArtistDetailPage({
     super.key,
     required this.artistId,
     required this.artistName,
     this.avatarUrl,
+    this.initialIsFollowed = false,
   });
 
   @override
@@ -44,6 +47,9 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   @override
   void initState() {
     super.initState();
+    // 先用传入的初始关注状态（从收藏列表进入时为 true），
+    // _fetchArtistSongs 获取到详情后会用接口返回值覆盖
+    _isFollowing = widget.initialIsFollowed;
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchArtistSongs();
@@ -105,7 +111,11 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
         if (detail.avatarUrl != null && detail.avatarUrl!.isNotEmpty) {
           _resolvedAvatarUrl = detail.avatarUrl;
         }
-        _isFollowing = detail.isFollowed;
+        // 只有接口明确返回了关注状态字段时才覆盖初始值，
+        // 否则保留从入口传入的 initialIsFollowed
+        if (detail.hasFollowStatus) {
+          _isFollowing = detail.isFollowed;
+        }
       }
 
       // 一次性拉取全部歌曲

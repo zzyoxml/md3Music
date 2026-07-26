@@ -1637,8 +1637,11 @@ class KugouApiClient {
     if (json == null) return null;
     try {
       final data = json['data'] as Map<String, dynamic>? ?? json;
+      print('[ArtistDetail] raw data keys: ${data.keys.toList()}');
+      print('[ArtistDetail] is_follow=${data['is_follow']}, isfollow=${data['isfollow']}, followed=${data['followed']}');
       return KugouArtistDetail.fromJson(data);
     } catch (e) {
+      print('[ArtistDetail] parse error: $e');
       return null;
     }
   }
