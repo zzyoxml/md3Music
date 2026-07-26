@@ -726,12 +726,26 @@ class KugouComment {
   });
 
   factory KugouComment.fromJson(Map<String, dynamic> json) {
+    // 修复头像 URL：http → https，避免 Android 明文 HTTP 请求被拒
+    String? fixAvatar(String? url) {
+      if (url == null || url.isEmpty) return null;
+      if (url.startsWith('http://')) {
+        return url.replaceFirst('http://', 'https://');
+      }
+      return url;
+    }
+
+    // 支持嵌套的 user 对象（部分接口返回 { user: { avatar, name, ... } }）
+    final user = json['user'] as Map<String, dynamic>?;
+
     return KugouComment(
       id: _str(json['commentid'] ?? json['id'] ?? ''),
       username: _str(
-        json['user_name'] ?? json['username'] ?? json['nickname'] ?? '',
+        json['user_name'] ?? json['username'] ?? json['nickname'] ?? user?['name'] ?? user?['nickname'] ?? '',
       ),
-      avatar: _strNull(json['user_pic'] ?? json['user_img'] ?? json['avatar']),
+      avatar: fixAvatar(_strNull(
+        json['user_pic'] ?? json['user_img'] ?? json['avatar'] ?? user?['avatar'] ?? user?['pic'] ?? user?['img'],
+      )),
       content: _str(json['content'] ?? json['comment_text'] ?? ''),
       time: _parseInt(json['createtime'] ?? json['time'] ?? 0),
       likes: _parseInt(json['like_count'] ?? json['likes'] ?? 0),

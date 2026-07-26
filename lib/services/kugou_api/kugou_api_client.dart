@@ -1188,14 +1188,17 @@ class KugouApiClient {
     String hash, {
     String? albumAudioId,
     int page = 1,
-    int pagesize = 20,
+    int pagesize = 30,
   }) async {
+    // /comment/music 接口需要 mixsongid（即 album_audio_id）
+    // hash 作为备选标识，实际评论拉取依赖 mixsongid
     final params = <String, dynamic>{
-      'hash': hash,
+      'mixsongid': albumAudioId ?? hash,
       'page': page,
       'pagesize': pagesize,
+      'show_classify': 1,
+      'show_hotword_list': 1,
     };
-    if (albumAudioId != null) params['album_audio_id'] = albumAudioId;
     final json = await _get(
       KugouEndpoints.commentMusic,
       queryParameters: params,

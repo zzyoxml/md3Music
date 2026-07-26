@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -257,17 +258,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          CircleAvatar(
-            radius: 16,
-            backgroundColor: colorScheme.primary.withValues(alpha: 0.15),
-            child: Text(
-              comment.username.isNotEmpty ? comment.username[0] : '?',
-              style: TextStyle(
-                color: colorScheme.primary,
-                fontSize: 13,
-              ),
-            ),
-          ),
+          _buildAvatar(comment, colorScheme),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -305,12 +296,80 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                     height: 1.4,
                   ),
                 ),
+                if (comment.likes > 0) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.thumb_up_outlined,
+                        size: 12,
+                        color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${comment.likes}',
+                        style: TextStyle(
+                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
         ],
       ),
     );
+  }
+
+  /// 构建评论用户头像。
+  /// 优先使用 API 返回的头像 URL，加载失败或无头像时回退到首字母圆形头像。
+  Widget _buildAvatar(KugouComment comment, ColorScheme colorScheme) {
+    final avatarUrl = _fixAvatarUrl(comment.avatar);
+
+    if (avatarUrl != null && avatarUrl.isNotEmpty) {
+      return CircleAvatar(
+        radius: 16,
+        backgroundColor: colorScheme.primary.withValues(alpha: 0.15),
+        child: ClipOval(
+          child: CachedNetworkImage(
+            imageUrl: avatarUrl,
+            width: 32,
+            height: 32,
+            fit: BoxFit.cover,
+            placeholder: (_, _) => _buildTextAvatar(comment, colorScheme),
+            errorWidget: (_, _, _) => _buildTextAvatar(comment, colorScheme),
+          ),
+        ),
+      );
+    }
+
+    return _buildTextAvatar(comment, colorScheme);
+  }
+
+  Widget _buildTextAvatar(KugouComment comment, ColorScheme colorScheme) {
+    return CircleAvatar(
+      radius: 16,
+      backgroundColor: colorScheme.primary.withValues(alpha: 0.15),
+      child: Text(
+        comment.username.isNotEmpty ? comment.username[0] : '?',
+        style: TextStyle(
+          color: colorScheme.primary,
+          fontSize: 13,
+        ),
+      ),
+    );
+  }
+
+  /// 修复头像 URL：http → https
+  String? _fixAvatarUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    if (url.startsWith('http://')) {
+      return url.replaceFirst('http://', 'https://');
+    }
+    return url;
   }
 
   String _formatTime(int timestamp) {

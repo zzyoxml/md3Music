@@ -564,23 +564,28 @@ class KugouProvider extends ChangeNotifier {
     _endLoading();
   }
 
-  Future<void> getComments(String hash, {String? albumAudioId}) async {
-    _beginLoading();
+  Future<KugouCommentList?> getComments(
+    String hash, {
+    String? albumAudioId,
+    int page = 1,
+  }) async {
     _error = null;
     try {
       final result = await _apiClient.getComments(
         hash,
         albumAudioId: albumAudioId,
+        page: page,
       );
       if (result != null) {
         _comments = result;
-      } else {
+      } else if (page == 1) {
         _error = '获取评论失败';
       }
+      return result;
     } catch (e) {
       _error = e.toString();
+      return null;
     }
-    _endLoading();
   }
 
   Future<KugouCommentList?> getPlaylistComments(

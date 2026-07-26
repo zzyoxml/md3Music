@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -11,6 +12,8 @@ import '../../services/kugou_api/kugou_models.dart';
 /// - AM 风格（[isAmStyle] = true）：背景为模糊封面 + 黑蒙版，统一白色文字。
 /// - MD3 风格（[isAmStyle] = false，默认）：跟随莫奈色主题，用户名用主色调，
 ///   评论正文和时间戳根据深浅色模式自动适配。
+///
+/// **分页加载**：滚动到底部自动加载下一页评论。
 ///
 /// **mask alpha 渐变**：列表顶部/底部各 24px 范围用 ShaderMask + BlendMode.dstIn
 /// 实现 alpha 渐变（比歌词页更窄），让滚动内容从背景柔和淡入、淡出到背景，
@@ -38,25 +41,47 @@ class CommentsView extends StatefulWidget {
 }
 
 class _CommentsViewState extends State<CommentsView> {
+  final ScrollController _scrollController = ScrollController();
   List<KugouComment> _comments = [];
   bool _isLoading = false;
+  bool _isLoadingMore = false;
   String? _error;
+  int _currentPage = 1;
+  bool _hasMore = true;
 
   @override
   void initState() {
     super.initState();
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _fetchComments();
     });
   }
 
   @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   void didUpdateWidget(covariant CommentsView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.songHash != widget.songHash) {
+      _currentPage = 1;
+      _hasMore = true;
+      _comments.clear();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _fetchComments();
       });
+    }
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      _loadMore();
     }
   }
 
@@ -69,19 +94,50 @@ class _CommentsViewState extends State<CommentsView> {
     });
 
     final kugouProvider = context.read<KugouProvider>();
-    await kugouProvider.getComments(widget.songHash,
-        albumAudioId: widget.albumAudioId);
+    final result = await kugouProvider.getComments(
+      widget.songHash,
+      albumAudioId: widget.albumAudioId,
+      page: 1,
+    );
 
     if (mounted) {
       setState(() {
         _isLoading = false;
-        final commentList = kugouProvider.comments;
-        if (commentList != null && commentList.comments.isNotEmpty) {
-          _comments = commentList.comments;
+        if (result != null && result.comments.isNotEmpty) {
+          _comments = result.comments;
+          _currentPage = 1;
+          _hasMore = result.comments.length >= 20;
         } else {
           _comments = [];
+          _hasMore = false;
         }
         _error = kugouProvider.error;
+      });
+    }
+  }
+
+  Future<void> _loadMore() async {
+    if (_isLoadingMore || !_hasMore || _isLoading) return;
+
+    setState(() => _isLoadingMore = true);
+
+    final kugouProvider = context.read<KugouProvider>();
+    final result = await kugouProvider.getComments(
+      widget.songHash,
+      albumAudioId: widget.albumAudioId,
+      page: _currentPage + 1,
+    );
+
+    if (mounted) {
+      setState(() {
+        _isLoadingMore = false;
+        if (result != null && result.comments.isNotEmpty) {
+          _comments.addAll(result.comments);
+          _currentPage++;
+          _hasMore = result.comments.length >= 20;
+        } else {
+          _hasMore = false;
+        }
       });
     }
   }
@@ -190,75 +246,172 @@ class _CommentsViewState extends State<CommentsView> {
       },
       blendMode: BlendMode.dstIn,
       child: ListView.separated(
+        controller: _scrollController,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        itemCount: _comments.length,
+        itemCount: _comments.length + (_hasMore ? 1 : 0),
         separatorBuilder: (_, _) => Divider(
           height: 1,
           color: secondaryTextColor.withValues(alpha: 0.2),
         ),
         itemBuilder: (context, index) {
-          final comment = _comments[index];
-          return Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  radius: 18,
-                  backgroundColor: usernameColor.withValues(alpha: 0.15),
-                  child: Text(
-                    comment.username.isNotEmpty ? comment.username[0] : '?',
-                    style: TextStyle(
-                      color: usernameColor,
-                      fontSize: 14,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(
-                            comment.username,
-                            style: TextStyle(
-                              color: usernameColor,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const Spacer(),
-                          Text(
-                            _formatTime(comment.time),
-                            style: TextStyle(
-                              color: secondaryTextColor
-                                  .withValues(alpha: 0.6),
-                              fontSize: 11,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        comment.content,
-                        style: TextStyle(
+          if (index == _comments.length) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: _isLoadingMore
+                    ? SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
                           color: primaryTextColor,
-                          fontSize: 14,
-                          height: 1.4,
                         ),
+                      )
+                    : TextButton(
+                        onPressed: _loadMore,
+                        style: TextButton.styleFrom(
+                          foregroundColor: primaryTextColor,
+                        ),
+                        child: const Text('加载更多'),
                       ),
-                      const SizedBox(height: 6),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+              ),
+            );
+          }
+          final comment = _comments[index];
+          return _buildCommentItem(
+            comment,
+            primaryTextColor,
+            secondaryTextColor,
+            usernameColor,
           );
         },
       ),
     );
+  }
+
+  Widget _buildCommentItem(
+    KugouComment comment,
+    Color primaryTextColor,
+    Color secondaryTextColor,
+    Color usernameColor,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildAvatar(comment, usernameColor),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        comment.username,
+                        style: TextStyle(
+                          color: usernameColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      _formatTime(comment.time),
+                      style: TextStyle(
+                        color: secondaryTextColor.withValues(alpha: 0.6),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  comment.content,
+                  style: TextStyle(
+                    color: primaryTextColor,
+                    fontSize: 14,
+                    height: 1.4,
+                  ),
+                ),
+                if (comment.likes > 0) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.thumb_up_outlined,
+                        size: 12,
+                        color: secondaryTextColor.withValues(alpha: 0.5),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${comment.likes}',
+                        style: TextStyle(
+                          color: secondaryTextColor.withValues(alpha: 0.5),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 构建评论用户头像。
+  /// 优先使用 API 返回的头像 URL，加载失败或无头像时回退到首字母圆形头像。
+  Widget _buildAvatar(KugouComment comment, Color usernameColor) {
+    final avatarUrl = _fixAvatarUrl(comment.avatar);
+
+    if (avatarUrl != null && avatarUrl.isNotEmpty) {
+      return CircleAvatar(
+        radius: 18,
+        backgroundColor: usernameColor.withValues(alpha: 0.15),
+        child: ClipOval(
+          child: CachedNetworkImage(
+            imageUrl: avatarUrl,
+            width: 36,
+            height: 36,
+            fit: BoxFit.cover,
+            placeholder: (_, _) => _buildTextAvatar(comment, usernameColor),
+            errorWidget: (_, _, _) => _buildTextAvatar(comment, usernameColor),
+          ),
+        ),
+      );
+    }
+
+    return _buildTextAvatar(comment, usernameColor);
+  }
+
+  Widget _buildTextAvatar(KugouComment comment, Color usernameColor) {
+    return CircleAvatar(
+      radius: 18,
+      backgroundColor: usernameColor.withValues(alpha: 0.15),
+      child: Text(
+        comment.username.isNotEmpty ? comment.username[0] : '?',
+        style: TextStyle(
+          color: usernameColor,
+          fontSize: 14,
+        ),
+      ),
+    );
+  }
+
+  /// 修复头像 URL：http → https
+  String? _fixAvatarUrl(String? url) {
+    if (url == null || url.isEmpty) return null;
+    if (url.startsWith('http://')) {
+      return url.replaceFirst('http://', 'https://');
+    }
+    return url;
   }
 
   String _formatTime(int timestamp) {
