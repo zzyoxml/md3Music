@@ -668,21 +668,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         // 根据偏好选择高斯模糊或 alpha 渐变淡出
         final useGaussian = LyricPreferences.instance.useGaussianBlur;
 
-        // 检测视口宽度变化，清除模糊缓存（保留原副作用，确保切屏/旋转后重建缓存）
-        if (_viewportWidth != constraints.maxWidth && _viewportWidth > 0) {
-          for (final entry in _lineBlurImages.values) {
-            entry.$1.dispose();
-          }
-          _lineBlurImages.clear();
-          _cachedBlurLineIndex = -1;
-        }
-        _viewportWidth = constraints.maxWidth;
-
-        // 在构造 painter 前更新模糊缓存（原 _buildBlurLayers 的缓存管理部分）
-        if (useGaussian) {
-          _updateBlurCacheIfNeeded(constraints.maxHeight, mainLineHeight);
-        }
-
         final lyricsContent = ClipRect(
           child: CustomPaint(
             painter: _LyricsPainter(
@@ -711,8 +696,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
               perLineOffsets: _buildPerLineOffsets(),
               blurFade: _blurFade,
               blurActive: useGaussian,
-              blurImages: _lineBlurImages,
-              cachedBlurLevels: _cachedBlurLevels,
             ),
             size: Size.infinite,
           ),
@@ -724,10 +707,31 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           onTapUp: _onTapUp,
           onVerticalDragUpdate: _onVerticalDragUpdate,
           onVerticalDragEnd: _onVerticalDragEnd,
-          // 模糊层已移入 painter 内部 canvas.drawImageRect，
-          // 不再用 Stack + N×Positioned widget 树，避免每帧重建
           child: useGaussian
-              ? lyricsContent
+              ? ClipRect(
+                  child: Builder(
+                    builder: (context) {
+                      // 检测视口宽度变化，清除模糊缓存
+                      if (_viewportWidth != constraints.maxWidth && _viewportWidth > 0) {
+                        for (final entry in _lineBlurImages.values) {
+                          entry.$1.dispose();
+                        }
+                        _lineBlurImages.clear();
+                        _cachedBlurLineIndex = -1;
+                      }
+                      _viewportWidth = constraints.maxWidth;
+                      return Stack(
+                        children: [
+                          lyricsContent,
+                          ..._buildBlurLayers(
+                            constraints.maxHeight,
+                            mainLineHeight,
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                )
               : ShaderMask(
                   shaderCallback: (Rect bounds) {
                     return LinearGradient(
@@ -771,14 +775,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     return (1 + distance).clamp(0, 5);
   }
 
-  /// 更新模糊缓存（仅当 currentLineIndex 变化且未在滑动时）。
+  /// 构建基于距离驱动的高斯模糊层（Per-Line 缓存版）。
   ///
-  /// 原本在 `_buildBlurLayers` 内同时做缓存更新与 widget 构建，
-  /// 现在改由 painter 内部 `canvas.drawImageRect` 绘制，
-  /// 此方法只负责维护 `_cachedBlurLevels` 和 `_lineBlurImages`，
-  /// 在 `build` 构造 painter 前调用一次。
-  void _updateBlurCacheIfNeeded(double viewportHeight, double mainLineHeight) {
-    if (_currentLineIndex < 0) return;
+  /// 每行歌词独立缓存模糊图片，位置变化时只重定位，不重新计算模糊。
+  /// 模糊图片替代歌词显示（而非叠加）。
+  List<Widget> _buildBlurLayers(double viewportHeight, double mainLineHeight) {
+    if (_currentLineIndex < 0) return const [];
 
     // 滑动时不更新缓存，等松手后再更新
     final bool isScrolling = _blurFade < 0.99;
@@ -803,6 +805,62 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       // 异步渲染变化行的模糊图片
       _updateLineBlurCache(levels, mainLineHeight);
     }
+
+    // 从缓存绘制模糊层
+    final List<Widget> layers = [];
+    final double currentScale = widget.enableScale
+        ? _scaleController.currentScale
+        : LyricLayout.activeScale;
+
+    for (final entry in _cachedBlurLevels.entries) {
+      final int i = entry.key;
+      final double sigma = (entry.value * 1.0 * _blurFade).clamp(0.5, 5.0);
+      if (sigma < 0.1) continue;
+
+      final cached = _lineBlurImages[i];
+      if (cached == null) continue;
+      final image = cached.$1;
+
+      final double lineTop = (i < _lineTops.length
+              ? _lineTops[i]
+              : i * mainLineHeight) +
+          _interludeOffsetBefore(i);
+      // 应用弹簧偏移
+      final List<double> offsets = _buildPerLineOffsets();
+      final double springOffset = (i < offsets.length) ? offsets[i] : 0.0;
+      final double y = lineTop + _scrollController.posY + springOffset;
+      final double lineHeight = (i < _lineHeights.length)
+          ? _lineHeights[i]
+          : mainLineHeight;
+
+      if (y + lineHeight < 0 || y > viewportHeight) continue;
+
+      final double padding = sigma * 3;
+      final bool isCurrentLine = i == _currentLineIndex;
+      final double scale = isCurrentLine ? currentScale : LyricLayout.inactiveScale;
+
+      // 计算缩放后的尺寸
+      final double scaledWidth = _viewportWidth * scale;
+      final double scaledHeight = (lineHeight + padding * 2) * scale;
+
+      layers.add(Positioned(
+        top: y - padding + (lineHeight + padding * 2) * (1 - scale) / 2,
+        left: (_viewportWidth - scaledWidth) / 2,
+        width: scaledWidth,
+        height: scaledHeight,
+        child: Opacity(
+          opacity: _blurFade,
+          child: RawImage(
+            image: image,
+            width: scaledWidth,
+            height: scaledHeight,
+            fit: BoxFit.fill,
+          ),
+        ),
+      ));
+    }
+
+    return layers;
   }
 
   /// 异步更新模糊缓存：为变化的行渲染模糊图片。
@@ -947,14 +1005,6 @@ class _LyricsPainter extends CustomPainter {
   /// 是否启用高斯模糊。
   final bool blurActive;
 
-  /// 模糊层图片缓存：Map<行索引, (ui.Image, blurLevel)>
-  /// 由 State 维护缓存生命周期，painter 只读消费
-  final Map<int, (ui.Image, int)> blurImages;
-
-  /// 缓存的模糊级别（哪些行需要模糊，每行 blurLevel 多少）
-  /// 由 State 维护，painter 只读消费
-  final Map<int, int> cachedBlurLevels;
-
   _LyricsPainter({
     required this.lines,
     required this.currentLineIndex,
@@ -981,8 +1031,6 @@ class _LyricsPainter extends CustomPainter {
     required this.perLineOffsets,
     required this.blurFade,
     required this.blurActive,
-    required this.blurImages,
-    required this.cachedBlurLevels,
   });
 
   /// 获取指定行 i 的实际高度（含换行），降级到 mainLineHeight。
@@ -1107,56 +1155,6 @@ class _LyricsPainter extends CustomPainter {
       interludeDots.paintAtLineY(canvas, dotsStartX, centerY,
           dotRadius: dotRadius, spacing: dotSpacing);
     }
-
-    // 绘制模糊层（原 _buildBlurLayers 逻辑，改为 canvas.drawImageRect）
-    // 用 Paint.color 的 alpha 通道实现原 Opacity 效果，避免 widget 树重建
-    if (blurActive && blurFade > 0.01 && cachedBlurLevels.isNotEmpty) {
-      final double currentScale = enableScale
-          ? scaleController.currentScale
-          : LyricLayout.activeScale;
-
-      for (final entry in cachedBlurLevels.entries) {
-        final int i = entry.key;
-        final double sigma = (entry.value * 1.0 * blurFade).clamp(0.5, 5.0);
-        if (sigma < 0.1) continue;
-
-        final cached = blurImages[i];
-        if (cached == null) continue;
-        final ui.Image image = cached.$1;
-
-        final double lineTop = (i < lineTops.length ? lineTops[i] : i * mainLineHeight) +
-            _interludeOffsetBefore(i);
-        final double springOffset =
-            (i < perLineOffsets.length) ? perLineOffsets[i] : 0.0;
-        final double y = lineTop + posY + springOffset;
-        final double lineHeight =
-            (i < lineHeights.length) ? lineHeights[i] : mainLineHeight;
-
-        if (y + lineHeight < 0 || y > viewportHeight) continue;
-
-        final double padding = sigma * 3;
-        final bool isCurrentLine = i == currentLineIndex;
-        final double scale =
-            isCurrentLine ? currentScale : LyricLayout.inactiveScale;
-
-        final double scaledWidth = viewportWidth * scale;
-        final double scaledHeight = (lineHeight + padding * 2) * scale;
-        final double dx = (viewportWidth - scaledWidth) / 2;
-        final double dy = y - padding +
-            (lineHeight + padding * 2) * (1 - scale) / 2;
-
-        // 用 Paint.color alpha 实现原 Opacity(opacity: _blurFade) 效果
-        final Paint blurPaint = Paint()
-          ..color = Color.fromRGBO(255, 255, 255, blurFade);
-        canvas.drawImageRect(
-          image,
-          Rect.fromLTWH(
-              0, 0, image.width.toDouble(), image.height.toDouble()),
-          Rect.fromLTWH(dx, dy, scaledWidth, scaledHeight),
-          blurPaint,
-        );
-      }
-    }
   }
 
   @override
@@ -1180,10 +1178,6 @@ class _LyricsPainter extends CustomPainter {
         oldDelegate.interludeExpandProgress != interludeExpandProgress ||
         oldDelegate.blurFade != blurFade ||
         oldDelegate.blurActive != blurActive ||
-        // blurImages/cachedBlurLevels 用 identical 比较引用（同一缓存实例）；
-        // State 维护缓存时只在切歌时替换引用，平时保持同一 Map 实例
-        !identical(oldDelegate.blurImages, blurImages) ||
-        !identical(oldDelegate.cachedBlurLevels, cachedBlurLevels) ||
         !listEquals(oldDelegate.lines, lines) ||
         !listEquals(oldDelegate.lineHeights, lineHeights) ||
         !listEquals(oldDelegate.lineTops, lineTops) ||
