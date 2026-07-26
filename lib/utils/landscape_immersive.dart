@@ -4,6 +4,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
+/// 全屏播放器竖屏下的系统栏样式。
+///
+/// **重要**：[AmStyleFullPlayer._buildFullLayout] 中 AnnotatedRegion 的 value
+/// 必须引用本常量，确保 applyImmersiveForOrientation 与 AnnotatedRegion
+/// 使用同一引用——否则 SystemUiOverlayStyle 未重写 ==，引用不等会触发
+/// 平台 channel 真实调用，导致系统栏反复重设（视觉闪烁）。
+const SystemUiOverlayStyle kPlayerOverlayStyle = SystemUiOverlayStyle(
+  statusBarColor: Color(0x00000000),
+  statusBarIconBrightness: Brightness.light,
+  systemNavigationBarColor: Color(0x00000000),
+  systemNavigationBarIconBrightness: Brightness.light,
+);
+
 /// 根据当前屏幕方向启用或禁用全屏沉浸模式。
 ///
 /// - 横屏（landscape）：启用 [SystemUiMode.immersiveSticky]，隐藏状态栏和导航栏。
@@ -22,12 +35,9 @@ void applyImmersiveForOrientation() {
   } else {
     // 竖屏：edgeToEdge，导航栏透明，内容延伸到导航栏后面
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-      statusBarColor: Color(0x00000000),
-      statusBarIconBrightness: Brightness.light,
-      systemNavigationBarColor: Color(0x00000000),
-      systemNavigationBarIconBrightness: Brightness.light,
-    ));
+    // 引用公共 const，与 AnnotatedRegion 共用同一实例
+    // 避免引用不等触发平台 channel 真实调用导致闪烁
+    SystemChrome.setSystemUIOverlayStyle(kPlayerOverlayStyle);
   }
 }
 

@@ -71,6 +71,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   double _dragStartY = 0;
   /// 防止 PopScope 回调与 dismiss() 重复触发。
   bool _isDismissing = false;
+  /// 上次的物理尺寸，用于 didChangeMetrics 方向变化防抖。
+  /// 避免 immersiveSticky 下用户触摸边缘唤醒系统栏等 insets 抖动
+  /// 引发无效的 applyImmersiveForOrientation 调用导致系统栏闪烁。
+  Size? _lastPhysicalSize;
 
   @override
   void initState() {
@@ -88,6 +92,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     _artworkFadeController.value = 1.0;
     // 进入播放器时根据当前方向应用沉浸模式
     applyImmersiveForOrientation();
+    // 记录初始物理尺寸，避免首次 didChangeMetrics 因 _lastPhysicalSize==null 误判方向变化
+    _lastPhysicalSize =
+        WidgetsBinding.instance.platformDispatcher.views.first.physicalSize;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkPadMode();
       final song = context.read<PlayerProvider>().currentSong;
@@ -162,7 +169,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   void didChangeMetrics() {
     // 延迟一帧再检测方向，确保 physicalSize 已更新为新方向
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) applyImmersiveForOrientation();
+      if (!mounted) return;
+      final view = WidgetsBinding.instance.platformDispatcher.views.first;
+      final current = view.physicalSize;
+      // 防抖：仅在物理尺寸（方向）真正变化时才重新应用沉浸模式
+      // 避免 immersiveSticky 下用户触摸边缘唤醒系统栏等 insets 抖动
+      // 引发无效的 applyImmersiveForOrientation 调用导致系统栏闪烁
+      if (_lastPhysicalSize == current) return;
+      _lastPhysicalSize = current;
+      applyImmersiveForOrientation();
     });
   }
 
@@ -427,8 +442,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     ColorScheme colorScheme,
   ) {
     // extendBody: true 让内容延伸到系统导航栏后面，实现沉浸效果
+    // 引用 kPlayerOverlayStyle 与 applyImmersiveForOrientation 共用同一 const 实例
+    // 避免 SystemUiOverlayStyle 引用不等触发平台 channel 真实调用导致闪烁
     return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle.light,
+      value: kPlayerOverlayStyle,
       child: Scaffold(
         backgroundColor: Colors.black,
         extendBody: true,
