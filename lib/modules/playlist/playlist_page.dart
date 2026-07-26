@@ -21,6 +21,8 @@ class PlaylistPage extends StatefulWidget {
   final bool isAlbum;
   // 专辑的 globalCollectionId（用于评论 API）
   final String? albumGlobalCollectionId;
+  // 是否为用户自己创建的歌单（可批量删除歌曲）
+  final bool isUserCreated;
 
   const PlaylistPage({
     super.key,
@@ -28,6 +30,7 @@ class PlaylistPage extends StatefulWidget {
     this.isInMyFavorites = false,
     this.isAlbum = false,
     this.albumGlobalCollectionId,
+    this.isUserCreated = false,
   });
 
   @override
@@ -59,6 +62,14 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   // 歌单介绍展开/折叠
   bool _isDescriptionExpanded = false;
+
+  // 批量选择模式
+  bool _isMultiSelectMode = false;
+  final Set<String> _selectedSongIds = {};
+  bool _isDeleting = false;
+
+  /// 删除歌曲用的 listid（仅自己创建的歌单有效）
+  String? get _deleteListid => widget.playlist.listCreateListid;
 
   /// 顶栏渐变 ScrollController：监听 CustomScrollView 滚动 offset，
   /// 用于 SliverAppBar pinned 后 fade-in 显示歌单名称
@@ -150,6 +161,134 @@ class _PlaylistPageState extends State<PlaylistPage> {
   /// 使显示列表缓存失效
   void _invalidateDisplaySongs() {
     _cachedDisplaySongs = null;
+  }
+
+  // ==================== 批量选择模式 ====================
+
+  void _enterMultiSelectMode(String songId) {
+    setState(() {
+      _isMultiSelectMode = true;
+      _selectedSongIds.clear();
+      _selectedSongIds.add(songId);
+      // 退出搜索状态，显示全部歌曲供选择
+      _isSearching = false;
+      _searchQuery = '';
+      _searchController.clear();
+      _invalidateDisplaySongs();
+    });
+  }
+
+  void _exitMultiSelectMode() {
+    setState(() {
+      _isMultiSelectMode = false;
+      _selectedSongIds.clear();
+    });
+  }
+
+  void _toggleSongSelection(String songId) {
+    setState(() {
+      if (_selectedSongIds.contains(songId)) {
+        _selectedSongIds.remove(songId);
+        // 如果取消选中了最后一首，自动退出多选
+        if (_selectedSongIds.isEmpty) {
+          _isMultiSelectMode = false;
+        }
+      } else {
+        _selectedSongIds.add(songId);
+      }
+    });
+  }
+
+  void _toggleSelectAll() {
+    setState(() {
+      if (_selectedSongIds.length == _displaySongs.length) {
+        _selectedSongIds.clear();
+      } else {
+        _selectedSongIds
+            ..clear()
+            ..addAll(_displaySongs.map((s) => s.id));
+      }
+    });
+  }
+
+  Future<void> _deleteSelectedSongs() async {
+    if (_selectedSongIds.isEmpty) return;
+    final listid = _deleteListid;
+    if (listid == null || listid.isEmpty) return;
+
+    final count = _selectedSongIds.length;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除歌曲'),
+        content: Text('确定从歌单中删除选中的 $count 首歌曲吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _isDeleting = true);
+
+    // 构造 fileids：优先用 fileId（>0），否则用 song.id（hash）
+    final selectedSongs = _songs.where((s) => _selectedSongIds.contains(s.id)).toList();
+    final fileids = selectedSongs.map((s) {
+      if (s.fileId != null && s.fileId! > 0) return s.fileId.toString();
+      return s.id;
+    }).join(',');
+
+    try {
+      final api = KugouApiClient();
+      final result = await api.deletePlaylistTracks(listid, fileids);
+      if (!mounted) return;
+
+      if (result != null) {
+        // 从本地列表中移除已删除的歌曲
+        setState(() {
+          _songs.removeWhere((s) => _selectedSongIds.contains(s.id));
+          _isMultiSelectMode = false;
+          _selectedSongIds.clear();
+          _isDeleting = false;
+          _invalidateDisplaySongs();
+        });
+        // 通知「我的收藏」刷新歌曲数
+        context.read<PlaylistCollectionNotifier>().notifyChanged();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('已删除 $count 首歌曲'),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
+      } else if (mounted) {
+        setState(() => _isDeleting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('删除失败，请重试'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isDeleting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('删除失败: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   void _toggleSearch() {
@@ -592,17 +731,25 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final textTheme = Theme.of(context).textTheme;
     final displayPlaylist = widget.playlist.copyWith(songs: _songs);
 
-    return Scaffold(
+    return PopScope(
+      canPop: !_isMultiSelectMode,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _isMultiSelectMode) _exitMultiSelectMode();
+      },
+      child: Scaffold(
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null
           ? _buildError(context, colorScheme)
           : Column(
               children: [
+                if (_isMultiSelectMode)
+                  _buildMultiSelectBar(colorScheme, textTheme),
                 Expanded(
                   child: CustomScrollView(
                     controller: _scrollController,
                     slivers: [
+                      if (!_isMultiSelectMode)
                       SliverAppBar(
                         expandedHeight: 280,
                         pinned: true,
@@ -826,7 +973,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         ),
                       ),
                       // 歌单介绍（默认折叠，最多显示2行，带动画）
-                      if (displayPlaylist.description != null &&
+                      if (!_isMultiSelectMode &&
+                          displayPlaylist.description != null &&
                           displayPlaylist.description!.isNotEmpty)
                         SliverToBoxAdapter(
                           child: Padding(
@@ -899,7 +1047,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                           ),
                         ),
                       // 歌单内搜索栏（点击搜索图标后展开）
-                      if (_isSearching)
+                      if (!_isMultiSelectMode && _isSearching)
                         SliverToBoxAdapter(
                           child: Padding(
                             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -942,6 +1090,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                             ),
                           ),
                         ),
+                      if (!_isMultiSelectMode)
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
@@ -1008,13 +1157,20 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         delegate: SliverChildBuilderDelegate((context, index) {
                           final song = _displaySongs[index];
                           final isHighlighted = _highlightSongId == song.id;
+                          final isSelected = _selectedSongIds.contains(song.id);
                           return AnimatedContainer(
                             duration: const Duration(milliseconds: 300),
-                            color: isHighlighted
+                            color: isHighlighted && !_isMultiSelectMode
                                 ? colorScheme.primaryContainer.withValues(alpha: 0.5)
                                 : Colors.transparent,
                             child: SongListItem(
                               song: song,
+                              isSelectMode: _isMultiSelectMode,
+                              isSelected: isSelected,
+                              onLongPress: widget.isUserCreated
+                                  ? () => _enterMultiSelectMode(song.id)
+                                  : null,
+                              onSelectToggle: () => _toggleSongSelection(song.id),
                               onTap: () {
                                 context.read<PlayerProvider>().playOnlinePlaylist(
                                   _displaySongs,
@@ -1027,7 +1183,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         }, childCount: _displaySongs.length),
                       ),
                       // 搜索无结果提示
-                      if (_isSearching && _displaySongs.isEmpty && _songs.isNotEmpty)
+                      if (!_isMultiSelectMode &&
+                          _isSearching && _displaySongs.isEmpty && _songs.isNotEmpty)
                         SliverToBoxAdapter(
                           child: Padding(
                             padding: const EdgeInsets.all(32),
@@ -1056,6 +1213,75 @@ class _PlaylistPageState extends State<PlaylistPage> {
                 const MiniPlayer(),
               ],
             ),
+      ),
+    );
+  }
+
+  /// 多选模式顶栏：关闭 / 已选 N 首 / 全选 / 删除
+  Widget _buildMultiSelectBar(ColorScheme colorScheme, TextTheme textTheme) {
+    final selectedCount = _selectedSongIds.length;
+    final totalCount = _displaySongs.length;
+    final allSelected = selectedCount == totalCount && totalCount > 0;
+    return Container(
+      decoration: BoxDecoration(
+        color: colorScheme.surface,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+          child: Row(
+            children: [
+              IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _exitMultiSelectMode,
+                tooltip: '退出选择',
+              ),
+              Expanded(
+                child: Text(
+                  '已选 $selectedCount 首',
+                  style: textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              if (_isDeleting)
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 12),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else ...[
+                IconButton(
+                  icon: Icon(
+                    allSelected ? Icons.deselect : Icons.select_all,
+                  ),
+                  onPressed: _toggleSelectAll,
+                  tooltip: allSelected ? '取消全选' : '全选',
+                ),
+                IconButton(
+                  icon: Icon(
+                    Icons.delete_outline,
+                    color: selectedCount > 0 ? colorScheme.error : null,
+                  ),
+                  onPressed: selectedCount > 0 ? _deleteSelectedSongs : null,
+                  tooltip: '删除',
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 

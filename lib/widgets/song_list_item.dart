@@ -16,6 +16,12 @@ class SongListItem extends StatelessWidget {
   final bool showDuration;
   final bool forceFavorited;
 
+  /// 多选模式：显示圆形复选框替代封面，点击切换选中而非播放。
+  final bool isSelectMode;
+  final bool isSelected;
+  final VoidCallback? onLongPress;
+  final VoidCallback? onSelectToggle;
+
   const SongListItem({
     super.key,
     required this.song,
@@ -23,6 +29,10 @@ class SongListItem extends StatelessWidget {
     this.onMoreTap,
     this.showDuration = true,
     this.forceFavorited = false,
+    this.isSelectMode = false,
+    this.isSelected = false,
+    this.onLongPress,
+    this.onSelectToggle,
   });
 
   void _showMoreMenu(BuildContext context) {
@@ -158,41 +168,48 @@ class SongListItem extends StatelessWidget {
     const imgSize = 52.0; // 正方形封面，不被 ListTile 压缩
 
     return InkWell(
-      onTap: onTap,
-      child: Padding(
+      onTap: isSelectMode ? onSelectToggle : onTap,
+      onLongPress: onLongPress,
+      child: Container(
+        color: isSelectMode && isSelected
+            ? colorScheme.primaryContainer.withValues(alpha: 0.3)
+            : Colors.transparent,
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         child: Row(
           children: [
-            // 封面图 —— 固定正方形
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: imgSize,
-                height: imgSize,
-                child: song.artworkUri != null
-                    ? CachedNetworkImage(
-                        imageUrl: song.artworkUri!,
-                        width: imgSize,
-                        height: imgSize,
-                        fit: BoxFit.cover,
-                        placeholder: (_, _) => Container(
-                          color: colorScheme.surfaceContainerHighest,
+            // 多选模式：圆形复选框；普通模式：封面图
+            if (isSelectMode)
+              _buildCheckbox(colorScheme, imgSize)
+            else
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  width: imgSize,
+                  height: imgSize,
+                  child: song.artworkUri != null
+                      ? CachedNetworkImage(
+                          imageUrl: song.artworkUri!,
+                          width: imgSize,
+                          height: imgSize,
+                          fit: BoxFit.cover,
+                          placeholder: (_, _) => Container(
+                            color: colorScheme.surfaceContainerHighest,
+                            child: Icon(Icons.music_note, color: colorScheme.onSurfaceVariant),
+                          ),
+                          errorWidget: (_, _, _) => Container(
+                            color: colorScheme.surfaceContainerHighest,
+                            child: Icon(Icons.music_note, color: colorScheme.onSurfaceVariant),
+                          ),
+                        )
+                      : Container(
+                          decoration: BoxDecoration(
+                            color: colorScheme.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                           child: Icon(Icons.music_note, color: colorScheme.onSurfaceVariant),
                         ),
-                        errorWidget: (_, _, _) => Container(
-                          color: colorScheme.surfaceContainerHighest,
-                          child: Icon(Icons.music_note, color: colorScheme.onSurfaceVariant),
-                        ),
-                      )
-                    : Container(
-                        decoration: BoxDecoration(
-                          color: colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Icon(Icons.music_note, color: colorScheme.onSurfaceVariant),
-                      ),
+                ),
               ),
-            ),
             const SizedBox(width: 12),
 
             // 标题 + 副标题
@@ -227,52 +244,85 @@ class SongListItem extends StatelessWidget {
               ),
             ),
 
-            // 右侧操作区：时长 / 红心 / 三点
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                if (isCurrentSong)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 2),
-                    // 频谱动画标识：3 根粒度柱 sin 波动
-                    // 暂停时 isPlaying=false → ticker 停止，保留最后一帧
-                    // 继续播放时 isPlaying=true → ticker 恢复，动画继续
-                    child: PlayingSpectrumIndicator(
-                      color: colorScheme.primary,
-                      size: 14,
-                      isPlaying: playerProvider.isPlaying,
+            // 右侧操作区：多选模式下不显示
+            if (!isSelectMode)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  if (isCurrentSong)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 2),
+                      // 频谱动画标识：3 根粒度柱 sin 波动
+                      // 暂停时 isPlaying=false → ticker 停止，保留最后一帧
+                      // 继续播放时 isPlaying=true → ticker 恢复，动画继续
+                      child: PlayingSpectrumIndicator(
+                        color: colorScheme.primary,
+                        size: 14,
+                        isPlaying: playerProvider.isPlaying,
+                      ),
+                    ),
+                  if (showDuration)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Text(song.displayDuration, style: const TextStyle(fontSize: 11)),
+                    ),
+                  GestureDetector(
+                    onTap: () => favoritesProvider.toggleFavorite(song),
+                    behavior: HitTestBehavior.opaque,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
+                      child: Icon(
+                        isFavorited ? Icons.favorite : Icons.favorite_border,
+                        size: 18,
+                        color: isFavorited ? colorScheme.error : colorScheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
-                if (showDuration)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 4),
-                    child: Text(song.displayDuration, style: const TextStyle(fontSize: 11)),
-                  ),
-                GestureDetector(
-                  onTap: () => favoritesProvider.toggleFavorite(song),
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),
-                    child: Icon(
-                      isFavorited ? Icons.favorite : Icons.favorite_border,
-                      size: 18,
-                      color: isFavorited ? colorScheme.error : colorScheme.onSurfaceVariant,
+                  GestureDetector(
+                    onTap: () => _showMoreMenu(context),
+                    behavior: HitTestBehavior.opaque,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                      child: Icon(Icons.more_vert, size: 18, color: colorScheme.onSurfaceVariant),
                     ),
                   ),
-                ),
-                GestureDetector(
-                  onTap: () => _showMoreMenu(context),
-                  behavior: HitTestBehavior.opaque,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
-                    child: Icon(Icons.more_vert, size: 18, color: colorScheme.onSurfaceVariant),
-                  ),
-                ),
-              ],
-            ),
+                ],
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 多选模式下的圆形复选框，与封面同等大小。
+  Widget _buildCheckbox(ColorScheme colorScheme, double size) {
+    return SizedBox(
+      width: size,
+      height: size,
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 150),
+        child: isSelected
+            ? Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: colorScheme.primary,
+                ),
+                child: Icon(
+                  Icons.check,
+                  color: colorScheme.onPrimary,
+                  size: 28,
+                ),
+              )
+            : Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: colorScheme.outline.withValues(alpha: 0.5),
+                    width: 2,
+                  ),
+                ),
+              ),
       ),
     );
   }

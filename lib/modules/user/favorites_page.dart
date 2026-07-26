@@ -519,6 +519,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                   builder: (context) => PlaylistPage(
                     playlist: playlist.toPlaylist(),
                     isInMyFavorites: true,
+                    isUserCreated: _isCreated(playlist),
                   ),
                 ),
               );
