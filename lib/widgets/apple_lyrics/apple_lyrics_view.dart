@@ -655,7 +655,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final bool shouldBlurFadeOut = _scrollController.isUserScrolling ||
         _scrollController.isWaitingForAutoReturn;
     final double blurFadeTarget = shouldBlurFadeOut ? 0.0 : 1.0;
-    final double blurFadeSpeed = shouldBlurFadeOut ? 15.0 : 4.0;
+    // 修复：淡入速度 4.0 → 12.0，约 150ms 完成（原 700-1000ms）。
+    // 配合修改 1，模糊图在新当前行周围快速淡入出现。
+    final double blurFadeSpeed = shouldBlurFadeOut ? 15.0 : 12.0;
     final double oldBlurFade = _blurFade;
     _blurFade += (blurFadeTarget - _blurFade) *
         (1 - math.exp(-blurFadeSpeed * dt));
@@ -967,8 +969,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   List<Widget> _buildBlurLayers(double viewportHeight, double mainLineHeight) {
     if (_currentLineIndex < 0) return const [];
 
-    // 滑动时不更新缓存，等松手后再更新
-    final bool isScrolling = _blurFade < 0.99;
+    // 修复：用 scroll controller 状态判断是否在滚动，而非 _blurFade。
+    // 回弹开始（isWaitingForAutoReturn 由 true→false）的瞬间 isScrolling 立即变 false，
+    // 缓存立即更新到新当前行周围的 levels。
+    // 此前用 _blurFade < 0.99 会因淡入慢导致缓存冻结 ~1s。
+    final bool isScrolling = _scrollController.isUserScrolling ||
+        _scrollController.isWaitingForAutoReturn;
 
     // 当前行变化时重新计算 blur levels 并更新缓存（滑动时跳过）
     if (_currentLineIndex != _cachedBlurLineIndex && !isScrolling) {
@@ -999,7 +1005,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
     for (final entry in _cachedBlurLevels.entries) {
       final int i = entry.key;
-      final double sigma = (entry.value * 1.0 * _blurFade).clamp(0.5, 5.0);
+      // 修复：sigma 不乘 _blurFade，与 _renderLineBlur 的渲染 sigma 一致。
+      // 这样 padding 和 scaledHeight 与渲染图片尺寸匹配，不会被拉伸。
+      // _blurFade 通过 Opacity 控制透明度实现淡入淡出。
+      final double sigma = entry.value.toDouble().clamp(0.5, 5.0);
       if (sigma < 0.1) continue;
 
       final cached = _lineBlurImages[i];
@@ -1084,8 +1093,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     try {
       if (_viewportWidth <= 0) return null;
 
-      // sigma 范围：blurLevel 1-5 → sigma 1.0-5.0，乘以 fade
-      final double sigma = (blurLevel * 1.0 * _blurFade).clamp(0.5, 5.0);
+      // 修复：sigma 不乘 _blurFade，确保渲染尺寸固定不依赖淡入进度。
+      // _blurFade 通过 Opacity 控制透明度，不需要再通过 sigma 控制模糊度。
+      // 此前 sigma 依赖 _blurFade 会导致：
+      //   - 异步渲染时 _blurFade 还小 → sigma 被 clamp 到 0.5 → 模糊太浅
+      //   - renderHeight 太小 → 绘制时图片被拉伸（上下比例太长）
+      final double sigma = blurLevel.toDouble().clamp(0.5, 5.0);
       final double fontSize = LyricLayout.fontSize(context);
       final double lineHeight = (lineIndex < _lineHeights.length)
           ? _lineHeights[lineIndex]
