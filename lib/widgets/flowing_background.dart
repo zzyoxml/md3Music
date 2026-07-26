@@ -29,12 +29,38 @@ class _FlowingBackgroundState extends State<FlowingBackground>
   Duration _lastElapsed = Duration.zero;
   List<Color> _colors = const [Colors.deepPurple, Colors.indigo, Colors.teal];
   String? _lastArtworkUrl;
+  // dispose 标志：用于取消 _extractColors 异步任务，
+  // 避免 setState 在 widget 销毁后被调用
+  bool _disposed = false;
+  // Ticker 真实运行状态跟踪，用于幂等保护 start/stop 调用
+  // （Ticker.start() 在 Flutter 3.44+ 重复调用会断言失败）
+  bool _isRunning = false;
+
+  /// 幂等地启动/停止 Ticker。
+  ///
+  /// Flutter 3.44 起 `Ticker.start()` 不允许重复调用，
+  /// 必须用单一状态变量跟踪当前运行状态：
+  /// - 已运行时再 start → 直接 return
+  /// - 已停止时再 stop → 直接 return
+  /// - 状态切换时才真正调用 start/stop
+  void _setRunning(bool running) {
+    if (running == _isRunning) return;
+    _isRunning = running;
+    if (running) {
+      _lastElapsed = Duration.zero;
+      _ticker?.start();
+    } else {
+      _ticker?.stop();
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _ticker = createTicker(_onTick);
-    _ticker!.start();
+    // 根据初始 isPlaying 决定是否启动 Ticker
+    // （避免 didUpdateWidget 后再次 start 触发 "started twice" 断言）
+    _setRunning(widget.isPlaying);
     _extractColors();
   }
 
@@ -44,18 +70,28 @@ class _FlowingBackgroundState extends State<FlowingBackground>
     if (oldWidget.artworkUrl != widget.artworkUrl) {
       _extractColors();
     }
-    // 播放状态变化时控制 ticker
+    // 播放状态变化时切换 Ticker（_setRunning 内部做幂等保护）
     if (oldWidget.isPlaying != widget.isPlaying) {
-      if (widget.isPlaying) {
-        _lastElapsed = Duration.zero;
-        _ticker?.start();
-      } else {
-        _ticker?.stop();
-      }
+      _setRunning(widget.isPlaying);
     }
   }
 
+  /// widget 从树中移除时（如路由收起）立即停止 Ticker。
+  ///
+  /// 关键修复：路由 dismiss 时 removeRoute 会触发子树 deactivate，
+  /// 若 Ticker 仍在持续触发 setState，子树会保持 dirty 状态，
+  /// 导致 InheritedElement.debugDeactivated 中的
+  /// `_dependents.isEmpty` 断言失败（dependent 还未清理）。
+  /// 在 deactivate 中提前停止 Ticker 可避免此竞态。
+  @override
+  void deactivate() {
+    _setRunning(false);
+    super.deactivate();
+  }
+
   void _onTick(Duration elapsed) {
+    // 防御性检查：widget 已销毁或不活跃时跳过 setState
+    if (!mounted || _disposed) return;
     final dt = (elapsed - _lastElapsed).inMicroseconds / 1000000.0;
     _lastElapsed = elapsed;
     // 累积时间，sin/cos 自然周期性，无跳变
@@ -74,7 +110,8 @@ class _FlowingBackgroundState extends State<FlowingBackground>
         NetworkImage(url),
         maximumColorCount: 5,
       );
-      if (!mounted) return;
+      // 双重检查：mounted（widget 还在树中）+ _disposed（State 未销毁）
+      if (!mounted || _disposed) return;
       final dominant = palette.dominantColor?.color ?? Colors.deepPurple;
       final vibrant = palette.vibrantColor?.color ?? Colors.indigo;
       final darkVibrant = palette.darkVibrantColor?.color ?? Colors.teal;
@@ -90,6 +127,8 @@ class _FlowingBackgroundState extends State<FlowingBackground>
 
   @override
   void dispose() {
+    _disposed = true;
+    _setRunning(false); // 幂等停止（deactivate 已停过则直接 return）
     _ticker?.dispose();
     super.dispose();
   }
