@@ -15,6 +15,7 @@ library;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
@@ -1158,7 +1159,34 @@ class _LyricsPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _LyricsPainter oldDelegate) {
-    // 每帧重绘（动画驱动，setState 每帧调用）
-    return true;
+    // 字段比较：仅在参数变化时才重绘。
+    // 注意：_onTick 每帧 setState 会触发 build 创建新 painter 实例，
+    // 但若所有字段都未变（如暂停时 currentTimeMs 不变），shouldRepaint 返回 false 跳过重绘。
+    // 列表字段用 listEquals 逐元素比较，避免引用不等但内容相同时误判。
+    return oldDelegate.currentLineIndex != currentLineIndex ||
+        oldDelegate.posY != posY ||
+        oldDelegate.fontSize != fontSize ||
+        oldDelegate.mainLineHeight != mainLineHeight ||
+        oldDelegate.viewportHeight != viewportHeight ||
+        oldDelegate.viewportWidth != viewportWidth ||
+        oldDelegate.maxLineWidth != maxLineWidth ||
+        oldDelegate.currentTimeMs != currentTimeMs ||
+        oldDelegate.enableScale != enableScale ||
+        oldDelegate.interludePlaceholderHeight != interludePlaceholderHeight ||
+        oldDelegate.activeInterludeIdx != activeInterludeIdx ||
+        oldDelegate.lastActiveAnchorIdx != lastActiveAnchorIdx ||
+        oldDelegate.interludeExpandProgress != interludeExpandProgress ||
+        oldDelegate.blurFade != blurFade ||
+        oldDelegate.blurActive != blurActive ||
+        !listEquals(oldDelegate.lines, lines) ||
+        !listEquals(oldDelegate.lineHeights, lineHeights) ||
+        !listEquals(oldDelegate.lineTops, lineTops) ||
+        !listEquals(oldDelegate.interludeAfterIndices, interludeAfterIndices) ||
+        !listEquals(oldDelegate.perLineOffsets, perLineOffsets) ||
+        oldDelegate.scaleController != scaleController ||
+        oldDelegate.emphasizeEffect != emphasizeEffect ||
+        oldDelegate.interludeDots != interludeDots ||
+        oldDelegate.wordRenderers != wordRenderers ||
+        oldDelegate.lineRenderers != lineRenderers;
   }
 }
