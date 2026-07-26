@@ -1105,18 +1105,41 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 进度条需要 200ms 刷新（Slider value 依赖 position）
           _buildProgressBar(playerProvider, position, duration, colorScheme),
           SizedBox(height: verticalSpacing),
-          _buildMainControls(
-            playerProvider,
-            colorScheme,
-            isExpanded: isExpanded,
+          // Selector 让主控制按钮仅在 isPlaying / loopMode / shuffle 变化时重建
+          // 不再每 200ms 因 position 变化重建
+          Selector<PlayerProvider,
+              ({bool isPlaying, AppLoopMode loopMode, bool shuffleEnabled})>(
+            selector: (_, p) => (
+              isPlaying: p.isPlaying,
+              loopMode: p.loopMode,
+              shuffleEnabled: p.shuffleEnabled,
+            ),
+            builder: (context, state, __) => _buildMainControls(
+              playerProvider,
+              colorScheme,
+              isExpanded: isExpanded,
+              isPlaying: state.isPlaying,
+              loopMode: state.loopMode,
+              shuffleEnabled: state.shuffleEnabled,
+            ),
           ),
           SizedBox(height: verticalSpacing),
-          _buildSecondaryControls(
-            playerProvider,
-            colorScheme,
-            isExpanded: isExpanded,
+          // Selector 让副控制按钮仅在 currentSong / speed / audioQuality 变化时重建
+          Selector<PlayerProvider,
+              ({String? songId, double speed, String audioQualityLabel})>(
+            selector: (_, p) => (
+              songId: p.currentSong?.id,
+              speed: p.speed,
+              audioQualityLabel: p.audioQualityLabel,
+            ),
+            builder: (context, _, __) => _buildSecondaryControls(
+              playerProvider,
+              colorScheme,
+              isExpanded: isExpanded,
+            ),
           ),
         ],
       ),
@@ -1268,6 +1291,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     PlayerProvider playerProvider,
     ColorScheme colorScheme, {
     bool isExpanded = false,
+    required bool isPlaying,
+    required AppLoopMode loopMode,
+    required bool shuffleEnabled,
   }) {
     // Apple Music HIG 风格：大按钮居中，白色图标，圆形白色播放按钮
     final spacing = isExpanded ? 4.0 : 8.0;
@@ -1279,11 +1305,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       children: [
         IconButton(
           icon: Icon(
-            playerProvider.shuffleEnabled
+            shuffleEnabled
                 ? Icons.shuffle
                 : Icons.shuffle_outlined,
             // 深色背景下：启用时纯白，未启用时半透明白
-            color: playerProvider.shuffleEnabled
+            color: shuffleEnabled
                 ? Colors.white
                 : Colors.white70,
           ),
@@ -1299,9 +1325,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         // Apple Music 标志性白色圆形播放按钮，黑色图标
         IconButton.filled(
           iconSize: playIconSize,
-          icon: Icon(playerProvider.isPlaying ? Icons.pause : Icons.play_arrow),
+          icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
           onPressed: () {
-            if (playerProvider.isPlaying) {
+            if (isPlaying) {
               playerProvider.pause();
             } else {
               playerProvider.resume();
@@ -1321,8 +1347,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         SizedBox(width: spacing),
         IconButton(
           icon: Icon(
-            _getLoopModeIcon(playerProvider.loopMode),
-            color: playerProvider.loopMode != AppLoopMode.off
+            _getLoopModeIcon(loopMode),
+            color: loopMode != AppLoopMode.off
                 ? Colors.white
                 : Colors.white70,
           ),
