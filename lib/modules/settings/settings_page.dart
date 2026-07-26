@@ -261,7 +261,7 @@ class _SettingsPageState extends State<SettingsPage> {
           },
         ),
         // 歌词字体独立选择入口（与全局字体解耦）
-        // 用 AnimatedBuilder 监听 LyricPreferences，切换字体会立即刷新 subtitle
+        // 仅 Apple Music 风格播放页开启时可用，因为歌词字体专为 AM 歌词渲染适配
         AnimatedBuilder(
           animation: LyricPreferences.instance,
           builder: (context, _) {
@@ -269,9 +269,14 @@ class _SettingsPageState extends State<SettingsPage> {
             return ListTile(
               leading: const Icon(Icons.text_fields),
               title: const Text('歌词字体'),
-              subtitle: Text(_lyricFontSourceLabel(prefs.fontSource)),
+              subtitle: Text(_useAmStylePlayer
+                  ? _lyricFontSourceLabel(prefs.fontSource)
+                  : '仅 Apple Music 风格播放页可用'),
               trailing: const Icon(Icons.chevron_right, size: 18),
-              onTap: () => _showLyricFontSourceSheet(prefs),
+              enabled: _useAmStylePlayer,
+              onTap: _useAmStylePlayer
+                  ? () => _showLyricFontSourceSheet(prefs)
+                  : null,
             );
           },
         ),
