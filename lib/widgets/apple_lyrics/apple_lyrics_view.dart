@@ -457,7 +457,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _updateInterlude();
 
     // 6. 推进间奏点动画时钟（基于帧 dt，60fps 流畅，不受 positionStream 5fps 限制）
-    _interludeDots.tick(dt);
+    // 暂停时不推进动画时钟，让间奏点随播放器一起暂停
+    if (widget.isPlaying) {
+      _interludeDots.tick(dt);
+    }
 
     // 7. 推进间奏占位 spring（_interludeExpandProgress）
     // 严格 AMLL：进入间奏时段 spring 展开 0 → 1，离开则 spring 收起 1 → 0
