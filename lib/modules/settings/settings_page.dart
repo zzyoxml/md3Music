@@ -207,6 +207,9 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildSectionHeader('外观'),
           _buildAppearanceSection(colorScheme),
           const Divider(),
+          _buildSectionHeader('播放页样式'),
+          _buildPlayerStyleSection(colorScheme),
+          const Divider(),
           _buildSectionHeader('歌词'),
           _buildLyricSection(colorScheme),
           const Divider(),
@@ -219,7 +222,7 @@ class _SettingsPageState extends State<SettingsPage> {
           _buildSectionHeader('在线音乐'),
           _buildOnlineMusicSection(colorScheme),
           const Divider(),
-          _buildSectionHeader('缓存'),
+          _buildSectionHeader('缓存与数据'),
           _buildCacheSection(colorScheme),
           const Divider(),
           _buildSectionHeader('关于'),
@@ -496,11 +499,11 @@ class _SettingsPageState extends State<SettingsPage> {
             },
           ),
         ),
-        // 字体入口：点击弹出三选一面板（系统 / 内置 SimHei / 自定义 TTF）
+        // app全局字体入口：点击弹出三选一面板（系统 / 内置 SimHei / 自定义 TTF）
         // 选择"自定义"时打开 Android SAF 文件选择器选 .ttf/.otf 文件
         ListTile(
           leading: const Icon(Icons.text_fields),
-          title: const Text('字体'),
+          title: const Text('app全局字体'),
           subtitle: Text(_getFontSourceLabel(themeProvider.fontSource)),
           trailing: const Icon(Icons.chevron_right, size: 18),
           onTap: () => _showFontSourceSheet(themeProvider),
@@ -544,48 +547,6 @@ class _SettingsPageState extends State<SettingsPage> {
           value: themeProvider.useOledBlack,
           onChanged: canToggleOled
               ? (v) => themeProvider.setUseOledBlack(v)
-              : null,
-        ),
-        SwitchListTile(
-          title: const Text('Apple Music 风格播放页'),
-          subtitle: const Text('使用模糊封面背景 + 弹簧动画 + 逐字歌词（关闭则用原版 MD3 风格）'),
-          value: _useAmStylePlayer,
-          onChanged: (v) {
-            setState(() => _useAmStylePlayer = v);
-            context.read<ThemeProvider>().setUseAmStylePlayer(v);
-          },
-        ),
-        SwitchListTile(
-          title: const Text('歌词高斯模糊'),
-          subtitle: const Text('开启为高斯模糊渐变，关闭为 alpha 淡出'),
-          value: _useGaussianBlur,
-          onChanged: _useAmStylePlayer
-              ? (v) {
-                  setState(() => _useGaussianBlur = v);
-                  LyricPreferences.instance.setUseGaussianBlur(v);
-                }
-              : null,
-        ),
-        SwitchListTile(
-          title: const Text('歌词辉光效果'),
-          subtitle: const Text('持续时间较长的字触发发光缩放效果'),
-          value: _useGlowEffect,
-          onChanged: _useAmStylePlayer
-              ? (v) {
-                  setState(() => _useGlowEffect = v);
-                  LyricPreferences.instance.setUseGlowEffect(v);
-                }
-              : null,
-        ),
-        SwitchListTile(
-          title: const Text('背景动态流光'),
-          subtitle: const Text('专辑封面色彩流动效果'),
-          value: _useFlowingBackground,
-          onChanged: _useAmStylePlayer
-              ? (v) {
-                  setState(() => _useFlowingBackground = v);
-                  LyricPreferences.instance.setUseFlowingBackground(v);
-                }
               : null,
         ),
         const Divider(),
@@ -703,6 +664,57 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  /// 播放页样式 section：Apple Music 风格播放页开关及相关视觉特效。
+  /// 这些设置仅在使用 AM 风格播放页时生效，关闭 AM 后各特效开关自动禁用。
+  Widget _buildPlayerStyleSection(ColorScheme colorScheme) {
+    return Column(
+      children: [
+        SwitchListTile(
+          title: const Text('Apple Music 风格播放页'),
+          subtitle: const Text('使用模糊封面背景 逐字歌词（关闭则用原版 MD3 风格）'),
+          value: _useAmStylePlayer,
+          onChanged: (v) {
+            setState(() => _useAmStylePlayer = v);
+            context.read<ThemeProvider>().setUseAmStylePlayer(v);
+          },
+        ),
+        SwitchListTile(
+          title: const Text('歌词高斯模糊'),
+          subtitle: const Text('开启为高斯模糊渐变，高功耗，关闭为 alpha 淡出'),
+          value: _useGaussianBlur,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  setState(() => _useGaussianBlur = v);
+                  LyricPreferences.instance.setUseGaussianBlur(v);
+                }
+              : null,
+        ),
+        SwitchListTile(
+          title: const Text('歌词辉光效果'),
+          subtitle: const Text('持续时间较长的字触发发光缩放效果，高功耗'),
+          value: _useGlowEffect,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  setState(() => _useGlowEffect = v);
+                  LyricPreferences.instance.setUseGlowEffect(v);
+                }
+              : null,
+        ),
+        SwitchListTile(
+          title: const Text('背景动态流光'),
+          subtitle: const Text('专辑封面色彩流动效果,高功耗 '),
+          value: _useFlowingBackground,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  setState(() => _useFlowingBackground = v);
+                  LyricPreferences.instance.setUseFlowingBackground(v);
+                }
+              : null,
+        ),
+      ],
+    );
+  }
+
   /// 弹出 8 色预设种子色选择面板。
   /// 选择后调用 ThemeProvider.setManualSeedColor 持久化并立即生效。
   void _showSeedColorPicker(ThemeProvider themeProvider) {
@@ -754,7 +766,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    '字体来源',
+                    'app全局字体来源',
                     style: Theme.of(ctx).textTheme.titleMedium,
                   ),
                 ),
