@@ -505,11 +505,20 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 GestureDetector(
                   onTap: () => _tabController.animateTo(1),
                   behavior: HitTestBehavior.opaque,
-                  child: _buildArtworkView(
-                    playerProvider,
-                    currentSong,
-                    colorScheme,
-                    isExpanded: true,
+                  // Selector 让 _buildArtworkView 仅在 currentSong / isPlaying 变化时重建，
+                  // 不再每 200ms 因 position 变化重建（封面 AnimatedScale 是隐式动画，需要 isPlaying 触发）
+                  child: Selector<PlayerProvider,
+                      ({String? songId, bool isPlaying})>(
+                    selector: (_, p) => (
+                      songId: p.currentSong?.id,
+                      isPlaying: p.isPlaying,
+                    ),
+                    builder: (context, _, __) => _buildArtworkView(
+                      playerProvider,
+                      currentSong,
+                      colorScheme,
+                      isExpanded: true,
+                    ),
                   ),
                 ),
                 GestureDetector(
@@ -583,10 +592,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                             curve: Curves.easeOutBack,
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(16),
-                              child: _buildCrossfadeArtwork(
-                                currentSong.artworkUri,
-                                colorScheme,
-                                iconSize: 48,
+                              // Selector 让封面仅在 artworkUri 变化时重建
+                              child: Selector<PlayerProvider, String?>(
+                                selector: (_, p) => p.currentSong?.artworkUri,
+                                builder: (context, artworkUri, __) =>
+                                    _buildCrossfadeArtwork(
+                                  artworkUri,
+                                  colorScheme,
+                                  iconSize: 48,
+                                ),
                               ),
                             ),
                           ),
@@ -657,10 +671,18 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         GestureDetector(
                           onTap: () => _tabController.animateTo(1),
                           behavior: HitTestBehavior.opaque,
-                          child: _buildSongInfo(
-                            playerProvider,
-                            currentSong,
-                            colorScheme,
+                          // Selector 让 _buildSongInfo 仅在 currentSong 变化时重建（切歌时）
+                          child: Selector<PlayerProvider, String?>(
+                            selector: (_, p) => p.currentSong?.id,
+                            builder: (context, songId, __) {
+                              final song = playerProvider.currentSong;
+                              if (song == null) return const SizedBox.shrink();
+                              return _buildSongInfo(
+                                playerProvider,
+                                song,
+                                colorScheme,
+                              );
+                            },
                           ),
                         ),
                       _isLoadingLyrics
@@ -739,10 +761,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               curve: Curves.easeOutBack,
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(16),
-                                child: _buildCrossfadeArtwork(
-                                  currentSong.artworkUri,
-                                  colorScheme,
-                                  iconSize: 48,
+                                // Selector 让封面仅在 artworkUri 变化时重建
+                                child: Selector<PlayerProvider, String?>(
+                                  selector: (_, p) => p.currentSong?.artworkUri,
+                                  builder: (context, artworkUri, __) =>
+                                      _buildCrossfadeArtwork(
+                                    artworkUri,
+                                    colorScheme,
+                                    iconSize: 48,
+                                  ),
                                 ),
                               ),
                             ),
@@ -807,7 +834,19 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     controller: _tabController,
                     children: [
                       if (!_isPadMode || _isPhoneLandscape)
-                        _buildSongInfo(playerProvider, currentSong, colorScheme),
+                        // Selector 让 _buildSongInfo 仅在 currentSong 变化时重建（切歌时）
+                        Selector<PlayerProvider, String?>(
+                          selector: (_, p) => p.currentSong?.id,
+                          builder: (context, songId, __) {
+                            final song = playerProvider.currentSong;
+                            if (song == null) return const SizedBox.shrink();
+                            return _buildSongInfo(
+                              playerProvider,
+                              song,
+                              colorScheme,
+                            );
+                          },
+                        ),
                       _isLoadingLyrics
                           ? const Center(child: CircularProgressIndicator())
                           : RepaintBoundary(
