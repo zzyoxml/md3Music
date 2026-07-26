@@ -515,15 +515,20 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 GestureDetector(
                   onTap: () => _tabController.animateTo(0),
                   behavior: HitTestBehavior.translucent,
-                  child: _isLoadingLyrics
-                      ? const Center(child: CircularProgressIndicator())
-                      : AppleLyricsView(
-                          lines: _parsedLyrics,
-                          currentTimeMs: playerProvider.position.inMilliseconds,
-                          isPlaying: playerProvider.isPlaying,
-                          onSeek: (ms) =>
-                              playerProvider.seek(Duration(milliseconds: ms)),
-                        ),
+                  // RepaintBoundary 隔离 AppleLyricsView 每帧 setState 的重绘范围，
+                  // 避免父级 TabBarView/Column 被牵连重建
+                  child: RepaintBoundary(
+                    child: _isLoadingLyrics
+                        ? const Center(child: CircularProgressIndicator())
+                        : AppleLyricsView(
+                            lines: _parsedLyrics,
+                            currentTimeMs:
+                                playerProvider.position.inMilliseconds,
+                            isPlaying: playerProvider.isPlaying,
+                            onSeek: (ms) => playerProvider
+                                .seek(Duration(milliseconds: ms)),
+                          ),
+                  ),
                 ),
                 CommentsView(
                   songHash: currentSong.id,
@@ -660,13 +665,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         ),
                       _isLoadingLyrics
                           ? const Center(child: CircularProgressIndicator())
-                          : AppleLyricsView(
-                              lines: _parsedLyrics,
-                              currentTimeMs:
-                                  playerProvider.position.inMilliseconds,
-                              isPlaying: playerProvider.isPlaying,
-                              onSeek: (ms) => playerProvider.seek(
-                                Duration(milliseconds: ms),
+                          : RepaintBoundary(
+                              child: AppleLyricsView(
+                                lines: _parsedLyrics,
+                                currentTimeMs:
+                                    playerProvider.position.inMilliseconds,
+                                isPlaying: playerProvider.isPlaying,
+                                onSeek: (ms) => playerProvider.seek(
+                                  Duration(milliseconds: ms),
+                                ),
                               ),
                             ),
                       CommentsView(
@@ -803,13 +810,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         _buildSongInfo(playerProvider, currentSong, colorScheme),
                       _isLoadingLyrics
                           ? const Center(child: CircularProgressIndicator())
-                          : AppleLyricsView(
-                              lines: _parsedLyrics,
-                              currentTimeMs:
-                                  playerProvider.position.inMilliseconds,
-                              isPlaying: playerProvider.isPlaying,
-                              onSeek: (ms) => playerProvider.seek(
-                                Duration(milliseconds: ms),
+                          : RepaintBoundary(
+                              child: AppleLyricsView(
+                                lines: _parsedLyrics,
+                                currentTimeMs:
+                                    playerProvider.position.inMilliseconds,
+                                isPlaying: playerProvider.isPlaying,
+                                onSeek: (ms) => playerProvider.seek(
+                                  Duration(milliseconds: ms),
+                                ),
                               ),
                             ),
                       CommentsView(
