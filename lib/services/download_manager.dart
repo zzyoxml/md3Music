@@ -191,6 +191,12 @@ class DownloadManager {
           bytes[0] == 0x66 && bytes[1] == 0x4C &&
           bytes[2] == 0x61 && bytes[3] == 0x43) {
         actualExt = 'flac'; // fLaC
+      } else if (bytes.length >= 12 &&
+          bytes[0] == 0x52 && bytes[1] == 0x49 &&
+          bytes[2] == 0x46 && bytes[3] == 0x46 &&
+          bytes[8] == 0x57 && bytes[9] == 0x41 &&
+          bytes[10] == 0x56 && bytes[11] == 0x45) {
+        actualExt = 'wav'; // RIFF...WAVE
       } else if (bytes.length >= 3 &&
           bytes[0] == 0x49 && bytes[1] == 0x44 && bytes[2] == 0x33) {
         actualExt = 'mp3'; // ID3
@@ -279,10 +285,13 @@ class DownloadManager {
   /// 根据音质参数确定文件扩展名。
   ///
   /// - 'flac' → 'flac'
+  /// - 'high' → 'flac'（Hi-Res 通常为 flac 或 wav，由 _fixFileExtension 修正）
   /// - '128' / '320' / 其他 → 'mp3'
   String? _getExtFromQuality(String? quality) {
     if (quality == null) return null;
-    if (quality.toLowerCase() == 'flac') return 'flac';
+    final q = quality.toLowerCase();
+    if (q == 'flac') return 'flac';
+    if (q == 'high') return 'flac';
     return 'mp3';
   }
 

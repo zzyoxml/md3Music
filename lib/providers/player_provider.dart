@@ -25,7 +25,8 @@ enum AppLoopMode { off, one, all }
 enum AudioQuality {
   standard('128', '标准音质'),
   high('320', '高音质'),
-  flac('flac', '无损音质');
+  flac('flac', '无损音质'),
+  hires('high', 'Hi-Res 无损');
 
   const AudioQuality(this.value, this.label);
   final String value;
@@ -367,7 +368,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final apiClient = KugouApiClient();
 
-      final result = await apiClient.getSongUrl(
+      final result = await apiClient.getSongUrlWithFallback(
         song.id,
         quality: _audioQuality.value,
         albumId: song.albumId,
@@ -418,7 +419,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       try {
         final apiClient = KugouApiClient();
-        final result = await apiClient.getSongUrl(
+        final result = await apiClient.getSongUrlWithFallback(
           _currentSong!.id,
           quality: _audioQuality.value,
           albumId: _currentSong!.albumId,
@@ -478,7 +479,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     try {
       final apiClient = KugouApiClient();
-      final result = await apiClient.getSongUrl(
+      final result = await apiClient.getSongUrlWithFallback(
         _currentSong!.id,
         quality: _audioQuality.value,
         albumId: _currentSong!.albumId,
@@ -520,7 +521,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       final song = _playlist[i];
       if (song.isOnline && song.url == null) {
         KugouApiClient()
-            .getSongUrl(
+            .getSongUrlWithFallback(
               song.id,
               quality: _audioQuality.value,
               albumId: song.albumId,
@@ -613,7 +614,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
 
       try {
-        final result = await KugouApiClient().getSongUrl(
+        final result = await KugouApiClient().getSongUrlWithFallback(
           _currentSong!.id,
           quality: _audioQuality.value,
           albumId: _currentSong!.albumId,
@@ -895,7 +896,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       // 删除的是当前播放歌曲：先解析新当前歌曲的 URL，再重建队列播放
       if (_currentSong != null && _currentSong!.isOnline && _currentSong!.url == null) {
         try {
-          final result = await KugouApiClient().getSongUrl(
+          final result = await KugouApiClient().getSongUrlWithFallback(
             _currentSong!.id,
             quality: _audioQuality.value,
             albumId: _currentSong!.albumId,
@@ -1042,7 +1043,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     try {
       final apiClient = KugouApiClient();
-      final result = await apiClient.getSongUrl(
+      final result = await apiClient.getSongUrlWithFallback(
         song.id,
         quality: _audioQuality.value,
         albumId: song.albumId,

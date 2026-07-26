@@ -1131,7 +1131,8 @@ class _SettingsPageState extends State<SettingsPage> {
       case 'flac':
         return '无损 FLAC';
       case 'hires':
-        return 'Hi-Res';
+      case 'high':
+        return 'Hi-Res 无损';
       default:
         return '高品质 320k';
     }
@@ -1142,6 +1143,7 @@ class _SettingsPageState extends State<SettingsPage> {
       ('128', '标准 128k'),
       ('320', '高品质 320k'),
       ('flac', '无损 FLAC'),
+      ('high', 'Hi-Res 无损'),
     ];
 
     showDialog(

@@ -1158,6 +1158,7 @@ class KugouQuality {
   static const String standard = '128';
   static const String high = '320';
   static const String lossless = 'flac';
+  static const String hires = 'high';
   static const String master = 'hi-res';
 }
 

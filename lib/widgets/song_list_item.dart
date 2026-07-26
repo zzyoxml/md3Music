@@ -110,6 +110,7 @@ class SongListItem extends StatelessWidget {
             ),
             _buildQualityOption(ctx, '高音质 (320kbps)', '320', downloadsProvider),
             _buildQualityOption(ctx, '无损音质 (FLAC)', 'flac', downloadsProvider),
+            _buildQualityOption(ctx, 'Hi-Res 无损', 'high', downloadsProvider),
           ],
         ),
         actions: [

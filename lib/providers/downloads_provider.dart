@@ -134,9 +134,11 @@ class DownloadsProvider extends ChangeNotifier {
 
     // 始终调用 API 获取指定音质的下载链接，不使用 song.url 缓存
     // 因为播放时获取的 URL 可能是最高音质（VIP 用户），与用户选择的音质不一致
+    // 使用带降级的获取方法：当指定音质不可用时自动降级到更低音质
     String? downloadUrl;
+    String actualQuality = quality;
     try {
-      final result = await _api.getSongUrl(
+      final result = await _api.getSongUrlWithFallback(
         song.id,
         quality: quality,
         albumId: song.albumId,
@@ -144,6 +146,7 @@ class DownloadsProvider extends ChangeNotifier {
       );
       if (result != null && result.url.isNotEmpty) {
         downloadUrl = result.url;
+        actualQuality = result.quality;
       }
     } catch (e) {
       debugPrint('[DownloadsProvider] getSongUrl failed: $e');
@@ -168,7 +171,7 @@ class DownloadsProvider extends ChangeNotifier {
 
     await _repository.saveTask(task);
     final dir = await _resolveDownloadDir();
-    _manager.download(task, dir, quality: quality);
+    _manager.download(task, dir, quality: actualQuality);
   }
 
   void cancelDownload(String songId) {

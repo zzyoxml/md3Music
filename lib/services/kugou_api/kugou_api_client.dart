@@ -639,6 +639,7 @@ class KugouApiClient {
     String quality = KugouQuality.standard,
     String? albumId,
     String? albumAudioId,
+    bool downgrade = true,
   }) async {
     final params = <String, dynamic>{
       'hash': hash.toLowerCase(),
@@ -712,7 +713,8 @@ class KugouApiClient {
       }
 
       final failProcess = data['fail_process'];
-      if (failProcess is List &&
+      if (downgrade &&
+          failProcess is List &&
           failProcess.contains('buy') &&
           quality != KugouQuality.standard) {
         params['quality'] = KugouQuality.standard;
@@ -804,6 +806,70 @@ class KugouApiClient {
         return KugouPlayUrl.fromJson({...data, 'quality': quality});
       }
     } catch (e) {}
+    return null;
+  }
+
+  /// 根据请求音质返回降级链。
+  /// 例如 'high' → ['high', 'flac', '320', '128']
+  List<String> _getDowngradeChain(String quality) {
+    switch (quality) {
+      case KugouQuality.hires: // 'high'
+        return [KugouQuality.hires, KugouQuality.lossless, KugouQuality.high, KugouQuality.standard];
+      case KugouQuality.lossless: // 'flac'
+        return [KugouQuality.lossless, KugouQuality.high, KugouQuality.standard];
+      case KugouQuality.high: // '320'
+        return [KugouQuality.high, KugouQuality.standard];
+      default:
+        return [KugouQuality.standard];
+    }
+  }
+
+  /// 带自动降级的获取播放链接。
+  ///
+  /// 当请求的音质不可用时，按降级链依次尝试更低音质，
+  /// 直到获取到可用链接或全部尝试完毕。
+  /// 返回的 KugouPlayUrl 中 quality 字段反映实际获取到的音质。
+  Future<KugouPlayUrl?> getSongUrlWithFallback(
+    String hash, {
+    String quality = KugouQuality.standard,
+    String? albumId,
+    String? albumAudioId,
+  }) async {
+    final chain = _getDowngradeChain(quality);
+
+    for (final q in chain) {
+      try {
+        final result = await getSongUrl(
+          hash,
+          quality: q,
+          albumId: albumId,
+          albumAudioId: albumAudioId,
+          downgrade: false,
+        );
+        if (result != null && result.url.isNotEmpty) {
+          // 用实际请求的音质覆盖返回值中的 quality 字段
+          return KugouPlayUrl(
+            url: result.url,
+            fileSize: result.fileSize,
+            bitRate: result.bitRate,
+            quality: q,
+          );
+        }
+      } catch (_) {}
+    }
+
+    // 所有音质都失败，最后尝试带降级的 standard 请求
+    // （会走 free_part=1 的 30s 试听兜底）
+    try {
+      return await getSongUrl(
+        hash,
+        quality: KugouQuality.standard,
+        albumId: albumId,
+        albumAudioId: albumAudioId,
+        downgrade: true,
+      );
+    } catch (_) {}
+
     return null;
   }
 

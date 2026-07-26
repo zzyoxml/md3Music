@@ -27,6 +27,7 @@ const List<AudioQuality> _audioQualities = [
   AudioQuality.standard,
   AudioQuality.high,
   AudioQuality.flac,
+  AudioQuality.hires,
 ];
 
 class FullPlayer extends StatefulWidget {
@@ -1413,6 +1414,7 @@ class _FullPlayerState extends State<FullPlayer>
             _buildDownloadQualityOption(ctx, '标准音质 (128kbps)', '128', song, downloadsProvider),
             _buildDownloadQualityOption(ctx, '高音质 (320kbps)', '320', song, downloadsProvider),
             _buildDownloadQualityOption(ctx, '无损音质 (FLAC)', 'flac', song, downloadsProvider),
+            _buildDownloadQualityOption(ctx, 'Hi-Res 无损', 'high', song, downloadsProvider),
           ],
         ),
         actions: [
