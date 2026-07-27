@@ -419,6 +419,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         drawerDestinations: _drawerDestinations,
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
+          // 守卫：FullPlayer 在栈顶时（展开进度 > 0.5），忽略 tab 切换，
+          // 避免与 FullPlayer 动画叠加导致状态混乱。
+          // 阈值用 0.5 与 isFullPlayerOnTop 一致，避免 dismiss 期间残留的小数值误拦截
+          if (isFullPlayerOnTop) {
+            return;
+          }
           setState(() {
             _previousSelectedIndex = _selectedIndex;
             _selectedIndex = index;

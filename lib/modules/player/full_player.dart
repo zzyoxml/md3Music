@@ -86,6 +86,7 @@ class _FullPlayerState extends State<FullPlayer>
     if (dy <= 0) return;
     final progress = 1.0 - (dy / kPlayerDragThreshold).clamp(0.0, 1.0);
     controller.stop();
+    _isDismissing = false; // 手动接管 controller，复位 dismiss 标志，避免后续手势/PopScope 误判
     controller.value = progress;
   }
 
@@ -103,6 +104,24 @@ class _FullPlayerState extends State<FullPlayer>
         route.dismiss();
       }
     } else {
+      controller.forward();
+    }
+  }
+
+  /// 把手拖拽被取消时（如 widget 树重建触发手势 arena 取消）：
+  /// 按当前进度决定走向，避免路由卡死。取消时无速度信息，仅按 progress 阈值决策。
+  void _onHandleDragCancel() {
+    final controller = _routeController;
+    if (controller == null) return;
+    final currentProgress = controller.value;
+    if (currentProgress < 0.5) {
+      _isDismissing = true;
+      final route = ModalRoute.of(context);
+      if (route is DraggablePlayerRoute) {
+        route.dismiss();
+      }
+    } else {
+      _isDismissing = false;
       controller.forward();
     }
   }
@@ -911,6 +930,7 @@ class _FullPlayerState extends State<FullPlayer>
           onVerticalDragStart: _onHandleDragStart,
           onVerticalDragUpdate: _onHandleDragUpdate,
           onVerticalDragEnd: _onHandleDragEnd,
+          onVerticalDragCancel: _onHandleDragCancel,
           behavior: HitTestBehavior.opaque,
           child: Padding(
             padding: const EdgeInsets.only(top: 12, bottom: 8),

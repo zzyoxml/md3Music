@@ -59,6 +59,11 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
     if (_isDismissing) return;
     _isDismissing = true;
     controller.reverse().then((_) {
+      // 强制归零，避免 removeRoute 不触发 didPop 导致 playerExpansion 残留非零值
+      // （didPop 只在系统 pop 时触发，dismiss 走 removeRoute 不触发）
+      if (playerExpansion.value != 0.0) {
+        playerExpansion.value = 0.0;
+      }
       if (navigator?.mounted ?? false) {
         navigator!.removeRoute(this);
       }
