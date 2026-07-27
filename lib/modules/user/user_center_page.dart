@@ -398,7 +398,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: Container(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+              padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
               decoration: BoxDecoration(
                 color: cs.surfaceContainerLow,
                 borderRadius: BorderRadius.circular(24),
@@ -414,9 +414,9 @@ class _UserCenterPageState extends State<UserCenterPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _buildCalendarHeader(cs, tt, monthLabel, kugou, context),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 16),
                   _buildWeekdayHeader(cs),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 8),
                   _buildCalendarGrid(
                     cs,
                     curYear,
@@ -426,7 +426,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                     receivedDays,
                     now,
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
                   _buildStatFooter(cs, tt, receivedDays.length),
                 ],
               ),
@@ -444,64 +444,62 @@ class _UserCenterPageState extends State<UserCenterPage> {
     KugouProvider kugou,
     BuildContext context,
   ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Row(
-        children: [
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            icon: const Icon(Icons.chevron_left),
-            color: cs.onSurfaceVariant,
-            onPressed: () {},
-          ),
-          Expanded(
-            child: Text(
+    return Column(
+      children: [
+        // 月份导航行 — 真正居中
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              icon: const Icon(Icons.chevron_left),
+              color: cs.onSurfaceVariant,
+              onPressed: () {},
+            ),
+            Text(
               monthLabel,
-              textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              icon: const Icon(Icons.chevron_right),
+              color: cs.onSurfaceVariant,
+              onPressed: () {},
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        // 签到按钮 — 单独一行居中
+        FilledButton.tonalIcon(
+          style: FilledButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            minimumSize: const Size(0, 36),
+            textStyle: tt.labelMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
           ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            icon: const Icon(Icons.chevron_right),
-            color: cs.onSurfaceVariant,
-            onPressed: () {},
-          ),
-          const SizedBox(width: 4),
-          Flexible(
-            child: FilledButton.tonalIcon(
-              style: FilledButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                minimumSize: const Size(0, 32),
-                textStyle: tt.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              onPressed: kugou.manualSignInRunning
-                  ? null
-                  : () => _handleManualSignIn(context, kugou),
-              icon: kugou.manualSignInRunning
-                  ? SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: cs.onSecondaryContainer,
-                    ),
-                  )
-                : const Icon(Icons.check_circle_outline, size: 16),
-            label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
-           ),
-          ),
-        ],
-      ),
+          onPressed: kugou.manualSignInRunning
+              ? null
+              : () => _handleManualSignIn(context, kugou),
+          icon: kugou.manualSignInRunning
+              ? SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: cs.onSecondaryContainer,
+                  ),
+                )
+              : const Icon(Icons.check_circle_outline, size: 16),
+          label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
+        ),
+      ],
     );
   }
 
@@ -670,7 +668,10 @@ class _UserCenterPageState extends State<UserCenterPage> {
     void addCell(Widget w) {
       cells.add(w);
       if (cells.length == 7) {
-        rows.add(Row(children: cells));
+        rows.add(Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(children: cells),
+        ));
         cells = [];
       }
     }
@@ -696,66 +697,69 @@ class _UserCenterPageState extends State<UserCenterPage> {
           child: AspectRatio(
             aspectRatio: 1,
             child: Center(
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  // 背景圆
-                  Container(
-                    width: double.infinity,
-                    height: double.infinity,
-                    margin: const EdgeInsets.all(2),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: isReceived
-                          ? cs.primary
-                          : (isToday
-                                ? cs.primary.withValues(alpha: 0.1)
-                                : Colors.transparent),
-                      border: isToday && !isReceived
-                          ? Border.all(color: cs.primary, width: 2)
-                          : null,
-                    ),
-                  ),
-                  // 签到勾选图标覆盖层
-                  if (isReceived)
-                    Positioned(
-                      bottom: -1,
-                      right: -1,
-                      child: Container(
-                        width: 16,
-                        height: 16,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: cs.secondary,
-                          border: Border.all(
-                            color: cs.surface,
-                            width: 1.5,
-                          ),
-                        ),
-                        child: Icon(
-                          Icons.check,
-                          size: 10,
-                          color: cs.onSecondary,
-                        ),
+              child: SizedBox(
+                width: 32,
+                height: 32,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    // 背景圆
+                    Container(
+                      width: double.infinity,
+                      height: double.infinity,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: isReceived
+                            ? cs.primary
+                            : (isToday
+                                  ? cs.primary.withValues(alpha: 0.1)
+                                  : Colors.transparent),
+                        border: isToday && !isReceived
+                            ? Border.all(color: cs.primary, width: 2)
+                            : null,
                       ),
                     ),
-                  // 日期文字
-                  Text(
-                    '$day',
-                    style: tt.bodyMedium?.copyWith(
-                      fontWeight: isToday || isReceived
-                          ? FontWeight.w700
-                          : null,
-                      color: isReceived
-                          ? cs.onPrimary
-                          : (isToday
-                                ? cs.primary
-                                : (isFuture
-                                      ? cs.onSurfaceVariant.withValues(alpha: 0.35)
-                                      : cs.onSurface)),
+                    // 签到勾选图标覆盖层
+                    if (isReceived)
+                      Positioned(
+                        bottom: -2,
+                        right: -2,
+                        child: Container(
+                          width: 14,
+                          height: 14,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: cs.secondary,
+                            border: Border.all(
+                              color: cs.surface,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Icon(
+                            Icons.check,
+                            size: 9,
+                            color: cs.onSecondary,
+                          ),
+                        ),
+                      ),
+                    // 日期文字
+                    Text(
+                      '$day',
+                      style: tt.bodySmall?.copyWith(
+                        fontWeight: isToday || isReceived
+                            ? FontWeight.w700
+                            : null,
+                        color: isReceived
+                            ? cs.onPrimary
+                            : (isToday
+                                  ? cs.primary
+                                  : (isFuture
+                                        ? cs.onSurfaceVariant.withValues(alpha: 0.35)
+                                        : cs.onSurface)),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
