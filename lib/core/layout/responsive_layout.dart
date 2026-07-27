@@ -86,19 +86,15 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final screenType = getScreenType(constraints.maxWidth);
-        switch (screenType) {
-          case ScreenType.compact:
-            return _buildCompactLayout();
-          case ScreenType.medium:
-            return _buildMediumLayout();
-          case ScreenType.expanded:
-            return _buildExpandedLayout();
-        }
-      },
-    );
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+
+    // 横屏（手机/平板）使用侧边导航栏，导航项垂直居中；
+    // 竖屏（手机/平板）使用底部导航栏。
+    if (isLandscape) {
+      return _buildRailLayout();
+    }
+    return _buildCompactLayout();
   }
 
   Widget _buildCompactLayout() {
@@ -115,7 +111,7 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
     );
   }
 
-  Widget _buildMediumLayout() {
+  Widget _buildRailLayout() {
     return Scaffold(
       key: _scaffoldKey,
       appBar: widget.appBar,
@@ -126,6 +122,8 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
             onDestinationSelected: widget.onDestinationSelected,
             destinations: widget.railDestinations,
             leading: widget.floatingActionButton,
+            groupAlignment: 0.0,
+            labelType: NavigationRailLabelType.all,
           ),
           VerticalDivider(
             thickness: 1,
@@ -134,34 +132,6 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
           ),
           Expanded(
             child: widget.mediumBody ?? widget.body,
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildExpandedLayout() {
-    return Scaffold(
-      key: _scaffoldKey,
-      appBar: widget.appBar,
-      body: Row(
-        children: [
-          NavigationDrawer(
-            selectedIndex: widget.selectedIndex,
-            onDestinationSelected: (index) {
-              widget.onDestinationSelected(index);
-            },
-            children: [
-              ...widget.drawerDestinations,
-            ],
-          ),
-          VerticalDivider(
-            thickness: 1,
-            width: 1,
-            color: Theme.of(context).colorScheme.outlineVariant,
-          ),
-          Expanded(
-            child: widget.expandedBody ?? widget.mediumBody ?? widget.body,
           ),
         ],
       ),
