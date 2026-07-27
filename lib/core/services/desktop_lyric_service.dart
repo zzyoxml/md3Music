@@ -229,7 +229,15 @@ class DesktopLyricService {
     _bluetoothLyricEnabled = enabled;
     _bindProvidersFromContext();
     _updateTicker();
-    if (!enabled) {
+    if (enabled) {
+      // 启用时重置切歌检测状态，让下个 tick 重新拉取歌词并推送。
+      // 解决 app 启动时调用本方法、但原生 service 尚未就绪导致的首次播放不推送问题。
+      _currentSongId = null;
+      _currentLrcText = null;
+      _lines = const [];
+      _currentLineIndex = -1;
+      _awaitingLyric = false;
+    } else {
       // 关闭时清空蓝牙歌词，让原生端恢复原始 title/artist
       await MediaNotificationService.updateBluetoothLyric('');
     }
@@ -318,7 +326,13 @@ class DesktopLyricService {
   }
 
   void _onTick() {
-    if (!_shouldTick() || _player == null || _kugou == null) return;
+    if (!_shouldTick()) return;
+    // provider 未绑定时（如 app 启动早期 context 未就绪）尝试重新绑定，
+    // 绑定成功后下个 tick 即可正常推送；仍失败则跳过本次
+    if (_player == null || _kugou == null) {
+      _bindProvidersFromContext();
+      if (_player == null || _kugou == null) return;
+    }
     final song = _player!.currentSong;
     if (song == null) {
       _currentSongId = null;
