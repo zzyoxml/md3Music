@@ -58,9 +58,10 @@
 ### 平板 · Apple Music 风格
 
 <p align="center">
-  <img src="img/pad/applemusic/47fc8b072e30bf05134ab14d98079fac.jpg" width="420" alt="平板 Apple Music 风格 1" />
-  <img src="img/pad/applemusic/adc640b5a5902cf39c960d3cf287da22.jpg" width="420" alt="平板 Apple Music 风格 2" />
+  <img src="img/pad/applemusic/5d27879361a4584d3a8118ae60d75d2a.jpg" width="420" alt="平板 Apple Music 风格 1" />
+  <img src="img/pad/applemusic/00ce9bab6dfddd67b6d83918f57cfaae.jpg" width="420" alt="平板 Apple Music 风格 2" />
 </p>
+
 
 ### 平板 · Material Design 3
 
