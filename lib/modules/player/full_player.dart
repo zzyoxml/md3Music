@@ -18,6 +18,7 @@ import 'comments_view.dart';
 import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/md3e_transport_row.dart';
 import '../../widgets/player_playlist_dialog.dart';
 import 'full_player_route.dart';
 
@@ -1335,12 +1336,12 @@ class _FullPlayerState extends State<FullPlayer>
     bool isExpanded = false,
   }) {
     final spacing = isExpanded ? 4.0 : 8.0;
-    final skipIconSize = isExpanded ? 28.0 : 36.0;
-    final playIconSize = isExpanded ? 40.0 : 48.0;
+    final sideButtonSize = isExpanded ? 48.0 : 56.0;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
+        // shuffle — 保留原 IconButton，不参与动画
         IconButton(
           icon: Icon(
             playerProvider.shuffleEnabled
@@ -1353,34 +1354,24 @@ class _FullPlayerState extends State<FullPlayer>
           onPressed: () => playerProvider.toggleShuffle(),
         ),
         SizedBox(width: spacing),
-        IconButton(
-          iconSize: skipIconSize,
-          icon: const Icon(Icons.skip_previous),
-          onPressed: () => playerProvider.previous(),
-        ),
-        SizedBox(width: spacing),
-        IconButton.filled(
-          iconSize: playIconSize,
-          icon: Icon(playerProvider.isPlaying ? Icons.pause : Icons.play_arrow),
-          onPressed: () {
+        // Phase 5: 上一曲/暂停/下一曲联合动画控件（替代中间 3 个 IconButton）
+        MD3ETransportRow(
+          isPlaying: playerProvider.isPlaying,
+          sideButtonSize: sideButtonSize,
+          playButtonSize: isExpanded ? 64.0 : 72.0,
+          spacing: spacing,
+          onPrevious: () => playerProvider.previous(),
+          onPlayPause: () {
             if (playerProvider.isPlaying) {
               playerProvider.pause();
             } else {
               playerProvider.resume();
             }
           },
-          style: IconButton.styleFrom(
-            backgroundColor: colorScheme.primary,
-            foregroundColor: colorScheme.onPrimary,
-          ),
+          onNext: () => playerProvider.next(),
         ),
         SizedBox(width: spacing),
-        IconButton(
-          iconSize: skipIconSize,
-          icon: const Icon(Icons.skip_next),
-          onPressed: () => playerProvider.next(),
-        ),
-        SizedBox(width: spacing),
+        // loop — 保留原 IconButton，不参与动画
         IconButton(
           icon: Icon(
             _getLoopModeIcon(playerProvider.loopMode),
