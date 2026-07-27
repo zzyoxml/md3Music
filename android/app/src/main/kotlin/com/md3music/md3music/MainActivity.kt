@@ -205,6 +205,30 @@ class MainActivity : FlutterActivity() {
                     startService(intent)
                     result.success(true)
                 }
+                // 蓝牙歌词：更新当前歌词文本（title→歌词，artist→「作者 - 标题」由原生端处理）
+                "updateBluetoothLyric" -> {
+                    val intent = Intent(this, AudioPlaybackService::class.java).apply {
+                        action = AudioPlaybackService.ACTION_UPDATE_BT_LYRIC
+                        putExtra(
+                            AudioPlaybackService.EXTRA_BT_LYRIC_TEXT,
+                            call.argument<String>("lyric") ?: ""
+                        )
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+                // 蓝牙歌词：开关切换
+                "setBluetoothLyricEnabled" -> {
+                    val intent = Intent(this, AudioPlaybackService::class.java).apply {
+                        action = AudioPlaybackService.ACTION_SET_BT_LYRIC_ENABLED
+                        putExtra(
+                            AudioPlaybackService.EXTRA_BT_LYRIC_ENABLED,
+                            call.argument<Boolean>("enabled") ?: false
+                        )
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }

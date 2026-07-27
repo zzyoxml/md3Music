@@ -33,6 +33,11 @@ class DesktopLyricService {
   bool _enabled = false;
   bool get enabled => _enabled;
 
+  // 蓝牙歌词开关：独立于悬浮窗。开启时定时器同样运行，但只推送蓝牙歌词通道，
+  // 不弹出悬浮窗。元数据替换（title→歌词，artist→「作者 - 标题」）由原生端处理。
+  bool _bluetoothLyricEnabled = false;
+  bool get bluetoothLyricEnabled => _bluetoothLyricEnabled;
+
   String? _currentSongId;
   String? _currentLrcText;
   // 解析后的歌词行列表（统一模型，KRC 含 words，LRC/纯文本 words 为空）
@@ -203,25 +208,48 @@ class DesktopLyricService {
     }
     await _pushConfig();
     _syncCurrentFromPlayer();
-    _ticker?.cancel();
-    // 250ms tick：逐行歌词不需要高频刷新，250ms 足够检测切行
-    // （曾用 100ms 支持逐字二分色但卡顿严重，已恢复逐行）
-    _ticker = Timer.periodic(
-      const Duration(milliseconds: 250),
-      (_) => _onTick(),
-    );
+    _updateTicker();
     _notify();
   }
 
   Future<void> disable() async {
     if (!_enabled) return;
     _enabled = false;
-    _ticker?.cancel();
-    _ticker = null;
+    _updateTicker();
     try {
       await MediaNotificationService.stopFloatingLyric();
     } catch (_) {}
     _notify();
+  }
+
+  /// 蓝牙歌词开关：独立于悬浮窗。开启后定时器运行以获取当前歌词行，
+  /// 但不弹出悬浮窗；关闭后若悬浮窗也未开启则停止定时器。
+  Future<void> setBluetoothLyricEnabled(bool enabled) async {
+    if (_bluetoothLyricEnabled == enabled) return;
+    _bluetoothLyricEnabled = enabled;
+    _bindProvidersFromContext();
+    _updateTicker();
+    if (!enabled) {
+      // 关闭时清空蓝牙歌词，让原生端恢复原始 title/artist
+      await MediaNotificationService.updateBluetoothLyric('');
+    }
+  }
+
+  /// 定时器是否需要运行：悬浮窗或蓝牙歌词任一开启即需运行
+  bool _shouldTick() => _enabled || _bluetoothLyricEnabled;
+
+  /// 根据开关状态启停定时器（250ms tick：逐行歌词足够检测切行）
+  void _updateTicker() {
+    if (_shouldTick()) {
+      _ticker?.cancel();
+      _ticker = Timer.periodic(
+        const Duration(milliseconds: 250),
+        (_) => _onTick(),
+      );
+    } else {
+      _ticker?.cancel();
+      _ticker = null;
+    }
   }
 
   void _bindProvidersFromContext() {
@@ -270,6 +298,9 @@ class DesktopLyricService {
   }
 
   Future<void> _pushProgress(Duration pos, Duration dur) async {
+    // 仅悬浮窗开启时推送：蓝牙歌词不需要 position/duration（通过 MediaSession 获取），
+    // 且避免 startService 触发 FloatingLyricService.onCreate 显示悬浮窗通知
+    if (!_enabled) return;
     try {
       await _channel.invokeMethod('updateProgress', {
         'position': pos.inMilliseconds,
@@ -279,13 +310,15 @@ class DesktopLyricService {
   }
 
   Future<void> _pushPlaying(bool playing) async {
+    // 同 _pushProgress：仅悬浮窗开启时推送
+    if (!_enabled) return;
     try {
       await _channel.invokeMethod('setPlaying', {'isPlaying': playing});
     } catch (_) {}
   }
 
   void _onTick() {
-    if (!_enabled || _player == null || _kugou == null) return;
+    if (!_shouldTick() || _player == null || _kugou == null) return;
     final song = _player!.currentSong;
     if (song == null) {
       _currentSongId = null;
@@ -376,13 +409,29 @@ class DesktopLyricService {
   ///   原生侧 GradientTextView.onDraw 走 LRC/纯文本分支，整行渐变色
   ///   历史参数保留是为了不破坏 MethodChannel 协议，原生侧会忽略 -1
   Future<void> _pushLyric(String current, String next, int sungCharCount) async {
-    try {
-      await _channel.invokeMethod('updateLyric', {
-        'lyric': current,
-        'nextLyric': next,
-        'sungCharCount': sungCharCount,
-      });
-    } catch (_) {}
+    // 悬浮窗：仅在 _enabled 时推送
+    if (_enabled) {
+      try {
+        await _channel.invokeMethod('updateLyric', {
+          'lyric': current,
+          'nextLyric': next,
+          'sungCharCount': sungCharCount,
+        });
+      } catch (_) {}
+    }
+    // 蓝牙歌词：仅在 _bluetoothLyricEnabled 时推送。
+    // 过滤占位文本：悬浮窗显示「歌词加载中...」等提示，但蓝牙歌词应推送空串，
+    // 让原生端恢复原始 title/artist，避免车机闪烁占位文本。
+    if (_bluetoothLyricEnabled) {
+      final btText = (current == '歌词加载中...' ||
+              current == '暂无歌词' ||
+              current == '歌词加载失败')
+          ? ''
+          : current;
+      try {
+        await MediaNotificationService.updateBluetoothLyric(btText);
+      } catch (_) {}
+    }
   }
 
   /// 二分查找当前播放位置对应的歌词行 index。

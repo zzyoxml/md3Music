@@ -138,4 +138,22 @@ class MediaNotificationService {
       return false;
     }
   }
+
+  // 蓝牙歌词相关：通过修改 MediaSession 元数据（title→歌词，artist→「作者 - 标题」）
+  // 在蓝牙 AVRCP 协议下让汽车主机等设备显示当前歌词。
+  static Future<void> updateBluetoothLyric(String lyric) async {
+    try {
+      await _channel.invokeMethod('updateBluetoothLyric', {
+        'lyric': lyric,
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> setBluetoothLyricEnabled(bool enabled) async {
+    try {
+      await _channel.invokeMethod('setBluetoothLyricEnabled', {
+        'enabled': enabled,
+      });
+    } catch (_) {}
+  }
 }

@@ -9,6 +9,7 @@ import 'app.dart';
 import 'core/services/desktop_lyric_service.dart';
 import 'core/services/lyricon_provider_service.dart';
 import 'core/services/media_notification_service.dart';
+import 'data/repositories/settings_repository.dart';
 import 'services/nodejs_server.dart';
 import 'widgets/apple_lyrics/layout/lyric_preferences.dart';
 
@@ -25,6 +26,13 @@ Future<void> main() async {
   // 注册通知栏/悬浮窗回调（悬浮窗内按钮 → DesktopLyricService；通知栏桌面歌词按钮 → toggle）
   MediaNotificationService.initCallbacks();
   DesktopLyricService.instance.registerNativeCallbacks();
+  // 恢复蓝牙歌词开关状态：让歌词服务定时器在需要时启动。
+  // 原生端 AudioPlaybackService.onCreate 会自行从 SharedPreferences 恢复开关。
+  try {
+    final settings = SettingsRepository();
+    final btLyricEnabled = await settings.getBluetoothLyricEnabled();
+    await DesktopLyricService.instance.setBluetoothLyricEnabled(btLyricEnabled);
+  } catch (_) {}
   // 注册 Lyricon 反向回调（连接状态变更 → UI 刷新）
   // initialize 内部仅 setMethodCallHandler，同步完成，无需 await
   LyriconProviderService.instance.initialize();
