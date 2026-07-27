@@ -441,7 +441,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                     itemCount: themes.length,
                     itemBuilder: (context, i) => Padding(
                       padding: const EdgeInsets.only(right: 12),
-                      child: ScaleIn(
+                      child: FadeInUp(
                         delayMs: i * 30,
                         child: SizedBox(
                           width: 130,
@@ -605,7 +605,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: plist.length,
-                    itemBuilder: (context, i) => ScaleIn(
+                    itemBuilder: (context, i) => FadeInUp(
                       delayMs: i * 30,
                       child: Padding(
                         padding: const EdgeInsets.only(right: 12),
@@ -743,17 +743,20 @@ class _PlaylistBrowsePageState extends State<_PlaylistBrowsePage> {
               mainAxisSpacing: 12,
             ),
             itemCount: list.length,
-            itemBuilder: (context, i) => AlbumCard(
-              album: Album(
-                id: list[i].id,
-                name: list[i].name,
-                artist: '',
-                artworkUri: list[i].coverUrl,
-                songCount: list[i].songCount,
-              ),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => PlaylistPage(playlist: list[i].toPlaylist()),
+            itemBuilder: (context, i) => FadeInUp(
+              delayMs: i * 30,
+              child: AlbumCard(
+                album: Album(
+                  id: list[i].id,
+                  name: list[i].name,
+                  artist: '',
+                  artworkUri: list[i].coverUrl,
+                  songCount: list[i].songCount,
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => PlaylistPage(playlist: list[i].toPlaylist()),
+                  ),
                 ),
               ),
             ),
@@ -864,8 +867,8 @@ class _RankDetailPageState extends State<_RankDetailPage> {
             itemCount: songs.length,
             itemBuilder: (context, i) {
               final song = songs[i].toSong();
-              return AnimatedListWrapper(
-                index: i,
+              return FadeInUp(
+                delayMs: i * 30,
                 child: SongListItem(
                   song: song,
                   onTap: () =>

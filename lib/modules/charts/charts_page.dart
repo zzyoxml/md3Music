@@ -103,8 +103,8 @@ class _ChartsPageState extends State<ChartsPage> {
             itemCount: ranks.ranks.length,
             itemBuilder: (context, i) {
               final rank = ranks.ranks[i];
-              return AnimatedListWrapper(
-                index: i,
+              return FadeInUp(
+                delayMs: i * 30,
                 child: Container(
                   margin: const EdgeInsets.only(bottom: 10),
                   decoration: BoxDecoration(
@@ -250,8 +250,8 @@ class _ChartsPageState extends State<ChartsPage> {
             itemCount: ranks.ranks.length,
             itemBuilder: (context, i) {
               final rank = ranks.ranks[i];
-              return AnimatedListWrapper(
-                index: i,
+              return FadeInUp(
+                delayMs: i * 30,
                 child: _RankGridCard(
                   name: rank.name,
                   coverUrl: rank.coverUrl,
@@ -429,8 +429,8 @@ class _RankSongPageState extends State<_RankSongPage> {
             itemCount: songs.length,
             itemBuilder: (context, i) {
               final song = songs[i].toSong();
-              return AnimatedListWrapper(
-                index: i,
+              return FadeInUp(
+                delayMs: i * 30,
                 child: SongListItem(
                   song: song,
                   onTap: () =>
