@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'shape_tokens.dart';
+import 'typography_m3e.dart';
+
 class AppTheme {
   AppTheme._();
 
@@ -128,7 +131,8 @@ class AppTheme {
       scaffoldBackgroundColor: colorScheme.surface,
       cardTheme: CardThemeData(
         elevation: isLight ? 1 : 1,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        // M3 Expressive：16dp → 32dp expressive（大卡片专用圆角）
+        shape: M3ExpressiveShapes.expressive,
         color: colorScheme.surfaceContainer,
         surfaceTintColor: colorScheme.surfaceTint,
       ),
@@ -229,7 +233,8 @@ class AppTheme {
         backgroundColor: colorScheme.primaryContainer,
         foregroundColor: colorScheme.onPrimaryContainer,
         elevation: 3,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        // M3 Expressive：方形 → CircleBorder（full），更鲜明的 FAB
+        shape: M3ExpressiveShapes.full,
       ),
       chipTheme: ChipThemeData(
         backgroundColor: colorScheme.surfaceContainerLow,
@@ -248,7 +253,8 @@ class AppTheme {
           FontWeight.w500,
           fontFamily: fontFamily,
         ),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        // M3 Expressive：用统一 shape token 来源（8dp small，行为不变）
+        shape: M3ExpressiveShapes.small,
         side: BorderSide(color: colorScheme.outlineVariant),
       ),
       sliderTheme: SliderThemeData(
@@ -297,127 +303,11 @@ class AppTheme {
   }
 
   static TextTheme _buildTextTheme(ColorScheme colorScheme, {String? fontFamily}) {
-    return TextTheme(
-      displayLarge: TextStyle(
-        fontSize: 57,
-        fontWeight: FontWeight.w400,
-        height: 1.12,
-        letterSpacing: -0.25,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      displayMedium: TextStyle(
-        fontSize: 45,
-        fontWeight: FontWeight.w400,
-        height: 1.16,
-        letterSpacing: 0,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      displaySmall: TextStyle(
-        fontSize: 36,
-        fontWeight: FontWeight.w400,
-        height: 1.22,
-        letterSpacing: 0,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      headlineLarge: TextStyle(
-        fontSize: 32,
-        fontWeight: FontWeight.w400,
-        height: 1.25,
-        letterSpacing: 0,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      headlineMedium: TextStyle(
-        fontSize: 28,
-        fontWeight: FontWeight.w400,
-        height: 1.29,
-        letterSpacing: 0,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      headlineSmall: TextStyle(
-        fontSize: 24,
-        fontWeight: FontWeight.w400,
-        height: 1.33,
-        letterSpacing: 0,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      titleLarge: TextStyle(
-        fontSize: 22,
-        fontWeight: FontWeight.w600,
-        height: 1.27,
-        letterSpacing: 0,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      titleMedium: TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
-        height: 1.5,
-        letterSpacing: 0.15,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      titleSmall: TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w500,
-        height: 1.43,
-        letterSpacing: 0.1,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      bodyLarge: TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w400,
-        height: 1.5,
-        letterSpacing: 0.5,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      bodyMedium: TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w400,
-        height: 1.43,
-        letterSpacing: 0.25,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      bodySmall: TextStyle(
-        fontSize: 12,
-        fontWeight: FontWeight.w400,
-        height: 1.33,
-        letterSpacing: 0.4,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      labelLarge: TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
-        height: 1.43,
-        letterSpacing: 0.1,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      labelMedium: TextStyle(
-        fontSize: 12,
-        fontWeight: FontWeight.w500,
-        height: 1.33,
-        letterSpacing: 0.5,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
-      labelSmall: TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w500,
-        height: 1.45,
-        letterSpacing: 0.5,
-        color: colorScheme.onSurface,
-        fontFamily: fontFamily,
-      ),
+    // M3 Expressive：委托给 typography_m3e.dart
+    // 关键变化：Display 57→64/45→52，Headline 引入 w500 对比，Title w600→w500，Label w600→w700
+    return M3ExpressiveTypography.build(
+      colorScheme.onSurface,
+      fontFamily: fontFamily,
     );
   }
 }

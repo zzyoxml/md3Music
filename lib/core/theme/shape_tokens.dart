@@ -15,40 +15,40 @@ class M3ExpressiveShapes {
   M3ExpressiveShapes._();
 
   /// 4dp — 小型组件：Chip、Badge、Tooltip
-  static const ShapeBorder extraSmall = RoundedRectangleBorder(
+  static const OutlinedBorder extraSmall = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(4)),
   );
 
   /// 8dp — 小型卡片、文本字段装饰、SongListItem 封面
-  static const ShapeBorder small = RoundedRectangleBorder(
+  static const OutlinedBorder small = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(8)),
   );
 
   /// 12dp — 中型卡片、列表项图标容器
-  static const ShapeBorder medium = RoundedRectangleBorder(
+  static const OutlinedBorder medium = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(12)),
   );
 
   /// 16dp — 标准卡片（保留兼容旧组件，与原 cardTheme 一致）
-  static const ShapeBorder large = RoundedRectangleBorder(
+  static const OutlinedBorder large = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(16)),
   );
 
   /// 20dp — 大型卡片、弹窗顶部
-  static const ShapeBorder largeEnd = RoundedRectangleBorder(
+  static const OutlinedBorder largeEnd = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(20)),
   );
 
   /// 28dp — 底部弹窗顶部、抽屉（与原 bottomSheetTheme 一致）
-  static const ShapeBorder extraLarge = RoundedRectangleBorder(
+  static const OutlinedBorder extraLarge = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(28)),
   );
 
   /// 32dp — M3 Expressive 大卡片专用：AlbumCard / PlaylistCard
-  static const ShapeBorder expressive = RoundedRectangleBorder(
+  static const OutlinedBorder expressive = RoundedRectangleBorder(
     borderRadius: BorderRadius.all(Radius.circular(32)),
   );
 
   /// Full — 圆形，用于 FAB / 圆形按钮 / NavigationBar pill indicator
-  static const ShapeBorder full = CircleBorder();
+  static const OutlinedBorder full = CircleBorder();
 }
