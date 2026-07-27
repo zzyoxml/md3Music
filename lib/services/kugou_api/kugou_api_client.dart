@@ -84,13 +84,9 @@ class KugouApiClient {
         authParts.add('vip_token=$_vipToken');
       }
       options.headers['Authorization'] = authParts.join(';');
-
-      // 调试日志：打印请求的用户身份（生产环境可移除）
-      print('🌐 [API Request] User: $_userid, URL: ${options.path}');
     } else {
       // 未登录，清除 Authorization 头
       options.headers.remove('Authorization');
-      print('⚠️ [API Request] 未登录状态, URL: ${options.path}');
     }
 
     if (_dfid != null) {
@@ -210,7 +206,6 @@ class KugouApiClient {
             .join('&');
         url = '$url?$qs';
       }
-      print('[API _postBinary] POST $url, body length=${body.length}');
       final headers = <String, String>{
         'Content-Type': 'application/octet-stream',
       };
@@ -226,7 +221,6 @@ class KugouApiClient {
         headers: headers,
         body: body,
       );
-      print('[API _postBinary] status=${response.statusCode}');
       // 酷狗指纹接口在"未匹配"时返回 502 + JSON body（含 error_code），
       // 需要解析 body 以区分"未识别"和"真正的服务错误"
       try {
@@ -262,9 +256,9 @@ class KugouApiClient {
         _vipToken = prefs.getString(userVipKey);
 
         if (_token != null && _userid != null) {
-          print('✅ [Auth] 从存储恢复用户 $currentUserid 的登录状态');
+          // 登录状态恢复成功
         } else {
-          print('⚠️ [Auth] 用户 $currentUserid 的凭证不完整，需要重新登录');
+          // 凭证不完整，清除残留状态
           _token = null;
           _userid = null;
           _vipToken = null;
@@ -274,10 +268,6 @@ class KugouApiClient {
         _token = prefs.getString('kugou_token');
         _userid = prefs.getString('kugou_userid');
         _vipToken = prefs.getString('kugou_vip_token');
-
-        if (_token != null && _userid != null) {
-          print('⚠️ [Auth] 检测到旧版本登录状态，建议重新登录');
-        }
       }
 
       _dfid = prefs.getString('kugou_dfid');
@@ -325,8 +315,6 @@ class KugouApiClient {
 
       // 记录当前登录的用户ID
       await prefs.setString(currentUserKey, userid);
-
-      print('✅ [Auth] 登录成功，用户ID: $userid, Token已存储到: $userTokenKey');
     } catch (e) {
       print('❌ [Auth] 保存登录状态失败: $e');
     }
@@ -356,8 +344,6 @@ class KugouApiClient {
       await prefs.remove('kugou_vip_token');
       await prefs.remove('kugou_dfid');
       await prefs.remove('kugou_current_userid');
-
-      print('✅ [Auth] 已清除用户 $oldUserid 的登录状态');
     } catch (e) {
       print('❌ [Auth] 清除登录状态失败: $e');
     }
@@ -439,7 +425,6 @@ class KugouApiClient {
       KugouEndpoints.searchAlbum,
       queryParameters: params,
     );
-    print('[SearchAlbums] keyword=$keywords, result=${json != null ? "ok" : "null"}');
     if (json == null) return null;
     try {
       final data = json['data'];
@@ -449,17 +434,9 @@ class KugouApiClient {
       } else if (data is Map) {
         list = data['info'] ?? data['list'] ?? [];
       }
-      // 打印原始 JSON 查看实际字段名
-      if (list.isNotEmpty) {
-        print('[SearchAlbums] RAW FIRST ITEM: ${list.first}');
-      }
       final albums = list
           .map((e) => KugouAlbumBrief.fromJson(e as Map<String, dynamic>))
           .toList();
-      print('[SearchAlbums] found ${albums.length} albums');
-      for (final a in albums) {
-        print('[SearchAlbums]   ${a.name} -> globalCollectionId=${a.globalCollectionId}, id=${a.id}, numericId=${a.numericId}');
-      }
       return albums;
     } catch (e) {
       print('[SearchAlbums] parse error: $e');
@@ -1706,8 +1683,6 @@ class KugouApiClient {
     if (json == null) return null;
     try {
       final data = json['data'] as Map<String, dynamic>? ?? json;
-      print('[ArtistDetail] raw data keys: ${data.keys.toList()}');
-      print('[ArtistDetail] is_follow=${data['is_follow']}, isfollow=${data['isfollow']}, followed=${data['followed']}');
       return KugouArtistDetail.fromJson(data);
     } catch (e) {
       print('[ArtistDetail] parse error: $e');
@@ -2258,14 +2233,32 @@ class KugouApiClient {
     );
     if (json == null) return null;
     try {
-      // 响应可能是 {status:0, data:{info:[...]}} 或 {status:0, data:{album_id:...}}
-      final data = json['data'] as Map<String, dynamic>? ?? json;
-      final info = data['info'];
+      // 响应格式有多种可能：
+      // 1. {status:0, data:{info:[...], ...}}  → 标准格式，data 是 Map
+      // 2. {status:0, data:{album_id:..., intro:...}} → data 直接是专辑信息 Map
+      // 3. {status:1, data:[]} → 查询失败，data 是空 List（如专辑下架）
+      // 4. {status:0, data:[{album_id:..., intro:...}]} → data 是 List 包专辑信息
+      final rawData = json['data'];
       Map<String, dynamic> albumData;
-      if (info is List && info.isNotEmpty) {
-        albumData = info.first as Map<String, dynamic>;
+      if (rawData is Map<String, dynamic>) {
+        // 情况 1/2：data 是 Map
+        final info = rawData['info'];
+        if (info is List && info.isNotEmpty) {
+          albumData = info.first as Map<String, dynamic>;
+        } else {
+          albumData = rawData;
+        }
+      } else if (rawData is List && rawData.isNotEmpty) {
+        // 情况 4：data 是 List，取第一个元素
+        final first = rawData.first;
+        if (first is Map<String, dynamic>) {
+          albumData = first;
+        } else {
+          return null;
+        }
       } else {
-        albumData = data;
+        // 情况 3：data 是空 List 或其他类型，专辑不可用
+        return null;
       }
       return KugouAlbumDetail.fromJson(albumData);
     } catch (e) {

@@ -126,8 +126,6 @@ class KugouArtistBrief {
           json['mix_singer_id'] ??
           '',
     );
-    print('[ArtistBrief.fromJson] json=$json');
-    print('[ArtistBrief.fromJson] parsedId=$parsedId, name=${extractFirstName(rawName)}');
 
     return KugouArtistBrief(
       id: parsedId,

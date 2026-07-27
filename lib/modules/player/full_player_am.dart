@@ -9,6 +9,7 @@ import '../../core/layout/responsive_layout.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
+import '../artist/artist_detail_page.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
@@ -409,9 +410,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   /// 跳转到当前歌曲所在专辑页。
   /// 若 song.albumId 为空（如本地歌曲缺少元数据），提示用户无专辑信息。
   void _navigateToAlbum(Song song) {
-    // DEBUG: 输出 song 元数据用于排查专辑名缺失问题
-    debugPrint('[AlbumNav-AM] title=${song.title} album="${song.album}" '
-        'albumId=${song.albumId} artist=${song.artist}');
     final albumId = song.albumId;
     if (albumId == null || albumId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -445,6 +443,159 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     } else {
       navigatorState.push(
         MaterialPageRoute(builder: (_) => AlbumDetailPage(album: album)),
+      );
+    }
+  }
+
+  /// 拆分歌手名列表。
+  /// 酷狗 API 返回的 artist 字段多位歌手用「、」「;」「/」「&」「，」等分隔符连接。
+  List<String> _splitArtistNames(String artist) {
+    if (artist.isEmpty) return const [];
+    return artist
+        .split(RegExp(r'[、;；/,，&]'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  /// 跳转到当前歌曲所在歌手页。
+  /// 若 song.artistId 为空（如本地歌曲缺少元数据），提示用户无歌手信息。
+  /// 跳转前先 dismiss FullPlayer，让 MiniPlayer 恢复显示。
+  /// 若有多位歌手，弹出二级菜单让用户选择具体某位歌手。
+  void _navigateToArtist(Song song) {
+    final artists = _splitArtistNames(song.artist);
+    if (artists.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('暂无歌手信息'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    // 单歌手：直接跳转
+    if (artists.length == 1) {
+      _pushArtistPage(song.artistId, artists.first);
+      return;
+    }
+    // 多位歌手：弹出二级菜单让用户选择
+    _showArtistSelector(context, song, artists);
+  }
+
+  /// 弹出歌手选择 BottomSheet（多位歌手场景）。
+  /// 第一位歌手直接使用 song.artistId 跳转；
+  /// 其他歌手通过 searchArtists 接口查询 ID 后跳转。
+  void _showArtistSelector(
+    BuildContext context,
+    Song song,
+    List<String> artists,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  '选择歌手',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              ...artists.map((name) {
+                return ListTile(
+                  leading: const Icon(Icons.person),
+                  title: Text(name),
+                  onTap: () {
+                    Navigator.pop(sheetCtx);
+                    // 第一位歌手直接用 song.artistId（数据已存在）
+                    if (name == artists.first) {
+                      _pushArtistPage(song.artistId, name);
+                    } else {
+                      // 其他歌手需要先搜索查询 ID
+                      _pushArtistPageByName(name);
+                    }
+                  },
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 通过歌手名搜索后跳转歌手详情页。
+  /// 显示 loading → 调用 searchArtists → 取第一个匹配 → 跳转
+  Future<void> _pushArtistPageByName(String name) async {
+    // 显示 loading
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final api = KugouApiClient();
+      final result = await api.searchArtists(name, pagesize: 5);
+      if (!mounted) return;
+      Navigator.of(context).pop(); // 关闭 loading
+      if (result == null || result.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('未找到歌手「$name」')),
+        );
+        return;
+      }
+      final artist = result.first;
+      _pushArtistPage(artist.id, artist.name);
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(); // 关闭 loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('搜索歌手失败：$e')),
+      );
+    }
+  }
+
+  /// 实际 push 歌手详情页。先 dismiss FullPlayer，再 push。
+  void _pushArtistPage(String? artistId, String artistName) {
+    if (artistId == null || artistId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('暂无歌手信息'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    // 注意：必须在 dismiss 之前捕获 navigatorState 引用，因为 dismiss 后
+    // widget 会被 dispose，State.mounted 变为 false，原来的 if (mounted) 检查会失败。
+    final navigatorState = Navigator.of(context);
+    final route = ModalRoute.of(context);
+    if (route is DraggablePlayerRoute) {
+      _isDismissing = true;
+      route.dismiss();
+      Future.delayed(const Duration(milliseconds: 300), () {
+        navigatorState.push(
+          MaterialPageRoute(
+            builder: (_) => ArtistDetailPage(
+              artistId: artistId,
+              artistName: artistName,
+              avatarUrl: null,
+            ),
+          ),
+        );
+      });
+    } else {
+      navigatorState.push(
+        MaterialPageRoute(
+          builder: (_) => ArtistDetailPage(
+            artistId: artistId,
+            artistName: artistName,
+            avatarUrl: null,
+          ),
+        ),
       );
     }
   }
@@ -1841,6 +1992,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final song = context.read<PlayerProvider>().currentSong;
     if (song == null) return;
 
+    // 动态标题：显示专辑名/歌手名（截断处理）
+    final albumTitle = song.album.isEmpty ? '查看专辑' : '查看专辑：${song.album}';
+    final artistTitle = song.artist.isEmpty ? '查看歌手' : '查看歌手：${song.artist}';
+
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -1872,6 +2027,30 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 onTap: () {
                   Navigator.pop(context);
                   _showLyricPreferencesSheet(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.album),
+                title: Text(
+                  albumTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _navigateToAlbum(song);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.person),
+                title: Text(
+                  artistTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _navigateToArtist(song);
                 },
               ),
               ListTile(
