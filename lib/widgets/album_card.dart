@@ -19,8 +19,7 @@ class AlbumCard extends StatelessWidget {
     final textTheme = Theme.of(context).textTheme;
 
     return ClipRRect(
-      // M3 Expressive：大卡片用 32dp 圆角（原 16dp）
-      borderRadius: BorderRadius.circular(32),
+      borderRadius: BorderRadius.circular(16),
       clipBehavior: Clip.antiAlias,
       child: Material(
         color: colorScheme.surfaceContainerLow,
@@ -65,9 +64,8 @@ class AlbumCard extends StatelessWidget {
   }
 
   Widget _buildInfo(ColorScheme colorScheme, TextTheme textTheme) {
-    // M3 Expressive：内边距加大（原 10/6 → 14/10），让信息区更"呼吸"
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -76,19 +74,17 @@ class AlbumCard extends StatelessWidget {
             album.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            // M3 Expressive：专辑名用 titleSmall（14sp w500）替代 labelMedium（12sp w500）
-            style: textTheme.titleSmall?.copyWith(
+            style: textTheme.labelMedium?.copyWith(
               fontWeight: FontWeight.w500,
               color: colorScheme.onSurface,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 2),
           Text(
             album.artist,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            // M3 Expressive：副标题用 labelMedium，色彩稍弱
-            style: textTheme.labelMedium?.copyWith(
+            style: textTheme.labelSmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
             ),
           ),

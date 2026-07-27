@@ -80,14 +80,12 @@ class MiniPlayer extends StatelessWidget {
               color: colorScheme.primary,
             ),
             Padding(
-              // M3 Expressive：8/4 → 12/6，更呼吸
               padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: Row(
                 children: [
                   ClipRRect(
-                    // M3 Expressive：6dp → 12dp，与 SongListItem 一致
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(6),
                     child: SizedBox(
                       width: 44,
                       height: 44,
@@ -126,9 +124,7 @@ class MiniPlayer extends StatelessWidget {
                           currentSong.displayName,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          // M3 Expressive：当前播放曲目字重 w600 更突出
-                          style: Theme.of(context).textTheme.bodyMedium
-                              ?.copyWith(fontWeight: FontWeight.w600),
+                          style: Theme.of(context).textTheme.bodyMedium,
                         ),
                         Text(
                           currentSong.artist,
