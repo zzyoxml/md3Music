@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/layout/responsive_layout.dart';
+import '../../data/models/album.dart';
 import '../../data/models/song.dart';
+import '../album/album_detail_page.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
@@ -111,6 +113,51 @@ class _FullPlayerState extends State<FullPlayer>
       route.dismiss();
     } else {
       Navigator.of(context).maybePop();
+    }
+  }
+
+  /// 跳转到当前歌曲所在专辑页。
+  /// 若 song.albumId 为空（如本地歌曲缺少元数据），提示用户无专辑信息。
+  /// 跳转前先 dismiss FullPlayer，让 MiniPlayer 恢复显示。
+  void _navigateToAlbum(Song song) {
+    // DEBUG: 输出 song 元数据用于排查专辑名缺失问题
+    debugPrint('[AlbumNav] title=${song.title} album="${song.album}" '
+        'albumId=${song.albumId} artist=${song.artist}');
+    final albumId = song.albumId;
+    if (albumId == null || albumId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('暂无专辑信息'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final album = Album(
+      id: albumId,
+      name: song.album,
+      artist: song.artist,
+      artworkUri: song.artworkUri,
+      songCount: 0,
+    );
+    // 先 dismiss FullPlayer，再 push 专辑页。
+    // 注意：必须在 dismiss 之前捕获 navigatorState 引用，因为 dismiss 后
+    // widget 会被 dispose，State.mounted 变为 false，原来的 if (mounted) 检查会失败。
+    final navigatorState = Navigator.of(context);
+    final route = ModalRoute.of(context);
+    if (route is DraggablePlayerRoute) {
+      _isDismissing = true;
+      route.dismiss();
+      // 等待 FullPlayer 淡出动画完成（约 250ms）后再 push 专辑页
+      Future.delayed(const Duration(milliseconds: 300), () {
+        navigatorState.push(
+          MaterialPageRoute(builder: (_) => AlbumDetailPage(album: album)),
+        );
+      });
+    } else {
+      navigatorState.push(
+        MaterialPageRoute(builder: (_) => AlbumDetailPage(album: album)),
+      );
     }
   }
 
@@ -467,31 +514,40 @@ class _FullPlayerState extends State<FullPlayer>
                         right: 0,
                         child: Column(
                           children: [
-                            Text(
-                              currentSong.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleMedium,
-                              textAlign: TextAlign.center,
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium,
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                             const SizedBox(height: 2),
-                            Text(
-                              currentSong.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                                textAlign: TextAlign.center,
                               ),
-                              textAlign: TextAlign.center,
                             ),
-                            Text(
-                              currentSong.album,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.album,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                ),
+                                textAlign: TextAlign.center,
                               ),
-                              textAlign: TextAlign.center,
                             ),
                           ],
                         ),
@@ -606,31 +662,40 @@ class _FullPlayerState extends State<FullPlayer>
                         right: 0,
                         child: Column(
                           children: [
-                            Text(
-                              currentSong.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleMedium,
-                              textAlign: TextAlign.center,
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.titleMedium,
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                             const SizedBox(height: 2),
-                            Text(
-                              currentSong.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant,
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                                textAlign: TextAlign.center,
                               ),
-                              textAlign: TextAlign.center,
                             ),
-                            Text(
-                              currentSong.album,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.album,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                ),
+                                textAlign: TextAlign.center,
                               ),
-                              textAlign: TextAlign.center,
                             ),
                           ],
                         ),
@@ -815,24 +880,46 @@ class _FullPlayerState extends State<FullPlayer>
               ),
             ),
           SizedBox(height: textSpacing),
-          Text(
-            currentSong.displayName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: isExpanded
-                ? Theme.of(context).textTheme.titleMedium
-                : Theme.of(context).textTheme.titleLarge,
-            textAlign: TextAlign.center,
+          InkWell(
+            onTap: () => _navigateToAlbum(currentSong as Song),
+            borderRadius: BorderRadius.circular(4),
+            child: Text(
+              currentSong.displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: isExpanded
+                  ? Theme.of(context).textTheme.titleMedium
+                  : Theme.of(context).textTheme.titleLarge,
+              textAlign: TextAlign.center,
+            ),
           ),
           const SizedBox(height: 4),
-          Text(
-            currentSong.artist,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+          InkWell(
+            onTap: () => _navigateToAlbum(currentSong as Song),
+            borderRadius: BorderRadius.circular(4),
+            child: Text(
+              currentSong.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
             ),
-            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 2),
+          InkWell(
+            onTap: () => _navigateToAlbum(currentSong as Song),
+            borderRadius: BorderRadius.circular(4),
+            child: Text(
+              currentSong.album,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+              ),
+              textAlign: TextAlign.center,
+            ),
           ),
           if (!isExpanded) const Spacer(),
         ],
@@ -851,32 +938,44 @@ class _FullPlayerState extends State<FullPlayer>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(
-              currentSong.displayName,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleLarge,
-              textAlign: TextAlign.center,
+            InkWell(
+              onTap: () => _navigateToAlbum(currentSong as Song),
+              borderRadius: BorderRadius.circular(4),
+              child: Text(
+                currentSong.displayName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleLarge,
+                textAlign: TextAlign.center,
+              ),
             ),
             const SizedBox(height: 4),
-            Text(
-              currentSong.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+            InkWell(
+              onTap: () => _navigateToAlbum(currentSong as Song),
+              borderRadius: BorderRadius.circular(4),
+              child: Text(
+                currentSong.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 2),
-            Text(
-              currentSong.album,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
+            InkWell(
+              onTap: () => _navigateToAlbum(currentSong as Song),
+              borderRadius: BorderRadius.circular(4),
+              child: Text(
+                currentSong.album,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
             ),
           ],
         ),
