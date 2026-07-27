@@ -7,6 +7,9 @@ import '../../providers/favorites_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
+import '../../widgets/app_animation.dart';
+import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
@@ -390,7 +393,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildPlaylistsTab() {
     if (_isLoadingPlaylists) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: MD3ELoadingIndicator());
     }
 
     if (_playlists.isEmpty) {
@@ -422,7 +425,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return RefreshIndicator(
+    return MD3ERefreshIndicator(
       onRefresh: () => _loadPlaylists(forceNoCache: true),
       child: ListView(
         controller: _scrollController,
@@ -507,7 +510,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     final colorScheme = Theme.of(context).colorScheme;
     final isSelected = _selectedIndices.contains(index);
 
-    return InkWell(
+    return FadeInUp(
+      delayMs: index * 30,
+      child: InkWell(
       onTap: _isManaging
           ? () {
               setState(() {
@@ -618,6 +623,7 @@ class _FavoritesPageState extends State<FavoritesPage>
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -625,7 +631,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildAlbumsTab() {
     if (_isLoadingAlbums) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: MD3ELoadingIndicator());
     }
 
     if (_albums.isEmpty) {
@@ -650,14 +656,17 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return RefreshIndicator(
+    return MD3ERefreshIndicator(
       onRefresh: () => _loadAlbums(),
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
         itemCount: _albums.length,
         itemBuilder: (context, index) {
           final album = _albums[index];
-          return _buildAlbumTile(album);
+          return FadeInUp(
+            delayMs: index * 30,
+            child: _buildAlbumTile(album),
+          );
         },
       ),
     );
@@ -762,7 +771,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildArtistsTab() {
     if (_isLoadingArtists) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: MD3ELoadingIndicator());
     }
 
     if (_artists.isEmpty) {
@@ -787,14 +796,17 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return RefreshIndicator(
+    return MD3ERefreshIndicator(
       onRefresh: () => _loadArtists(),
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
         itemCount: _artists.length,
         itemBuilder: (context, index) {
           final artist = _artists[index];
-          return _buildArtistTile(artist);
+          return FadeInUp(
+            delayMs: index * 30,
+            child: _buildArtistTile(artist),
+          );
         },
       ),
     );

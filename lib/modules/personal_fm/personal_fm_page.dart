@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
+import '../../widgets/app_animation.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 
 class PersonalFmPage extends StatefulWidget {
@@ -319,27 +321,39 @@ class _PersonalFmPageState extends State<PersonalFmPage>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 8),
-            Text(
-              '实时推荐会根据你的反馈持续更新',
-              style: textTheme.bodySmall?.copyWith(
-                color: cs.onSurfaceVariant.withValues(alpha: 0.58),
+            FadeInUp(
+              child: Text(
+                '实时推荐会根据你的反馈持续更新',
+                style: textTheme.bodySmall?.copyWith(
+                  color: cs.onSurfaceVariant.withValues(alpha: 0.58),
+                ),
               ),
             ),
             const SizedBox(height: 16),
-            if (isLoggedIn) _buildToolbar(cs, textTheme),
+            if (isLoggedIn)
+              FadeInUp(
+                delayMs: 30,
+                child: _buildToolbar(cs, textTheme),
+              ),
             const SizedBox(height: 18),
-            isLoggedIn
-                ? _buildRadioHero(
-                    cs,
-                    textTheme,
-                    currentTrack,
-                    isPlaying,
-                    sideTracks,
-                  )
-                : _buildEmptyState(cs, textTheme),
+            FadeInUp(
+              delayMs: 60,
+              child: isLoggedIn
+                  ? _buildRadioHero(
+                      cs,
+                      textTheme,
+                      currentTrack,
+                      isPlaying,
+                      sideTracks,
+                    )
+                  : _buildEmptyState(cs, textTheme),
+            ),
             if (isLoggedIn && currentTrack != null) const SizedBox(height: 28),
             if (isLoggedIn)
-              _buildNowPanel(cs, textTheme, currentTrack, isPlaying),
+              FadeInUp(
+                delayMs: 90,
+                child: _buildNowPanel(cs, textTheme, currentTrack, isPlaying),
+              ),
             const SizedBox(height: 30),
           ],
         ),
@@ -836,9 +850,8 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               color: cs.primary,
             ),
             child: _isLoading
-                ? CircularProgressIndicator(
+                ? MD3ELoadingIndicator(
                     color: cs.onPrimary,
-                    strokeWidth: 2,
                   )
                 : Icon(
                     isPlaying ? Icons.pause : Icons.play_arrow,

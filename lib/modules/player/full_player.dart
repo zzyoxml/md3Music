@@ -17,6 +17,7 @@ import '../../services/kugou_api/kugou_models.dart';
 import 'comments_view.dart';
 import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/player_playlist_dialog.dart';
 import 'full_player_route.dart';
 
@@ -265,7 +266,7 @@ class _FullPlayerState extends State<FullPlayer>
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
+      builder: (_) => const Center(child: MD3ELoadingIndicator()),
     );
     try {
       final api = KugouApiClient();
@@ -606,7 +607,7 @@ class _FullPlayerState extends State<FullPlayer>
                   onTap: () => _tabController.animateTo(0),
                   behavior: HitTestBehavior.translucent,
                   child: _isLoadingLyrics
-                      ? const Center(child: CircularProgressIndicator())
+                      ? const Center(child: MD3ELoadingIndicator())
                       : LyricsView(
                           key: _lyricsKey,
                           lyrics: _lyrics,
@@ -748,7 +749,7 @@ class _FullPlayerState extends State<FullPlayer>
                           child: _buildSongInfo(playerProvider, currentSong, colorScheme),
                         ),
                       _isLoadingLyrics
-                          ? const Center(child: CircularProgressIndicator())
+                          ? const Center(child: MD3ELoadingIndicator())
                           : LyricsView(
                               key: _lyricsKey,
                               lyrics: _lyrics,
@@ -888,7 +889,7 @@ class _FullPlayerState extends State<FullPlayer>
                       if (!_isPadMode || _isPhoneLandscape)
                         _buildSongInfo(playerProvider, currentSong, colorScheme),
                       _isLoadingLyrics
-                          ? const Center(child: CircularProgressIndicator())
+                          ? const Center(child: MD3ELoadingIndicator())
                           : LyricsView(
                               lyrics: _lyrics,
                               position: playerProvider.position,
@@ -1813,7 +1814,7 @@ class _FullPlayerState extends State<FullPlayer>
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircularProgressIndicator(),
+                    MD3ELoadingIndicator(size: 32),
                     SizedBox(height: 16),
                     Text('加载歌单中...'),
                   ],

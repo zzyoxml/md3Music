@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 
 import '../../providers/kugou_provider.dart';
 import '../../widgets/app_animation.dart';
+import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../login/login_page.dart';
 import '../settings/settings_page.dart';
@@ -90,7 +92,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (!kugou.isLoggedIn) return _buildNotLoggedIn(cs, tt);
-          return RefreshIndicator(
+          return MD3ERefreshIndicator(
             onRefresh: () async {
               await kugou.getVipDetail();
               await kugou.getVipMonthRecord();
@@ -444,62 +446,60 @@ class _UserCenterPageState extends State<UserCenterPage> {
     KugouProvider kugou,
     BuildContext context,
   ) {
-    return Column(
-      children: [
-        // 月份导航行 — 真正居中
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              icon: const Icon(Icons.chevron_left),
-              color: cs.onSurfaceVariant,
-              onPressed: () {},
-            ),
-            Text(
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      child: Row(
+        children: [
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: const Icon(Icons.chevron_left),
+            color: cs.onSurfaceVariant,
+            onPressed: () {},
+          ),
+          Expanded(
+            child: Text(
               monthLabel,
+              textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
             ),
-            IconButton(
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              icon: const Icon(Icons.chevron_right),
-              color: cs.onSurfaceVariant,
-              onPressed: () {},
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        // 签到按钮 — 单独一行居中
-        FilledButton.tonalIcon(
-          style: FilledButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            minimumSize: const Size(0, 36),
-            textStyle: tt.labelMedium?.copyWith(
-              fontWeight: FontWeight.w600,
+          ),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            icon: const Icon(Icons.chevron_right),
+            color: cs.onSurfaceVariant,
+            onPressed: () {},
+          ),
+          const SizedBox(width: 4),
+          Flexible(
+            child: FilledButton.tonalIcon(
+              style: FilledButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                minimumSize: const Size(0, 32),
+                textStyle: tt.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              onPressed: kugou.manualSignInRunning
+                  ? null
+                  : () => _handleManualSignIn(context, kugou),
+              icon: kugou.manualSignInRunning
+                  ? MD3ELoadingIndicator(
+                      size: 16,
+                      color: cs.onSecondaryContainer,
+                    )
+                  : const Icon(Icons.check_circle_outline, size: 16),
+              label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
             ),
           ),
-          onPressed: kugou.manualSignInRunning
-              ? null
-              : () => _handleManualSignIn(context, kugou),
-          icon: kugou.manualSignInRunning
-              ? SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: cs.onSecondaryContainer,
-                  ),
-                )
-              : const Icon(Icons.check_circle_outline, size: 16),
-          label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
-        ),
-      ],
+        ],
+      ),
     );
   }
 

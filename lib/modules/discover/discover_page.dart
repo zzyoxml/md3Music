@@ -8,6 +8,8 @@ import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/album_card.dart';
 import '../../widgets/app_animation.dart';
+import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/song_list_item.dart';
 import '../charts/charts_page.dart';
@@ -172,10 +174,10 @@ class _DiscoverPageState extends State<DiscoverPage> {
           ),
         ],
       ),
-      body: RefreshIndicator(
+      body: MD3ERefreshIndicator(
         onRefresh: _loadAllData,
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(child: MD3ELoadingIndicator())
             : _error != null
             ? _buildError(colorScheme)
             : CustomScrollView(
@@ -312,7 +314,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                   children: [
                     Text(
                       _getGreeting(),
-                      style: tt.headlineMedium?.copyWith(
+                      style: tt.displaySmall?.copyWith(
                         color: cs.onPrimaryContainer,
                         fontWeight: FontWeight.bold,
                       ),
@@ -439,7 +441,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                     itemCount: themes.length,
                     itemBuilder: (context, i) => Padding(
                       padding: const EdgeInsets.only(right: 12),
-                      child: ScaleIn(
+                      child: FadeInUp(
                         delayMs: i * 30,
                         child: SizedBox(
                           width: 130,
@@ -603,7 +605,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                     scrollDirection: Axis.horizontal,
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     itemCount: plist.length,
-                    itemBuilder: (context, i) => ScaleIn(
+                    itemBuilder: (context, i) => FadeInUp(
                       delayMs: i * 30,
                       child: Padding(
                         padding: const EdgeInsets.only(right: 12),
@@ -728,7 +730,7 @@ class _PlaylistBrowsePageState extends State<_PlaylistBrowsePage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (kugou.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: MD3ELoadingIndicator());
           }
           final list = kugou.playlistList;
           if (list.isEmpty) return const Center(child: Text('暂无数据'));
@@ -741,17 +743,20 @@ class _PlaylistBrowsePageState extends State<_PlaylistBrowsePage> {
               mainAxisSpacing: 12,
             ),
             itemCount: list.length,
-            itemBuilder: (context, i) => AlbumCard(
-              album: Album(
-                id: list[i].id,
-                name: list[i].name,
-                artist: '',
-                artworkUri: list[i].coverUrl,
-                songCount: list[i].songCount,
-              ),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => PlaylistPage(playlist: list[i].toPlaylist()),
+            itemBuilder: (context, i) => FadeInUp(
+              delayMs: i * 30,
+              child: AlbumCard(
+                album: Album(
+                  id: list[i].id,
+                  name: list[i].name,
+                  artist: '',
+                  artworkUri: list[i].coverUrl,
+                  songCount: list[i].songCount,
+                ),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => PlaylistPage(playlist: list[i].toPlaylist()),
+                  ),
                 ),
               ),
             ),
@@ -786,7 +791,7 @@ class _DailyRecommendDetailPageState extends State<_DailyRecommendDetailPage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (kugou.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: MD3ELoadingIndicator());
           }
           final songs = kugou.recommendSongsAsSongs;
           if (songs.isEmpty) return const Center(child: Text('暂无数据'));
@@ -837,7 +842,7 @@ class _RankDetailPageState extends State<_RankDetailPage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (kugou.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: MD3ELoadingIndicator());
           }
           final songs = kugou.rankSongs;
           if (songs.isEmpty) {
@@ -862,8 +867,8 @@ class _RankDetailPageState extends State<_RankDetailPage> {
             itemCount: songs.length,
             itemBuilder: (context, i) {
               final song = songs[i].toSong();
-              return AnimatedListWrapper(
-                index: i,
+              return FadeInUp(
+                delayMs: i * 30,
                 child: SongListItem(
                   song: song,
                   onTap: () =>

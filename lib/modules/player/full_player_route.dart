@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/theme/motion_constants.dart';
 import '../../providers/theme_provider.dart';
 import 'full_player.dart';
 import 'full_player_am.dart';
@@ -95,25 +96,28 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
   @override
   Widget buildTransitions(BuildContext context, Animation<double> animation,
       Animation<double> secondaryAnimation, Widget child) {
-    // 同步 controller 值到全局 playerExpansion，
-    // 让 MiniPlayer 等外部监听者感知进度
-    if (animation.value != playerExpansion.value) {
-      playerExpansion.value = animation.value;
-    }
-
     return AnimatedBuilder(
       animation: animation,
       builder: (context, _) {
-        final progress = animation.value.clamp(0.0, 1.0);
+        final raw = animation.value.clamp(0.0, 1.0);
+        // 展开动画播放期间（forward/reverse）应用过冲 curve，带轻微过冲感
+        // 拖拽期间 controller.value 被手动设置（isAnimating=false），保持跟手
+        final progress = controller.isAnimating
+            ? M3ExpressiveMotion.expressiveEasing.transform(raw).clamp(0.0, 1.0)
+            : raw;
+        // 同步到全局 playerExpansion，让 MiniPlayer 同步淡入淡出（含过冲）
+        if (progress != playerExpansion.value) {
+          playerExpansion.value = progress;
+        }
         // 淡入：progress 0→1 时 opacity 0→1
         // 滑动：progress 0→1 时从 15% 屏幕高度下方位移滑到 0（抽屉上滑感）
         return Opacity(
           opacity: progress,
-          child: SlideTransition(
-            position: Tween<Offset>(
+          child: FractionalTranslation(
+            translation: Tween<Offset>(
               begin: const Offset(0, 0.15),
               end: Offset.zero,
-            ).animate(animation),
+            ).transform(progress),
             child: child,
           ),
         );

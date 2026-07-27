@@ -10,6 +10,8 @@ import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/album_card.dart';
+import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../login/login_page.dart';
 
@@ -106,7 +108,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: RefreshIndicator(
+      body: MD3ERefreshIndicator(
         onRefresh: _loadData,
         child: CustomScrollView(
           slivers: [
@@ -136,7 +138,7 @@ class _HomePageState extends State<HomePage> {
                 child: Center(
                   child: Padding(
                     padding: EdgeInsets.all(64),
-                    child: CircularProgressIndicator(),
+                    child: MD3ELoadingIndicator(size: 64),
                   ),
                 ),
               )
@@ -544,7 +546,7 @@ class _PlaylistDetailPageState extends State<_PlaylistDetailPage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugouProvider, child) {
           if (kugouProvider.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: MD3ELoadingIndicator());
           }
           final songs = kugouProvider.currentPlaylistSongs;
           if (songs.isEmpty) {
@@ -611,7 +613,7 @@ class _RankDetailPageState extends State<_RankDetailPage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugouProvider, child) {
           if (kugouProvider.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: MD3ELoadingIndicator());
           }
           final songs = kugouProvider.rankSongs;
           if (songs.isEmpty) {
