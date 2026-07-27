@@ -430,7 +430,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final displayAlbum = _albumDetail?.toAlbum() ?? widget.album;
+    // 字段级 fallback：API 返回的 albumDetail 优先，但其 artworkUri 为 null 时
+    // 保留传入的 widget.album.artworkUri（即 song.artworkUri），避免丢失初始封面
+    final apiAlbum = _albumDetail?.toAlbum();
+    final displayAlbum = apiAlbum != null
+        ? (apiAlbum.artworkUri == null && widget.album.artworkUri != null
+            ? apiAlbum.copyWith(artworkUri: widget.album.artworkUri)
+            : apiAlbum)
+        : widget.album;
     final description = _albumDetail?.description;
 
     return Scaffold(

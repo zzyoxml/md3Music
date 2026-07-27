@@ -80,6 +80,48 @@ class EmphasizeEffect {
   /// 非 CJK 字最大长度
   static const int _nonCjkMaxLength = 7;
 
+  // ============== 内容过滤常量 ==============
+
+  /// 匹配任意 Unicode 字母或数字（用于判定纯符号）。
+  /// \p{L} = 所有字母（含 CJK 汉字、平假名、片假名、韩文、拉丁、西里尔等）
+  /// \p{N} = 所有数字
+  /// 注意：CJK 标点（、。：等）属于 \p{P}（标点），不会被匹配 → 纯符号判定生效
+  static final RegExp _letterOrNumberRegex = RegExp(
+    r'[\p{L}\p{N}]',
+    unicode: true,
+  );
+
+  /// 带冒号的歌手标签：男：/女：/合：/男声：/女声：/合唱： 等。
+  /// 单字标签必须带冒号，避免 "男"/"女"/"合" 在正常歌词中误伤。
+  static final RegExp _singerLabelWithColonRegex = RegExp(
+    r'^[\s(（]*(男|女|合|童|男声|女声|合唱|男唱|女唱|男独|女独|独唱|伴唱|和声|男和|女和)[\s)）]*[:：]$',
+  );
+
+  /// 括号包裹的歌手标签：(男)/（女）/(合唱) 等。
+  static final RegExp _parenSingerLabelRegex = RegExp(
+    r'^[(（]\s*(男|女|合|童|男声|女声|合唱|男唱|女唱|男独|女独|独唱|伴唱|和声)\s*[)）]$',
+  );
+
+  /// 多字歌手标签（无冒号也视为标签）：男声/女声/合唱/男唱/女唱 等。
+  /// 这些词在正常歌词中极少作为独立 word 出现，可直接过滤。
+  static final RegExp _multiCharSingerLabelRegex = RegExp(
+    r'^(男声|女声|合唱|男唱|女唱|男独|女独|独唱|伴唱|和声|男和|女和)$',
+  );
+
+  /// 元数据行关键词（行首匹配，trim 后判定）。
+  /// 覆盖常见中文歌曲元数据：作词/作曲/编曲 等。
+  static const List<String> _metadataLineKeywords = [
+    '作词', '作曲', '词：', '词:', '曲：', '曲:',
+    '编曲', '制作人', '混音', '录音', '母带', '出品',
+    '监制', '和声', '演唱', '演奏', '乐团', '乐队',
+    '原唱', '翻唱', '吉他', '钢琴', '贝斯', '鼓：', '鼓:',
+    '弦乐', '管乐', '合声', '伴奏', '独唱', '合唱',
+    'OP', 'SP', '音乐总监', '原曲', '原词', '改编',
+    '缩混', '统筹', '企划', '发行', '出版', '版权',
+    '词曲', '歌词', '歌曲', '歌名', '歌手', '专辑',
+    '制作', '编辑', '校对', 'OP:', 'OP：', 'SP:', 'SP：',
+  ];
+
   // ============== amount / blur 公式常量 ==============
 
   /// amount 缩放系数（spec.md：amount *= 0.6）
@@ -126,18 +168,46 @@ class EmphasizeEffect {
 
   // ============== 公开 API ==============
 
+  /// 判断整行是否应禁用辉光（行级过滤）。
+  ///
+  /// 返回 true 表示该行【不应】有任何辉光。
+  /// 在 [WordRenderer.tick] 中先调用此方法，若返回 true 则跳过所有 word 的辉光计算。
+  ///
+  /// 判定规则：行文本 trim 后为空，或以元数据关键词开头（作词/作曲/编曲 等）。
+  /// 结果仅依赖 [LyricLine.text]（行绑定后不变），可安全缓存。
+  static bool shouldSkipEmphasizeForLine(LyricLine line) {
+    final lineText = line.text.trim();
+    if (lineText.isEmpty) return true;
+    for (final keyword in _metadataLineKeywords) {
+      if (lineText.startsWith(keyword)) return true;
+    }
+    return false;
+  }
+
   /// 判断 word 是否触发辉光。
   ///
-  /// 触发条件（spec.md "Requirement: 强调辉光（emphasize）效果"）：
+  /// 触发条件（spec.md "Requirement: 强调辉光（emphasize）效果" + 内容过滤）：
   /// - 字时长 [LyricWord.duration] >= 1000ms
+  /// - 文本非空
+  /// - 【新增】非纯符号/标点（_ - \ 、 @ * . , … — 等）
+  /// - 【新增】非歌手标签（男：/女：/(男)/合唱 等）
   /// - 且为 CJK 字符（任意长度）或 非 CJK 字符长度 1~7
   ///
   /// CJK 判定：[String.runes] 中任一字符落在 CJK 统一表意 / 平假名 /
   /// 片假名 / CJK 标点 / 韩文 任一 Unicode 范围内，即视为 CJK 字符。
+  ///
+  /// 结果仅依赖 [LyricWord.text] 与 [LyricWord.duration]（行绑定后不变），可安全缓存。
   static bool shouldEmphasize(LyricWord word) {
     if (word.duration < _durationThresholdMs) return false;
     final text = word.text;
     if (text.isEmpty) return false;
+
+    // 纯符号/标点 word 不触发辉光（_ - \ 、 @ * . , … — 等）
+    if (_isPureSymbol(text)) return false;
+
+    // 歌手标签 word 不触发辉光（男：/女：/(男)/合唱 等）
+    if (_isSingerLabel(text)) return false;
+
     final runes = text.runes.toList();
     final hasCJK = runes.any(_isCJKCodePoint);
     if (hasCJK) {
@@ -145,7 +215,7 @@ class EmphasizeEffect {
       return true;
     }
     // 非 CJK 字符：长度需在 1~7 之间
-    return runes.length >= 1 && runes.length <= _nonCjkMaxLength;
+    return runes.isNotEmpty && runes.length <= _nonCjkMaxLength;
   }
 
   /// 计算某时刻的辉光状态。
@@ -266,5 +336,29 @@ class EmphasizeEffect {
         (codePoint >= 0x30A0 && codePoint <= 0x30FF) || // 片假名
         (codePoint >= 0x3000 && codePoint <= 0x303F) || // CJK 标点
         (codePoint >= 0xAC00 && codePoint <= 0xD7AF); // 韩文
+  }
+
+  /// 判断 text 是否仅由符号/标点构成（不含任何字母或数字）。
+  ///
+  /// 例：`_` `-` `\` `、` `@` `*` `.` `,` `…` `—` `～` 等均返回 true；
+  ///     `"a-"` `"你好。"` `"1."` 等含字母/数字的均返回 false。
+  ///
+  /// 使用 `\p{L}\p{N}` 反向判定：若 text 中无任何字母或数字，则视为纯符号。
+  /// CJK 标点（、。：等）属于 `\p{P}`（标点），不会被匹配 → 正确判定为纯符号。
+  static bool _isPureSymbol(String text) {
+    return text.isNotEmpty && !_letterOrNumberRegex.hasMatch(text);
+  }
+
+  /// 判断 text 是否为歌手标签（男：/女：/(男)/合唱/男声 等）。
+  ///
+  /// 单字标签（男/女/合/童）必须带冒号或括号才判定，避免误伤正常歌词
+  /// （如「合欢花」「女儿情」「童年」中的单字）。
+  /// 多字标签（男声/女声/合唱/男唱 等）在正常歌词中极少作为独立 word 出现，可直接过滤。
+  static bool _isSingerLabel(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+    return _singerLabelWithColonRegex.hasMatch(trimmed) ||
+        _parenSingerLabelRegex.hasMatch(trimmed) ||
+        _multiCharSingerLabelRegex.hasMatch(trimmed);
   }
 }

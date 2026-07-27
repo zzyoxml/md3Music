@@ -11,8 +11,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/services/custom_font_loader.dart';
+import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/folder_picker_service.dart';
 import '../../core/services/lyricon_provider_service.dart';
+import '../../core/services/media_notification_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../providers/device_provider.dart';
@@ -57,6 +59,8 @@ class _SettingsPageState extends State<SettingsPage> {
   // Lyricon 词幕推送相关状态
   bool _lyriconEnabled = false;
   bool _lyriconDisplayTranslation = true;
+  // 蓝牙歌词开关：通过 MediaSession 元数据替换在车机等设备显示歌词
+  bool _bluetoothLyricEnabled = false;
   // 自定义下载目录：null/空表示使用默认目录
   String? _downloadDir;
   // 设备类型选择
@@ -130,6 +134,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final downloadDir = await _settingsRepository.getDownloadDir();
     // 从 ThemeProvider 同步 UI 缩放
     final uiScale = context.read<ThemeProvider>().uiScale;
+    // 读取蓝牙歌词开关
+    final bluetoothLyricEnabled = await _settingsRepository.getBluetoothLyricEnabled();
 
     setState(() {
       _themeMode = themeMode;
@@ -144,6 +150,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _deviceType = deviceType;
       _downloadDir = downloadDir;
       _uiScale = uiScale;
+      _bluetoothLyricEnabled = bluetoothLyricEnabled;
     });
   }
 
@@ -322,6 +329,19 @@ class _SettingsPageState extends State<SettingsPage> {
                   _settingsRepository.setLyriconDisplayTranslation(value);
                 }
               : null,
+        ),
+        // 蓝牙歌词：通过 MediaSession 元数据替换在车机等设备显示歌词
+        SwitchListTile(
+          title: const Text('蓝牙歌词'),
+          subtitle: const Text('通过蓝牙在汽车主机等设备显示当前歌词（标题显示歌词，作者显示「作者 - 标题」）'),
+          value: _bluetoothLyricEnabled,
+          onChanged: (value) async {
+            setState(() => _bluetoothLyricEnabled = value);
+            await _settingsRepository.setBluetoothLyricEnabled(value);
+            // 同步到歌词服务（启停定时器）和原生端（元数据替换开关）
+            DesktopLyricService.instance.setBluetoothLyricEnabled(value);
+            MediaNotificationService.setBluetoothLyricEnabled(value);
+          },
         ),
       ],
     );

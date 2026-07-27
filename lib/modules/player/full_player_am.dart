@@ -6,7 +6,10 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/layout/responsive_layout.dart';
+import '../../data/models/album.dart';
 import '../../data/models/song.dart';
+import '../album/album_detail_page.dart';
+import '../artist/artist_detail_page.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
@@ -370,6 +373,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     if (dy <= 0) return; // 上拉不触发收起
     final progress = 1.0 - (dy / kPlayerDragThreshold).clamp(0.0, 1.0);
     controller.stop();
+    _isDismissing = false; // 手动接管 controller，复位 dismiss 标志，避免后续手势/PopScope 误判
     controller.value = progress;
   }
 
@@ -393,6 +397,24 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     }
   }
 
+  /// 把手拖拽被取消时（如 widget 树重建触发手势 arena 取消）：
+  /// 按当前进度决定走向，避免路由卡死。取消时无速度信息，仅按 progress 阈值决策。
+  void _onHandleDragCancel() {
+    final controller = _routeController;
+    if (controller == null) return;
+    final currentProgress = controller.value;
+    if (currentProgress < 0.5) {
+      _isDismissing = true;
+      final route = ModalRoute.of(context);
+      if (route is DraggablePlayerRoute) {
+        route.dismiss();
+      }
+    } else {
+      _isDismissing = false;
+      controller.forward();
+    }
+  }
+
   /// 点击下拉按钮直接收起（保留原 _buildTopBar 的 IconButton 行为）。
   void _collapseByButton() {
     final route = ModalRoute.of(context);
@@ -401,6 +423,199 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       route.dismiss();
     } else {
       Navigator.of(context).maybePop();
+    }
+  }
+
+  /// 跳转到当前歌曲所在专辑页。
+  /// 若 song.albumId 为空（如本地歌曲缺少元数据），提示用户无专辑信息。
+  void _navigateToAlbum(Song song) {
+    final albumId = song.albumId;
+    if (albumId == null || albumId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('暂无专辑信息'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final album = Album(
+      id: albumId,
+      name: song.album,
+      artist: song.artist,
+      artworkUri: song.artworkUri,
+      songCount: 0,
+    );
+    // 先 dismiss FullPlayer，再 push 专辑页。
+    // 注意：必须在 dismiss 之前捕获 navigatorState 引用，因为 dismiss 后
+    // widget 会被 dispose，State.mounted 变为 false，原来的 if (mounted) 检查会失败。
+    final navigatorState = Navigator.of(context);
+    final route = ModalRoute.of(context);
+    if (route is DraggablePlayerRoute) {
+      _isDismissing = true;
+      route.dismiss();
+      Future.delayed(const Duration(milliseconds: 300), () {
+        navigatorState.push(
+          MaterialPageRoute(builder: (_) => AlbumDetailPage(album: album)),
+        );
+      });
+    } else {
+      navigatorState.push(
+        MaterialPageRoute(builder: (_) => AlbumDetailPage(album: album)),
+      );
+    }
+  }
+
+  /// 拆分歌手名列表。
+  /// 酷狗 API 返回的 artist 字段多位歌手用「、」「;」「/」「&」「，」等分隔符连接。
+  List<String> _splitArtistNames(String artist) {
+    if (artist.isEmpty) return const [];
+    return artist
+        .split(RegExp(r'[、;；/,，&]'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+  }
+
+  /// 跳转到当前歌曲所在歌手页。
+  /// 若 song.artistId 为空（如本地歌曲缺少元数据），提示用户无歌手信息。
+  /// 跳转前先 dismiss FullPlayer，让 MiniPlayer 恢复显示。
+  /// 若有多位歌手，弹出二级菜单让用户选择具体某位歌手。
+  void _navigateToArtist(Song song) {
+    final artists = _splitArtistNames(song.artist);
+    if (artists.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('暂无歌手信息'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    // 单歌手：直接跳转
+    if (artists.length == 1) {
+      _pushArtistPage(song.artistId, artists.first);
+      return;
+    }
+    // 多位歌手：弹出二级菜单让用户选择
+    _showArtistSelector(context, song, artists);
+  }
+
+  /// 弹出歌手选择 BottomSheet（多位歌手场景）。
+  /// 第一位歌手直接使用 song.artistId 跳转；
+  /// 其他歌手通过 searchArtists 接口查询 ID 后跳转。
+  void _showArtistSelector(
+    BuildContext context,
+    Song song,
+    List<String> artists,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  '选择歌手',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+              ),
+              ...artists.map((name) {
+                return ListTile(
+                  leading: const Icon(Icons.person),
+                  title: Text(name),
+                  onTap: () {
+                    Navigator.pop(sheetCtx);
+                    // 第一位歌手直接用 song.artistId（数据已存在）
+                    if (name == artists.first) {
+                      _pushArtistPage(song.artistId, name);
+                    } else {
+                      // 其他歌手需要先搜索查询 ID
+                      _pushArtistPageByName(name);
+                    }
+                  },
+                );
+              }),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// 通过歌手名搜索后跳转歌手详情页。
+  /// 显示 loading → 调用 searchArtists → 取第一个匹配 → 跳转
+  Future<void> _pushArtistPageByName(String name) async {
+    // 显示 loading
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+    try {
+      final api = KugouApiClient();
+      final result = await api.searchArtists(name, pagesize: 5);
+      if (!mounted) return;
+      Navigator.of(context).pop(); // 关闭 loading
+      if (result == null || result.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('未找到歌手「$name」')),
+        );
+        return;
+      }
+      final artist = result.first;
+      _pushArtistPage(artist.id, artist.name);
+    } catch (e) {
+      if (!mounted) return;
+      Navigator.of(context).pop(); // 关闭 loading
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('搜索歌手失败：$e')),
+      );
+    }
+  }
+
+  /// 实际 push 歌手详情页。先 dismiss FullPlayer，再 push。
+  void _pushArtistPage(String? artistId, String artistName) {
+    if (artistId == null || artistId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('暂无歌手信息'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    // 注意：必须在 dismiss 之前捕获 navigatorState 引用，因为 dismiss 后
+    // widget 会被 dispose，State.mounted 变为 false，原来的 if (mounted) 检查会失败。
+    final navigatorState = Navigator.of(context);
+    final route = ModalRoute.of(context);
+    if (route is DraggablePlayerRoute) {
+      _isDismissing = true;
+      route.dismiss();
+      Future.delayed(const Duration(milliseconds: 300), () {
+        navigatorState.push(
+          MaterialPageRoute(
+            builder: (_) => ArtistDetailPage(
+              artistId: artistId,
+              artistName: artistName,
+              avatarUrl: null,
+            ),
+          ),
+        );
+      });
+    } else {
+      navigatorState.push(
+        MaterialPageRoute(
+          builder: (_) => ArtistDetailPage(
+            artistId: artistId,
+            artistName: artistName,
+            avatarUrl: null,
+          ),
+        ),
+      );
     }
   }
 
@@ -634,36 +849,45 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         right: 0,
                         child: Column(
                           children: [
-                            Text(
-                              currentSong.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(color: Colors.white),
-                              textAlign: TextAlign.center,
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(color: Colors.white),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                             const SizedBox(height: 2),
-                            Text(
-                              currentSong.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(color: Colors.white70),
-                              textAlign: TextAlign.center,
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: Colors.white70),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
-                            Text(
-                              currentSong.album,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(color: Colors.white54),
-                              textAlign: TextAlign.center,
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.album,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: Colors.white54),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                           ],
                         ),
@@ -813,36 +1037,45 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         right: 0,
                         child: Column(
                           children: [
-                            Text(
-                              currentSong.displayName,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
-                                  ?.copyWith(color: Colors.white),
-                              textAlign: TextAlign.center,
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(color: Colors.white),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                             const SizedBox(height: 2),
-                            Text(
-                              currentSong.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(color: Colors.white70),
-                              textAlign: TextAlign.center,
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: Colors.white70),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
-                            Text(
-                              currentSong.album,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .bodySmall
-                                  ?.copyWith(color: Colors.white54),
-                              textAlign: TextAlign.center,
+                            GestureDetector(
+                              onTap: () => _navigateToAlbum(currentSong as Song),
+                              child: Text(
+                                currentSong.album,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: Colors.white54),
+                                textAlign: TextAlign.center,
+                              ),
                             ),
                           ],
                         ),
@@ -935,6 +1168,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           onVerticalDragStart: _onHandleDragStart,
           onVerticalDragUpdate: _onHandleDragUpdate,
           onVerticalDragEnd: _onHandleDragEnd,
+          onVerticalDragCancel: _onHandleDragCancel,
           behavior: HitTestBehavior.opaque,
           child: Padding(
             padding: const EdgeInsets.only(top: 12, bottom: 8),
@@ -1055,26 +1289,48 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               ),
             ),
           SizedBox(height: textSpacing),
-          Text(
-            currentSong.displayName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style:
-                (isExpanded
-                        ? Theme.of(context).textTheme.titleMedium
-                        : Theme.of(context).textTheme.titleLarge)
-                    ?.copyWith(color: Colors.white),
-            textAlign: TextAlign.center,
+          InkWell(
+            onTap: () => _navigateToAlbum(currentSong as Song),
+            borderRadius: BorderRadius.circular(4),
+            child: Text(
+              currentSong.displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style:
+                  (isExpanded
+                          ? Theme.of(context).textTheme.titleMedium
+                          : Theme.of(context).textTheme.titleLarge)
+                      ?.copyWith(color: Colors.white),
+              textAlign: TextAlign.center,
+            ),
           ),
           const SizedBox(height: 4),
-          Text(
-            currentSong.artist,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(
-              context,
-            ).textTheme.bodySmall?.copyWith(color: Colors.white70),
-            textAlign: TextAlign.center,
+          InkWell(
+            onTap: () => _navigateToAlbum(currentSong as Song),
+            borderRadius: BorderRadius.circular(4),
+            child: Text(
+              currentSong.artist,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 2),
+          InkWell(
+            onTap: () => _navigateToAlbum(currentSong as Song),
+            borderRadius: BorderRadius.circular(4),
+            child: Text(
+              currentSong.album,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+              textAlign: TextAlign.center,
+            ),
           ),
           if (!isExpanded) const Spacer(),
         ],
@@ -1093,34 +1349,46 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(
-              currentSong.displayName,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.titleLarge?.copyWith(color: Colors.white),
-              textAlign: TextAlign.center,
+            InkWell(
+              onTap: () => _navigateToAlbum(currentSong as Song),
+              borderRadius: BorderRadius.circular(4),
+              child: Text(
+                currentSong.displayName,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleLarge?.copyWith(color: Colors.white),
+                textAlign: TextAlign.center,
+              ),
             ),
             const SizedBox(height: 4),
-            Text(
-              currentSong.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(color: Colors.white70),
-              textAlign: TextAlign.center,
+            InkWell(
+              onTap: () => _navigateToAlbum(currentSong as Song),
+              borderRadius: BorderRadius.circular(4),
+              child: Text(
+                currentSong.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(color: Colors.white70),
+                textAlign: TextAlign.center,
+              ),
             ),
             const SizedBox(height: 2),
-            Text(
-              currentSong.album,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.white70),
-              textAlign: TextAlign.center,
+            InkWell(
+              onTap: () => _navigateToAlbum(currentSong as Song),
+              borderRadius: BorderRadius.circular(4),
+              child: Text(
+                currentSong.album,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.white70),
+                textAlign: TextAlign.center,
+              ),
             ),
           ],
         ),
@@ -1744,6 +2012,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final song = context.read<PlayerProvider>().currentSong;
     if (song == null) return;
 
+    // 动态标题：显示专辑名/歌手名（截断处理）
+    final albumTitle = song.album.isEmpty ? '查看专辑' : '查看专辑：${song.album}';
+    final artistTitle = song.artist.isEmpty ? '查看歌手' : '查看歌手：${song.artist}';
+
     showModalBottomSheet(
       context: context,
       builder: (context) {
@@ -1775,6 +2047,30 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 onTap: () {
                   Navigator.pop(context);
                   _showLyricPreferencesSheet(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.album),
+                title: Text(
+                  albumTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _navigateToAlbum(song);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.person),
+                title: Text(
+                  artistTitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _navigateToArtist(song);
                 },
               ),
               ListTile(

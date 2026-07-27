@@ -95,6 +95,17 @@ class WordRenderer {
   /// 每个 word index 的当前辉光状态。
   final Map<int, EmphasizeState> _emphasizeStates = <int, EmphasizeState>{};
 
+  /// 行级元数据判定缓存（行绑定期计算一次）。
+  /// true 表示该行为元数据行（作词/作曲 等），整行禁用辉光。
+  /// 仅依赖 [LyricLine.text]，在 [_ensureBound] 时计算，避免每帧重复正则匹配。
+  bool _isMetadataLine = false;
+
+  /// 每字辉光判定缓存（行绑定期计算一次）。
+  /// 与 [_wordPainters] / [_wordWidths] 同长度同索引。
+  /// true 表示该 word 应触发辉光（已通过 duration + 内容过滤）。
+  /// 仅依赖 [LyricWord.text] 与 [LyricWord.duration]，在 [_ensureBound] 时计算。
+  List<bool> _wordEmphasisFlags = const <bool>[];
+
   // ============== 状态查询 ==============
 
   /// 当前 alpha map（不可变视图，供测试断言）。
@@ -194,6 +205,14 @@ class WordRenderer {
       intraWordProgress = 0.0;
     }
 
+    // 行级辉光判定（循环外计算一次）：
+    // _isMetadataLine 在 _ensureBound 时缓存（行切换时才更新）；
+    // _isActive / useGlowEffect / _emphasizeEffect 运行时可变，每帧检查。
+    final bool skipLineEmphasis = _emphasizeEffect == null ||
+        !_isActive ||
+        !LyricPreferences.instance.useGlowEffect ||
+        _isMetadataLine;
+
     bool anyChanged = false;
     for (int i = 0; i < wordCount; i++) {
       final double target = _targetAlphaForExact(i, currentWordIdx, intraWordProgress, dark, bright);
@@ -223,21 +242,17 @@ class WordRenderer {
       if ((nextY - currentY).abs() > 1e-6) anyChanged = true;
       _wordYOffsets[i] = nextY;
 
-      // 强调辉光效果：计算每个 word 的 EmphasizeState
+      // 强调辉光效果：改用缓存的 _wordEmphasisFlags[i] 替代每帧调用 shouldEmphasize。
+      // 字级判定（含正则匹配）在 _ensureBound 时已缓存，此处仅 O(1) 数组读取。
       final LyricWord emWord = words[i];
-      if (_emphasizeEffect != null && _isActive && LyricPreferences.instance.useGlowEffect) {
-        final bool shouldEm = EmphasizeEffect.shouldEmphasize(emWord);
-        if (shouldEm) {
-          _emphasizeStates[i] = _emphasizeEffect!.computeState(
-            word: emWord,
-            currentTimeMs: currentTimeMs,
-            isLastWord: i == wordCount - 1,
-            wordIndex: i,
-            anchorCharCount: emWord.text.runes.length,
-          );
-        } else {
-          _emphasizeStates[i] = EmphasizeState.idle;
-        }
+      if (!skipLineEmphasis && _wordEmphasisFlags[i]) {
+        _emphasizeStates[i] = _emphasizeEffect!.computeState(
+          word: emWord,
+          currentTimeMs: currentTimeMs,
+          isLastWord: i == wordCount - 1,
+          wordIndex: i,
+          anchorCharCount: emWord.text.runes.length,
+        );
       } else {
         _emphasizeStates[i] = EmphasizeState.idle;
       }
@@ -449,6 +464,10 @@ class WordRenderer {
     _emphasizeStates.clear();
     _lastSetAlphas.clear(); // v4 优化：line 切换时清空 alpha 缓存
 
+    // 行级元数据判定缓存：作词/作曲/编曲 等元数据行整行禁用辉光。
+    // 仅依赖 line.text（行绑定后不变），此处计算一次，tick 中仅读取字段。
+    _isMetadataLine = EmphasizeEffect.shouldSkipEmphasizeForLine(line);
+
     // 释放旧 _wordPainters（line 缩短时避免泄漏）
     for (final painter in _wordPainters) {
       painter.dispose();
@@ -461,6 +480,8 @@ class WordRenderer {
       line.words.length,
       (_) => TextPainter(textDirection: TextDirection.ltr),
     );
+    // 预分配辉光判定缓存数组（与 _wordPainters 同长度同索引）
+    _wordEmphasisFlags = List<bool>.filled(line.words.length, false);
     for (int i = 0; i < line.words.length; i++) {
       _wordPainters[i].text = TextSpan(
         text: line.words[i].text,
@@ -476,6 +497,9 @@ class WordRenderer {
       _wordWidths[i] = _wordPainters[i].width;
       _wordAlphas[i] = dark;
       _wordYOffsets[i] = 0;
+      // 缓存该 word 的辉光判定结果（含正则匹配，仅在此执行一次）
+      // tick 中通过 _wordEmphasisFlags[i] O(1) 读取，避免每帧重复正则匹配
+      _wordEmphasisFlags[i] = EmphasizeEffect.shouldEmphasize(line.words[i]);
       // _lastSetAlphas[i] 不设置（默认 null），下次 paintLine 会重新 set text + layout
     }
   }
@@ -489,6 +513,9 @@ class WordRenderer {
     _boundLine = null;
     _boundFontSize = -1;
     _wordWidths = const <double>[];
+    // 清理辉光判定缓存
+    _wordEmphasisFlags = const <bool>[];
+    _isMetadataLine = false;
     // v4 优化：dispose per-word TextPainter 实例
     for (final painter in _wordPainters) {
       painter.dispose();

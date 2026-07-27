@@ -225,6 +225,21 @@ class SettingsRepository {
     await prefs.setBool('lyricon_display_roma', v);
   }
 
+  // ===== 蓝牙歌词配置 =====
+  // 通过修改 MediaSession 元数据（title 显示歌词，artist 显示「作者 - 标题」），
+  // 在蓝牙 AVRCP 协议下让汽车主机等设备显示当前歌词。
+  static const String _keyBluetoothLyricEnabled = 'settings_bluetooth_lyric_enabled';
+
+  Future<bool> getBluetoothLyricEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyBluetoothLyricEnabled) ?? false;
+  }
+
+  Future<void> setBluetoothLyricEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyBluetoothLyricEnabled, v);
+  }
+
   // ===== UI 缩放 =====
 
   Future<double> getUiScale() async {

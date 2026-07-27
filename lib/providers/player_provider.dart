@@ -290,9 +290,18 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         seek(Duration.zero);
         _audioService?.play();
       } else if (_currentIndex >= _playlist.length - 1) {
+        // 走到这里：当前是最后一首（含单首歌场景），且非 FM、非列表循环
         if (onPlaylistEnd != null) {
           await onPlaylistEnd!();
         } else {
+          // 记录当前位置与歌曲实际时长，用于判断是否异常结束
+          // （URL 过期 / 试听片段提前 completed 时，position 明显小于歌曲时长）
+          final lastPosition = _position;
+          final songDuration = _currentSong?.duration ?? Duration.zero;
+          final bool isAbnormalEnd = lastPosition.inSeconds > 5 &&
+              songDuration.inSeconds > 0 &&
+              lastPosition.inSeconds < songDuration.inSeconds * 0.8;
+
           // 非 FM：最后一曲播完回到第一曲
           if (_shuffleEnabled) {
             final currentSong = _currentSong;
@@ -309,7 +318,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           if (_playlist.isNotEmpty) {
             _currentSong = _playlist[_currentIndex];
           }
-          final ok = await _resolveAndPlayCurrentSong();
+          // 异常结束时清除旧 URL，强制重新解析（避免复用过期链接）
+          if (isAbnormalEnd && _currentSong != null && _currentSong!.isOnline) {
+            _currentSong = _currentSong!.copyWith(url: null);
+            _playlist[_currentIndex] = _currentSong!;
+          }
+          // 异常结束时从上次位置继续播放；正常播完从 0 开始
+          final seekTo = isAbnormalEnd ? lastPosition : null;
+          final ok = await _resolveAndPlayCurrentSong(seekTo: seekTo);
           if (!ok) {
             _resolveError = '无法获取播放链接';
           }

@@ -54,7 +54,7 @@ _tmp*/
 native-libs.zip
 
 # IDE/AI tool configs
-.mimicode/
+.mimocode/
 .trae/
 .workbuddy/
 .vscode/
@@ -63,3 +63,7 @@ native-libs.zip
 debug-apk/
 .mimocode/plans/1784872693615-silent-garden.md
 PRODUCT.md
+
+# AI 工具生成的计划文档与性能 trace
+docs/superpowers/
+trace.html

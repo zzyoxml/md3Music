@@ -97,6 +97,194 @@ void main() {
     });
   });
 
+  group('shouldEmphasize - 纯符号过滤', () {
+    test('下划线 _ 1500ms → false（纯符号）', () {
+      final word = makeWord(duration: 1500, text: '_');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('连字符 - 1500ms → false（纯符号）', () {
+      final word = makeWord(duration: 1500, text: '-');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('反斜杠 \\ 1500ms → false（纯符号）', () {
+      final word = makeWord(duration: 1500, text: r'\');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('顿号 、 1500ms → false（CJK 标点属纯符号）', () {
+      final word = makeWord(duration: 1500, text: '、');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('at 符号 @ 1500ms → false（纯符号）', () {
+      final word = makeWord(duration: 1500, text: '@');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('星号 * 1500ms → false（纯符号）', () {
+      final word = makeWord(duration: 1500, text: '*');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('省略号 … 1500ms → false（纯符号）', () {
+      final word = makeWord(duration: 1500, text: '…');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('破折号 — 1500ms → false（纯符号）', () {
+      final word = makeWord(duration: 1500, text: '—');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('波浪号 ～ 1500ms → false（纯符号）', () {
+      final word = makeWord(duration: 1500, text: '～');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('多符号组合 --- 1500ms → false（纯符号）', () {
+      final word = makeWord(duration: 1500, text: '---');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('含字母的混合内容 a- 1500ms → true（非纯符号）', () {
+      final word = makeWord(duration: 1500, text: 'a-');
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
+    });
+
+    test('含数字的混合内容 1. 1500ms → true（非纯符号）', () {
+      final word = makeWord(duration: 1500, text: '1.');
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
+    });
+
+    test('含 CJK 的混合内容 你好。 1500ms → true（非纯符号）', () {
+      final word = makeWord(duration: 1500, text: '你好。');
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
+    });
+  });
+
+  group('shouldEmphasize - 歌手标签过滤', () {
+    test('男： 1500ms → false（带冒号单字标签）', () {
+      final word = makeWord(duration: 1500, text: '男：');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('女: 1500ms → false（半角冒号）', () {
+      final word = makeWord(duration: 1500, text: '女:');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('合： 1500ms → false', () {
+      final word = makeWord(duration: 1500, text: '合：');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('(男) 1500ms → false（括号包裹标签）', () {
+      final word = makeWord(duration: 1500, text: '(男)');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('（女） 1500ms → false（全角括号）', () {
+      final word = makeWord(duration: 1500, text: '（女）');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('合唱： 1500ms → false（多字标签带冒号）', () {
+      final word = makeWord(duration: 1500, text: '合唱：');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('男声 1500ms → false（多字标签无冒号）', () {
+      final word = makeWord(duration: 1500, text: '男声');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('女声 1500ms → false', () {
+      final word = makeWord(duration: 1500, text: '女声');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('合唱 1500ms → false（多字标签无冒号）', () {
+      final word = makeWord(duration: 1500, text: '合唱');
+      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+    });
+
+    test('男 1500ms → true（单字无冒号不过滤，避免误伤正常歌词）', () {
+      // 单字标签必须带冒号或括号才过滤，"男" 单独出现可能是正常歌词字
+      final word = makeWord(duration: 1500, text: '男');
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
+    });
+
+    test('女 1500ms → true（单字无冒号不过滤）', () {
+      final word = makeWord(duration: 1500, text: '女');
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
+    });
+
+    test('合 1500ms → true（单字无冒号不过滤，如"合欢花"中的合）', () {
+      final word = makeWord(duration: 1500, text: '合');
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
+    });
+  });
+
+  group('shouldSkipEmphasizeForLine - 行级元数据过滤', () {
+    LyricLine makeLine(String text) =>
+        LyricLine(startTime: 0, duration: 2000, text: text);
+
+    test('作词：李宗盛 → true（元数据行）', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('作词：李宗盛')), isTrue);
+    });
+
+    test('作曲:黄韵玲 → true（半角冒号）', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('作曲:黄韵玲')), isTrue);
+    });
+
+    test('编曲：陈志远 → true', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('编曲：陈志远')), isTrue);
+    });
+
+    test('制作人：林迈可 → true', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('制作人：林迈可')), isTrue);
+    });
+
+    test('混音：XXX → true', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('混音：张三')), isTrue);
+    });
+
+    test('OP：环球音乐 → true', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('OP：环球音乐')), isTrue);
+    });
+
+    test('OP: Universal → true（半角冒号）', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('OP: Universal')), isTrue);
+    });
+
+    test('空行 → true', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('')), isTrue);
+    });
+
+    test('纯空白行 → true', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('   ')), isTrue);
+    });
+
+    test('月亮代表我的心 → false（正常歌词）', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('月亮代表我的心')), isFalse);
+    });
+
+    test('I love you → false（英文歌词）', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('I love you')), isFalse);
+    });
+
+    test('男：你好 → false（对唱歌词行，不跳过整行）', () {
+      // 男：你好 不应整行跳过，只应跳过 "男：" 这个 word → 字级与行级过滤分工
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('男：你好')), isFalse);
+    });
+
+    test('  作词：李宗盛  → true（带前后空格）', () {
+      expect(EmphasizeEffect.shouldSkipEmphasizeForLine(makeLine('  作词：李宗盛  ')), isTrue);
+    });
+  });
+
   group('computeState - 字内进度 t', () {
     test('t=0 时 scale=1.0, glowLevel≈0, shadowBlur≈0（接近 idle）', () {
       // duration=1000ms：
