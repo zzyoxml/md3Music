@@ -705,6 +705,9 @@ class KugouProvider extends ChangeNotifier {
       );
       if (result != null) {
         _personalFmSongs = result;
+        // 补全 albumName：红心 radio 接口不返回 album_name，但返回了 album_id，
+        // 用 album_id 调 getAlbumDetail 批量补全
+        await _fillPersonalFmAlbumNames();
         if (!isInteractive) {
           _dataTimestamps['personalFm'] = DateTime.now();
         }
@@ -715,6 +718,48 @@ class KugouProvider extends ChangeNotifier {
       _error = e.toString();
     }
     _endLoading();
+  }
+
+  /// 补全 PersonalFm 歌曲缺失的 albumName。
+  /// 红心 radio 接口只返回 album_id 不返回 album_name，
+  /// 需要用 album_id 调 getAlbumDetail 获取专辑名后回填。
+  Future<void> _fillPersonalFmAlbumNames() async {
+    // 收集需要补全的去重 albumId（albumName 为空 且 albumId 非空）
+    final albumIdsToFetch = <String>{};
+    for (final song in _personalFmSongs) {
+      if (song.albumName == null &&
+          song.albumId != null &&
+          song.albumId!.isNotEmpty) {
+        albumIdsToFetch.add(song.albumId!);
+      }
+    }
+    if (albumIdsToFetch.isEmpty) return;
+
+    // 并发获取专辑信息（限制并发数避免请求过多）
+    final albumNameCache = <String, String>{};
+    final futures = albumIdsToFetch.map((albumId) async {
+      try {
+        final detail = await _apiClient.getAlbumDetail(albumId);
+        if (detail != null && detail.name.isNotEmpty) {
+          albumNameCache[albumId] = detail.name;
+        }
+      } catch (_) {
+        // 获取失败不影响其他歌曲
+      }
+    });
+    await Future.wait(futures);
+
+    if (albumNameCache.isEmpty) return;
+
+    // 回填 albumName
+    _personalFmSongs = _personalFmSongs.map((song) {
+      if (song.albumName == null &&
+          song.albumId != null &&
+          albumNameCache.containsKey(song.albumId)) {
+        return song.copyWith(albumName: albumNameCache[song.albumId]);
+      }
+      return song;
+    }).toList();
   }
 
   void moveToFirst(KugouSongDetail song) {

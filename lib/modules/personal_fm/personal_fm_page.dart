@@ -26,6 +26,9 @@ class _PersonalFmPageState extends State<PersonalFmPage>
   /// 顶栏渐变 ScrollController：与 ScrollAwareAppBar 共享
   final ScrollController _scrollController = ScrollController();
 
+  /// 防止 _playSong 期间 _syncFmListToPlayer 把已移到首位的歌曲移回去
+  bool _syncEnabled = true;
+
   final List<Map<String, dynamic>> _modeOptions = [
     {'value': 'normal', 'label': '红心'},
     {'value': 'small', 'label': '小众'},
@@ -195,15 +198,24 @@ class _PersonalFmPageState extends State<PersonalFmPage>
 
     _slideController.forward(from: 0).then((_) async {
       if (!mounted) return;
-      kugou.moveToFirst(song);
-      _slideController.reset();
 
-      await _appendFmSongs();
-      if (!mounted) return;
+      // 临时禁用 _syncFmListToPlayer，防止 notifyListeners 触发的回调
+      // 把已移到首位的歌曲移回去（根因：_appendFmSongs → notifyListeners → _syncFmListToPlayer
+      // → 发现 player 仍在播放旧歌 → moveToFirst(旧歌) 覆盖了我们的 moveToFirst(新歌)）
+      _syncEnabled = false;
+      try {
+        kugou.moveToFirst(song);
+        _slideController.reset();
 
-      await player.playOnlinePlaylist(kugou.personalFmAsSongs, 0);
-      if (!mounted) return;
-      _updateVinylAnimation(player.isPlaying);
+        await _appendFmSongs();
+        if (!mounted) return;
+
+        await player.playOnlinePlaylist(kugou.personalFmAsSongs, 0);
+        if (!mounted) return;
+        _updateVinylAnimation(player.isPlaying);
+      } finally {
+        _syncEnabled = true;
+      }
     });
   }
 
@@ -218,6 +230,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
   }
 
   void _syncFmListToPlayer(PlayerProvider player) {
+    if (!_syncEnabled) return;
     final kugou = Provider.of<KugouProvider>(context, listen: false);
     final songs = kugou.personalFmSongs;
     if (songs.isEmpty || player.playlist.isEmpty) return;

@@ -259,7 +259,15 @@ class KugouPlaylistBrief {
       ),
       name: _cleanName(json['specialname'] ?? json['name'] ?? ''),
       coverUrl: _resolveArtworkUri(
-        json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['cover_url'],
+        // sizable_cover 是 /kmr/v2/albums 等接口实际返回的封面字段，
+        // 与 KugouSongDetail.fromJson 保持一致的字段集
+        json['sizable_cover'] ??
+            json['imgurl'] ??
+            json['img'] ??
+            json['pic'] ??
+            json['cover_url'] ??
+            json['cover'] ??
+            json['trans_param']?['union_cover'],
       ),
       songCount: _parseInt(
         json['songcount'] ?? json['song_count'] ?? json['count'] ?? 0,
@@ -334,6 +342,33 @@ class KugouSongDetail {
     this.songId,
     this.fileId,
   });
+
+  /// 创建副本并覆盖指定字段（用于补全 albumName 等缺失字段）
+  KugouSongDetail copyWith({
+    String? albumName,
+  }) {
+    return KugouSongDetail(
+      hash: hash,
+      albumId: albumId,
+      albumName: albumName ?? this.albumName,
+      artistId: artistId,
+      artistName: artistName,
+      songName: songName,
+      duration: duration,
+      sqHash: sqHash,
+      hqHash: hqHash,
+      hash320: hash320,
+      hash128: hash128,
+      lyrics: lyrics,
+      albumAudioId: albumAudioId,
+      artworkUri: artworkUri,
+      fileName: fileName,
+      privilege: privilege,
+      albumAudioId2: albumAudioId2,
+      songId: songId,
+      fileId: fileId,
+    );
+  }
 
   factory KugouSongDetail.fromJson(Map<String, dynamic> json) {
     // 处理 singerinfo / authors 数组格式
@@ -658,7 +693,15 @@ class KugouPlaylist {
       ),
       name: _str(json['specialname'] ?? json['name'] ?? ''),
       coverUrl: _resolveArtworkUri(
-        json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['cover_url'],
+        // sizable_cover 是 /kmr/v2/albums 等接口实际返回的封面字段，
+        // 与 KugouSongDetail.fromJson 保持一致的字段集
+        json['sizable_cover'] ??
+            json['imgurl'] ??
+            json['img'] ??
+            json['pic'] ??
+            json['cover_url'] ??
+            json['cover'] ??
+            json['trans_param']?['union_cover'],
       ),
       creator: _strNull(json['nickname'] ?? json['creator']),
       songCount: _parseInt(
@@ -942,7 +985,15 @@ class KugouAlbumDetail {
             '',
       ),
       coverUrl: _resolveArtworkUri(
-        json['imgurl'] ?? json['img'] ?? json['pic'] ?? json['cover_url'],
+        // sizable_cover 是 /kmr/v2/albums 等接口实际返回的封面字段，
+        // 与 KugouSongDetail.fromJson 保持一致的字段集
+        json['sizable_cover'] ??
+            json['imgurl'] ??
+            json['img'] ??
+            json['pic'] ??
+            json['cover_url'] ??
+            json['cover'] ??
+            json['trans_param']?['union_cover'],
       ),
       artistName: _strNull(
         json['singername'] ??
