@@ -166,7 +166,7 @@ class SongListItem extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
-    const imgSize = 52.0; // 正方形封面，不被 ListTile 压缩
+    const imgSize = 56.0; // M3 Expressive：52→56dp（M3 触控目标推荐尺寸）
 
     return InkWell(
       onTap: isSelectMode ? onSelectToggle : onTap,
@@ -175,7 +175,8 @@ class SongListItem extends StatelessWidget {
         color: isSelectMode && isSelected
             ? colorScheme.primaryContainer.withValues(alpha: 0.3)
             : Colors.transparent,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        // M3 Expressive：10/6 → 12/8，更呼吸
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           children: [
             // 多选模式：圆形复选框；普通模式：封面图
@@ -183,7 +184,8 @@ class SongListItem extends StatelessWidget {
               _buildCheckbox(colorScheme, imgSize)
             else
               ClipRRect(
-                borderRadius: BorderRadius.circular(8),
+                // M3 Expressive：8dp → 12dp medium
+                borderRadius: BorderRadius.circular(12),
                 child: SizedBox(
                   width: imgSize,
                   height: imgSize,
@@ -205,7 +207,8 @@ class SongListItem extends StatelessWidget {
                       : Container(
                           decoration: BoxDecoration(
                             color: colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(8),
+                            // M3 Expressive：8dp → 12dp medium
+                            borderRadius: BorderRadius.circular(12),
                           ),
                           child: Icon(Icons.music_note, color: colorScheme.onSurfaceVariant),
                         ),
@@ -224,7 +227,8 @@ class SongListItem extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w500,
+                      // M3 Expressive：w500 → w600，与副标题 w400 形成更强对比
+                      fontWeight: FontWeight.w600,
                       color: isCurrentSong ? colorScheme.primary : null,
                     ),
                   ),
