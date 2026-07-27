@@ -6,6 +6,7 @@ import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
 
@@ -422,7 +423,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
 
     return Scaffold(
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: MD3ELoadingIndicator())
           : _error != null
               ? _buildError(context, colorScheme)
               : CustomScrollView(
@@ -662,11 +663,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                     width: 44,
                                     height: 44,
                                     child: Center(
-                                      child: SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(strokeWidth: 2),
-                                      ),
+                                      child: MD3ELoadingIndicator(size: 24),
                                     ),
                                   )
                                 : IconButton.filledTonal(

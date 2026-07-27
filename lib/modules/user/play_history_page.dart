@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../data/models/song.dart';
 import '../../data/repositories/history_repository.dart';
 import '../../providers/player_provider.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
 
@@ -72,7 +73,7 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: MD3ELoadingIndicator())
           : _songs.isEmpty
               ? _buildEmpty()
               : Column(

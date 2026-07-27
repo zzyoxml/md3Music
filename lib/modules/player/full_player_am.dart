@@ -23,6 +23,7 @@ import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/flowing_background.dart';
 import '../../widgets/apple_lyrics/models/lyric_line.dart';
 import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/player_playlist_dialog.dart';
 import 'comments_view.dart';
@@ -553,7 +554,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
+      builder: (_) => const Center(child: MD3ELoadingIndicator()),
     );
     try {
       final api = KugouApiClient();
@@ -754,7 +755,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   // 避免父级 TabBarView/Column 被牵连重建
                   child: RepaintBoundary(
                     child: _isLoadingLyrics
-                        ? const Center(child: CircularProgressIndicator())
+                        ? const Center(child: MD3ELoadingIndicator())
                         // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
                         : Selector<PlayerProvider, int>(
                             selector: (_, p) =>
@@ -930,7 +931,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           ),
                         ),
                       _isLoadingLyrics
-                          ? const Center(child: CircularProgressIndicator())
+                          ? const Center(child: MD3ELoadingIndicator())
                           : RepaintBoundary(
                               // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
                               child: Selector<PlayerProvider, int>(
@@ -1110,7 +1111,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           },
                         ),
                       _isLoadingLyrics
-                          ? const Center(child: CircularProgressIndicator())
+                          ? const Center(child: MD3ELoadingIndicator())
                           : RepaintBoundary(
                               // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
                               child: Selector<PlayerProvider, int>(
@@ -2131,7 +2132,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    CircularProgressIndicator(),
+                    MD3ELoadingIndicator(size: 32),
                     SizedBox(height: 16),
                     Text('加载歌单中...'),
                   ],

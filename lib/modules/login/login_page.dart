@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../providers/kugou_provider.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -324,7 +325,7 @@ class _LoginPageState extends State<LoginPage> {
                           },
                         ),
                       )
-                    : const Center(child: CircularProgressIndicator()),
+                    : const Center(child: MD3ELoadingIndicator()),
               ),
               const SizedBox(height: 24),
               FilledButton.icon(
@@ -383,11 +384,7 @@ class _LoginPageState extends State<LoginPage> {
           FilledButton.icon(
             onPressed: _loggingIn ? null : _onLoginPhone,
             icon: _loggingIn
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
+                ? const MD3ELoadingIndicator(size: 16)
                 : const Icon(Icons.login),
             label: const Text('登录'),
           ),
@@ -419,7 +416,7 @@ class _LoginPageState extends State<LoginPage> {
                     borderRadius: BorderRadius.circular(12),
                     child: Image.memory(bytes, fit: BoxFit.cover),
                   )
-                : const Center(child: CircularProgressIndicator()),
+                : const Center(child: MD3ELoadingIndicator()),
           ),
           const SizedBox(height: 16),
           FilledButton.icon(

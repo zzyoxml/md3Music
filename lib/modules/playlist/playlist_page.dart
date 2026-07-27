@@ -11,6 +11,7 @@ import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../widgets/song_list_item.dart';
 import '../../widgets/playlist_comments_view.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 import '../player/mini_player.dart';
 
 class PlaylistPage extends StatefulWidget {
@@ -738,7 +739,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
       },
       child: Scaffold(
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: MD3ELoadingIndicator())
           : _error != null
           ? _buildError(context, colorScheme)
           : Column(
@@ -1255,11 +1256,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
               if (_isDeleting)
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 12),
-                  child: SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
+                  child: MD3ELoadingIndicator(size: 20),
                 )
               else ...[
                 IconButton(

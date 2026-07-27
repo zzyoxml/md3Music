@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/app_animation.dart';
+import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/song_list_item.dart';
 
@@ -64,7 +66,7 @@ class _ChartsPageState extends State<ChartsPage> {
     return Consumer<KugouProvider>(
       builder: (context, kugou, _) {
         if (kugou.isLoading) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(child: MD3ELoadingIndicator());
         }
         final ranks = kugou.rankList;
         if (ranks == null || ranks.ranks.isEmpty) {
@@ -93,7 +95,7 @@ class _ChartsPageState extends State<ChartsPage> {
             ),
           );
         }
-        return RefreshIndicator(
+        return MD3ERefreshIndicator(
           onRefresh: () => kugou.getRankList(forceRefresh: true),
           child: ListView.builder(
             controller: _scrollController,
@@ -205,7 +207,7 @@ class _ChartsPageState extends State<ChartsPage> {
     return Consumer<KugouProvider>(
       builder: (context, kugou, _) {
         if (kugou.isLoading) {
-          return const Center(child: CircularProgressIndicator());
+          return const Center(child: MD3ELoadingIndicator());
         }
         final ranks = kugou.rankList;
         if (ranks == null || ranks.ranks.isEmpty) {
@@ -234,7 +236,7 @@ class _ChartsPageState extends State<ChartsPage> {
             ),
           );
         }
-        return RefreshIndicator(
+        return MD3ERefreshIndicator(
           onRefresh: () => kugou.getRankList(forceRefresh: true),
           child: GridView.builder(
             controller: _scrollController,
@@ -390,7 +392,7 @@ class _RankSongPageState extends State<_RankSongPage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (kugou.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: MD3ELoadingIndicator());
           }
           final songs = kugou.rankSongs;
           if (songs.isEmpty) {

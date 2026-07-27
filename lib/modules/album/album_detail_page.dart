@@ -9,6 +9,7 @@ import '../../providers/player_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/playlist_comments_view.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
@@ -442,7 +443,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
     return Scaffold(
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const Center(child: MD3ELoadingIndicator())
           : _error != null
               ? _buildError(context, colorScheme)
               : Column(

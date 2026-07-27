@@ -5,6 +5,8 @@ import 'package:provider/provider.dart';
 
 import '../../providers/kugou_provider.dart';
 import '../../widgets/app_animation.dart';
+import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../login/login_page.dart';
 import '../settings/settings_page.dart';
@@ -90,7 +92,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (!kugou.isLoggedIn) return _buildNotLoggedIn(cs, tt);
-          return RefreshIndicator(
+          return MD3ERefreshIndicator(
             onRefresh: () async {
               await kugou.getVipDetail();
               await kugou.getVipMonthRecord();
@@ -488,14 +490,10 @@ class _UserCenterPageState extends State<UserCenterPage> {
                   ? null
                   : () => _handleManualSignIn(context, kugou),
               icon: kugou.manualSignInRunning
-                  ? SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: cs.onSecondaryContainer,
-                    ),
-                  )
+                  ? MD3ELoadingIndicator(
+                      size: 16,
+                      color: cs.onSecondaryContainer,
+                    )
                 : const Icon(Icons.check_circle_outline, size: 16),
             label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
            ),

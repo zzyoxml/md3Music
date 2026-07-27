@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 
 class PersonalFmPage extends StatefulWidget {
@@ -836,9 +837,8 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               color: cs.primary,
             ),
             child: _isLoading
-                ? CircularProgressIndicator(
+                ? MD3ELoadingIndicator(
                     color: cs.onPrimary,
-                    strokeWidth: 2,
                   )
                 : Icon(
                     isPlaying ? Icons.pause : Icons.play_arrow,

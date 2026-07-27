@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../providers/kugou_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 
 /// 评论列表视图。
 ///
@@ -164,7 +165,7 @@ class _CommentsViewState extends State<CommentsView> {
 
     if (_isLoading) {
       return Center(
-        child: CircularProgressIndicator(color: primaryTextColor),
+        child: MD3ELoadingIndicator(color: primaryTextColor),
       );
     }
 
@@ -260,13 +261,9 @@ class _CommentsViewState extends State<CommentsView> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: _isLoadingMore
-                    ? SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: primaryTextColor,
-                        ),
+                    ? MD3ELoadingIndicator(
+                        size: 24,
+                        color: primaryTextColor,
                       )
                     : TextButton(
                         onPressed: _loadMore,

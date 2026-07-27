@@ -9,6 +9,7 @@ import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
@@ -344,7 +345,7 @@ class _SearchPageState extends State<SearchPage>
     final kugouProvider = context.watch<KugouProvider>();
 
     if (kugouProvider.isLoading && (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: MD3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null && (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
@@ -391,7 +392,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: MD3ELoadingIndicator(size: 24),
             ),
         ],
       ),
@@ -408,7 +409,7 @@ class _SearchPageState extends State<SearchPage>
     final kugouProvider = context.watch<KugouProvider>();
 
     if (kugouProvider.isLoading && (kugouProvider.searchResults?.albums.isEmpty ?? true)) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: MD3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null && (kugouProvider.searchResults?.albums.isEmpty ?? true)) {
@@ -465,7 +466,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: MD3ELoadingIndicator(size: 24),
             ),
         ],
       ),
@@ -476,7 +477,7 @@ class _SearchPageState extends State<SearchPage>
     final kugouProvider = context.watch<KugouProvider>();
 
     if (kugouProvider.isLoading && (kugouProvider.searchResults?.artists.isEmpty ?? true)) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: MD3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null && (kugouProvider.searchResults?.artists.isEmpty ?? true)) {
@@ -544,7 +545,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: MD3ELoadingIndicator(size: 24),
             ),
         ],
       ),
@@ -555,7 +556,7 @@ class _SearchPageState extends State<SearchPage>
     final kugouProvider = context.watch<KugouProvider>();
 
     if (kugouProvider.isLoading && (kugouProvider.searchResults?.playlists.isEmpty ?? true)) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: MD3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null && (kugouProvider.searchResults?.playlists.isEmpty ?? true)) {
@@ -617,7 +618,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: CircularProgressIndicator(strokeWidth: 2),
+              child: MD3ELoadingIndicator(size: 24),
             ),
         ],
       ),

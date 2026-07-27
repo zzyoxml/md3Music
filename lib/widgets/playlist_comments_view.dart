@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../providers/kugou_provider.dart';
 import '../services/kugou_api/kugou_models.dart';
+import 'md3e_loading_indicator.dart';
 
 /// 歌单/专辑评论列表视图。
 ///
@@ -159,7 +160,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(32),
-          child: CircularProgressIndicator(),
+          child: MD3ELoadingIndicator(),
         ),
       );
     }
@@ -233,11 +234,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: _isLoadingMore
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                  ? const MD3ELoadingIndicator(size: 24)
                   : TextButton(
                       onPressed: _loadMore,
                       child: const Text('加载更多'),

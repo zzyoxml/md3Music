@@ -8,6 +8,8 @@ import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/album_card.dart';
 import '../../widgets/app_animation.dart';
+import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/song_list_item.dart';
 import '../charts/charts_page.dart';
@@ -172,10 +174,10 @@ class _DiscoverPageState extends State<DiscoverPage> {
           ),
         ],
       ),
-      body: RefreshIndicator(
+      body: MD3ERefreshIndicator(
         onRefresh: _loadAllData,
         child: _isLoading
-            ? const Center(child: CircularProgressIndicator())
+            ? const Center(child: MD3ELoadingIndicator())
             : _error != null
             ? _buildError(colorScheme)
             : CustomScrollView(
@@ -728,7 +730,7 @@ class _PlaylistBrowsePageState extends State<_PlaylistBrowsePage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (kugou.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: MD3ELoadingIndicator());
           }
           final list = kugou.playlistList;
           if (list.isEmpty) return const Center(child: Text('暂无数据'));
@@ -786,7 +788,7 @@ class _DailyRecommendDetailPageState extends State<_DailyRecommendDetailPage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (kugou.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: MD3ELoadingIndicator());
           }
           final songs = kugou.recommendSongsAsSongs;
           if (songs.isEmpty) return const Center(child: Text('暂无数据'));
@@ -837,7 +839,7 @@ class _RankDetailPageState extends State<_RankDetailPage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (kugou.isLoading) {
-            return const Center(child: CircularProgressIndicator());
+            return const Center(child: MD3ELoadingIndicator());
           }
           final songs = kugou.rankSongs;
           if (songs.isEmpty) {
