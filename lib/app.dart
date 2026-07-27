@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import 'core/layout/responsive_layout.dart';
 import 'core/theme/app_theme.dart';
+import 'core/theme/motion_constants.dart';
 import 'data/models/playlist.dart';
 import 'main.dart' show appNavigatorKey;
 import 'modules/charts/charts_page.dart';
@@ -447,9 +448,9 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       children: [
         Expanded(
           child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 400),
-            switchInCurve: const Interval(0.5, 1.0, curve: Curves.easeOut),
-            switchOutCurve: const Interval(0.0, 0.5, curve: Curves.easeIn),
+            duration: M3ExpressiveMotion.defaultDuration,
+            switchInCurve: const Interval(0.5, 1.0, curve: M3ExpressiveMotion.expressiveEasing),
+            switchOutCurve: const Interval(0.0, 0.5, curve: M3ExpressiveMotion.expressiveEasing),
             transitionBuilder: (child, animation) {
               final isEntering = child.key == ValueKey(_selectedIndex);
 

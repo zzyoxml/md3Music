@@ -312,7 +312,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                   children: [
                     Text(
                       _getGreeting(),
-                      style: tt.headlineMedium?.copyWith(
+                      style: tt.displaySmall?.copyWith(
                         color: cs.onPrimaryContainer,
                         fontWeight: FontWeight.bold,
                       ),
