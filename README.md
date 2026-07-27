@@ -7,7 +7,7 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.12+-02569B?logo=flutter)](https://flutter.dev)
 [![Platform](https://img.shields.io/badge/Platform-Android-green)]()
-[![Version](https://img.shields.io/badge/Version-3.4.0-blue)]()
+[![Version](https://img.shields.io/badge/Version-3.5.0-blue)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 </div>
@@ -27,22 +27,32 @@
 ### 手机 · Apple Music 风格
 
 <p align="center">
-  <img src="img/phone/applemusic/06c1d2f4c9d505eebd5f22929bce3a03.jpg" width="220" alt="手机 Apple Music 风格 1" />
-  <img src="img/phone/applemusic/6fdf0863425dc6ac4be62ca4630d00bf.jpg" width="220" alt="手机 Apple Music 风格 2" />
-  <img src="img/phone/applemusic/8b1cbabc78824b4d4c20e91d48ffd2a6.jpg" width="220" alt="手机 Apple Music 风格 3" />
+  <img src="img/phone/applemusic/Screenshot_2026-07-27-16-26-21-709_com.md3music.md3music_1785140818888edit.jpg" width="220" alt="手机 Apple Music 风格 1" />
+  <img src="img/phone/applemusic/Screenshot_2026-07-27-16-26-24-328_com.md3music.md3music_1785140811076edit.jpg" width="220" alt="手机 Apple Music 风格 2" />
+  <img src="img/phone/applemusic/Screenshot_2026-07-27-16-26-28-137_com.md3music.md3music_1785140802166edit.jpg" width="220" alt="手机 Apple Music 风格 3" />
 </p>
 
 ### 手机 · 更多界面
 
 <p align="center">
-  <img src="img/phone/other/1a910009176c619f456736cbfa434eb4.jpg" width="200" alt="手机更多界面 1" />
-  <img src="img/phone/other/1de8fefeb7bd0fcd2407799eeb736276.jpg" width="200" alt="手机更多界面 2" />
-  <img src="img/phone/other/1ebc26c2078a5468531dc1efb2a0be2b.jpg" width="200" alt="手机更多界面 3" />
+  <img src="img/phone/other/Screenshot_2026-07-27-12-11-55-256_com.md3music.md3music-edit.jpg" width="200" alt="手机更多界面 1" />
+  <img src="img/phone/other/Screenshot_2026-07-27-12-12-09-452_com.md3music.md3music_1785125790967edit.jpg" width="200" alt="手机更多界面 2" />
+  <img src="img/phone/other/Screenshot_2026-07-27-12-12-11-629_com.md3music.md3music_1785125804040edit.jpg" width="200" alt="手机更多界面 3" />
 </p>
 <p align="center">
-  <img src="img/phone/other/45e83716a07dd5b19c0241445117664d.jpg" width="200" alt="手机更多界面 4" />
-  <img src="img/phone/other/6546f5b8be1c44ec9709e514f0d5dce0.jpg" width="200" alt="手机更多界面 5" />
-  <img src="img/phone/other/a7ca9d5ad72e5ee65cdb65b74de6f937.jpg" width="200" alt="手机更多界面 6" />
+  <img src="img/phone/other/Screenshot_2026-07-27-12-12-17-432_com.md3music.md3music_1785125828120edit.jpg" width="200" alt="手机更多界面 4" />
+  <img src="img/phone/other/Screenshot_2026-07-27-12-12-29-360_com.md3music.md3music_1785125861447edit.jpg" width="200" alt="手机更多界面 5" />
+  <img src="img/phone/other/Screenshot_2026-07-27-12-12-33-145_com.md3music.md3music_1785125869619edit.jpg" width="200" alt="手机更多界面 6" />
+</p>
+<p align="center">
+  <img src="img/phone/other/Screenshot_2026-07-27-12-12-38-109_com.md3music.md3music_1785125883439edit.jpg" width="200" alt="手机更多界面 7" />
+  <img src="img/phone/other/Screenshot_2026-07-27-12-12-44-567_com.md3music.md3music_1785125899909edit.jpg" width="200" alt="手机更多界面 8" />
+  <img src="img/phone/other/Screenshot_2026-07-27-12-12-59-497_com.md3music.md3music_1785125915013edit.jpg" width="200" alt="手机更多界面 9" />
+</p>
+<p align="center">
+  <img src="img/phone/other/Screenshot_2026-07-27-12-14-20-356_com.md3music.md3music_1785125983291edit.jpg" width="200" alt="手机更多界面 10" />
+  <img src="img/phone/other/Screenshot_2026-07-27-12-14-31-085_com.md3music.md3music_1785125990804edit.jpg" width="200" alt="手机更多界面 11" />
+  <img src="img/phone/other/Screenshot_2026-07-27-12-14-40-376_com.md3music.md3music_1785126001241edit.jpg" width="200" alt="手机更多界面 12" />
 </p>
 
 ### 平板 · Apple Music 风格
@@ -62,13 +72,16 @@
 ### 平板 · 更多界面
 
 <p align="center">
-  <img src="img/pad/other/7343c95bccbc61f8ba795418685e1bcb.jpg" width="560" alt="平板更多界面 1" />
+  <img src="img/pad/other/mmexport1785140345418_1785140430976edit.jpg" width="560" alt="平板更多界面 1" />
 </p>
 <p align="center">
-  <img src="img/pad/other/94e59e208e26dd23b07e4e9b010e26b0.jpg" width="560" alt="平板更多界面 2" />
+  <img src="img/pad/other/mmexport1785140349229_1785140392889edit.jpg" width="560" alt="平板更多界面 2" />
 </p>
 <p align="center">
-  <img src="img/pad/other/fc9be62b3cc5bca413b057cde2c92f1b.jpg" width="560" alt="平板更多界面 3" />
+  <img src="img/pad/other/mmexport1785140353053_1785140379593edit.jpg" width="560" alt="平板更多界面 3" />
+</p>
+<p align="center">
+  <img src="img/pad/other/mmexport1785140356378_1785140371441edit.jpg" width="560" alt="平板更多界面 4" />
 </p>
 
 ---
@@ -78,41 +91,50 @@
 ### 🎵 在线音乐
 - **音乐搜索** - 支持歌曲、专辑、歌单多维度搜索
 - **每日推荐** - 个性化歌曲推荐
-- **热门排行榜** - 多种排行榜实时更新
-- **私人 FM** - 猜你喜欢，无限畅听
+- **热门排行榜** - 多种排行榜实时更新，列表/网格双模式切换
+- **私人 FM** - 猜你喜欢，无限畅听，支持红心/小众/速览模式
+- **歌手详情** - 歌手歌曲浏览，支持搜索/定位/排序，关注/取消关注歌手
+- **歌曲评论** - 歌单/专辑/歌曲评论查看，支持分页加载与头像展示
 - **歌曲信息** - 自动剥离音频扩展名显示纯净标题
 
 ### 🎧 播放体验
-- **多音质选择** - 标准(128k)、高质(320k)、无损(FLAC)
+- **多音质选择** - 标准(128k)、高质(320k)、无损(FLAC)、Hi-Res 无损（自动降级链：Hi-Res → FLAC → 320 → 128 → 试听）
 - **循环模式** - 单曲循环、列表循环、随机播放
 - **播放进度记忆** - 退出或被清理后恢复上次位置与列表，冷启动不会自动出声
+- **异常恢复** - 播放异常结束时强制重新解析 URL 并从断点续播
 - **进度条高潮标记** - 进度条上高亮副歌区间，便于快速跳转
 - **拖动暂停** - 拖动进度条时自动暂停，松手后恢复，定位更准确
 - **逐字歌词** - KRC/LRC/纯文本歌词解析与实时滚动显示，支持 offset
+- **歌词辉光效果** - 智能触发逐字辉光动画，仅在 Apple Music 风格播放页可用
 - **Lyricon 歌词** - 扩展歌词格式支持
 - **桌面歌词** - 桌面悬浮歌词展示
+- **蓝牙歌词** - 通过 MediaSession 元数据实现 AVRCP 蓝牙设备歌词显示
 - **频谱动画** - 播放中动态频谱可视化标识
+- **封面跳转** - 播放页点击歌名/作者/专辑可直接跳转专辑详情页
 - **后台播放** - Android 后台播放通知与状态栏控制
 - **音频焦点** - 耳机拔出、来电等场景自动暂停与恢复
 
 ### 📱 用户中心
-- **VIP 签到** - 自动领取 VIP 特权
-- **我的收藏** - 本地收藏 + 云端同步
+- **VIP 签到** - 自动领取 VIP 特权，打卡日历可视化（签到勾选徽章 + 进度环统计）
+- **我的收藏** - 本地收藏 + 云端同步，自建歌单支持批量多选删除
 - **播放历史** - 自动记录播放记录
-- **下载管理** - 后台下载、写入封面/歌词元数据、支持自定义目录
+- **下载管理** - 后台下载、写入封面/歌词元数据、支持自定义目录、Hi-Res 音源下载
 
 ### ⚙️ 设置功能
 - **一键清理缓存** - 快速清理应用缓存
 - **深色模式** - 浅色/深色/跟随系统/OLED 纯黑
 - **主题色选择** - 预设种子色面板，动态主题色切换
 - **设备模式** - 自动/手机/平板手动切换，播放器与列表按模式适配
+- **播放页样式** - Apple Music 风格开关、歌词高斯模糊、辉光效果、背景动态流光
+- **歌词设置** - 歌词字体选择（仅 Apple Music 风格播放页可用）
 
 ### 🎨 设计风格
-- **Material Design 3** - 最新 MD3 设计规范
+- **Material Design 3** - 最新 MD3 设计规范，全站统一 ColorScheme 色彩角色与 textTheme 文字层级
 - **Apple Music 风格** - 模糊封面背景 + 弹簧动画 + 逐字歌词
 - **动态颜色主题** - 基于 Seed Color 动态配色，支持莫奈色（Android 12+）
 - **滚动感知 AppBar** - 页面滚动时顶栏渐变效果
 - **响应式布局** - 手机/平板自适应，横屏沉浸播放
+- **统一组件规范** - 卡片圆角、Elevation 层级、Chip/Tab 指示器全站一致
 
 ---
 
@@ -269,10 +291,15 @@ md3Music/
 │   ├── modules/                # 功能模块
 │   │   ├── discover/           # 发现页
 │   │   ├── charts/             # 排行榜
-│   │   ├── player/             # 播放器
+│   │   ├── player/             # 播放器（含评论视图）
 │   │   ├── search/             # 搜索
-│   │   ├── user/               # 用户中心
-│   │   └── settings/           # 设置
+│   │   ├── album/              # 专辑详情
+│   │   ├── artist/             # 歌手详情
+│   │   ├── personal_fm/        # 私人 FM
+│   │   ├── user/               # 用户中心（签到/收藏/下载/历史）
+│   │   ├── library/            # 音乐库
+│   │   ├── settings/           # 设置
+│   │   └── login/              # 登录
 │   ├── providers/              # 状态管理
 │   ├── services/               # API 服务（元数据写入/下载管理）
 │   └── widgets/                # 公共组件
@@ -337,6 +364,7 @@ md3Music/
 | 标准 | MP3 | 128 kbps |
 | 高质 | MP3 | 320 kbps |
 | 无损 | FLAC | ~1000 kbps |
+| Hi-Res | FLAC/MKV | ~2000+ kbps |
 
 ---
 
