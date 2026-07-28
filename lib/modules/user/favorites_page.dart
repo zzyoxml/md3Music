@@ -351,7 +351,14 @@ class _FavoritesPageState extends State<FavoritesPage>
   @override
   Widget build(BuildContext context) {
     final textTheme = Theme.of(context).textTheme;
-    return Scaffold(
+    // 批量管理模式下拦截系统返回：退出管理模式而非退出 App
+    return PopScope(
+      canPop: !_isManaging,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _exitManageMode();
+      },
+      child: Scaffold(
       appBar: AppBar(
         title: Text(
           '我的收藏',
@@ -385,6 +392,7 @@ class _FavoritesPageState extends State<FavoritesPage>
           _buildAlbumsTab(),
           _buildArtistsTab(),
         ],
+      ),
       ),
     );
   }

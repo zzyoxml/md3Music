@@ -28,7 +28,7 @@ import '../../widgets/seed_color_picker.dart';
 /// Fallback display when runtime PackageInfo read fails.
 const String kBuildAppVersion = String.fromEnvironment(
   'APP_VERSION',
-  defaultValue: '3.5.0',
+  defaultValue: '3.6.0',
 );
 
 class SettingsPage extends StatefulWidget {
