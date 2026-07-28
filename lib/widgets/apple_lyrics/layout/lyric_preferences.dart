@@ -72,6 +72,7 @@ class LyricPreferences extends ChangeNotifier {
   static const String _keyUseFlowingBackground = 'lyric_use_flowing_background';
   static const String _keyFontSource = 'lyric_font_source';
   static const String _keyCustomFontPath = 'lyric_custom_font_path';
+  static const String _keyShowTranslation = 'lyric_show_translation';
 
   // ============== 当前值 ==============
 
@@ -80,6 +81,7 @@ class LyricPreferences extends ChangeNotifier {
   bool _useGaussianBlur = true;
   bool _useGlowEffect = true;
   bool _useFlowingBackground = true;
+  bool _showTranslation = true;
   LyricFontSource _fontSource = LyricFontSource.system;
   String? _customFontPath;
   // 运行时加载成功后填充的 family（仅 custom 模式且加载成功时非 null）
@@ -91,6 +93,7 @@ class LyricPreferences extends ChangeNotifier {
   bool get useGaussianBlur => _useGaussianBlur;
   bool get useGlowEffect => _useGlowEffect;
   bool get useFlowingBackground => _useFlowingBackground;
+  bool get showTranslation => _showTranslation;
   LyricFontSource get fontSource => _fontSource;
   String? get customFontPath => _customFontPath;
 
@@ -129,6 +132,7 @@ class LyricPreferences extends ChangeNotifier {
     _useGaussianBlur = prefs.getBool(_keyUseGaussianBlur) ?? true;
     _useGlowEffect = prefs.getBool(_keyUseGlowEffect) ?? true;
     _useFlowingBackground = prefs.getBool(_keyUseFlowingBackground) ?? true;
+    _showTranslation = prefs.getBool(_keyShowTranslation) ?? true;
     _fontSource = _fontSourceFromName(prefs.getString(_keyFontSource));
     _customFontPath = prefs.getString(_keyCustomFontPath);
     _loaded = true;
@@ -184,6 +188,15 @@ class LyricPreferences extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyUseFlowingBackground, enabled);
+  }
+
+  /// 设置歌词翻译副行显示开关并持久化。
+  Future<void> setShowTranslation(bool enabled) async {
+    if (_showTranslation == enabled) return;
+    _showTranslation = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShowTranslation, enabled);
   }
 
   // ============== 歌词字体来源 ==============
@@ -266,6 +279,7 @@ class LyricPreferences extends ChangeNotifier {
     _useGaussianBlur = true;
     _useGlowEffect = true;
     _useFlowingBackground = true;
+    _showTranslation = true;
     _fontSource = LyricFontSource.system;
     _customFontPath = null;
     _loadedCustomFontFamily = null;
@@ -276,6 +290,7 @@ class LyricPreferences extends ChangeNotifier {
     await prefs.setBool(_keyUseGaussianBlur, _useGaussianBlur);
     await prefs.setBool(_keyUseGlowEffect, _useGlowEffect);
     await prefs.setBool(_keyUseFlowingBackground, _useFlowingBackground);
+    await prefs.setBool(_keyShowTranslation, _showTranslation);
     await prefs.remove(_keyFontSource);
     await prefs.remove(_keyCustomFontPath);
   }

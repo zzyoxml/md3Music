@@ -252,10 +252,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             lyric?.displayLrcLyric ??
             lyric?.displayLyric ??
             '';
+        // 合并翻译：酷狗 API 返回的 translatedContent，按时间戳最近邻匹配到各行
+        // 即使 showTranslation 关闭也合并数据，toggle 时无需重新 fetch
+        final translationText = lyric?.translatedContent;
         setState(() {
           _isLoadingLyrics = false;
           // 解析器链自动检测格式（KRC/LRC/纯文本）并输出统一 List<LyricLine>
-          _parsedLyrics = LyricParserChain.parse(lyricText);
+          _parsedLyrics = (translationText != null && translationText.isNotEmpty)
+              ? LyricParserChain.parse(lyricText, translationText: translationText)
+              : LyricParserChain.parse(lyricText);
           // 同步记录格式，用于底部标注
           _lyricFormat = LyricParserChain.detectFormat(lyricText);
         });
@@ -1664,7 +1669,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final textTheme = Theme.of(context).textTheme;
     // AM 风格：深色蒙版背景上用 15% 透明度白色作 pill 底，图标纯白，
     // 桌面歌词开启时用实心 icon（与 mini_player 一致）。
-    return Material(
+    // ListenableBuilder 监听 LyricPreferences：翻译开关 toggle 时刷新按钮颜色
+    return ListenableBuilder(
+      listenable: LyricPreferences.instance,
+      builder: (context, _) => Material(
       color: Colors.white.withValues(alpha: 0.15),
       shape: const StadiumBorder(),
       clipBehavior: Clip.antiAlias,
@@ -1792,8 +1800,29 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 ),
               ),
             ),
+            // 7. 翻译开关 — 切换歌词翻译副行显示
+            Expanded(
+              child: InkWell(
+                onTap: () {
+                  LyricPreferences.instance.setShowTranslation(
+                    !LyricPreferences.instance.showTranslation,
+                  );
+                },
+                child: Center(
+                  child: Icon(
+                    Icons.translate,
+                    size: 22,
+                    // 开启时纯白，关闭时 50% 白（视觉上与其它按钮激活态一致）
+                    color: LyricPreferences.instance.showTranslation
+                        ? Colors.white
+                        : Colors.white.withValues(alpha: 0.5),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
+      ),
       ),
     );
   }

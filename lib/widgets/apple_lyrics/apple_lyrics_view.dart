@@ -219,6 +219,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   // 字体缓存：字体变化时强制重算行高 + 失效所有模糊图片缓存
   // （TextPainter 用 fontFamily 测量，旧缓存会与新字体渲染尺寸不一致）
   String? _cachedFontFamily;
+  // 翻译副行缓存：当前行变化或 showTranslation 开关切换时，
+  // 当前行高度需重算（副行高度仅计入当前行）
+  int _cachedCurrentLineIndex = -1;
+  bool _cachedShowTranslation = false;
 
   /// 返回指定行索引上方所有激活间奏占位的累计高度。
   ///
@@ -247,12 +251,15 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   void _recomputeLineHeightsIfNeeded(double fontSize, double viewportWidth) {
     final identitySame = identical(widget.lines, _cachedLinesRef);
     final currentFontFamily = LyricLayout.fontFamily;
+    final currentShowTranslation = LyricPreferences.instance.showTranslation;
     if (fontSize == _cachedFontSize &&
         viewportWidth == _cachedViewportWidth &&
         widget.lines.length == _cachedLinesLength &&
         identitySame &&
         _lineHeights.length == widget.lines.length &&
-        currentFontFamily == _cachedFontFamily) {
+        currentFontFamily == _cachedFontFamily &&
+        _currentLineIndex == _cachedCurrentLineIndex &&
+        currentShowTranslation == _cachedShowTranslation) {
       return; // 缓存命中
     }
     _cachedFontSize = fontSize;
@@ -260,6 +267,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _cachedLinesLength = widget.lines.length;
     _cachedLinesRef = widget.lines;
     _cachedFontFamily = currentFontFamily;
+    _cachedCurrentLineIndex = _currentLineIndex;
+    _cachedShowTranslation = currentShowTranslation;
 
     // v3 优化：列表内容变化时递增 generation counter。
     // lines 用 identical 比较，只有引用变化才递增；
@@ -284,11 +293,15 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     double acc = 0;
     for (int i = 0; i < widget.lines.length; i++) {
       final line = widget.lines[i];
+      // 当前行 + 开关开启时，把翻译副行高度计入（仅当前行预留空间）
+      final showTrans = i == _currentLineIndex &&
+          LyricPreferences.instance.showTranslation;
       heights.add(LyricLayout.measureLineHeight(
         line,
         fontSize,
         mainLineHeight,
         maxLineWidth,
+        showTranslation: showTrans,
       ));
       tops.add(acc);
       acc += heights.last;

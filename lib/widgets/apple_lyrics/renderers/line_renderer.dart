@@ -26,6 +26,7 @@ import 'dart:math';
 import 'package:flutter/widgets.dart';
 
 import '../layout/lyric_layout.dart';
+import '../layout/lyric_preferences.dart';
 import '../models/lyric_line.dart';
 
 /// 整行降级渲染器。
@@ -55,6 +56,12 @@ class LineRenderer {
   /// **性能优化**：之前每帧 paintLine 都创建新 TextPainter + GC，
   /// 现在复用实例，只重新 set text + layout（alpha 变了需要重新 layout）。
   final TextPainter _painter = TextPainter(textDirection: TextDirection.ltr);
+
+  /// 翻译副行专用 TextPainter（与主文本分离，避免复用 _painter 导致
+  /// v4 缓存校验失效——主文本在 alpha 未变时会跳过 set text，若 _painter
+  /// 被翻译副行改写过，下次主文本绘制会错误地画出翻译文本）。
+  final TextPainter _translationPainter =
+      TextPainter(textDirection: TextDirection.ltr);
 
   /// v4 优化：上次 set text + layout 时的 alpha。
   /// 仅在 alpha 变化 > 0.001 时才 set text + layout，避免每帧 N 次 layout。
@@ -179,6 +186,32 @@ class LineRenderer {
       _lastSetMaxWidth = maxWidth;
     }
     _painter.paint(canvas, offset);
+
+    // 翻译副行：仅当前行 + 开关开启 + 有翻译内容时绘制
+    // 副行字号为主行一半，alpha 固定 translationOpacity（不随主行动画变化）
+    if (_isActive &&
+        LyricPreferences.instance.showTranslation &&
+        line.translation != null &&
+        line.translation!.isNotEmpty) {
+      final transFontSize = LyricLayout.translationFontSize(fontSize);
+      // 主文本实际高度（含换行）：用 _painter.height 获取上次 layout 结果
+      final mainHeight = _painter.height;
+      // 主副行间留 0.3em 间隙，与 measureLineHeight 计算保持一致
+      final transY = offset.dy + mainHeight + transFontSize * 0.3;
+      _translationPainter.text = TextSpan(
+        text: line.translation,
+        style: TextStyle(
+          color: Color.fromRGBO(255, 255, 255, LyricLayout.translationOpacity),
+          fontSize: transFontSize,
+          height: LyricLayout.translationLineHeight,
+          fontFamily: LyricLayout.fontFamily,
+        ),
+      );
+      _translationPainter.layout(
+          maxWidth:
+              maxWidth == double.infinity ? double.infinity : maxWidth);
+      _translationPainter.paint(canvas, Offset(offset.dx, transY));
+    }
   }
 
   /// 重置状态：alpha 回到初始值（0.2），isActive=false。
