@@ -51,6 +51,13 @@ class AppleLyricsView extends StatefulWidget {
   /// 是否启用缩放（默认 true）
   final bool enableScale;
 
+  /// 是否强制使用深色背景的歌词颜色（白色文字）。
+  ///
+  /// AM 风格播放器背景始终为深色（Colors.black + 模糊封面），
+  /// 即使 app 处于浅色主题也应使用白色歌词。
+  /// 非 AM 播放器背景跟随主题，浅色主题用黑色歌词。
+  final bool forceDarkBackground;
+
   const AppleLyricsView({
     super.key,
     required this.lines,
@@ -58,6 +65,7 @@ class AppleLyricsView extends StatefulWidget {
     this.isPlaying = false,
     this.onSeek,
     this.enableScale = true,
+    this.forceDarkBackground = false,
   });
 
   /// 找到当前应高亮的行索引：最后一个 `startTime <= currentTimeMs` 的行。
@@ -849,6 +857,16 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
   @override
   Widget build(BuildContext context) {
+    // 根据主题亮度设置歌词文字颜色：
+    // - AM 风格（forceDarkBackground=true）→ 始终白色
+    // - 深色主题 → 白色
+    // - 浅色主题 → 黑色
+    final isLightTheme = Theme.of(context).brightness == Brightness.light;
+    LyricLayout.textColorValue =
+        (widget.forceDarkBackground || !isLightTheme)
+            ? 0xFFFFFFFF
+            : 0xFF000000;
+
     return LayoutBuilder(
       builder: (context, constraints) {
         // 设置视口大小，供 scrollController 计算 targetY
@@ -897,6 +915,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
               perLineOffsets: _buildPerLineOffsets(),
               blurFade: _blurFade,
               blurActive: useGaussian,
+              textColorValue: LyricLayout.textColorValue,
               // v3 优化：传入 generation counter
               linesGeneration: _linesGeneration,
               lineHeightsGeneration: _lineHeightsGeneration,
@@ -1145,7 +1164,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       textPainter.text = TextSpan(
         text: widget.lines[lineIndex].text,
         style: TextStyle(
-          color: Color.fromRGBO(255, 255, 255, 0.5),
+          color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, 0.5),
           fontSize: fontSize,
           height: LyricLayout.lineHeight,
           // 显式注入歌词 fontFamily，与清晰层保持一致，
@@ -1234,6 +1253,10 @@ class _LyricsPainter extends CustomPainter {
   /// 是否启用高斯模糊。
   final bool blurActive;
 
+  /// 当前文字颜色值（0xFFFFFFFF 或 0xFF000000）。
+  /// 主题切换时此值变化，shouldRepaint 据此触发重绘。
+  final int textColorValue;
+
   // v3 优化：generation counter，替代 listEquals O(n) 比较。
   // 列表内容变化时 counter++，shouldRepaint 仅比较 counter 是否变化。
   final int linesGeneration;
@@ -1268,6 +1291,7 @@ class _LyricsPainter extends CustomPainter {
     required this.perLineOffsets,
     required this.blurFade,
     required this.blurActive,
+    required this.textColorValue,
     required this.linesGeneration,
     required this.lineHeightsGeneration,
     required this.lineTopsGeneration,
@@ -1416,6 +1440,7 @@ class _LyricsPainter extends CustomPainter {
         oldDelegate.interludeExpandProgress != interludeExpandProgress ||
         oldDelegate.blurFade != blurFade ||
         oldDelegate.blurActive != blurActive ||
+        oldDelegate.textColorValue != textColorValue ||
         // v3 优化：generation counter 替代 listEquals
         oldDelegate.linesGeneration != linesGeneration ||
         oldDelegate.lineHeightsGeneration != lineHeightsGeneration ||

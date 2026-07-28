@@ -779,6 +779,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               lines: _parsedLyrics,
                               currentTimeMs: positionMs,
                               isPlaying: playerProvider.isPlaying,
+                              forceDarkBackground: true,
                               onSeek: (ms) => playerProvider
                                   .seek(Duration(milliseconds: ms)),
                             ),
@@ -959,6 +960,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                         lines: _parsedLyrics,
                                         currentTimeMs: positionMs,
                                         isPlaying: playerProvider.isPlaying,
+                                        forceDarkBackground: true,
                                         onSeek: (ms) => playerProvider.seek(
                                           Duration(milliseconds: ms),
                                         ),

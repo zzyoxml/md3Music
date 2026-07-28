@@ -72,6 +72,10 @@ class LineRenderer {
   /// maxWidth 变化时也需重新 layout（视口宽度变化导致换行变化）。
   double _lastSetMaxWidth = -1;
 
+  /// 上次 set text 时的文字颜色值。
+  /// 主题切换时 textColorValue 变化，需强制重建 TextSpan。
+  int _lastTextColorValue = -1;
+
   // ============== 状态查询 ==============
 
   /// 当前 alpha（用于测试与外部协调）。
@@ -166,14 +170,16 @@ class LineRenderer {
       Canvas canvas, Offset offset, LyricLine line, double fontSize,
       {double maxWidth = double.infinity}) {
     if (line.text.isEmpty) return;
-    // v4 优化：alpha 变化 < 0.001 且 maxWidth 未变时跳过 set text + layout
+    // v4 优化：alpha 变化 < 0.001 且 maxWidth 未变且颜色未变时跳过 set text + layout
+    final bool colorChanged = LyricLayout.textColorValue != _lastTextColorValue;
     if ((_currentAlpha - _lastSetAlpha).abs() > 0.001 ||
-        maxWidth != _lastSetMaxWidth) {
+        maxWidth != _lastSetMaxWidth ||
+        colorChanged) {
       _painter.text = TextSpan(
         text: line.text,
         style: TextStyle(
-          // 文字颜色固定白色，alpha 整行统一（无 mask 渐变）
-          color: Color.fromRGBO(255, 255, 255, _currentAlpha),
+          // 文字颜色从 LyricLayout 获取，支持主题动态切换
+          color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, _currentAlpha),
           fontSize: fontSize,
           height: LyricLayout.lineHeight,
           // 显式注入歌词 fontFamily（system 模式为 null，走系统字体链）
@@ -184,6 +190,7 @@ class LineRenderer {
           maxWidth: maxWidth == double.infinity ? double.infinity : maxWidth);
       _lastSetAlpha = _currentAlpha;
       _lastSetMaxWidth = maxWidth;
+      _lastTextColorValue = LyricLayout.textColorValue;
     }
     _painter.paint(canvas, offset);
 
@@ -205,7 +212,7 @@ class LineRenderer {
       _translationPainter.text = TextSpan(
         text: auxText,
         style: TextStyle(
-          color: Color.fromRGBO(255, 255, 255, LyricLayout.translationOpacity),
+          color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, LyricLayout.translationOpacity),
           fontSize: transFontSize,
           height: LyricLayout.translationLineHeight,
           fontFamily: LyricLayout.fontFamily,
@@ -228,5 +235,6 @@ class LineRenderer {
     _isConverged = true;
     _lastSetAlpha = -1;
     _lastSetMaxWidth = -1;
+    _lastTextColorValue = -1;
   }
 }

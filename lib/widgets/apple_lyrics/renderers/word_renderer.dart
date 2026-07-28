@@ -100,6 +100,10 @@ class WordRenderer {
   /// 仅依赖 [LyricLine.text]，在 [_ensureBound] 时计算，避免每帧重复正则匹配。
   bool _isMetadataLine = false;
 
+  /// 上次 set text 时的文字颜色值。
+  /// 主题切换时 textColorValue 变化，需清空 _lastSetAlphas 强制重建所有 word TextSpan。
+  int _lastTextColorValue = -1;
+
   /// 每字辉光判定缓存（行绑定期计算一次）。
   /// 与 [_wordPainters] / [_wordWidths] 同长度同索引。
   /// true 表示该 word 应触发辉光（已通过 duration + 内容过滤）。
@@ -327,6 +331,12 @@ class WordRenderer {
       {double maxWidth = double.infinity}) {
     _ensureBound(line, fontSize);
 
+    // 主题切换时 textColorValue 变化，清空 alpha 缓存强制重建所有 word TextSpan
+    if (LyricLayout.textColorValue != _lastTextColorValue) {
+      _lastSetAlphas.clear();
+      _lastTextColorValue = LyricLayout.textColorValue;
+    }
+
     if (line.words.isEmpty) {
       _paintSolidFallback(canvas, offset, line, fontSize, maxWidth: maxWidth);
       return;
@@ -367,7 +377,7 @@ class WordRenderer {
         painter.text = TextSpan(
           text: word.text,
           style: TextStyle(
-            color: Color.fromRGBO(255, 255, 255, alpha),
+            color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, alpha),
             fontSize: fontSize,
             height: lineHeight,
             // 显式注入歌词 fontFamily，与测量路径保持一致
@@ -434,7 +444,7 @@ class WordRenderer {
       _translationPainter.text = TextSpan(
         text: auxText,
         style: TextStyle(
-          color: Color.fromRGBO(255, 255, 255, LyricLayout.translationOpacity),
+          color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, LyricLayout.translationOpacity),
           fontSize: transFontSize,
           height: LyricLayout.translationLineHeight,
           fontFamily: LyricLayout.fontFamily,
@@ -460,7 +470,7 @@ class WordRenderer {
     painter.text = TextSpan(
       text: line.text,
       style: TextStyle(
-        color: Color.fromRGBO(255, 255, 255, alpha),
+        color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, alpha),
         fontSize: fontSize,
         height: LyricLayout.lineHeight,
         // 显式注入歌词 fontFamily，与 paintLine 路径保持一致

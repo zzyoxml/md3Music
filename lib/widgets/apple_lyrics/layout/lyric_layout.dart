@@ -198,8 +198,17 @@ class LyricLayout {
 
   // ============== 颜色 ==============
 
-  /// 文字颜色（固定白色 #FFFFFF）
-  static const int textColorValue = 0xFFFFFFFF;
+  /// 文字颜色（默认白色 #FFFFFF，浅色主题下改为黑色）
+  ///
+  /// 由 [AppleLyricsView] 在 build 时根据主题亮度设置：
+  /// - 深色背景（AM 风格 / 暗色主题）→ 白色 0xFFFFFFFF
+  /// - 浅色背景（非 AM 风格 + 亮色主题）→ 黑色 0xFF000000
+  static int textColorValue = 0xFFFFFFFF;
+
+  /// 文字颜色的 RGB 分量（0-255），供 Color.fromRGBO 使用
+  static int get textRed => (textColorValue >> 16) & 0xFF;
+  static int get textGreen => (textColorValue >> 8) & 0xFF;
+  static int get textBlue => textColorValue & 0xFF;
 
   /// 背景颜色（半透明黑 rgba(0,0,0,0.35)）
   ///

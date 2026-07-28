@@ -4,10 +4,12 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/repositories/settings_repository.dart';
+import '../../data/models/song.dart';
 import '../../main.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../core/utils/audio_scanner.dart';
 import '../../widgets/apple_lyrics/models/lyric_line.dart';
 import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import 'media_notification_service.dart';
@@ -358,27 +360,45 @@ class DesktopLyricService {
 
     // 拉取/解析歌词（修复：用 LyricParserChain 自动识别 KRC/LRC/纯文本）
     if (!_awaitingLyric && _lines.isEmpty) {
-      final lyric = _kugou!.lyric;
-      if (lyric != null && lyric.displayLyric.isNotEmpty) {
-        final lrc = lyric.displayLyric;
-        if (lrc != _currentLrcText) {
-          _currentLrcText = lrc;
-          // LyricParserChain.parse 自动检测格式：
-          // - KRC：返回 LyricLine 列表，每行含 LyricWord 字级时间戳
-          // - LRC：返回 LyricLine 列表，words 为空
-          // - 纯文本：返回 LyricLine 列表，words 为空，startTime 全部为 0
-          _lines = LyricParserChain.parse(
-            lrc,
-            translationText: lyric.translatedContent,
-            romaText: lyric.romaContent,
-          );
-          if (_lines.isEmpty) {
-            _pushLyric('暂无歌词', '', -1);
+      // 本地歌曲优先读取内嵌歌词
+      if (song is Song && !song.isOnline) {
+        final localPath = song.localPath;
+        if (localPath != null && localPath.isNotEmpty) {
+          String filePath = localPath;
+          if (filePath.startsWith('file://')) {
+            filePath = Uri.parse(filePath).toFilePath();
+          }
+          final embedded = readEmbeddedLyrics(filePath);
+          if (embedded != null && embedded.isNotEmpty) {
+            _currentLrcText = embedded;
+            _lines = LyricParserChain.parse(embedded);
+            if (_lines.isEmpty) {
+              _pushLyric('暂无歌词', '', -1);
+            }
           }
         }
-      } else if (song.id.isNotEmpty) {
-        _fetchLyricFor(song);
-        return;
+      }
+
+      // 内嵌歌词为空时从酷狗 API 获取
+      if (_lines.isEmpty) {
+        final lyric = _kugou!.lyric;
+        if (lyric != null && lyric.displayLyric.isNotEmpty) {
+          final lrc = lyric.displayLyric;
+          if (lrc != _currentLrcText) {
+            _currentLrcText = lrc;
+            _lines = LyricParserChain.parse(
+              lrc,
+              translationText: lyric.translatedContent,
+              romaText: lyric.romaContent,
+            );
+            if (_lines.isEmpty) {
+              _pushLyric('暂无歌词', '', -1);
+            }
+          }
+        } else if (song.id.isNotEmpty) {
+          _fetchLyricFor(song);
+          return;
+        }
       }
     }
 
@@ -411,7 +431,29 @@ class DesktopLyricService {
     if (_awaitingLyric || song == null) return;
     _awaitingLyric = true;
     try {
-      await _kugou!.getLyric(song.id, songName: song.title, fmt: 'lrc');
+      // 本地歌曲优先读取内嵌歌词
+      if (song is Song && !song.isOnline) {
+        final localPath = song.localPath;
+        if (localPath != null && localPath.isNotEmpty) {
+          String filePath = localPath;
+          if (filePath.startsWith('file://')) {
+            filePath = Uri.parse(filePath).toFilePath();
+          }
+          final embedded = readEmbeddedLyrics(filePath);
+          if (embedded != null && embedded.isNotEmpty) {
+            // 内嵌歌词已在 _onTick 中解析，此处仅标记不需要 API 获取
+            return;
+          }
+        }
+        // 内嵌歌词为空，用空 hash + 关键词搜索酷狗歌词
+        final searchName = song.artist != '未知艺术家'
+            ? '${song.title} ${song.artist}'
+            : song.title;
+        await _kugou!.getLyric('', songName: searchName, fmt: 'lrc');
+      } else {
+        // 在线歌曲用 song.id 作为 hash
+        await _kugou!.getLyric(song.id, songName: song.title, fmt: 'lrc');
+      }
     } catch (_) {
       _pushLyric('歌词加载失败', '', -1);
     } finally {

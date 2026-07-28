@@ -11,6 +11,7 @@ import '../core/services/lyricon_provider_service.dart';
 import '../core/services/media_notification_service.dart';
 import '../core/services/media_store_service.dart';
 import '../data/models/song.dart';
+import '../core/utils/audio_scanner.dart';
 import '../data/repositories/history_repository.dart';
 import '../data/repositories/player_state_repository.dart';
 import '../data/repositories/settings_repository.dart';
@@ -1180,6 +1181,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       title: song.displayName,
       artist: song.artist,
       artUrl: song.artworkUri,
+      // 本地歌曲传递文件路径，供原生侧提取内嵌封面
+      fallbackFilePath: song.localPath,
       isPlaying: _isPlaying,
       position: _position,
       duration: _duration ?? Duration.zero,
@@ -1199,6 +1202,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   just_audio.UriAudioSource _createAudioSource(Song song) {
     final playbackUrl = song.isOnline ? song.url : song.localPath;
+    // 本地歌曲的 artworkUri 是 local:// 或 content:// 格式，
+    // just_audio 无法加载这些 URI 作为封面；系统通知封面由
+    // AudioPlaybackService 通过 fallbackFilePath 提取内嵌封面处理
+    final effectiveArtUri = song.isOnline && song.artworkUri != null
+        ? Uri.parse(song.artworkUri!)
+        : null;
     if (kIsWeb) {
       return createAudioSourceWeb(
         id: song.id,
@@ -1207,7 +1216,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         title: song.displayName,
         artist: song.artist,
         album: song.album,
-        artUri: song.artworkUri != null ? Uri.parse(song.artworkUri!) : null,
+        artUri: effectiveArtUri,
       );
     }
     return createAudioSource(
@@ -1217,7 +1226,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       title: song.displayName,
       artist: song.artist,
       album: song.album,
-      artUri: song.artworkUri != null ? Uri.parse(song.artworkUri!) : null,
+      artUri: effectiveArtUri,
     );
   }
 
@@ -1334,32 +1343,46 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       List<LyricLine> lines = const [];
       if (song != null) {
-        final ctx = appNavigatorKey.currentContext;
-        if (ctx != null) {
-          try {
-            final kugou = ctx.read<KugouProvider>();
-            // fmt='lrc' 触发 KugouApiClient 内部并发双请求（LRC + KRC），
-            // 返回的 KugouLyric 同时携带 decodedContent（LRC）与
-            // decodedKrcContent（KRC），由 displayLyric 优先返回 KRC 明文。
-            // 不复用 kugou.lyric 缓存：KugouProvider 未暴露 lyricSongId getter，
-            // 无法判断缓存是否属于当前歌曲（切歌瞬间缓存可能仍是上一首）。
-            // getLyric 内部有 _lyricSongId 竞态保护，与 apple_lyrics_view
-            // 的并发请求互不干扰（后调覆盖前调，结果一致）。
-            await kugou.getLyric(song.id, songName: song.title, fmt: 'lrc');
-            if (token != _lyriconFetchToken) return; // 切歌已变化，丢弃旧结果
-            // 复用 LyricParserChain 自动识别 KRC/LRC/纯文本（与
-            // DesktopLyricService 同一解析入口，不重复实现解析逻辑）
-            final text = kugou.lyric?.displayLyric;
-            final translationText = kugou.lyric?.translatedContent;
-            final romaText = kugou.lyric?.romaContent;
-            if (text != null && text.isNotEmpty) {
-              lines = LyricParserChain.parse(
-                text,
-                translationText: translationText,
-                romaText: romaText,
-              );
+        // 本地歌曲优先读取内嵌歌词
+        if (!song.isOnline) {
+          final localPath = song.localPath;
+          if (localPath != null && localPath.isNotEmpty) {
+            String filePath = localPath;
+            if (filePath.startsWith('file://')) {
+              filePath = Uri.parse(filePath).toFilePath();
             }
-          } catch (_) {}
+            final embedded = readEmbeddedLyrics(filePath);
+            if (embedded != null && embedded.isNotEmpty) {
+              lines = LyricParserChain.parse(embedded);
+            }
+          }
+        }
+
+        // 内嵌歌词为空时从酷狗 API 获取
+        if (lines.isEmpty) {
+          final ctx = appNavigatorKey.currentContext;
+          if (ctx != null) {
+            try {
+              final kugou = ctx.read<KugouProvider>();
+              // 本地歌曲传空 hash + "歌名 艺术家" 关键词搜索
+              final lyricHash = song.isOnline ? song.id : '';
+              final searchName = !song.isOnline && song.artist != '未知艺术家'
+                  ? '${song.title} ${song.artist}'
+                  : song.title;
+              await kugou.getLyric(lyricHash, songName: searchName, fmt: 'lrc');
+              if (token != _lyriconFetchToken) return;
+              final text = kugou.lyric?.displayLyric;
+              final translationText = kugou.lyric?.translatedContent;
+              final romaText = kugou.lyric?.romaContent;
+              if (text != null && text.isNotEmpty) {
+                lines = LyricParserChain.parse(
+                  text,
+                  translationText: translationText,
+                  romaText: romaText,
+                );
+              }
+            } catch (_) {}
+          }
         }
       }
       if (token != _lyriconFetchToken) return;

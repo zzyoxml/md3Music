@@ -18,9 +18,7 @@ import '../../providers/downloads_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import 'comments_view.dart';
-import '../../widgets/apple_lyrics/apple_lyrics_view.dart';
-import '../../widgets/apple_lyrics/models/lyric_line.dart';
-import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
+import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_transport_row.dart';
@@ -54,7 +52,7 @@ class FullPlayer extends StatefulWidget {
 class _FullPlayerState extends State<FullPlayer>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
-  List<LyricLine> _parsedLyrics = const [];
+  String _lyrics = '';
   bool _isLoadingLyrics = false;
   String? _lastSongId;
 
@@ -329,7 +327,7 @@ class _FullPlayerState extends State<FullPlayer>
       _currentTabLength = newTabLength;
       // Pad 模式首次进入时（从 3 tab 切到 2 tab）默认打开歌词。
       // 注意：children 列表在 pad 模式被 `if (!_isPadMode)` 跳过 SongInfo，
-      // 所以 children 实际只有 2 个：index 0 = AppleLyricsView, index 1 = CommentsView。
+      // 所以 children 实际只有 2 个：index 0 = LyricsView, index 1 = CommentsView。
       // 因此歌词在 pad 模式下的 index 是 0，不是 1。
       // 后续用户手动切换 tab 后不强制重置，保留用户当前选择。
       final isFirstEnterPad = shouldBePadMode && newTabLength == 2;
@@ -420,13 +418,11 @@ class _FullPlayerState extends State<FullPlayer>
 
     setState(() {
       _isLoadingLyrics = true;
-      _parsedLyrics = const [];
+      _lyrics = '';
     });
 
     try {
       String lyricText = '';
-      String? translationText;
-      String? romaText;
 
       // 本地歌曲优先读取内嵌歌词（ID3 USLT / Vorbis LYRICS / MP4 ©lyr）
       if (song is Song && !song.isOnline) {
@@ -460,26 +456,20 @@ class _FullPlayerState extends State<FullPlayer>
               lyric?.displayLrcLyric ??
               lyric?.displayLyric ??
               '';
-          translationText = lyric?.translatedContent;
-          romaText = lyric?.romaContent;
         }
       }
 
       if (mounted) {
         setState(() {
           _isLoadingLyrics = false;
-          _parsedLyrics = LyricParserChain.parse(
-            lyricText,
-            translationText: translationText,
-            romaText: romaText,
-          );
+          _lyrics = lyricText;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _isLoadingLyrics = false;
-          _parsedLyrics = const [];
+          _lyrics = '';
         });
       }
     }
@@ -615,14 +605,11 @@ class _FullPlayerState extends State<FullPlayer>
                   behavior: HitTestBehavior.translucent,
                   child: _isLoadingLyrics
                       ? const Center(child: MD3ELoadingIndicator())
-                      : AppleLyricsView(
-                          lines: _parsedLyrics,
-                          currentTimeMs:
-                              playerProvider.position.inMilliseconds,
-                          isPlaying: playerProvider.isPlaying,
-                          onSeek: (timeMs) {
-                            playerProvider
-                                .seek(Duration(milliseconds: timeMs));
+                      : LyricsView(
+                          lyrics: _lyrics,
+                          position: playerProvider.position,
+                          onSeek: (duration) {
+                            playerProvider.seek(duration);
                           },
                         ),
                 ),
@@ -760,14 +747,11 @@ class _FullPlayerState extends State<FullPlayer>
                         ),
                       _isLoadingLyrics
                           ? const Center(child: MD3ELoadingIndicator())
-                          : AppleLyricsView(
-                              lines: _parsedLyrics,
-                              currentTimeMs:
-                                  playerProvider.position.inMilliseconds,
-                              isPlaying: playerProvider.isPlaying,
-                              onSeek: (timeMs) {
-                                playerProvider
-                                    .seek(Duration(milliseconds: timeMs));
+                          : LyricsView(
+                              lyrics: _lyrics,
+                              position: playerProvider.position,
+                              onSeek: (duration) {
+                                playerProvider.seek(duration);
                               },
                             ),
                       CommentsView(
@@ -903,14 +887,11 @@ class _FullPlayerState extends State<FullPlayer>
                         _buildSongInfo(playerProvider, currentSong, colorScheme),
                       _isLoadingLyrics
                           ? const Center(child: MD3ELoadingIndicator())
-                          : AppleLyricsView(
-                              lines: _parsedLyrics,
-                              currentTimeMs:
-                                  playerProvider.position.inMilliseconds,
-                              isPlaying: playerProvider.isPlaying,
-                              onSeek: (timeMs) {
-                                playerProvider
-                                    .seek(Duration(milliseconds: timeMs));
+                          : LyricsView(
+                              lyrics: _lyrics,
+                              position: playerProvider.position,
+                              onSeek: (duration) {
+                                playerProvider.seek(duration);
                               },
                             ),
                       CommentsView(

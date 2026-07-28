@@ -294,7 +294,7 @@ class InterludeDots {
       final double dy = 0.0;
       final paint = Paint()
         ..style = PaintingStyle.fill
-        ..color = Color.fromRGBO(255, 255, 255, alpha);
+        ..color = Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, alpha);
       canvas.drawCircle(Offset(dx, dy), dotRadius, paint);
     }
 

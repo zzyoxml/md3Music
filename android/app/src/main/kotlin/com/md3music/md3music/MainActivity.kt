@@ -180,6 +180,7 @@ class MainActivity : FlutterActivity() {
                         putExtra(AudioPlaybackService.EXTRA_TITLE, call.argument<String>("title") ?: "")
                         putExtra(AudioPlaybackService.EXTRA_ARTIST, call.argument<String>("artist") ?: "")
                         putExtra(AudioPlaybackService.EXTRA_ART_URL, call.argument<String>("artUrl"))
+                        putExtra(AudioPlaybackService.EXTRA_FALLBACK_FILE_PATH, call.argument<String>("fallbackFilePath"))
                         putExtra(AudioPlaybackService.EXTRA_IS_PLAYING, call.argument<Boolean>("isPlaying") ?: false)
                         putExtra(AudioPlaybackService.EXTRA_POSITION, call.argument<Number>("position")?.toLong() ?: 0L)
                         putExtra(AudioPlaybackService.EXTRA_DURATION, call.argument<Number>("duration")?.toLong() ?: 0L)

@@ -16,6 +16,8 @@ import android.graphics.Paint
 import android.os.Handler
 import android.os.Looper
 import android.graphics.Typeface
+import android.media.MediaMetadataRetriever
+import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -48,6 +50,7 @@ class AudioPlaybackService : Service() {
         const val EXTRA_TITLE = "title"
         const val EXTRA_ARTIST = "artist"
         const val EXTRA_ART_URL = "artUrl"
+        const val EXTRA_FALLBACK_FILE_PATH = "fallbackFilePath"
         const val EXTRA_IS_PLAYING = "isPlaying"
         const val EXTRA_POSITION = "position"
         const val EXTRA_DURATION = "duration"
@@ -283,6 +286,7 @@ class AudioPlaybackService : Service() {
         val title = intent?.getStringExtra(EXTRA_TITLE) ?: ""
         val artist = intent?.getStringExtra(EXTRA_ARTIST) ?: ""
         val artUrl = intent?.getStringExtra(EXTRA_ART_URL)
+        val fallbackFilePath = intent?.getStringExtra(EXTRA_FALLBACK_FILE_PATH)
         val isPlaying = intent?.getBooleanExtra(EXTRA_IS_PLAYING, false) ?: false
         val position = intent?.getLongExtra(EXTRA_POSITION, 0L) ?: 0L
         val duration = intent?.getLongExtra(EXTRA_DURATION, 0L) ?: 0L
@@ -291,7 +295,7 @@ class AudioPlaybackService : Service() {
         val isFavorited =
             intent?.getBooleanExtra(EXTRA_IS_FAVORITED, false) ?: false
 
-        showNotification(title, artist, artUrl, isPlaying, position, duration, desktopLyricEnabled, isFavorited)
+        showNotification(title, artist, artUrl, fallbackFilePath, isPlaying, position, duration, desktopLyricEnabled, isFavorited)
 
         if (isPlaying) {
             acquireWakeLock(this)
@@ -440,10 +444,75 @@ class AudioPlaybackService : Service() {
         )
     }
 
+    /// 根据 URI 类型加载封面 Bitmap，支持：
+    /// - http(s):// → URL 下载（在线音乐）
+    /// - content:// → ContentResolver 加载（MediaStore albumart）
+    /// - local://<path> → 提取文件路径，用 MediaMetadataRetriever 读内嵌封面
+    /// - file://<path> → 转为文件路径，用 MediaMetadataRetriever 读内嵌封面
+    /// - 纯文件路径 → 直接用 MediaMetadataRetriever 读内嵌封面
+    /// [fallbackFilePath] 在所有方式失败后作为最终回退
+    private fun loadArtworkBitmap(artUri: String, fallbackFilePath: String?): Bitmap? {
+        // 1. http(s):// 在线封面
+        if (artUri.startsWith("http://") || artUri.startsWith("https://")) {
+            return try {
+                BitmapFactory.decodeStream(java.net.URL(artUri).openStream())
+            } catch (_: Exception) { null }
+        }
+
+        // 2. content:// MediaStore albumart
+        if (artUri.startsWith("content://")) {
+            try {
+                val uri = Uri.parse(artUri)
+                contentResolver.openInputStream(uri)?.use { input ->
+                    return BitmapFactory.decodeStream(input)
+                }
+            } catch (_: Exception) {}
+            // content:// 加载失败，回退到 fallbackFilePath 提取内嵌封面
+            if (!fallbackFilePath.isNullOrEmpty()) {
+                return extractEmbeddedArtwork(fallbackFilePath)
+            }
+            return null
+        }
+
+        // 3. local://<path> 或 file://<path>：提取文件路径后读内嵌封面
+        val filePath = when {
+            artUri.startsWith("local://") -> artUri.substring("local://".length)
+            artUri.startsWith("file://") -> {
+                val uri = Uri.parse(artUri)
+                uri.path ?: artUri.substring("file://".length)
+            }
+            else -> artUri
+        }
+        return extractEmbeddedArtwork(filePath)
+    }
+
+    /// 用 MediaMetadataRetriever 从音频文件中提取内嵌封面图。
+    /// 支持真实文件路径、file:// URI 和 content:// URI。
+    private fun extractEmbeddedArtwork(filePath: String): Bitmap? {
+        return try {
+            val retriever = MediaMetadataRetriever()
+            if (filePath.startsWith("content://")) {
+                // content:// URI 需要 Context 重载
+                retriever.setDataSource(this, Uri.parse(filePath))
+            } else if (filePath.startsWith("file://")) {
+                // file:// URI 转为真实路径
+                val path = Uri.parse(filePath).path ?: filePath.substring("file://".length)
+                retriever.setDataSource(path)
+            } else {
+                // 纯文件路径
+                retriever.setDataSource(filePath)
+            }
+            val art = retriever.embeddedPicture
+            retriever.release()
+            if (art != null) BitmapFactory.decodeByteArray(art, 0, art.size) else null
+        } catch (_: Exception) { null }
+    }
+
     private fun showNotification(
         title: String,
         artist: String,
         artUrl: String?,
+        fallbackFilePath: String?,
         isPlaying: Boolean,
         position: Long,
         duration: Long,
@@ -524,10 +593,12 @@ class AudioPlaybackService : Service() {
                     .setShowActionsInCompactView(0, 1, 3)
             )
 
-        if (!artUrl.isNullOrEmpty()) {
+        // 封面加载：支持 http(s):// / content:// / local:// / file:// / 文件路径
+        val effectiveArtUrl = artUrl ?: fallbackFilePath
+        if (!effectiveArtUrl.isNullOrEmpty()) {
             Thread {
                 try {
-                    val originalBitmap = BitmapFactory.decodeStream(java.net.URL(artUrl).openStream())
+                    val originalBitmap = loadArtworkBitmap(effectiveArtUrl, fallbackFilePath)
                     if (originalBitmap != null) {
                         // 缓存原始 bitmap 供蓝牙歌词 refreshMetadata 复用，避免重复下载
                         lastArtBitmap = originalBitmap
@@ -545,7 +616,7 @@ class AudioPlaybackService : Service() {
                                 .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
                                 .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, originalBitmap)
                                 .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, originalBitmap)
-                                .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artUrl)
+                                .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, effectiveArtUrl)
                                 .build()
                         )
                     } else {
