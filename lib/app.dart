@@ -117,7 +117,7 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class _AppView extends StatelessWidget {
+class _AppView extends StatefulWidget {
   final bool showOnboarding;
 
   const _AppView({this.showOnboarding = false});
@@ -197,7 +197,7 @@ class _AppViewState extends State<_AppView> {
         );
       },
       navigatorKey: appNavigatorKey,
-      initialRoute: showOnboarding ? '/onboarding' : '/',
+      initialRoute: widget.showOnboarding ? '/onboarding' : '/',
       routes: {
         // '/' 不在 routes 注册，改在 onGenerateRoute 用 _UpFadeMainRoute 创建，
         // 以便 push FullPlayer 时主页面向上淡出（仅 FullPlayer 生效）
