@@ -187,19 +187,23 @@ class LineRenderer {
     }
     _painter.paint(canvas, offset);
 
-    // 翻译副行：仅当前行 + 开关开启 + 有翻译内容时绘制
-    // 副行字号为主行一半，alpha 固定 translationOpacity（不随主行动画变化）
+    // 辅助副行（翻译或罗马音）：仅当前行 + 开关开启 + 有内容时绘制
+    // 根据 displayMode 选择显示 translation 还是 roma
+    // 副行字号为主行 70%，alpha 固定 translationOpacity（不随主行动画变化）
+    final auxText = LyricPreferences.instance.displayMode == LyricDisplayMode.roma
+        ? line.roma
+        : line.translation;
     if (_isActive &&
         LyricPreferences.instance.showTranslation &&
-        line.translation != null &&
-        line.translation!.isNotEmpty) {
+        auxText != null &&
+        auxText.isNotEmpty) {
       final transFontSize = LyricLayout.translationFontSize(fontSize);
       // 主文本实际高度（含换行）：用 _painter.height 获取上次 layout 结果
       final mainHeight = _painter.height;
       // 主副行间留 0.3em 间隙，与 measureLineHeight 计算保持一致
       final transY = offset.dy + mainHeight + transFontSize * 0.3;
       _translationPainter.text = TextSpan(
-        text: line.translation,
+        text: auxText,
         style: TextStyle(
           color: Color.fromRGBO(255, 255, 255, LyricLayout.translationOpacity),
           fontSize: transFontSize,

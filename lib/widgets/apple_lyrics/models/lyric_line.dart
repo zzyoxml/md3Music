@@ -66,6 +66,10 @@ class LyricLine {
   /// 翻译文本，可空（如无翻译数据）。
   final String? translation;
 
+  /// 罗马音/音译文本，可空（如无罗马音数据）。与 [translation] 并列，
+  /// 二者可同时存在（如日语歌曲同时有中文翻译和罗马音）。
+  final String? roma;
+
   /// 常量构造函数。[words] 默认空常量列表。
   const LyricLine({
     required this.startTime,
@@ -73,6 +77,7 @@ class LyricLine {
     required this.text,
     this.words = const [],
     this.translation,
+    this.roma,
   });
 
   /// 该行是否有逐字时间戳。渲染器据此切换逐字 / 整行模式。
@@ -91,7 +96,9 @@ class LyricLine {
     String? text,
     List<LyricWord>? words,
     String? translation,
+    String? roma,
     bool clearTranslation = false,
+    bool clearRoma = false,
   }) {
     return LyricLine(
       startTime: startTime ?? this.startTime,
@@ -99,6 +106,7 @@ class LyricLine {
       text: text ?? this.text,
       words: words ?? this.words,
       translation: clearTranslation ? null : (translation ?? this.translation),
+      roma: clearRoma ? null : (roma ?? this.roma),
     );
   }
 
@@ -111,6 +119,7 @@ class LyricLine {
           duration == other.duration &&
           text == other.text &&
           translation == other.translation &&
+          roma == other.roma &&
           listEquals(words, other.words);
 
   @override
@@ -119,11 +128,13 @@ class LyricLine {
         duration,
         text,
         translation,
+        roma,
         Object.hashAll(words),
       );
 
   @override
   String toString() =>
       'LyricLine(startTime: $startTime, duration: $duration, text: \'$text\', '
-      'words: ${words.length}, translation: ${translation == null ? 'null' : '\'$translation\''})';
+      'words: ${words.length}, translation: ${translation == null ? 'null' : '\'$translation\''}, '
+      'roma: ${roma == null ? 'null' : '\'$roma\''})';
 }

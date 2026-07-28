@@ -799,12 +799,16 @@ class KugouLyric {
   final String? decodedContent;
   final String? decodedKrcContent;
   final String? translatedContent;
+  /// 罗马音/音译 LRC 明文（酷狗 KRC [language:] 中 language=1 条目）。
+  /// 与 [translatedContent] 分离，独立通路传递到渲染层。
+  final String? romaContent;
 
   const KugouLyric({
     required this.content,
     this.decodedContent,
     this.decodedKrcContent,
     this.translatedContent,
+    this.romaContent,
   });
 
   factory KugouLyric.fromJson(Map<String, dynamic> json) {
@@ -835,6 +839,9 @@ class KugouLyric {
 
   /// 仅返回 LRC 明文（可空）
   String? get displayLrcLyric => decodedContent;
+
+  /// 仅返回罗马音 LRC 明文（可空）
+  String? get displayRomaLyric => romaContent;
 }
 
 class KugouArtistDetail {

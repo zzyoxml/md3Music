@@ -60,6 +60,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   String? _lastSongId;
   // 当前歌词格式（KRC / LRC / plaintext），用于底部标注；null 表示尚未检测
   LyricFormat? _lyricFormat;
+  // 当前歌曲是否有翻译/罗马音数据，用于 ActionBar 长按切换模式判断
+  bool _hasTranslation = false;
+  bool _hasRoma = false;
 
   // 封面 + 背景淡入淡出动画
   late final AnimationController _artworkFadeController;
@@ -252,15 +255,21 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             lyric?.displayLrcLyric ??
             lyric?.displayLyric ??
             '';
-        // 合并翻译：酷狗 API 返回的 translatedContent，按时间戳最近邻匹配到各行
-        // 即使 showTranslation 关闭也合并数据，toggle 时无需重新 fetch
+        // 合并翻译和罗马音：酷狗 API 返回的 translatedContent/romaContent，
+        // 按时间戳最近邻匹配到各行。即使 showTranslation 关闭也合并数据，
+        // toggle 时无需重新 fetch
         final translationText = lyric?.translatedContent;
+        final romaText = lyric?.romaContent;
         setState(() {
           _isLoadingLyrics = false;
+          _hasTranslation = translationText != null && translationText.isNotEmpty;
+          _hasRoma = romaText != null && romaText.isNotEmpty;
           // 解析器链自动检测格式（KRC/LRC/纯文本）并输出统一 List<LyricLine>
-          _parsedLyrics = (translationText != null && translationText.isNotEmpty)
-              ? LyricParserChain.parse(lyricText, translationText: translationText)
-              : LyricParserChain.parse(lyricText);
+          _parsedLyrics = LyricParserChain.parse(
+            lyricText,
+            translationText: translationText,
+            romaText: romaText,
+          );
           // 同步记录格式，用于底部标注
           _lyricFormat = LyricParserChain.detectFormat(lyricText);
         });
@@ -1800,7 +1809,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 ),
               ),
             ),
-            // 7. 翻译开关 — 切换歌词翻译副行显示
+            // 7. 翻译/罗马音开关 — 短按 toggle 副行显示，长按切换模式
             Expanded(
               child: InkWell(
                 onTap: () {
@@ -1808,9 +1817,31 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     !LyricPreferences.instance.showTranslation,
                   );
                 },
+                onLongPress: () {
+                  // 仅当歌曲同时有翻译和罗马音时才切换模式
+                  if (!_hasTranslation || !_hasRoma) return;
+                  final next =
+                      LyricPreferences.instance.displayMode ==
+                              LyricDisplayMode.translation
+                          ? LyricDisplayMode.roma
+                          : LyricDisplayMode.translation;
+                  LyricPreferences.instance.setDisplayMode(next);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(next == LyricDisplayMode.roma
+                          ? '已切换到罗马音'
+                          : '已切换到翻译'),
+                      duration: const Duration(milliseconds: 800),
+                    ),
+                  );
+                },
                 child: Center(
                   child: Icon(
-                    Icons.translate,
+                    // 罗马音模式用 Icons.abc 区分，翻译模式用 Icons.translate
+                    LyricPreferences.instance.displayMode ==
+                            LyricDisplayMode.roma
+                        ? Icons.abc
+                        : Icons.translate,
                     size: 22,
                     // 开启时纯白，关闭时 50% 白（视觉上与其它按钮激活态一致）
                     color: LyricPreferences.instance.showTranslation

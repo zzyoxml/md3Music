@@ -221,8 +221,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   String? _cachedFontFamily;
   // 翻译副行缓存：当前行变化或 showTranslation 开关切换时，
   // 当前行高度需重算（副行高度仅计入当前行）
+  // displayMode 切换也需重算（虽副行高度不变，但需触发重绘）
   int _cachedCurrentLineIndex = -1;
   bool _cachedShowTranslation = false;
+  LyricDisplayMode _cachedDisplayMode = LyricDisplayMode.translation;
 
   /// 返回指定行索引上方所有激活间奏占位的累计高度。
   ///
@@ -252,6 +254,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final identitySame = identical(widget.lines, _cachedLinesRef);
     final currentFontFamily = LyricLayout.fontFamily;
     final currentShowTranslation = LyricPreferences.instance.showTranslation;
+    final currentDisplayMode = LyricPreferences.instance.displayMode;
     if (fontSize == _cachedFontSize &&
         viewportWidth == _cachedViewportWidth &&
         widget.lines.length == _cachedLinesLength &&
@@ -259,7 +262,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         _lineHeights.length == widget.lines.length &&
         currentFontFamily == _cachedFontFamily &&
         _currentLineIndex == _cachedCurrentLineIndex &&
-        currentShowTranslation == _cachedShowTranslation) {
+        currentShowTranslation == _cachedShowTranslation &&
+        currentDisplayMode == _cachedDisplayMode) {
       return; // 缓存命中
     }
     _cachedFontSize = fontSize;
@@ -269,6 +273,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _cachedFontFamily = currentFontFamily;
     _cachedCurrentLineIndex = _currentLineIndex;
     _cachedShowTranslation = currentShowTranslation;
+    _cachedDisplayMode = currentDisplayMode;
 
     // v3 优化：列表内容变化时递增 generation counter。
     // lines 用 identical 比较，只有引用变化才递增；

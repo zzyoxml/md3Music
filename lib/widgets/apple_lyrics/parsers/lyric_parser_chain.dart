@@ -60,12 +60,18 @@ class LyricParserChain {
   ///
   /// 若传入 [translationText]，解析完成后会按时间戳最近邻匹配将翻译合并到
   /// 各行。容差 500ms；翻译文本无时间戳时降级为按行序号顺序匹配。
-  static List<LyricLine> parse(String text, {String? translationText}) {
+  ///
+  /// [romaText] 同理，但合并到 [LyricLine.roma] 字段（与 translation 并列）。
+  static List<LyricLine> parse(String text,
+      {String? translationText, String? romaText}) {
     try {
       final format = detectFormat(text);
-      final lines = _delegate(text, format);
+      var lines = _delegate(text, format);
       if (translationText != null && translationText.isNotEmpty) {
-        return _mergeTranslation(lines, translationText);
+        lines = _mergeField(lines, translationText, isRoma: false);
+      }
+      if (romaText != null && romaText.isNotEmpty) {
+        lines = _mergeField(lines, romaText, isRoma: true);
       }
       return lines;
     } catch (_) {
@@ -81,12 +87,17 @@ class LyricParserChain {
   ///
   /// 若传入 [translationText]，解析完成后会按时间戳最近邻匹配将翻译合并到
   /// 各行。容差 500ms；翻译文本无时间戳时降级为按行序号顺序匹配。
+  ///
+  /// [romaText] 同理，但合并到 [LyricLine.roma] 字段。
   static List<LyricLine> parseAs(String text, LyricFormat format,
-      {String? translationText}) {
+      {String? translationText, String? romaText}) {
     try {
-      final lines = _delegate(text, format);
+      var lines = _delegate(text, format);
       if (translationText != null && translationText.isNotEmpty) {
-        return _mergeTranslation(lines, translationText);
+        lines = _mergeField(lines, translationText, isRoma: false);
+      }
+      if (romaText != null && romaText.isNotEmpty) {
+        lines = _mergeField(lines, romaText, isRoma: true);
       }
       return lines;
     } catch (_) {
@@ -94,38 +105,39 @@ class LyricParserChain {
     }
   }
 
-  /// 将翻译 LRC 文本按时间戳对齐到原文行。
+  /// 将翻译/罗马音 LRC 文本按时间戳对齐到原文行（泛化版）。
   ///
   /// 算法：
-  /// 1. 用 [LrcParser] 解析 translationText 得到 [List<LyricLine>]（仅取
-  ///    startTime + text）
+  /// 1. 用 [LrcParser] 解析 text 得到 [List<LyricLine>]（仅取 startTime + text）
   /// 2. 对每个原文行，查找时间戳差值最小且 <= 500ms 的翻译行
-  /// 3. 命中则用 [LyricLine.copyWith] 替换原文行的 translation 字段
+  /// 3. 命中则用 [LyricLine.copyWith] 替换原文行的 translation 或 roma 字段
   ///
   /// 容差 500ms 用于吸收 KRC（毫秒）vs LRC 翻译（百分秒）轻微错位。
-  /// 若翻译文本无法解析为 LRC（无时间戳行），降级按行序号顺序匹配。
-  static List<LyricLine> _mergeTranslation(
-      List<LyricLine> lines, String translationText) {
-    final translationLines = LrcParser.parse(translationText);
-    // 诊断日志：确认翻译 LRC 解析结果
-    debugPrint('[LyriconDebug._mergeTranslation] '
-        'lines.len=${lines.length}, translationText.len=${translationText.length}, '
-        'translationLines.len=${translationLines.length}, '
-        'hasTimestamps=${translationLines.any((l) => l.startTime > 0)}');
-    if (translationLines.isEmpty) return lines;
+  /// 若文本无法解析为 LRC（无时间戳行），降级按行序号顺序匹配。
+  ///
+  /// [isRoma] 为 true 时写入 [LyricLine.roma]，否则写入 [LyricLine.translation]。
+  static List<LyricLine> _mergeField(
+      List<LyricLine> lines, String text, {required bool isRoma}) {
+    final fieldLines = LrcParser.parse(text);
+    final fieldLabel = isRoma ? 'roma' : 'translation';
+    debugPrint('[LyriconDebug._mergeField] '
+        'lines.len=${lines.length}, $fieldLabel.len=${text.length}, '
+        'fieldLines.len=${fieldLines.length}, '
+        'hasTimestamps=${fieldLines.any((l) => l.startTime > 0)}');
+    if (fieldLines.isEmpty) return lines;
 
-    // 降级判断：若翻译解析后所有行 startTime 都是 0，说明是纯文本（无时间戳），
+    // 降级判断：若解析后所有行 startTime 都是 0，说明是纯文本（无时间戳），
     // 按行序号顺序匹配；否则用最近邻时间戳匹配
-    final hasTimestamps = translationLines.any((l) => l.startTime > 0);
+    final hasTimestamps = fieldLines.any((l) => l.startTime > 0);
 
     final List<LyricLine> result = [];
     int matchedCount = 0;
     for (int i = 0; i < lines.length; i++) {
       String? matched;
       if (hasTimestamps) {
-        // 最近邻：找时间戳差值最小且 <= 500ms 的翻译行
+        // 最近邻：找时间戳差值最小且 <= 500ms 的行
         int bestDelta = 501; // 容差 +1 作为哨兵
-        for (final tl in translationLines) {
+        for (final tl in fieldLines) {
           final delta = (tl.startTime - lines[i].startTime).abs();
           if (delta <= 500 && delta < bestDelta) {
             bestDelta = delta;
@@ -134,17 +146,18 @@ class LyricParserChain {
         }
       } else {
         // 降级：按行序号匹配
-        if (i < translationLines.length) {
-          matched = translationLines[i].text;
+        if (i < fieldLines.length) {
+          matched = fieldLines[i].text;
         }
       }
       if (matched != null) matchedCount++;
       result.add(matched == null
           ? lines[i]
-          : lines[i].copyWith(translation: matched));
+          : isRoma
+              ? lines[i].copyWith(roma: matched)
+              : lines[i].copyWith(translation: matched));
     }
-    // 诊断日志：合并命中率
-    debugPrint('[LyriconDebug._mergeTranslation] matched=$matchedCount/${lines.length}');
+    debugPrint('[LyriconDebug._mergeField] $fieldLabel matched=$matchedCount/${lines.length}');
     return result;
   }
 

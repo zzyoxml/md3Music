@@ -367,7 +367,11 @@ class DesktopLyricService {
           // - KRC：返回 LyricLine 列表，每行含 LyricWord 字级时间戳
           // - LRC：返回 LyricLine 列表，words 为空
           // - 纯文本：返回 LyricLine 列表，words 为空，startTime 全部为 0
-          _lines = LyricParserChain.parse(lrc, translationText: lyric.translatedContent);
+          _lines = LyricParserChain.parse(
+            lrc,
+            translationText: lyric.translatedContent,
+            romaText: lyric.romaContent,
+          );
           if (_lines.isEmpty) {
             _pushLyric('暂无歌词', '', -1);
           }
