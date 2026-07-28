@@ -17,7 +17,6 @@ import '../../core/services/lyricon_provider_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/repositories/settings_repository.dart';
-import '../../providers/device_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
@@ -63,8 +62,6 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _bluetoothLyricEnabled = false;
   // 自定义下载目录：null/空表示使用默认目录
   String? _downloadDir;
-  // 设备类型选择
-  DeviceType _deviceType = DeviceType.auto;
   double _uiScale = 1.0;
 
   @override
@@ -128,8 +125,6 @@ class _SettingsPageState extends State<SettingsPage> {
     final useDynamicColor = context.read<ThemeProvider>().useDynamicColor;
     // 从 ThemeProvider 同步「Apple Music 风格播放页」开关状态
     final useAmStylePlayer = context.read<ThemeProvider>().useAmStylePlayer;
-    // 从 DeviceProvider 同步设备类型
-    final deviceType = context.read<DeviceProvider>().deviceType;
     // 读取自定义下载目录
     final downloadDir = await _settingsRepository.getDownloadDir();
     // 从 ThemeProvider 同步 UI 缩放
@@ -147,7 +142,6 @@ class _SettingsPageState extends State<SettingsPage> {
       _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
       _useGlowEffect = LyricPreferences.instance.useGlowEffect;
       _useFlowingBackground = LyricPreferences.instance.useFlowingBackground;
-      _deviceType = deviceType;
       _downloadDir = downloadDir;
       _uiScale = uiScale;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
@@ -570,64 +564,6 @@ class _SettingsPageState extends State<SettingsPage> {
               : null,
         ),
         const Divider(),
-        // 设备类型选择
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '设备类型',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        if (_deviceType == DeviceType.auto)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                '当前识别为：${context.read<DeviceProvider>().autoDetectedLabel}',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: SegmentedButton<DeviceType>(
-            segments: const [
-              ButtonSegment(
-                value: DeviceType.auto,
-                label: Text('自动'),
-                icon: Icon(Icons.brightness_auto),
-              ),
-              ButtonSegment(
-                value: DeviceType.phone,
-                label: Text('手机'),
-                icon: Icon(Icons.smartphone),
-              ),
-              ButtonSegment(
-                value: DeviceType.pad,
-                label: Text('Pad'),
-                icon: Icon(Icons.tablet),
-              ),
-            ],
-            selected: {_deviceType},
-            onSelectionChanged: (modes) {
-              final type = modes.first;
-              setState(() => _deviceType = type);
-              context.read<DeviceProvider>().setDeviceType(type);
-            },
-          ),
-        ),
-        const SizedBox(height: 8),
         // UI 缩放滑块
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),

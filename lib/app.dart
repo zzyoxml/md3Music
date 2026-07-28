@@ -440,8 +440,10 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   }
 
   Widget _buildBody(BuildContext context) {
-    // 切换方向：pad 用上下淡入，手机用左右滑动
-    final isPad = context.read<DeviceProvider>().isPad;
+    // 切换方向：横屏（侧边导航栏）用上下淡入，竖屏（底部导航栏）用左右滑动
+    final isLandscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    final useVerticalTransition = isLandscape;
     final goingRight = _selectedIndex > _previousSelectedIndex;
 
     return Column(
@@ -454,10 +456,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
             transitionBuilder: (child, animation) {
               final isEntering = child.key == ValueKey(_selectedIndex);
 
-              if (isPad) {
-                // Pad：基于 tab 顺序上下滑动
-                // tab 序号增大 → 旧页面向上滑出，新页面从下方滑入
-                // tab 序号减小 → 旧页面向下滑出，新页面从上方滑入
+              if (useVerticalTransition) {
+                // 侧边导航栏：基于 tab 顺序上下滑动
                 final slideY = isEntering
                     ? (goingRight ? 0.1 : -0.1)
                     : (goingRight ? -0.1 : 0.1);
@@ -472,7 +472,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
                   ),
                 );
               } else {
-                // 手机：左右滑动淡入淡出
+                // 底部导航栏：左右滑动淡入淡出
                 final slideX = isEntering
                     ? (goingRight ? 0.12 : -0.12)
                     : (goingRight ? -0.12 : 0.12);
