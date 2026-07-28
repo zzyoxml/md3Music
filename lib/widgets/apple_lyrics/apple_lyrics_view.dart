@@ -896,48 +896,59 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           onTapUp: _onTapUp,
           onVerticalDragUpdate: _onVerticalDragUpdate,
           onVerticalDragEnd: _onVerticalDragEnd,
-          child: useGaussian
-              ? ClipRect(
-                  child: Builder(
-                    builder: (context) {
-                      // 检测视口宽度变化，清除模糊缓存
-                      if (_viewportWidth != constraints.maxWidth && _viewportWidth > 0) {
-                        for (final entry in _lineBlurImages.values) {
-                          entry.$1.dispose();
+          child: ShaderMask(
+            // 歌词界面上下边界 alpha 渐变（参数与评论区一致：24px 渐变高度），
+            // 顶部 24px alpha 0→1，底部 24px alpha 1→0，
+            // 让歌词从边界柔和淡入/淡出。
+            shaderCallback: (Rect bounds) {
+              const double fadeHeight = 24.0;
+              final double fadeRatio =
+                  (fadeHeight / bounds.height).clamp(0.0, 0.5);
+              return LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: const [
+                  Colors.transparent,
+                  Colors.black,
+                  Colors.black,
+                  Colors.transparent,
+                ],
+                stops: [
+                  0.0,
+                  fadeRatio,
+                  1.0 - fadeRatio,
+                  1.0,
+                ],
+              ).createShader(bounds);
+            },
+            blendMode: BlendMode.dstIn,
+            child: useGaussian
+                ? ClipRect(
+                    child: Builder(
+                      builder: (context) {
+                        // 检测视口宽度变化，清除模糊缓存
+                        if (_viewportWidth != constraints.maxWidth && _viewportWidth > 0) {
+                          for (final entry in _lineBlurImages.values) {
+                            entry.$1.dispose();
+                          }
+                          _lineBlurImages.clear();
+                          _cachedBlurLineIndex = -1;
                         }
-                        _lineBlurImages.clear();
-                        _cachedBlurLineIndex = -1;
-                      }
-                      _viewportWidth = constraints.maxWidth;
-                      return Stack(
-                        children: [
-                          lyricsContent,
-                          ..._buildBlurLayers(
-                            constraints.maxHeight,
-                            mainLineHeight,
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                )
-              : ShaderMask(
-                  shaderCallback: (Rect bounds) {
-                    return LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: const <Color>[
-                        Color(0x00000000),
-                        Color(0xFF000000),
-                        Color(0xFF000000),
-                        Color(0x00000000),
-                      ],
-                      stops: const <double>[0.0, 0.15, 0.85, 1.0],
-                    ).createShader(bounds);
-                  },
-                  blendMode: BlendMode.dstIn,
-                  child: lyricsContent,
-                ),
+                        _viewportWidth = constraints.maxWidth;
+                        return Stack(
+                          children: [
+                            lyricsContent,
+                            ..._buildBlurLayers(
+                              constraints.maxHeight,
+                              mainLineHeight,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  )
+                : lyricsContent,
+          ),
         );
       },
     );
