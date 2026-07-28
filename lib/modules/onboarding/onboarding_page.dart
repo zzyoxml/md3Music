@@ -281,7 +281,7 @@ class _OnboardingPageState extends State<OnboardingPage>
       _HiddenOp(
         icon: Icons.download,
         gesture: '长按',
-        target: '第3个 · 封面图标',
+        target: '封面图标',
         action: '下载当前歌曲',
         color: colorScheme.tertiary,
         onColor: colorScheme.onTertiary,
@@ -289,7 +289,7 @@ class _OnboardingPageState extends State<OnboardingPage>
       _HiddenOp(
         icon: Icons.lyrics,
         gesture: '长按',
-        target: '第4个 · 歌词图标',
+        target: '歌词图标',
         action: '呼出悬浮窗歌词',
         color: colorScheme.secondary,
         onColor: colorScheme.onSecondary,
@@ -297,7 +297,7 @@ class _OnboardingPageState extends State<OnboardingPage>
       _HiddenOp(
         icon: Icons.translate,
         gesture: '长按',
-        target: '右下方 · 翻译图标',
+        target: '翻译图标',
         action: '切换罗马音和翻译',
         color: colorScheme.primary,
         onColor: colorScheme.onPrimary,
@@ -305,7 +305,7 @@ class _OnboardingPageState extends State<OnboardingPage>
       _HiddenOp(
         icon: Icons.volume_up,
         gesture: '长按',
-        target: '右上角 · 音质选项',
+        target: '右上角音质选项',
         action: '调节应用内音量',
         color: colorScheme.tertiary,
         onColor: colorScheme.onTertiary,
