@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/layout/responsive_layout.dart';
+import '../../core/services/desktop_lyric_service.dart';
+import '../../core/services/media_notification_service.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
@@ -18,6 +20,7 @@ import 'comments_view.dart';
 import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/md3e_transport_row.dart';
 import '../../widgets/player_playlist_dialog.dart';
 import 'full_player_route.dart';
 
@@ -51,6 +54,9 @@ class _FullPlayerState extends State<FullPlayer>
 
   // 封面淡入淡出动画
   late final AnimationController _artworkFadeController;
+
+  // 桌面歌词状态监听：长按歌词按钮 toggle 后同步 icon
+  late final VoidCallback _onDesktopLyricChanged;
   late final Animation<double> _artworkFadeAnimation;
   String? _previousArtworkUrl;
 
@@ -62,70 +68,8 @@ class _FullPlayerState extends State<FullPlayer>
   // 拖动进度条前的播放状态，用于拖动结束后恢复
   bool _wasPlayingBeforeDrag = false;
 
-  // === 拖拽收起手势：通过驱动路由 AnimationController 实现 ===
-  double _dragStartY = 0;
   /// 防止 PopScope 回调与 dismiss() 重复触发。
   bool _isDismissing = false;
-
-  /// 获取当前路由的 AnimationController。
-  AnimationController? get _routeController {
-    final route = ModalRoute.of(context);
-    if (route is DraggablePlayerRoute) {
-      return route.controller;
-    }
-    return null;
-  }
-
-  void _onHandleDragStart(DragStartDetails details) {
-    _dragStartY = details.globalPosition.dy;
-  }
-
-  void _onHandleDragUpdate(DragUpdateDetails details) {
-    final controller = _routeController;
-    if (controller == null) return;
-    final dy = details.globalPosition.dy - _dragStartY;
-    if (dy <= 0) return;
-    final progress = 1.0 - (dy / kPlayerDragThreshold).clamp(0.0, 1.0);
-    controller.stop();
-    _isDismissing = false; // 手动接管 controller，复位 dismiss 标志，避免后续手势/PopScope 误判
-    controller.value = progress;
-  }
-
-  void _onHandleDragEnd(DragEndDetails details) {
-    final controller = _routeController;
-    if (controller == null) return;
-    final currentProgress = controller.value;
-    final velocity = details.primaryVelocity ?? 0;
-
-    if (currentProgress < 0.5 || velocity > 300) {
-      // 收起：用 dismiss() 走统一的 reverse + pop 流程
-      _isDismissing = true;
-      final route = ModalRoute.of(context);
-      if (route is DraggablePlayerRoute) {
-        route.dismiss();
-      }
-    } else {
-      controller.forward();
-    }
-  }
-
-  /// 把手拖拽被取消时（如 widget 树重建触发手势 arena 取消）：
-  /// 按当前进度决定走向，避免路由卡死。取消时无速度信息，仅按 progress 阈值决策。
-  void _onHandleDragCancel() {
-    final controller = _routeController;
-    if (controller == null) return;
-    final currentProgress = controller.value;
-    if (currentProgress < 0.5) {
-      _isDismissing = true;
-      final route = ModalRoute.of(context);
-      if (route is DraggablePlayerRoute) {
-        route.dismiss();
-      }
-    } else {
-      _isDismissing = false;
-      controller.forward();
-    }
-  }
 
   void _collapseByButton() {
     final route = ModalRoute.of(context);
@@ -337,6 +281,11 @@ class _FullPlayerState extends State<FullPlayer>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _tabController = TabController(length: 3, vsync: this);
+    // 桌面歌词状态变化时刷新 UI（同步歌词按钮 icon）
+    _onDesktopLyricChanged = () {
+      if (mounted) setState(() {});
+    };
+    DesktopLyricService.instance.addListener(_onDesktopLyricChanged);
     _artworkFadeController = AnimationController(
       duration: const Duration(milliseconds: 1000),
       vsync: this,
@@ -442,6 +391,7 @@ class _FullPlayerState extends State<FullPlayer>
     try {
       context.read<PlayerProvider>().removeListener(_onPlayerSongChanged);
     } catch (_) {}
+    DesktopLyricService.instance.removeListener(_onDesktopLyricChanged);
     WidgetsBinding.instance.removeObserver(this);
     _artworkFadeController.dispose();
     _tabController.dispose();
@@ -588,7 +538,7 @@ class _FullPlayerState extends State<FullPlayer>
       bottom: false,
       child: Column(
         children: [
-          _buildTopBar(),
+          _buildTopBar(playerProvider),
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -734,7 +684,7 @@ class _FullPlayerState extends State<FullPlayer>
             flex: 6,
             child: Column(
               children: [
-                _buildTopBar(),
+                _buildTopBar(playerProvider),
 
                 // 内容区（歌词 / 评论 / 封面信息）
                 // Pad模式下无封面Tab；手机横屏保留封面Tab
@@ -881,7 +831,7 @@ class _FullPlayerState extends State<FullPlayer>
             flex: 6,
             child: Column(
               children: [
-                _buildTopBar(),
+                _buildTopBar(playerProvider),
                 Expanded(
                   child: TabBarView(
                     controller: _tabController,
@@ -917,63 +867,62 @@ class _FullPlayerState extends State<FullPlayer>
     );
   }
 
-  Widget _buildTopBar() {
-    // Pad 模式下隐藏封面Tab；手机横屏保留全部3个Tab
-    final tabs = _isPadMode && !_isPhoneLandscape
-        ? const [Tab(text: '歌词'), Tab(text: '评论')]
-        : const [Tab(text: '封面'), Tab(text: '歌词'), Tab(text: '评论')];
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // 顶部下拉手柄：向下拖拽收起到 MiniPlayer，淡入淡出与拖拽距离线性绑定
-        GestureDetector(
-          onVerticalDragStart: _onHandleDragStart,
-          onVerticalDragUpdate: _onHandleDragUpdate,
-          onVerticalDragEnd: _onHandleDragEnd,
-          onVerticalDragCancel: _onHandleDragCancel,
-          behavior: HitTestBehavior.opaque,
-          child: Padding(
-            padding: const EdgeInsets.only(top: 12, bottom: 8),
-            child: Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Theme.of(context)
-                      .colorScheme
-                      .onSurfaceVariant
-                      .withValues(alpha: 0.4),
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-            ),
+  Widget _buildTopBar(PlayerProvider playerProvider) {
+    // 顶部栏：返回/音质/菜单分列两侧，无把手
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.keyboard_arrow_down),
+            onPressed: _collapseByButton,
           ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8),
+          const Spacer(),
+          // MD3E v2: 顶部栏右侧 FLAC 质量徽章，点击复用 _showQualityDialog
+          _buildQualityPill(playerProvider),
+          IconButton(
+            icon: const Icon(Icons.more_vert),
+            onPressed: () => _showMoreMenu(context),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// MD3E v2 质量徽章 — primaryContainer 背景 + StadiumBorder + 图标 + 文字。
+  /// 点击复用 _showQualityDialog。
+  Widget _buildQualityPill(PlayerProvider playerProvider) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Material(
+      color: colorScheme.primaryContainer,
+      shape: const StadiumBorder(),
+      child: InkWell(
+        onTap: () => _showQualityDialog(playerProvider),
+        onLongPress: () => _showVolumeDialog(playerProvider),
+        customBorder: const StadiumBorder(),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           child: Row(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton(
-                icon: const Icon(Icons.keyboard_arrow_down),
-                onPressed: _collapseByButton,
+              Icon(
+                Icons.music_note,
+                size: 14,
+                color: colorScheme.onPrimaryContainer,
               ),
-              Expanded(
-                child: TabBar(
-                  controller: _tabController,
-                  tabs: tabs,
-                  labelStyle: Theme.of(context).textTheme.labelMedium,
-                  indicatorSize: TabBarIndicatorSize.label,
+              const SizedBox(width: 4),
+              Text(
+                playerProvider.audioQualityLabel,
+                style: textTheme.labelMedium?.copyWith(
+                  color: colorScheme.onPrimaryContainer,
+                  fontWeight: FontWeight.w600,
                 ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.more_vert),
-                onPressed: () => _showMoreMenu(context),
               ),
             ],
           ),
         ),
-      ],
+      ),
     );
   }
 
@@ -1056,13 +1005,16 @@ class _FullPlayerState extends State<FullPlayer>
             onTap: () => _navigateToAlbum(currentSong as Song),
             borderRadius: BorderRadius.circular(4),
             child: Text(
-              currentSong.displayName,
+              currentSong.displayName.toUpperCase(),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: isExpanded
-                  ? Theme.of(context).textTheme.titleMedium
-                  : Theme.of(context).textTheme.titleLarge,
-              textAlign: TextAlign.center,
+              // MD3E v2: 大写 + 粗体 w700 + 字间距 1.5 + 标题更大
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+                height: 1.2,
+              ),
+              textAlign: TextAlign.left,
             ),
           ),
           const SizedBox(height: 4),
@@ -1075,8 +1027,9 @@ class _FullPlayerState extends State<FullPlayer>
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500, // MD3E v2: 提升字重
               ),
-              textAlign: TextAlign.center,
+              textAlign: TextAlign.left,
             ),
           ),
           const SizedBox(height: 2),
@@ -1084,13 +1037,14 @@ class _FullPlayerState extends State<FullPlayer>
             onTap: () => _navigateToAlbum(currentSong as Song),
             borderRadius: BorderRadius.circular(4),
             child: Text(
-              currentSong.album,
+              currentSong.album.toUpperCase(), // MD3E v2: 专辑名大写
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                letterSpacing: 0.8, // MD3E v2: 大写配字间距
               ),
-              textAlign: TextAlign.center,
+              textAlign: TextAlign.left,
             ),
           ),
           if (!isExpanded) const Spacer(),
@@ -1114,11 +1068,15 @@ class _FullPlayerState extends State<FullPlayer>
               onTap: () => _navigateToAlbum(currentSong as Song),
               borderRadius: BorderRadius.circular(4),
               child: Text(
-                currentSong.displayName,
+                currentSong.displayName.toUpperCase(),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleLarge,
-                textAlign: TextAlign.center,
+                // MD3E v2: 大写 + 粗体 w700 + 字间距 1.5
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                ),
+                textAlign: TextAlign.left,
               ),
             ),
             const SizedBox(height: 4),
@@ -1131,8 +1089,9 @@ class _FullPlayerState extends State<FullPlayer>
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w500, // MD3E v2: 提升字重
                 ),
-                textAlign: TextAlign.center,
+                textAlign: TextAlign.left,
               ),
             ),
             const SizedBox(height: 2),
@@ -1140,13 +1099,14 @@ class _FullPlayerState extends State<FullPlayer>
               onTap: () => _navigateToAlbum(currentSong as Song),
               borderRadius: BorderRadius.circular(4),
               child: Text(
-                currentSong.album,
+                currentSong.album.toUpperCase(), // MD3E v2: 专辑名大写
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: colorScheme.onSurfaceVariant,
+                  letterSpacing: 0.8, // MD3E v2: 大写配字间距
                 ),
-                textAlign: TextAlign.center,
+                textAlign: TextAlign.left,
               ),
             ),
           ],
@@ -1178,7 +1138,7 @@ class _FullPlayerState extends State<FullPlayer>
             isExpanded: isExpanded,
           ),
           SizedBox(height: verticalSpacing),
-          _buildSecondaryControls(
+          _buildActionBar(
             playerProvider,
             colorScheme,
             isExpanded: isExpanded,
@@ -1335,12 +1295,12 @@ class _FullPlayerState extends State<FullPlayer>
     bool isExpanded = false,
   }) {
     final spacing = isExpanded ? 4.0 : 8.0;
-    final skipIconSize = isExpanded ? 28.0 : 36.0;
-    final playIconSize = isExpanded ? 40.0 : 48.0;
+    final sideButtonSize = isExpanded ? 48.0 : 56.0;
 
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
+        // shuffle — 保留原 IconButton，不参与动画
         IconButton(
           icon: Icon(
             playerProvider.shuffleEnabled
@@ -1353,34 +1313,24 @@ class _FullPlayerState extends State<FullPlayer>
           onPressed: () => playerProvider.toggleShuffle(),
         ),
         SizedBox(width: spacing),
-        IconButton(
-          iconSize: skipIconSize,
-          icon: const Icon(Icons.skip_previous),
-          onPressed: () => playerProvider.previous(),
-        ),
-        SizedBox(width: spacing),
-        IconButton.filled(
-          iconSize: playIconSize,
-          icon: Icon(playerProvider.isPlaying ? Icons.pause : Icons.play_arrow),
-          onPressed: () {
+        // Phase 5: 上一曲/暂停/下一曲联合动画控件（替代中间 3 个 IconButton）
+        MD3ETransportRow(
+          isPlaying: playerProvider.isPlaying,
+          sideButtonSize: sideButtonSize,
+          playButtonSize: isExpanded ? 64.0 : 72.0,
+          spacing: spacing,
+          onPrevious: () => playerProvider.previous(),
+          onPlayPause: () {
             if (playerProvider.isPlaying) {
               playerProvider.pause();
             } else {
               playerProvider.resume();
             }
           },
-          style: IconButton.styleFrom(
-            backgroundColor: colorScheme.primary,
-            foregroundColor: colorScheme.onPrimary,
-          ),
+          onNext: () => playerProvider.next(),
         ),
         SizedBox(width: spacing),
-        IconButton(
-          iconSize: skipIconSize,
-          icon: const Icon(Icons.skip_next),
-          onPressed: () => playerProvider.next(),
-        ),
-        SizedBox(width: spacing),
+        // loop — 保留原 IconButton，不参与动画
         IconButton(
           icon: Icon(
             _getLoopModeIcon(playerProvider.loopMode),
@@ -1394,7 +1344,11 @@ class _FullPlayerState extends State<FullPlayer>
     );
   }
 
-  Widget _buildSecondaryControls(
+  /// MD3E v2 底部操作条 — 6 个常用动作收纳在单条长 pill 内。
+  ///
+  /// 替代原 `_buildSecondaryControls` 的 9 个独立按钮。
+  /// 不在 ActionBar 中的动作（下载/音量/音质/歌单）通过 more_vert 菜单访问。
+  Widget _buildActionBar(
     PlayerProvider playerProvider,
     ColorScheme colorScheme, {
     bool isExpanded = false,
@@ -1402,66 +1356,146 @@ class _FullPlayerState extends State<FullPlayer>
     final song = playerProvider.currentSong;
     final isFavorited =
         song != null && context.watch<FavoritesProvider>().isFavorite(song.id);
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Row(
+    final textTheme = Theme.of(context).textTheme;
+
+    return Material(
+      color: colorScheme.primaryContainer,
+      shape: const StadiumBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(
+        height: 48,
+        child: Row(
           children: [
-            IconButton(
-              icon: Icon(
-                isFavorited ? Icons.favorite : Icons.favorite_border,
-                color: isFavorited
-                    ? colorScheme.error
-                    : colorScheme.onSurfaceVariant,
+            // 1. 倍速指示（纯文字）
+            Expanded(
+              child: InkWell(
+                onTap: () => _showSpeedDialog(playerProvider),
+                child: Center(
+                  child: Text(
+                    '${playerProvider.speed}x',
+                    style: textTheme.labelLarge?.copyWith(
+                      color: colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               ),
-              onPressed: song != null
-                  ? () => context.read<FavoritesProvider>().toggleFavorite(song)
-                  : null,
             ),
-            IconButton(
-              icon: const Icon(Icons.download),
-              onPressed: song != null ? () => _downloadSong(song) : null,
+            // 2. 播放列表 — 弹出播放队列
+            Expanded(
+              child: InkWell(
+                onTap: () => _showPlaylist(playerProvider),
+                child: Center(
+                  child: Icon(
+                    Icons.queue_music,
+                    size: 22,
+                    color: colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
             ),
-            IconButton(
-              icon: const Icon(Icons.volume_up),
-              onPressed: () => _showVolumeDialog(playerProvider),
+            // 3. 封面 — 短按跳转到封面 tab，长按弹出下载音质选择
+            Expanded(
+              child: InkWell(
+                onTap: () {
+                  if (_tabController.index != 0) {
+                    _tabController.animateTo(0);
+                  }
+                },
+                onLongPress: song != null
+                    ? () => _downloadSong(song)
+                    : null,
+                child: Center(
+                  child: Icon(
+                    Icons.album,
+                    size: 22,
+                    color: colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+            ),
+            // 4. 歌词 — 短按跳转到歌词 tab，长按开关桌面歌词
+            Expanded(
+              child: InkWell(
+                onTap: () {
+                  if (_tabController.index != 1) {
+                    _tabController.animateTo(1);
+                  }
+                },
+                onLongPress: () async {
+                  await DesktopLyricService.instance.toggle();
+                  if (mounted) {
+                    // 同步通知栏"桌面歌词"按钮状态
+                    final player = context.read<PlayerProvider>();
+                    final song = player.currentSong;
+                    await MediaNotificationService.updateNotification(
+                      title: song?.title ?? '',
+                      artist: song?.artist ?? '',
+                      artUrl: song?.artworkUri,
+                      isPlaying: player.isPlaying,
+                      position: player.position,
+                      duration: player.duration ?? Duration.zero,
+                      desktopLyricEnabled:
+                          DesktopLyricService.instance.enabled,
+                    );
+                  }
+                },
+                child: Center(
+                  child: Icon(
+                    // 桌面歌词开启时用实心 icon + primary 色，与 mini_player 一致
+                    DesktopLyricService.instance.enabled
+                        ? Icons.lyrics
+                        : Icons.lyrics_outlined,
+                    size: 22,
+                    color: DesktopLyricService.instance.enabled
+                        ? colorScheme.primary
+                        : colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+            ),
+            // 5. 评论 — 跳转到评论 tab
+            Expanded(
+              child: InkWell(
+                onTap: () {
+                  if (_tabController.index != 2) {
+                    _tabController.animateTo(2);
+                  }
+                },
+                child: Center(
+                  child: Icon(
+                    Icons.comment_outlined,
+                    size: 22,
+                    color: colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
+            ),
+            // 6. 收藏
+            Expanded(
+              child: InkWell(
+                onTap: song != null
+                    ? () =>
+                        context.read<FavoritesProvider>().toggleFavorite(song)
+                    : null,
+                child: Center(
+                  child: Icon(
+                    isFavorited ? Icons.favorite : Icons.favorite_border,
+                    size: 22,
+                    color: isFavorited
+                        ? colorScheme.error
+                        : colorScheme.onPrimaryContainer,
+                  ),
+                ),
+              ),
             ),
           ],
         ),
-        Expanded(
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              TextButton(
-                onPressed: () => _showSpeedDialog(playerProvider),
-                child: Text(
-                  '${playerProvider.speed}x',
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontSize: isExpanded ? 12 : null,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () => _showQualityDialog(playerProvider),
-                child: Text(
-                  playerProvider.audioQualityLabel,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    fontSize: isExpanded ? 12 : null,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        IconButton(
-          icon: const Icon(Icons.playlist_play),
-          onPressed: () => _showPlaylist(playerProvider),
-        ),
-      ],
+      ),
     );
   }
 
+  // MD3E v2: 音量调节改为右上角长按音质徽章呼出。
   void _showVolumeDialog(PlayerProvider playerProvider) {
     showDialog(
       context: context,
@@ -1648,6 +1682,7 @@ class _FullPlayerState extends State<FullPlayer>
     return '$minutes:$seconds';
   }
 
+  // MD3E v2: 下方 ActionBar 第 3 个按钮（封面）长按触发。
   void _downloadSong(dynamic song) {
     final downloadsProvider = context.read<DownloadsProvider>();
     final isDownloaded = downloadsProvider.isDownloaded(song.id);
@@ -1978,6 +2013,8 @@ class _FullPlayerState extends State<FullPlayer>
         });
   }
 
+  // MD3E v2: 原 _buildSecondaryControls 已替换为 _buildActionBar，
+  // 此方法现在由 ActionBar 第2位"播放列表"按钮调用。
   void _showPlaylist(PlayerProvider playerProvider) {
     showDialog(
       context: context,
