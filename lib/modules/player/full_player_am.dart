@@ -316,6 +316,22 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     }
   }
 
+  /// 判断当前歌曲是否为本地歌曲且歌词为 LRC 逐行格式（无字级时间戳）。
+  ///
+  /// 这种情况禁用 AppleLyricsView 的间奏点（节奏点）动画：
+  /// LRC 逐行没有逐字时间戳，行间节奏点与真实节拍不易对齐，
+  /// 本地歌曲的 LRC 又常常缺少精确时间戳，体验较差，禁用后更干净。
+  ///
+  /// 若是字级 LRC（含逐字时间戳），行起始时间戳精确到毫秒，
+  /// 间奏点可以正常对齐节拍，应保留。
+  /// 在线歌曲 / KRC 逐字歌词 / 静态歌词不受影响。
+  bool _isLocalLrcLyricWithoutWordTiming(dynamic currentSong) {
+    if (currentSong is! Song || currentSong.isOnline) return false;
+    if (_lyricFormat != LyricFormat.lrc) return false;
+    // 任意一行有字级时间戳即视为字级 LRC（混合场景按字级处理）
+    return !_parsedLyrics.any((line) => line.hasWordTiming);
+  }
+
   /// 封面淡入淡出（AM 风格：白色占位）
   Widget _buildCrossfadeArtwork(
     String? artworkUrl,
@@ -780,6 +796,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               currentTimeMs: positionMs,
                               isPlaying: playerProvider.isPlaying,
                               forceDarkBackground: true,
+                              // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+                              enableInterludeDots:
+                                  !_isLocalLrcLyricWithoutWordTiming(
+                                      currentSong),
                               onSeek: (ms) => playerProvider
                                   .seek(Duration(milliseconds: ms)),
                             ),
@@ -961,6 +981,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                         currentTimeMs: positionMs,
                                         isPlaying: playerProvider.isPlaying,
                                         forceDarkBackground: true,
+                                        // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+                                        enableInterludeDots:
+                                            !_isLocalLrcLyricWithoutWordTiming(
+                                                currentSong),
                                         onSeek: (ms) => playerProvider.seek(
                                           Duration(milliseconds: ms),
                                         ),
@@ -1155,6 +1179,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                         lines: _parsedLyrics,
                                         currentTimeMs: positionMs,
                                         isPlaying: playerProvider.isPlaying,
+                                        // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+                                        enableInterludeDots:
+                                            !_isLocalLrcLyricWithoutWordTiming(
+                                                currentSong),
                                         onSeek: (ms) => playerProvider.seek(
                                           Duration(milliseconds: ms),
                                         ),
@@ -2189,10 +2217,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     showModalBottomSheet(
       context: context,
       builder: (context) {
-        // 歌词类型标签：KRC / LRC / 静态 / 未加载
+        // 歌词类型标签：KRC / LRC 逐字 / LRC 行级 / 静态 / 未加载
+        // LRC 内部细分：任意一行含字级时间戳即视为"逐字"，否则为"行级"
+        final hasWordTiming = _parsedLyrics.any((line) => line.hasWordTiming);
         final lyricTypeLabel = switch (_lyricFormat) {
           LyricFormat.krc => 'KRC 逐字歌词',
-          LyricFormat.lrc => 'LRC 行级歌词',
+          LyricFormat.lrc => hasWordTiming ? 'LRC 逐字歌词' : 'LRC 行级歌词',
           LyricFormat.plaintext => '静态歌词',
           null => _isLoadingLyrics ? '歌词加载中' : '未加载',
         };

@@ -58,6 +58,14 @@ class AppleLyricsView extends StatefulWidget {
   /// 非 AM 播放器背景跟随主题，浅色主题用黑色歌词。
   final bool forceDarkBackground;
 
+  /// 是否启用间奏点（节奏点）动画。
+  ///
+  /// 设为 false 时跳过间奏检测，歌词行之间不会出现节奏点小圆点动画。
+  /// 适用于本地歌曲且歌词为 LRC 逐行格式的场景：LRC 没有逐字时间戳，
+  /// 行间的节奏点与真实节拍不易对齐，禁用后体验更干净。
+  /// 默认 true，保持原有视觉。
+  final bool enableInterludeDots;
+
   const AppleLyricsView({
     super.key,
     required this.lines,
@@ -66,6 +74,7 @@ class AppleLyricsView extends StatefulWidget {
     this.onSeek,
     this.enableScale = true,
     this.forceDarkBackground = false,
+    this.enableInterludeDots = true,
   });
 
   /// 找到当前应高亮的行索引：最后一个 `startTime <= currentTimeMs` 的行。
@@ -319,7 +328,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       tops.add(acc);
       acc += heights.last;
       // 检测当前行与下一行之间是否有间奏（最后一行后面无间奏）
-      if (i < widget.lines.length - 1) {
+      // 间奏点关闭时跳过检测，_interludeAfterIndices 保持为空，
+      // _updateInterlude 自然不会激活任何间奏，节奏点不会出现。
+      if (widget.enableInterludeDots && i < widget.lines.length - 1) {
         final next = widget.lines[i + 1];
         final gap = next.startTime - line.endTime;
         if (gap >= LyricLayout.interludeThresholdMs) {

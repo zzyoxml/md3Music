@@ -265,5 +265,28 @@ Plain again
       expect(result.first.hasWordTiming, isFalse);
       expect(result.first.startTime, 1500);
     });
+
+    test('13. 字级 LRC 自动检测：每行多时间戳 + 字间文本 → hasWordTiming=true', () {
+      // 验证字级 LRC（用户提供的实际格式）能正确走 LRC 解析路径
+      // 且 LyricLine.words 携带逐字时间戳
+      const input = '''[ti:湘女多情]
+[00:01.000]湘[00:01.242]女[00:02.233]多[00:03.225]情[00:04.216] - [00:05.208]周[00:06.199]杰[00:07.191]伦[00:08.181]
+[00:17.973]湘[00:18.373]女[00:18.838]多[00:19.237]情[00:20.725] [00:21.605]暮[00:21.982]色[00:22.793]已[00:22.963]落[00:23.437]地[00:24.477]
+''';
+      final result = LyricParserChain.parse(input);
+
+      expect(result, hasLength(2));
+      // 两条都是字级 LRC
+      for (final line in result) {
+        expect(line.hasWordTiming, isTrue);
+      }
+      // 第 1 行：标题行
+      expect(result[0].text, '湘女多情 - 周杰伦');
+      expect(result[0].startTime, 1000);
+      expect(result[0].words, hasLength(8));
+      // 第 2 行：实际歌词
+      expect(result[1].text, '湘女多情 暮色已落地');
+      expect(result[1].startTime, 17973);
+    });
   });
 }

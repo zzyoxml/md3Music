@@ -147,4 +147,119 @@ void main() {
       expect(a.first, equals(b));
     });
   });
+
+  group('LrcParser 字级 LRC 解析', () {
+    test('单行字级 LRC：每个字独立 startTime，hasWordTiming=true', () {
+      final result = LrcParser.parse(
+        '[00:01.000]湘[00:01.242]女[00:02.233]多[00:03.225]情[00:04.216] - [00:05.208]周[00:06.199]杰[00:07.191]伦[00:08.181]',
+      );
+      // 一行多时间戳 + 字间文本 → 单条 LyricLine
+      expect(result, hasLength(1));
+      final line = result.first;
+      expect(line.startTime, 1000);
+      expect(line.hasWordTiming, isTrue);
+      // 文本拼接：8 个字
+      expect(line.text, '湘女多情 - 周杰伦');
+      // 8 个字
+      expect(line.words, hasLength(8));
+      // 第 1 个字：湘 @ 1000ms
+      expect(line.words[0].text, '湘');
+      expect(line.words[0].startTime, 1000);
+      // 第 2 个字：女 @ 1242ms
+      expect(line.words[1].text, '女');
+      expect(line.words[1].startTime, 1242);
+      // " - " 中间有空格，文本保留
+      expect(line.words[4].text, ' - ');
+      expect(line.words[4].startTime, 4216);
+      // 最后一个字：伦 @ 7191ms
+      expect(line.words[7].text, '伦');
+      expect(line.words[7].startTime, 7191);
+    });
+
+    test('字级 LRC：word duration = 下一字 startTime - 当前字 startTime', () {
+      final result = LrcParser.parse('[00:01.000]A[00:01.500]B[00:02.000]C');
+      expect(result, hasLength(1));
+      expect(result.first.hasWordTiming, isTrue);
+      expect(result.first.words, hasLength(3));
+      expect(result.first.words[0].duration, 500); // 1500-1000
+      expect(result.first.words[1].duration, 500); // 2000-1500
+      expect(result.first.words[2].duration, 0); // 末位字 duration=0
+    });
+
+    test('字级 LRC：行尾的纯结束时间戳（无文本）会被跳过', () {
+      // 最后一个时间戳 [00:08.181] 后面是换行，无字文本，应被跳过
+      final result = LrcParser.parse('[00:01.000]湘[00:01.242]女[00:08.181]');
+      expect(result, hasLength(1));
+      expect(result.first.hasWordTiming, isTrue);
+      // 只保留 2 个有效字（湘、女），跳过空字
+      expect(result.first.words, hasLength(2));
+      expect(result.first.words[0].text, '湘');
+      expect(result.first.words[1].text, '女');
+    });
+
+    test('字级 LRC：行 duration = 末字 startTime + duration - 行 startTime', () {
+      final result = LrcParser.parse('[00:01.000]A[00:02.000]B[00:03.000]C');
+      expect(result, hasLength(1));
+      // 行 startTime = 1000
+      expect(result.first.startTime, 1000);
+      // 末字 C duration=0, 但 lineDuration = (3000+0) - 1000 = 2000
+      expect(result.first.duration, 2000);
+    });
+
+    test('字级 LRC：与一行多时间戳区分（后者时间戳间无文本）', () {
+      // 一行多时间戳（无字间文本）应展开为多条 LyricLine
+      final multi = LrcParser.parse('[00:10.00][00:30.00]Chorus');
+      expect(multi, hasLength(2));
+      expect(multi[0].hasWordTiming, isFalse);
+      expect(multi[1].hasWordTiming, isFalse);
+      expect(multi[0].text, 'Chorus');
+      expect(multi[1].text, 'Chorus');
+    });
+
+    test('字级 LRC：跳过词/曲等元数据行', () {
+      final lrc = '''
+[00:01.000]词[00:01.500]：[00:02.000]方[00:02.500]文[00:03.000]山
+[00:05.000]湘[00:05.500]女[00:06.000]多[00:06.500]情
+''';
+      final result = LrcParser.parse(lrc);
+      // 第 1 行以"词："开头是元数据，被跳过
+      expect(result, hasLength(1));
+      expect(result.first.text, '湘女多情');
+      expect(result.first.hasWordTiming, isTrue);
+    });
+
+    test('字级 LRC：保留标题行（用户主动加了字级时间戳）', () {
+      final lrc =
+          '[00:01.000]湘[00:01.242]女[00:02.233]多[00:03.225]情[00:04.216] - [00:05.208]周[00:06.199]杰[00:07.191]伦[00:08.181]';
+      final result = LrcParser.parse(lrc);
+      expect(result, hasLength(1));
+      // 标题行保留（因有字级时间戳）
+      expect(result.first.text, '湘女多情 - 周杰伦');
+    });
+
+    test('字级 LRC 与普通 LRC 混合解析', () {
+      final lrc = '''
+[00:01.000]湘[00:01.242]女[00:02.233]多[00:03.225]情
+[00:05.000]Plain LRC Line
+''';
+      final result = LrcParser.parse(lrc);
+      expect(result, hasLength(2));
+      // 第 1 行：字级
+      expect(result[0].hasWordTiming, isTrue);
+      expect(result[0].text, '湘女多情');
+      // 第 2 行：普通 LRC
+      expect(result[1].hasWordTiming, isFalse);
+      expect(result[1].text, 'Plain LRC Line');
+    });
+
+    test('字级 LRC：offset 偏移生效', () {
+      final result = LrcParser.parse(
+        '[offset:+500]\n[00:01.000]A[00:02.000]B',
+      );
+      expect(result, hasLength(1));
+      expect(result.first.startTime, 500); // 1000 - 500
+      expect(result.first.words[0].startTime, 500);
+      expect(result.first.words[1].startTime, 1500); // 2000 - 500
+    });
+  });
 }
