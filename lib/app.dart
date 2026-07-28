@@ -10,7 +10,6 @@ import 'core/theme/app_theme.dart';
 import 'core/theme/motion_constants.dart';
 import 'data/models/playlist.dart';
 import 'main.dart' show appNavigatorKey, handleShortcut, pendingShortcutType, shortcutTabRequest;
-import 'modules/charts/charts_page.dart';
 import 'modules/discover/discover_page.dart';
 import 'modules/user/user_center_page.dart';
 import 'modules/user/favorites_page.dart';
@@ -315,7 +314,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         _previousSelectedIndex = _selectedIndex;
         _selectedIndex = 4;
       })),
-      const ChartsPage(),
+      const LibraryPage(),
       const FavoritesPage(),
       const PersonalFmPage(),
       const UserCenterPage(),
@@ -388,9 +387,9 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       label: '发现',
     ),
     NavigationDestination(
-      icon: Icon(Icons.trending_up_outlined),
-      selectedIcon: Icon(Icons.trending_up),
-      label: '排行',
+      icon: Icon(Icons.library_music_outlined),
+      selectedIcon: Icon(Icons.library_music),
+      label: '本地音乐',
     ),
     NavigationDestination(
       icon: Icon(Icons.favorite_outline),
@@ -416,9 +415,9 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       label: Text('发现'),
     ),
     NavigationRailDestination(
-      icon: Icon(Icons.trending_up_outlined),
-      selectedIcon: Icon(Icons.trending_up),
-      label: Text('排行'),
+      icon: Icon(Icons.library_music_outlined),
+      selectedIcon: Icon(Icons.library_music),
+      label: Text('本地音乐'),
     ),
     NavigationRailDestination(
       icon: Icon(Icons.favorite_outline),
@@ -444,9 +443,9 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       label: Text('发现'),
     ),
     NavigationDrawerDestination(
-      icon: Icon(Icons.trending_up_outlined),
-      selectedIcon: Icon(Icons.trending_up),
-      label: Text('排行'),
+      icon: Icon(Icons.library_music_outlined),
+      selectedIcon: Icon(Icons.library_music),
+      label: Text('本地音乐'),
     ),
     NavigationDrawerDestination(
       icon: Icon(Icons.favorite_outline),

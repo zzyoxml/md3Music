@@ -22,6 +22,7 @@ class MainActivity : FlutterActivity() {
     private val FLOATING_CHANNEL = "com.md3music.md3music/floating_lyric"
     private val FOLDER_PICKER_CHANNEL = "com.md3music.md3music/folder_picker"
     private val FONT_PICKER_CHANNEL = "com.md3music.md3music/font_picker"
+    private val MEDIA_STORE_CHANNEL = "com.md3music.md3music/media_store"
     private var pendingDesktopLyricAction: String? = null
     private var folderPickerResult: MethodChannel.Result? = null
     private var fontPickerResult: MethodChannel.Result? = null
@@ -410,6 +411,57 @@ class MainActivity : FlutterActivity() {
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
                     startActivityForResult(intent, FONT_PICKER_REQUEST_CODE)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // 注册 MediaStore 扫描器 MethodChannel
+        // Android 11+ 沙箱模式下，通过 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        // 可以读取系统已索引的所有音频（含网易云/QQ 音乐/酷狗等通过 MediaStore 公开的部分）。
+        val mediaStoreChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            MEDIA_STORE_CHANNEL
+        )
+        mediaStoreChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getSdkVersion" -> {
+                    result.success(Build.VERSION.SDK_INT)
+                }
+                "queryAudioFiles" -> {
+                    try {
+                        // MediaStore 查询是同步阻塞的，在子线程执行避免 ANR
+                        Thread {
+                            try {
+                                val files = MediaStoreScanner.queryAudioFiles(this)
+                                runOnUiThread { result.success(files) }
+                            } catch (e: Exception) {
+                                runOnUiThread {
+                                    result.error("QUERY_ERROR", e.message, null)
+                                }
+                            }
+                        }.start()
+                    } catch (e: Exception) {
+                        result.error("QUERY_ERROR", e.message, null)
+                    }
+                }
+                "resolveLocalPath" -> {
+                    // 把 content:// URI 解析为真实文件路径（just_audio 可播放）
+                    val uriStr = call.argument<String>("uri")
+                    if (uriStr == null) {
+                        result.error("INVALID_URI", "uri is null", null)
+                        return@setMethodCallHandler
+                    }
+                    Thread {
+                        try {
+                            val path = MediaStoreScanner.resolveLocalPath(this, uriStr)
+                            runOnUiThread { result.success(path) }
+                        } catch (e: Exception) {
+                            runOnUiThread {
+                                result.error("RESOLVE_ERROR", e.message, null)
+                            }
+                        }
+                    }.start()
                 }
                 else -> result.notImplemented()
             }

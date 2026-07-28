@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -8,6 +7,7 @@ import '../providers/favorites_provider.dart';
 import '../providers/player_provider.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import 'playing_spectrum_indicator.dart';
+import 'smart_artwork_image.dart';
 
 class SongListItem extends StatelessWidget {
   final Song song;
@@ -49,14 +49,25 @@ class SongListItem extends StatelessWidget {
               subtitle: Text(song.artist),
             ),
             const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.download),
-              title: const Text('下载'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _showDownloadDialog(context);
-              },
-            ),
+            if (song.isOnline) ...[
+              ListTile(
+                leading: const Icon(Icons.download),
+                title: const Text('下载'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showDownloadDialog(context);
+                },
+              ),
+              if (downloadsProvider.isDownloaded(song.id))
+                ListTile(
+                  leading: const Icon(Icons.delete_outline),
+                  title: const Text('删除下载'),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    downloadsProvider.removeTask(song.id);
+                  },
+                ),
+            ],
             ListTile(
               leading: const Icon(Icons.playlist_add),
               title: const Text('下一首播放'),
@@ -72,15 +83,6 @@ class SongListItem extends StatelessWidget {
                 );
               },
             ),
-            if (downloadsProvider.isDownloaded(song.id))
-              ListTile(
-                leading: const Icon(Icons.delete_outline),
-                title: const Text('删除下载'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  downloadsProvider.removeTask(song.id);
-                },
-              ),
           ],
         ),
       ),
@@ -182,34 +184,12 @@ class SongListItem extends StatelessWidget {
             if (isSelectMode)
               _buildCheckbox(colorScheme, imgSize)
             else
-              ClipRRect(
-                borderRadius: BorderRadius.circular(8),
-                child: SizedBox(
-                  width: imgSize,
-                  height: imgSize,
-                  child: song.artworkUri != null
-                      ? CachedNetworkImage(
-                          imageUrl: song.artworkUri!,
-                          width: imgSize,
-                          height: imgSize,
-                          fit: BoxFit.cover,
-                          placeholder: (_, _) => Container(
-                            color: colorScheme.surfaceContainerHighest,
-                            child: Icon(Icons.music_note, color: colorScheme.onSurfaceVariant),
-                          ),
-                          errorWidget: (_, _, _) => Container(
-                            color: colorScheme.surfaceContainerHighest,
-                            child: Icon(Icons.music_note, color: colorScheme.onSurfaceVariant),
-                          ),
-                        )
-                      : Container(
-                          decoration: BoxDecoration(
-                            color: colorScheme.surfaceContainerHighest,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Icon(Icons.music_note, color: colorScheme.onSurfaceVariant),
-                        ),
-                ),
+              // 封面图：智能选择 Image.network（在线/content://）或 LocalArtworkImage（文件路径）
+              SmartArtworkImage(
+                artworkUri: song.artworkUri,
+                fallbackFilePath: song.localPath,
+                size: imgSize,
+                borderRadius: 8,
               ),
             const SizedBox(width: 12),
 

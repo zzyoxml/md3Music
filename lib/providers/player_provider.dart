@@ -9,6 +9,7 @@ import '../core/services/audio_service.dart';
 import '../core/services/desktop_lyric_service.dart';
 import '../core/services/lyricon_provider_service.dart';
 import '../core/services/media_notification_service.dart';
+import '../core/services/media_store_service.dart';
 import '../data/models/song.dart';
 import '../data/repositories/history_repository.dart';
 import '../data/repositories/player_state_repository.dart';
@@ -357,7 +358,19 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     if (_audioService != null) {
-      final source = _createAudioSource(song);
+      final playbackUrl = await _resolvePlaybackUrl(song);
+      if (playbackUrl == null || playbackUrl.isEmpty) {
+        _resolveError = '无法获取播放链接';
+        notifyListeners();
+        return;
+      }
+      // 把解析后的真实路径回写到 song，避免下次切回时重新解析
+      if (!song.isOnline) {
+        _currentSong = song.copyWith(localPath: playbackUrl);
+        _playlist[0] = _currentSong!;
+        notifyListeners();
+      }
+      final source = _createAudioSource(_currentSong!);
       await _audioService.setPlaylist([source], startIndex: 0);
       await _audioService.play();
     }
@@ -465,12 +478,19 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       _prefetchNextSongs(startIndex);
     } else if (_audioService != null) {
-      final playbackUrl = _currentSong!.isOnline
-          ? _currentSong!.url
-          : _currentSong!.localPath;
-      if (playbackUrl != null && playbackUrl.isNotEmpty) {
-        await _setUrlAndPlay(playbackUrl);
+      final playbackUrl = await _resolvePlaybackUrl(_currentSong!);
+      if (playbackUrl == null || playbackUrl.isEmpty) {
+        _resolveError = '无法获取播放链接';
+        notifyListeners();
+        return;
       }
+      // 把解析后的真实路径回写到 song（适用于本地 content:// URI）
+      if (!_currentSong!.isOnline) {
+        _currentSong = _currentSong!.copyWith(localPath: playbackUrl);
+        _playlist[_currentIndex] = _currentSong!;
+        notifyListeners();
+      }
+      await _setUrlAndPlay(playbackUrl);
     }
   }
 
@@ -655,11 +675,18 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     if (_audioService != null) {
-      final playbackUrl = _currentSong!.isOnline
-          ? _currentSong!.url
-          : _currentSong!.localPath;
+      final playbackUrl = await _resolvePlaybackUrl(_currentSong!);
       if (playbackUrl != null && playbackUrl.isNotEmpty) {
+        // 把解析后的真实路径回写到 song（适用于本地 content:// URI）
+        if (!_currentSong!.isOnline) {
+          _currentSong = _currentSong!.copyWith(localPath: playbackUrl);
+          _playlist[_currentIndex] = _currentSong!;
+          notifyListeners();
+        }
         await _setUrlAndPlay(playbackUrl, seekTo: seekTo, playAfter: play);
+      } else {
+        _resolveError = '无法获取播放链接';
+        notifyListeners();
       }
     }
 
@@ -803,10 +830,18 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     if (newSongs.isNotEmpty) {
       if (_audioService != null) {
-        final sources = newSongs
+        // 异步把 content:// 全部解析为真实路径后建 source
+        final resolvedSongs = await _resolveLocalPathsForBatch(newSongs);
+        final sources = resolvedSongs
             .map((song) => _createAudioSource(song))
             .toList();
         await _audioService.addAllAudioSources(sources);
+        // 回写真实路径到 _playlist
+        for (final song in resolvedSongs) {
+          final idx = _playlist.indexWhere((s) => s.id == song.id);
+          if (idx >= 0) _playlist[idx] = song;
+        }
+        notifyListeners();
       }
       _prefetchNextSongs(_currentIndex);
     }
@@ -841,6 +876,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     // 重建 audio_service 队列以反映新顺序
     if (_audioService != null && _currentSong != null) {
+      // 全部本地歌曲批量解析 content:// → 真实路径
+      final resolved = await _resolveLocalPathsForBatch(_playlist);
+      // 回写
+      for (int i = 0; i < resolved.length && i < _playlist.length; i++) {
+        _playlist[i] = resolved[i];
+      }
       final sources = _playlist
           .map((song) => _createAudioSource(song))
           .toList();
@@ -848,6 +889,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       // seek 到当前位置，保持播放连续性
       await _audioService.seek(_position);
       if (_isPlaying) await _audioService.play();
+      notifyListeners();
     }
     _prefetchNextSongs(_currentIndex);
   }
@@ -924,6 +966,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
             _playlist[_currentIndex] = resolvedSong;
           }
         } catch (_) {}
+      }
+      // 重建前先批量解析本地 content://，避免 just_audio 加载失败
+      final resolvedPlaylist = await _resolveLocalPathsForBatch(_playlist);
+      for (int i = 0; i < resolvedPlaylist.length && i < _playlist.length; i++) {
+        _playlist[i] = resolvedPlaylist[i];
+      }
+      if (_currentIndex >= 0 && _currentIndex < _playlist.length) {
+        _currentSong = _playlist[_currentIndex];
       }
       final sources = _playlist.map(_createAudioSource).toList();
       await _audioService!.setPlaylist(
@@ -1169,6 +1219,88 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       album: song.album,
       artUri: song.artworkUri != null ? Uri.parse(song.artworkUri!) : null,
     );
+  }
+
+  /// 把 [Song] 转为可播放的 `file://` 或绝对路径 URL。
+  ///
+  /// **关键**：本地音乐在 MediaStore 中以 `content://media/...` 形式存在，
+  /// 而 `just_audio.setUrl` 不支持 `content://` 协议，会导致
+  /// "播放没声音"。这里通过原生 MethodChannel 把 `content://` 解析为
+  /// 真实文件路径（命中 MediaStore.DATA 字段或拷贝到 App 缓存）。
+  ///
+  /// 解析结果会回写到 song 的 `localPath`（去掉 `content://` 前缀后的真实路径），
+  /// 后续切歌/重播时无需重新解析。
+  Future<String?> _resolvePlaybackUrl(Song song) async {
+    if (song.isOnline) return song.url;
+    final raw = song.localPath;
+    if (raw == null || raw.isEmpty) return null;
+    // 非 content:// 协议：直接当本地路径用（兼容旧的绝对路径/SMB 路径等）
+    if (!raw.startsWith('content://')) {
+      // just_audio 的 setUrl / AudioSource.uri 需要完整的 URI，
+      // 裸路径 /storage/emulated/0/... 会导致 "No host specified in URI" 错误。
+      // 这里把绝对路径转换为 file:// URI。
+      if (raw.startsWith('/')) {
+        return Uri.file(raw).toString();
+      }
+      return raw;
+    }
+    try {
+      final resolved = await MediaStoreService.resolveLocalPath(raw);
+      if (resolved == null || resolved.isEmpty) {
+        debugPrint('[PlayerProvider] 解析 content:// 失败: $raw');
+        return null;
+      }
+      // resolved 是真实文件路径，同样需要转换为 file:// URI
+      if (resolved.startsWith('/')) {
+        final fileUri = Uri.file(resolved).toString();
+        debugPrint('[PlayerProvider] content:// → $fileUri');
+        return fileUri;
+      }
+      debugPrint('[PlayerProvider] content:// → $resolved');
+      return resolved;
+    } catch (e) {
+      debugPrint('[PlayerProvider] resolvePlaybackUrl 异常: $e');
+      return null;
+    }
+  }
+
+  /// 批量解析一组本地音乐（仅对 `content://` URI 调用原生 MethodChannel）。
+  ///
+  /// 用于在 `appendPlaylist` / `insertAfterCurrent` / `removeFromPlaylist` 等
+  /// 一次性构建多 source 的入口，避免对每首歌的 `content://` 漏解析而传给
+  /// `just_audio` 导致"播放没声音"。
+  ///
+  /// 在线歌曲保持原样不动。解析失败的本地歌曲保留原 `content://`（让上层
+  /// `setPlaylist` 静默失败，避免阻塞整体流程）。
+  Future<List<Song>> _resolveLocalPathsForBatch(List<Song> songs) async {
+    final result = <Song>[];
+    for (final song in songs) {
+      if (song.isOnline) {
+        result.add(song);
+        continue;
+      }
+      final raw = song.localPath;
+      if (raw == null || raw.isEmpty) {
+        result.add(song);
+        continue;
+      }
+      // 非 content:// 的裸路径也需要转换为 file:// URI
+      if (!raw.startsWith('content://')) {
+        if (raw.startsWith('/') && !raw.startsWith('file://')) {
+          result.add(song.copyWith(localPath: Uri.file(raw).toString()));
+        } else {
+          result.add(song);
+        }
+        continue;
+      }
+      final resolved = await _resolvePlaybackUrl(song);
+      if (resolved != null && resolved != raw) {
+        result.add(song.copyWith(localPath: resolved));
+      } else {
+        result.add(song);
+      }
+    }
+    return result;
   }
 
   /// 监听自身 notifyListeners：检测 currentSong 变化时推送 Lyricon。

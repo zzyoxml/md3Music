@@ -1,4 +1,3 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -6,6 +5,7 @@ import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/theme/motion_constants.dart';
 import '../../providers/player_provider.dart';
+import '../../widgets/smart_artwork_image.dart';
 import 'full_player_route.dart';
 
 /// 底部常驻迷你播放条。
@@ -217,35 +217,12 @@ class _MiniPlayerState extends State<MiniPlayer>
                                   child: SizedBox(
                                     width: 44,
                                     height: 44,
-                                    child: currentSong.artworkUri != null
-                                        ? CachedNetworkImage(
-                                            imageUrl: currentSong.artworkUri!,
-                                            fit: BoxFit.cover,
-                                            placeholder: (_, _) => Container(
-                                              color: colorScheme
-                                                  .surfaceContainerHighest,
-                                              child: Icon(Icons.music_note,
-                                                  size: 20,
-                                                  color: colorScheme
-                                                      .onSurfaceVariant),
-                                            ),
-                                            errorWidget: (_, _, _) => Container(
-                                              color: colorScheme
-                                                  .surfaceContainerHighest,
-                                              child: Icon(Icons.music_note,
-                                                  size: 20,
-                                                  color: colorScheme
-                                                      .onSurfaceVariant),
-                                            ),
-                                          )
-                                        : Container(
-                                            color: colorScheme
-                                                .surfaceContainerHighest,
-                                            child: Icon(Icons.music_note,
-                                                size: 20,
-                                                color: colorScheme
-                                                    .onSurfaceVariant),
-                                          ),
+                                    child: SmartArtworkImage(
+                                      artworkUri: currentSong.artworkUri,
+                                      fallbackFilePath: currentSong.localPath,
+                                      size: 44,
+                                      borderRadius: 6,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 12),

@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/album.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/album_card.dart';
 import '../../widgets/app_animation.dart';
 import '../../widgets/md3e_loading_indicator.dart';
@@ -161,15 +162,22 @@ class _DiscoverPageState extends State<DiscoverPage> {
               context,
             ).push(MaterialPageRoute(builder: (_) => const SongRecognitionPage())),
           ),
-          Consumer<KugouProvider>(
-            builder: (context, kugou, _) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              // 头像可点击：切换到「我的」tab
-              child: GestureDetector(
-                onTap: () => widget.onAvatarTap?.call(),
-                child: _buildAvatar(kugou, colorScheme),
-              ),
+          Selector<KugouProvider, (String?, String, bool)>(
+            selector: (_, kugou) => (
+              kugou.userInfo?.avatar,
+              kugou.userInfo?.userid ?? 'default',
+              kugou.isLoggedIn,
             ),
+            builder: (context, data, _) {
+              final (avatarUrl, userId, isLoggedIn) = data;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () => widget.onAvatarTap?.call(),
+                  child: _buildAvatar(avatarUrl, userId, isLoggedIn, colorScheme),
+                ),
+              );
+            },
           ),
         ],
       ),
@@ -204,16 +212,13 @@ class _DiscoverPageState extends State<DiscoverPage> {
     return '晚上好';
   }
 
-  Widget _buildAvatar(KugouProvider kugou, ColorScheme colorScheme) {
-    final avatarUrl = kugou.userInfo?.avatar;
-    final userId = kugou.userInfo?.userid ?? 'default';
-
+  Widget _buildAvatar(String? avatarUrl, String userId, bool isLoggedIn, ColorScheme colorScheme) {
     if (avatarUrl == null || avatarUrl.isEmpty) {
       return CircleAvatar(
         backgroundColor: colorScheme.primaryContainer,
         radius: 16,
         child: Icon(
-          kugou.isLoggedIn ? Icons.person : Icons.person_outline,
+          isLoggedIn ? Icons.person : Icons.person_outline,
           size: 18,
           color: colorScheme.onPrimaryContainer,
         ),
@@ -231,12 +236,12 @@ class _DiscoverPageState extends State<DiscoverPage> {
           height: 32,
           fit: BoxFit.cover,
           placeholder: (context, url) => Icon(
-            kugou.isLoggedIn ? Icons.person : Icons.person_outline,
+            isLoggedIn ? Icons.person : Icons.person_outline,
             size: 18,
             color: colorScheme.onPrimaryContainer,
           ),
           errorWidget: (context, url, error) => Icon(
-            kugou.isLoggedIn ? Icons.person : Icons.person_outline,
+            isLoggedIn ? Icons.person : Icons.person_outline,
             size: 18,
             color: colorScheme.onPrimaryContainer,
           ),
@@ -337,9 +342,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Widget _buildDailySection(ColorScheme cs) {
-    return Consumer<KugouProvider>(
-      builder: (context, kugou, _) {
-        final songs = kugou.recommendSongs;
+    return Selector<KugouProvider, List<KugouSongDetail>>(
+      selector: (_, kugou) => kugou.recommendSongs,
+      builder: (context, songs, _) {
         if (songs.isEmpty) return const SliverToBoxAdapter(child: SizedBox());
         return SliverToBoxAdapter(
           child: FadeInUp(
@@ -409,9 +414,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Widget _buildThemeMusicSection(ColorScheme cs) {
-    return Consumer<KugouProvider>(
-      builder: (context, kugou, _) {
-        final themes = kugou.themePlaylistData;
+    return Selector<KugouProvider, List<KugouThemeInfo>>(
+      selector: (_, kugou) => kugou.themePlaylistData,
+      builder: (context, themes, _) {
         if (themes.isEmpty) return const SliverToBoxAdapter(child: SizedBox());
         return SliverToBoxAdapter(
           child: FadeInUp(
@@ -496,11 +501,11 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Widget _buildSceneSection(ColorScheme cs) {
-    return Consumer<KugouProvider>(
-      builder: (context, kugou, _) {
-        final scenes = kugou.sceneData;
-        if (scenes == null) return const SliverToBoxAdapter(child: SizedBox());
-        final data = scenes['data'] as Map<String, dynamic>? ?? scenes;
+    return Selector<KugouProvider, Map<String, dynamic>?>(
+      selector: (_, kugou) => kugou.sceneData,
+      builder: (context, sceneData, _) {
+        if (sceneData == null) return const SliverToBoxAdapter(child: SizedBox());
+        final data = sceneData['data'] as Map<String, dynamic>? ?? sceneData;
         final list = data['list'] ?? data['info'] ?? [];
         if (list is! List || list.isEmpty) {
           return const SliverToBoxAdapter(child: SizedBox());
@@ -568,9 +573,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Widget _buildPlaylistSection(ColorScheme cs) {
-    return Consumer<KugouProvider>(
-      builder: (context, kugou, _) {
-        final plist = kugou.playlistList;
+    return Selector<KugouProvider, List<KugouPlaylistBrief>>(
+      selector: (_, kugou) => kugou.playlistList,
+      builder: (context, plist, _) {
         if (plist.isEmpty) return const SliverToBoxAdapter(child: SizedBox());
         return SliverToBoxAdapter(
           child: FadeInUp(
@@ -643,9 +648,10 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Widget _buildRankSection(ColorScheme cs) {
-    return Consumer<KugouProvider>(
-      builder: (context, kugou, _) {
-        final ranks = kugou.rankListAsAlbums;
+    return Selector<KugouProvider, KugouRankList?>(
+      selector: (_, kugou) => kugou.rankList,
+      builder: (context, rankList, _) {
+        final ranks = rankList?.ranks.map((e) => e.toAlbum()).toList() ?? [];
         if (ranks.isEmpty) return const SliverToBoxAdapter(child: SizedBox());
         return SliverToBoxAdapter(
           child: FadeInUp(
@@ -687,7 +693,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                             Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => _RankDetailPage(
-                                  rankId: kugou.rankList!.ranks[i].id,
+                                  rankId: rankList!.ranks[i].id,
                                   rankName: ranks[i].name,
                                 ),
                               ),
@@ -714,11 +720,14 @@ class _PlaylistBrowsePage extends StatefulWidget {
 }
 
 class _PlaylistBrowsePageState extends State<_PlaylistBrowsePage> {
+  bool _isLoading = true;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<KugouProvider>().getPlaylist();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await context.read<KugouProvider>().getPlaylist();
+      if (mounted) setState(() => _isLoading = false);
     });
   }
 
@@ -726,42 +735,41 @@ class _PlaylistBrowsePageState extends State<_PlaylistBrowsePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('热门歌单')),
-      body: Consumer<KugouProvider>(
-        builder: (context, kugou, _) {
-          if (kugou.isLoading) {
-            return const Center(child: MD3ELoadingIndicator());
-          }
-          final list = kugou.playlistList;
-          if (list.isEmpty) return const Center(child: Text('暂无数据'));
-          return GridView.builder(
-            padding: const EdgeInsets.all(16),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              childAspectRatio: 0.85,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-            ),
-            itemCount: list.length,
-            itemBuilder: (context, i) => FadeInUp(
-              delayMs: i * 30,
-              child: AlbumCard(
-                album: Album(
-                  id: list[i].id,
-                  name: list[i].name,
-                  artist: '',
-                  artworkUri: list[i].coverUrl,
-                  songCount: list[i].songCount,
-                ),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => PlaylistPage(playlist: list[i].toPlaylist()),
+      body: _isLoading
+          ? const Center(child: MD3ELoadingIndicator())
+          : Selector<KugouProvider, List<KugouPlaylistBrief>>(
+              selector: (_, kugou) => kugou.playlistList,
+              builder: (context, list, _) {
+                if (list.isEmpty) return const Center(child: Text('暂无数据'));
+                return GridView.builder(
+                  padding: const EdgeInsets.all(16),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    childAspectRatio: 0.85,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
                   ),
-                ),
-              ),
+                  itemCount: list.length,
+                  itemBuilder: (context, i) => FadeInUp(
+                    delayMs: i * 30,
+                    child: AlbumCard(
+                      album: Album(
+                        id: list[i].id,
+                        name: list[i].name,
+                        artist: '',
+                        artworkUri: list[i].coverUrl,
+                        songCount: list[i].songCount,
+                      ),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => PlaylistPage(playlist: list[i].toPlaylist()),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
-          );
-        },
-      ),
     );
   }
 }
@@ -775,11 +783,14 @@ class _DailyRecommendDetailPage extends StatefulWidget {
 }
 
 class _DailyRecommendDetailPageState extends State<_DailyRecommendDetailPage> {
+  bool _isLoading = true;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<KugouProvider>().getRecommendDaily();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await context.read<KugouProvider>().getRecommendDaily();
+      if (mounted) setState(() => _isLoading = false);
     });
   }
 
@@ -787,32 +798,32 @@ class _DailyRecommendDetailPageState extends State<_DailyRecommendDetailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('每日推荐')),
-      body: Consumer<KugouProvider>(
-        builder: (context, kugou, _) {
-          if (kugou.isLoading) {
-            return const Center(child: MD3ELoadingIndicator());
-          }
-          final songs = kugou.recommendSongsAsSongs;
-          if (songs.isEmpty) return const Center(child: Text('暂无数据'));
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: songs.length,
-            itemBuilder: (context, index) {
-              final song = songs[index];
-              return SongListItem(
-                song: song,
-                onTap: () {
-                  context.read<PlayerProvider>().playOnlinePlaylist(
-                    songs,
-                    index,
-                  );
-                },
-                onMoreTap: () {},
-              );
-            },
-          );
-        },
-      ),
+      body: _isLoading
+          ? const Center(child: MD3ELoadingIndicator())
+          : Selector<KugouProvider, List<KugouSongDetail>>(
+              selector: (_, kugou) => kugou.recommendSongs,
+              builder: (context, recommendSongs, _) {
+                final songs = recommendSongs.map((e) => e.toSong()).toList();
+                if (songs.isEmpty) return const Center(child: Text('暂无数据'));
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: songs.length,
+                  itemBuilder: (context, index) {
+                    final song = songs[index];
+                    return SongListItem(
+                      song: song,
+                      onTap: () {
+                        context.read<PlayerProvider>().playOnlinePlaylist(
+                          songs,
+                          index,
+                        );
+                      },
+                      onMoreTap: () {},
+                    );
+                  },
+                );
+              },
+            ),
     );
   }
 }
@@ -826,11 +837,14 @@ class _RankDetailPage extends StatefulWidget {
 }
 
 class _RankDetailPageState extends State<_RankDetailPage> {
+  bool _isLoading = true;
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<KugouProvider>().getRankSongs(rankId: widget.rankId);
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await context.read<KugouProvider>().getRankSongs(rankId: widget.rankId);
+      if (mounted) setState(() => _isLoading = false);
     });
   }
 
@@ -838,50 +852,53 @@ class _RankDetailPageState extends State<_RankDetailPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(widget.rankName)),
-      body: Consumer<KugouProvider>(
-        builder: (context, kugou, _) {
-          if (kugou.isLoading) {
-            return const Center(child: MD3ELoadingIndicator());
-          }
-          final songs = kugou.rankSongs;
-          if (songs.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Text('暂无数据'),
-                  ElevatedButton(
-                    onPressed: () => kugou.getRankSongs(
-                      rankId: widget.rankId,
-                      forceRefresh: true,
+      body: _isLoading
+          ? const Center(child: MD3ELoadingIndicator())
+          : Selector<KugouProvider, List<KugouSongDetail>>(
+              selector: (_, kugou) => kugou.rankSongs,
+              builder: (context, songs, _) {
+                if (songs.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Text('暂无数据'),
+                        ElevatedButton(
+                          onPressed: () async {
+                            setState(() => _isLoading = true);
+                            await context.read<KugouProvider>().getRankSongs(
+                              rankId: widget.rankId,
+                              forceRefresh: true,
+                            );
+                            if (mounted) setState(() => _isLoading = false);
+                          },
+                          child: const Text('重试'),
+                        ),
+                      ],
                     ),
-                    child: const Text('重试'),
-                  ),
-                ],
-              ),
-            );
-          }
-          return ListView.builder(
-            padding: const EdgeInsets.all(16),
-            itemCount: songs.length,
-            itemBuilder: (context, i) {
-              final song = songs[i].toSong();
-              return FadeInUp(
-                delayMs: i * 30,
-                child: SongListItem(
-                  song: song,
-                  onTap: () =>
-                      context.read<PlayerProvider>().playOnlinePlaylist(
-                        songs.map((e) => e.toSong()).toList(),
-                        i,
+                  );
+                }
+                return ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: songs.length,
+                  itemBuilder: (context, i) {
+                    final song = songs[i].toSong();
+                    return FadeInUp(
+                      delayMs: i * 30,
+                      child: SongListItem(
+                        song: song,
+                        onTap: () =>
+                            context.read<PlayerProvider>().playOnlinePlaylist(
+                              songs.map((e) => e.toSong()).toList(),
+                              i,
+                            ),
+                        onMoreTap: () {},
                       ),
-                  onMoreTap: () {},
-                ),
-              );
-            },
-          );
-        },
-      ),
+                    );
+                  },
+                );
+              },
+            ),
     );
   }
 }

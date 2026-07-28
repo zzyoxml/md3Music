@@ -1,7 +1,7 @@
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../data/models/album.dart';
+import 'smart_artwork_image.dart';
 
 class AlbumCard extends StatelessWidget {
   final Album album;
@@ -28,37 +28,16 @@ class AlbumCard extends StatelessWidget {
           child: Column(
             children: [
               Expanded(
-                child: _buildImage(colorScheme),
+                child: SmartArtworkImage(
+                  artworkUri: album.artworkUri,
+                  size: double.infinity,
+                  borderRadius: 0,
+                ),
               ),
               _buildInfo(colorScheme, textTheme),
             ],
           ),
         ),
-      ),
-    );
-  }
-
-  Widget _buildImage(ColorScheme colorScheme) {
-    if (album.artworkUri != null) {
-      return CachedNetworkImage(
-        imageUrl: album.artworkUri!,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        placeholder: (_, _) => _buildPlaceholder(colorScheme),
-        errorWidget: (_, _, _) => _buildPlaceholder(colorScheme),
-      );
-    }
-    return _buildPlaceholder(colorScheme);
-  }
-
-  Widget _buildPlaceholder(ColorScheme colorScheme) {
-    return Container(
-      width: double.infinity,
-      color: colorScheme.surfaceContainerHighest,
-      child: Icon(
-        Icons.album,
-        size: 40,
-        color: colorScheme.onSurfaceVariant,
       ),
     );
   }

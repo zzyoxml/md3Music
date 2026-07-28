@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 import '../../core/layout/responsive_layout.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/media_notification_service.dart';
+import '../../core/utils/audio_scanner.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
@@ -26,6 +27,7 @@ import '../../widgets/flowing_background.dart';
 import '../../widgets/apple_lyrics/models/lyric_line.dart';
 import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/player_artwork_image.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/player_playlist_dialog.dart';
 import 'comments_view.dart';
@@ -34,7 +36,10 @@ import 'full_player_route.dart';
 /// 预加载封面图片到磁盘缓存，防止切换时白屏
 void _preloadArtwork(String? url) {
   if (url == null || url.isEmpty) return;
-  CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+  // 仅预加载在线封面，本地封面（content:// / local:// / file://）由组件按需加载
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+  }
 }
 
 const List<AudioQuality> _audioQualities = [
@@ -244,33 +249,52 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     });
 
     try {
-      final kugouProvider = context.read<KugouProvider>();
-      await kugouProvider.getLyric(songId, songName: song.title);
+      String lyricText = '';
+      String? translationText;
+      String? romaText;
+
+      // 本地歌曲优先读取内嵌歌词（ID3 USLT / Vorbis LYRICS / MP4 ©lyr）
+      if (song is Song && !song.isOnline) {
+        final localPath = song.localPath;
+        if (localPath != null && localPath.isNotEmpty) {
+          // file:// URI 或 content:// 需要提取真实路径
+          String filePath = localPath;
+          if (filePath.startsWith('file://')) {
+            filePath = Uri.parse(filePath).toFilePath();
+          }
+          final embedded = readEmbeddedLyrics(filePath);
+          if (embedded != null && embedded.isNotEmpty) {
+            lyricText = embedded;
+          }
+        }
+      }
+
+      // 内嵌歌词为空时回退到酷狗 API
+      if (lyricText.isEmpty) {
+        final kugouProvider = context.read<KugouProvider>();
+        await kugouProvider.getLyric(songId, songName: song.title);
+
+        if (mounted) {
+          final lyric = kugouProvider.lyric;
+          lyricText = lyric?.displayKrcLyric ??
+              lyric?.displayLrcLyric ??
+              lyric?.displayLyric ??
+              '';
+          translationText = lyric?.translatedContent;
+          romaText = lyric?.romaContent;
+        }
+      }
 
       if (mounted) {
-        // 优先取 KRC 明文（逐字），降级 LRC 明文（行级），最后降级 displayLyric
-        final lyric = kugouProvider.lyric;
-        final lyricText =
-            lyric?.displayKrcLyric ??
-            lyric?.displayLrcLyric ??
-            lyric?.displayLyric ??
-            '';
-        // 合并翻译和罗马音：酷狗 API 返回的 translatedContent/romaContent，
-        // 按时间戳最近邻匹配到各行。即使 showTranslation 关闭也合并数据，
-        // toggle 时无需重新 fetch
-        final translationText = lyric?.translatedContent;
-        final romaText = lyric?.romaContent;
         setState(() {
           _isLoadingLyrics = false;
           _hasTranslation = translationText != null && translationText.isNotEmpty;
           _hasRoma = romaText != null && romaText.isNotEmpty;
-          // 解析器链自动检测格式（KRC/LRC/纯文本）并输出统一 List<LyricLine>
           _parsedLyrics = LyricParserChain.parse(
             lyricText,
             translationText: translationText,
             romaText: romaText,
           );
-          // 同步记录格式，用于底部标注
           _lyricFormat = LyricParserChain.detectFormat(lyricText);
         });
       }
@@ -290,6 +314,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     String? artworkUrl,
     ColorScheme colorScheme, {
     double iconSize = 48.0,
+    String? fallbackFilePath,
   }) {
     return AnimatedBuilder(
       animation: _artworkFadeAnimation,
@@ -302,25 +327,27 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               Positioned.fill(
                 child: Opacity(
                   opacity: oldOpacity,
-                  child: CachedNetworkImage(
-                    imageUrl: _previousArtworkUrl!,
+                  child: PlayerArtworkImage(
+                    artworkUri: _previousArtworkUrl,
+                    fallbackFilePath: fallbackFilePath,
                     fit: BoxFit.cover,
-                    placeholder: (_, _) => _artworkPlaceholder(iconSize),
-                    errorWidget: (_, _, _) => _artworkPlaceholder(iconSize),
+                    iconSize: iconSize,
+                    backgroundColor: Colors.white12,
+                    iconColor: Colors.white54,
                   ),
                 ),
               ),
             Positioned.fill(
               child: Opacity(
                 opacity: newOpacity,
-                child: artworkUrl != null && artworkUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                        imageUrl: artworkUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (_, _) => _artworkPlaceholder(iconSize),
-                        errorWidget: (_, _, _) => _artworkPlaceholder(iconSize),
-                      )
-                    : _artworkPlaceholder(iconSize),
+                child: PlayerArtworkImage(
+                  artworkUri: artworkUrl,
+                  fallbackFilePath: fallbackFilePath,
+                  fit: BoxFit.cover,
+                  iconSize: iconSize,
+                  backgroundColor: Colors.white12,
+                  iconColor: Colors.white54,
+                ),
               ),
             ),
           ],
@@ -339,7 +366,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   }
 
   /// 模糊背景淡入淡出（无 alpha 渐变；渐变移到 AppleLyricsView 歌词界面边界）
-  Widget _buildCrossfadeBlurredBackground(String? artworkUrl) {
+  Widget _buildCrossfadeBlurredBackground(String? artworkUrl, {String? fallbackFilePath}) {
     return AnimatedBuilder(
       animation: _artworkFadeAnimation,
       builder: (context, _) {
@@ -353,11 +380,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   opacity: oldOpacity,
                   child: ImageFiltered(
                     imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
-                    child: Image.network(
-                      _previousArtworkUrl!,
+                    child: PlayerArtworkImage(
+                      artworkUri: _previousArtworkUrl,
+                      fallbackFilePath: fallbackFilePath,
+                      isFill: true,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          const ColoredBox(color: Colors.black),
+                      backgroundColor: Colors.black,
+                      iconColor: Colors.white24,
                     ),
                   ),
                 ),
@@ -365,17 +394,17 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             Positioned.fill(
               child: Opacity(
                 opacity: newOpacity,
-                child: artworkUrl != null && artworkUrl.isNotEmpty
-                    ? ImageFiltered(
-                        imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
-                        child: Image.network(
-                          artworkUrl,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) =>
-                              const ColoredBox(color: Colors.black),
-                        ),
-                      )
-                    : const ColoredBox(color: Colors.black),
+                child: ImageFiltered(
+                  imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
+                  child: PlayerArtworkImage(
+                    artworkUri: artworkUrl,
+                    fallbackFilePath: fallbackFilePath,
+                    isFill: true,
+                    fit: BoxFit.cover,
+                    backgroundColor: Colors.black,
+                    iconColor: Colors.white24,
+                  ),
+                ),
               ),
             ),
           ],
@@ -651,7 +680,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         body: Stack(
           children: [
             // 1. 模糊封面背景层（Apple Music 风格，带淡入淡出）
-            _buildCrossfadeBlurredBackground(currentSong.artworkUri),
+            _buildCrossfadeBlurredBackground(
+              currentSong.artworkUri,
+              fallbackFilePath: currentSong.localPath,
+            ),
             // 2. 动态流光背景层（可选，从专辑封面提取色彩流动）
             if (LyricPreferences.instance.useFlowingBackground)
               FlowingBackground(
@@ -809,13 +841,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(16),
                                     // Selector 让封面仅在 artworkUri 变化时重建
-                                    child: Selector<PlayerProvider, String?>(
-                                      selector: (_, p) => p.currentSong?.artworkUri,
-                                      builder: (context, artworkUri, __) =>
+                                    child: Selector<PlayerProvider, (String?, String?)>(
+                                      selector: (_, p) => (p.currentSong?.artworkUri, p.currentSong?.localPath),
+                                      builder: (context, data, __) =>
                                           _buildCrossfadeArtwork(
-                                        artworkUri,
+                                        data.$1,
                                         colorScheme,
                                         iconSize: 48,
+                                        fallbackFilePath: data.$2,
                                       ),
                                     ),
                                   ),
@@ -1001,13 +1034,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(16),
                                       // Selector 让封面仅在 artworkUri 变化时重建
-                                      child: Selector<PlayerProvider, String?>(
-                                        selector: (_, p) => p.currentSong?.artworkUri,
-                                        builder: (context, artworkUri, __) =>
+                                      child: Selector<PlayerProvider, (String?, String?)>(
+                                        selector: (_, p) => (p.currentSong?.artworkUri, p.currentSong?.localPath),
+                                        builder: (context, data, __) =>
                                             _buildCrossfadeArtwork(
-                                          artworkUri,
+                                          data.$1,
                                           colorScheme,
                                           iconSize: 48,
+                                          fallbackFilePath: data.$2,
                                         ),
                                       ),
                                     ),
@@ -1258,6 +1292,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           currentSong.artworkUri,
                           colorScheme,
                           iconSize: iconSize,
+                          fallbackFilePath: currentSong.localPath,
                         ),
                       ),
                     ),
@@ -1276,6 +1311,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     currentSong.artworkUri,
                     colorScheme,
                     iconSize: iconSize,
+                    fallbackFilePath: currentSong.localPath,
                   ),
                 ),
               ),

@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../core/layout/responsive_layout.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/media_notification_service.dart';
+import '../../core/utils/audio_scanner.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
@@ -21,13 +22,17 @@ import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_transport_row.dart';
+import '../../widgets/player_artwork_image.dart';
 import '../../widgets/player_playlist_dialog.dart';
 import 'full_player_route.dart';
 
 /// 预加载封面图片到磁盘缓存，防止切换时白屏
 void _preloadArtwork(String? url) {
   if (url == null || url.isEmpty) return;
-  CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+  // 仅预加载在线封面，本地封面（content:// / local:// / file://）由组件按需加载
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    CachedNetworkImageProvider(url).resolve(const ImageConfiguration());
+  }
 }
 
 const List<AudioQuality> _audioQualities = [
@@ -418,14 +423,37 @@ class _FullPlayerState extends State<FullPlayer>
     });
 
     try {
-      final kugouProvider = context.read<KugouProvider>();
-      await kugouProvider.getLyric(songId, songName: song.title);
+      String lyricText = '';
+
+      // 本地歌曲优先读取内嵌歌词（ID3 USLT / Vorbis LYRICS / MP4 ©lyr）
+      if (song is Song && !song.isOnline) {
+        final localPath = song.localPath;
+        if (localPath != null && localPath.isNotEmpty) {
+          String filePath = localPath;
+          if (filePath.startsWith('file://')) {
+            filePath = Uri.parse(filePath).toFilePath();
+          }
+          final embedded = readEmbeddedLyrics(filePath);
+          if (embedded != null && embedded.isNotEmpty) {
+            lyricText = embedded;
+          }
+        }
+      }
+
+      // 内嵌歌词为空时回退到酷狗 API
+      if (lyricText.isEmpty) {
+        final kugouProvider = context.read<KugouProvider>();
+        await kugouProvider.getLyric(songId, songName: song.title);
+        if (mounted) {
+          final lyric = kugouProvider.lyric;
+          lyricText = lyric?.displayLyric ?? '';
+        }
+      }
 
       if (mounted) {
         setState(() {
           _isLoadingLyrics = false;
-          final lyric = kugouProvider.lyric;
-          _lyrics = lyric?.displayLyric ?? '';
+          _lyrics = lyricText;
         });
       }
     } catch (e) {
@@ -443,6 +471,7 @@ class _FullPlayerState extends State<FullPlayer>
     String? artworkUrl,
     ColorScheme colorScheme, {
     double iconSize = 48.0,
+    String? fallbackFilePath,
   }) {
     return AnimatedBuilder(
       animation: _artworkFadeAnimation,
@@ -455,25 +484,27 @@ class _FullPlayerState extends State<FullPlayer>
               Positioned.fill(
                 child: Opacity(
                   opacity: oldOpacity,
-                  child: CachedNetworkImage(
-                    imageUrl: _previousArtworkUrl!,
+                  child: PlayerArtworkImage(
+                    artworkUri: _previousArtworkUrl,
+                    fallbackFilePath: fallbackFilePath,
                     fit: BoxFit.cover,
-                    placeholder: (_, _) => _artworkPlaceholder(colorScheme, iconSize),
-                    errorWidget: (_, _, _) => _artworkPlaceholder(colorScheme, iconSize),
+                    iconSize: iconSize,
+                    backgroundColor: colorScheme.surfaceContainerHighest,
+                    iconColor: colorScheme.onSurfaceVariant,
                   ),
                 ),
               ),
             Positioned.fill(
               child: Opacity(
                 opacity: newOpacity,
-                child: artworkUrl != null && artworkUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                        imageUrl: artworkUrl,
-                        fit: BoxFit.cover,
-                        placeholder: (_, _) => _artworkPlaceholder(colorScheme, iconSize),
-                        errorWidget: (_, _, _) => _artworkPlaceholder(colorScheme, iconSize),
-                      )
-                    : _artworkPlaceholder(colorScheme, iconSize),
+                child: PlayerArtworkImage(
+                  artworkUri: artworkUrl,
+                  fallbackFilePath: fallbackFilePath,
+                  fit: BoxFit.cover,
+                  iconSize: iconSize,
+                  backgroundColor: colorScheme.surfaceContainerHighest,
+                  iconColor: colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ],
@@ -629,6 +660,7 @@ class _FullPlayerState extends State<FullPlayer>
                                 currentSong.artworkUri,
                                 colorScheme,
                                 iconSize: 48,
+                                fallbackFilePath: currentSong.localPath,
                               ),
                             ),
                           ),
@@ -776,6 +808,7 @@ class _FullPlayerState extends State<FullPlayer>
                                   currentSong.artworkUri,
                                   colorScheme,
                                   iconSize: 48,
+                                  fallbackFilePath: currentSong.localPath,
                                 ),
                               ),
                             ),
@@ -944,6 +977,7 @@ class _FullPlayerState extends State<FullPlayer>
         currentSong.artworkUri,
         colorScheme,
         iconSize: iconSize,
+        fallbackFilePath: currentSong.localPath,
       ),
     );
   }

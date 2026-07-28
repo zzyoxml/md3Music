@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/library_provider.dart';
+import '../../widgets/md3e_loading_indicator.dart';
 import 'albums_page.dart';
 import 'artists_page.dart';
+import 'folders_page.dart';
 import 'songs_page.dart';
 
 class LibraryPage extends StatefulWidget {
@@ -16,16 +18,26 @@ class LibraryPage extends StatefulWidget {
 class _LibraryPageState extends State<LibraryPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final provider = context.read<LibraryProvider>();
+      provider.loadScanFolders();
+      // 如果没有歌曲数据且不在扫描中，自动扫描
+      if (!provider.hasMusic && !provider.isScanning) {
+        provider.loadLocalMusic();
+      }
+    });
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -34,40 +46,269 @@ class _LibraryPageState extends State<LibraryPage>
     final libraryProvider = context.watch<LibraryProvider>();
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final hasMusic = libraryProvider.songs.isNotEmpty ||
-        libraryProvider.albums.isNotEmpty ||
-        libraryProvider.artists.isNotEmpty;
+    final hasMusic = libraryProvider.hasMusic;
+    final isScanning = libraryProvider.isScanning;
 
     return Scaffold(
       appBar: AppBar(
+        centerTitle: true,
         title: Text(
-          '音乐库',
+          '本地音乐',
           style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
         ),
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(text: '歌曲'),
-            Tab(text: '专辑'),
-            Tab(text: '歌手'),
-          ],
-        ),
+        bottom: hasMusic || isScanning
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(100),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // 搜索栏
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 4),
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          hintText: '搜索本地音乐',
+                          prefixIcon: const Icon(Icons.search, size: 20),
+                          suffixIcon: _searchController.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 20),
+                                  onPressed: () {
+                                    _searchController.clear();
+                                    libraryProvider.clearSearch();
+                                  },
+                                )
+                              : null,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(28),
+                            borderSide: BorderSide.none,
+                          ),
+                          filled: true,
+                          fillColor: colorScheme.surfaceContainerHigh,
+                        ),
+                        onChanged: (value) {
+                          libraryProvider.setSearchQuery(value);
+                          setState(() {});
+                        },
+                      ),
+                    ),
+                    // TabBar
+                    TabBar(
+                      controller: _tabController,
+                      tabs: const [
+                        Tab(text: '曲目'),
+                        Tab(text: '专辑'),
+                        Tab(text: '艺术家'),
+                        Tab(text: '文件夹'),
+                      ],
+                      isScrollable: false,
+                    ),
+                  ],
+                ),
+              )
+            : null,
       ),
-      body: !hasMusic && !libraryProvider.isLoading
-          ? _buildEmptyState(colorScheme)
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                SongsPage(songs: libraryProvider.songs),
-                AlbumsPage(albums: libraryProvider.albums),
-                ArtistsPage(artists: libraryProvider.artists),
-              ],
-            ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          context.read<LibraryProvider>().loadLocalMusic();
-        },
-        child: const Icon(Icons.refresh),
+      body: isScanning && !hasMusic
+          ? _buildScanningState(colorScheme)
+          : !hasMusic
+              ? _buildEmptyState(colorScheme)
+              : TabBarView(
+                  controller: _tabController,
+                  children: [
+                    SongsPage(songs: libraryProvider.songs),
+                    AlbumsPage(albums: libraryProvider.albums),
+                    ArtistsPage(artists: libraryProvider.artists),
+                    FoldersPage(folders: libraryProvider.folders),
+                  ],
+                ),
+      floatingActionButton: _buildScanFAB(context, colorScheme),
+    );
+  }
+
+  Widget _buildScanFAB(BuildContext context, ColorScheme colorScheme) {
+    return FloatingActionButton(
+      onPressed: () => _showScanMenu(context),
+      child: const Icon(Icons.refresh),
+    );
+  }
+
+  void _showScanMenu(BuildContext context) {
+    final provider = context.read<LibraryProvider>();
+    showModalBottomSheet(
+      context: context,
+      builder: (ctx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  '扫描本地音乐',
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.refresh),
+                title: const Text('扫描音乐'),
+                subtitle: const Text('扫描默认目录和已添加的文件夹'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  provider.loadLocalMusic();
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.create_new_folder_outlined),
+                title: const Text('添加扫描文件夹'),
+                subtitle: const Text('选择额外的文件夹进行扫描'),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final success = await provider.addScanFolder();
+                  if (success && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('已添加文件夹，点击扫描音乐')),
+                    );
+                  }
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.folder_off_outlined),
+                title: const Text('排除文件夹'),
+                subtitle: Text('已排除 ${provider.excludedFolders.length} 个文件夹'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showExcludedFolderManagement(context);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showExcludedFolderManagement(BuildContext context) {
+    final provider = context.read<LibraryProvider>();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setModalState) {
+            final excludedFolders = provider.excludedFolders;
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '排除文件夹',
+                          style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx),
+                          child: const Text('关闭'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '排除的文件夹及其子目录不会被扫描',
+                      style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                            color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (excludedFolders.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: Center(child: Text('暂无排除文件夹')),
+                      )
+                    else
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxHeight: MediaQuery.of(ctx).size.height * 0.35,
+                        ),
+                        child: ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: excludedFolders.length,
+                          itemBuilder: (context, index) {
+                            final folder = excludedFolders[index];
+                            final name = folder.split('/').where((p) => p.isNotEmpty).last;
+                            return ListTile(
+                              leading: const Icon(Icons.folder_off_outlined),
+                              title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              subtitle: Text(folder, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.remove_circle_outline),
+                                onPressed: () {
+                                  provider.removeExcludedFolder(folder);
+                                  setModalState(() {});
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    const SizedBox(height: 8),
+                    // 添加排除文件夹按钮
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.tonalIcon(
+                        onPressed: () async {
+                          final success = await provider.addExcludedFolder();
+                          if (success) {
+                            setModalState(() {});
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('已添加排除文件夹，重新扫描后生效')),
+                              );
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.add),
+                        label: const Text('添加排除文件夹'),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildScanningState(ColorScheme colorScheme) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const MD3ELoadingIndicator(),
+          const SizedBox(height: 16),
+          Text(
+            '正在扫描本地音乐...',
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+          ),
+        ],
       ),
     );
   }
