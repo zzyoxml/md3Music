@@ -16,7 +16,6 @@ import '../charts/charts_page.dart';
 import '../playlist/playlist_page.dart';
 import '../recognition/song_recognition_page.dart';
 import '../search/search_page.dart';
-import '../recognition/song_recognition_page.dart';
 
 class DiscoverPage extends StatefulWidget {
   const DiscoverPage({super.key, this.onAvatarTap});

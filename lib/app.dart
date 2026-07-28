@@ -3,12 +3,13 @@ import 'dart:io' show exit;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:quick_actions/quick_actions.dart';
 
 import 'core/layout/responsive_layout.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/motion_constants.dart';
 import 'data/models/playlist.dart';
-import 'main.dart' show appNavigatorKey;
+import 'main.dart' show appNavigatorKey, handleShortcut, pendingShortcutType, shortcutTabRequest;
 import 'modules/charts/charts_page.dart';
 import 'modules/discover/discover_page.dart';
 import 'modules/user/user_center_page.dart';
@@ -113,8 +114,48 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class _AppView extends StatelessWidget {
+class _AppView extends StatefulWidget {
   const _AppView();
+
+  @override
+  State<_AppView> createState() => _AppViewState();
+}
+
+class _AppViewState extends State<_AppView> {
+  @override
+  void initState() {
+    super.initState();
+    // 注册 Android 长按应用图标 Shortcut items
+    const quickActions = QuickActions();
+    quickActions.setShortcutItems(const [
+      ShortcutItem(
+        type: 'action_open_favorites',
+        localizedTitle: '我的收藏',
+        icon: 'ic_shortcut_favorite',
+      ),
+      ShortcutItem(
+        type: 'action_open_recognition',
+        localizedTitle: '听歌识曲',
+        icon: 'ic_shortcut_mic',
+      ),
+      ShortcutItem(
+        type: 'action_open_search',
+        localizedTitle: '搜索',
+        icon: 'ic_shortcut_search',
+      ),
+    ]);
+    // 处理冷启动时缓存的 shortcut 类型：
+    // QuickActions.initialize 在 runApp 之前注册，但此时 Navigator 尚未就绪，
+    // 因此 main.dart 把 shortcut 类型暂存到 pendingShortcutType，
+    // 这里在首帧渲染后消费。
+    if (pendingShortcutType != null) {
+      final type = pendingShortcutType;
+      pendingShortcutType = null;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        handleShortcut(type!);
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -269,12 +310,23 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     context.read<PlayerProvider>().onLoginRequired = _showLoginRequiredDialog;
     // 监听应用生命周期：detached（进程被系统销毁前的最后窗口）时尝试关停本地 Node.js
     WidgetsBinding.instance.addObserver(this);
+    // 监听 shortcut 入口的 tab 切换请求（来自 main.dart 的 handleShortcut）
+    shortcutTabRequest.addListener(_handleShortcutTabRequest);
   }
 
   @override
   void dispose() {
+    shortcutTabRequest.removeListener(_handleShortcutTabRequest);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// 处理 shortcut 入口的 tab 切换请求
+  void _handleShortcutTabRequest() {
+    final index = shortcutTabRequest.value;
+    if (index == null) return;
+    shortcutTabRequest.value = null;
+    setState(() => _selectedIndex = index);
   }
 
   @override

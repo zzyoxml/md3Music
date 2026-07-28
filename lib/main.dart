@@ -1,8 +1,9 @@
 import 'package:flutter/foundation.dart';
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'dart:io' show Platform;
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:quick_actions/quick_actions.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
@@ -10,6 +11,8 @@ import 'core/services/desktop_lyric_service.dart';
 import 'core/services/lyricon_provider_service.dart';
 import 'core/services/media_notification_service.dart';
 import 'data/repositories/settings_repository.dart';
+import 'modules/recognition/song_recognition_page.dart';
+import 'modules/search/search_page.dart';
 import 'services/nodejs_server.dart';
 import 'widgets/apple_lyrics/layout/lyric_preferences.dart';
 
@@ -17,6 +20,17 @@ const String _kBatteryPromptShownKey = 'battery_prompt_shown';
 
 /// 顶级 Navigator 的 GlobalKey，预留供后续扩展使用。
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+
+/// 用于在 MyApp 启动前缓存「冷启动时通过 shortcut 触发」的类型。
+/// QuickActions.initialize 在 runApp 之前注册回调，但此时 Navigator 还未就绪，
+/// 因此把 shortcut 类型暂存到该字段，由 _AppView 在首帧处理后清空。
+String? pendingShortcutType;
+
+/// 用于通知 _MainLayout 切换底部 tab。
+/// shortcut 入口「我的收藏」需要切换到主页第 3 个 tab（index=2），
+/// 而非 push 一个新的 FavoritesPage 路由（避免页面重复）。
+/// _MainLayout 在 initState 中监听此 notifier，收到非 null 值后切换 tab 并清空。
+final ValueNotifier<int?> shortcutTabRequest = ValueNotifier<int?>(null);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,7 +68,42 @@ Future<void> main() async {
     }
   }
 
+  // 注册 Android 长按应用图标 Shortcut 回调。
+  // initialize 必须在 runApp 之前调用，以便冷启动时能接收到 shortcut 触发。
+  if (!kIsWeb && Platform.isAndroid) {
+    const quickActions = QuickActions();
+    quickActions.initialize((shortcutType) {
+      // 应用已就绪时直接处理；否则暂存，由 _AppView 在首帧处理
+      if (appNavigatorKey.currentContext != null) {
+        handleShortcut(shortcutType);
+      } else {
+        pendingShortcutType = shortcutType;
+      }
+    });
+  }
+
   runApp(const MyApp());
+}
+
+/// 根据 shortcut 类型路由到对应页面。
+/// 通过全局 [appNavigatorKey] 获取 NavigatorState，避免依赖具体 BuildContext。
+void handleShortcut(String shortcutType) {
+  final nav = appNavigatorKey.currentState;
+  if (nav == null) return;
+  switch (shortcutType) {
+    case 'action_open_favorites':
+      // 切换到主页底部 tab index=2（我的收藏），而非 push 新路由
+      shortcutTabRequest.value = 2;
+      break;
+    case 'action_open_recognition':
+      nav.push(MaterialPageRoute(
+        builder: (_) => const SongRecognitionPage(),
+      ));
+      break;
+    case 'action_open_search':
+      nav.push(MaterialPageRoute(builder: (_) => const SearchPage()));
+      break;
+  }
 }
 
 Future<void> _requestPermissions() async {
