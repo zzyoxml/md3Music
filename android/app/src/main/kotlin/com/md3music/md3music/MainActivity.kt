@@ -325,12 +325,18 @@ class MainActivity : FlutterActivity() {
                 "setDisplayRoma" -> {
                     val enabled = call.argument<Boolean>("enabled") ?: false
                     try {
-                        // 反射调用，兼容旧版 SDK
-                        val method = provider?.player?.javaClass?.getMethod("setDisplayRoma", Boolean::class.java)
-                        method?.invoke(provider?.player, enabled)
+                        // SDK 0.1.70+ 已原生支持 setDisplayRoma，直接调用
+                        provider?.player?.setDisplayRoma(enabled)
                         result.success(true)
                     } catch (_: Exception) {
-                        result.success(false)
+                        // 兜底：反射调用兼容旧版 SDK
+                        try {
+                            val method = provider?.player?.javaClass?.getMethod("setDisplayRoma", Boolean::class.java)
+                            method?.invoke(provider?.player, enabled)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            result.success(false)
+                        }
                     }
                 }
                 else -> result.notImplemented()

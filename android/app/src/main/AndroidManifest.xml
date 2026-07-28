@@ -70,7 +70,7 @@
             android:foregroundServiceType="specialUse"
             android:exported="false" />
         <meta-data android:name="lyricon_module" android:value="true" />
-        <meta-data android:name="lyricon_module_author" android:value="md3music" />
+        <meta-data android:name="lyricon_module_author" android:value="𝒗𝒄𝒆𝒙𝒎𝒍 &amp; Little-White3110" />
         <meta-data android:name="lyricon_module_description" android:value="MD3Music Lyricon Provider" />
         <meta-data android:name="lyricon_module_tags" android:resource="@array/lyricon_module_tags" />
         <!-- Don't delete the meta-data below.

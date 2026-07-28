@@ -116,6 +116,7 @@ class AudioPlaybackService : Service() {
                     end = (line["end"] as? Number)?.toLong() ?: 0L,
                     text = line["text"] as? String ?: "",
                     translation = line["translation"] as? String,
+                    roma = line["roma"] as? String,
                     words = wordsRaw.map { w ->
                         LyricWord(
                             text = w["text"] as? String ?: "",
@@ -136,11 +137,12 @@ class AudioPlaybackService : Service() {
             // 关注点：lyrics.size 是否为 0；首行 begin/end 是否合法（begin < end）
             val first = lyrics.firstOrNull()
             val withTranslation = lyrics.count { !it.translation.isNullOrEmpty() }
+            val withRoma = lyrics.count { !it.roma.isNullOrEmpty() }
             android.util.Log.d("LyriconDebug",
                 "buildLyriconSong: name='${song.name}', artist='${song.artist}', " +
                 "duration=${song.duration}, lyrics.size=${lyrics.size}, " +
-                "withTranslation=$withTranslation, " +
-                "first=${first?.let { "begin=${it.begin}, end=${it.end}, text='${it.text}', translation='${it.translation}', words=${it.words?.size ?: 0}" }}"
+                "withTranslation=$withTranslation, withRoma=$withRoma, " +
+                "first=${first?.let { "begin=${it.begin}, end=${it.end}, text='${it.text}', translation='${it.translation}', roma='${it.roma}', words=${it.words?.size ?: 0}" }}"
             )
             return song
         }
@@ -231,9 +233,10 @@ class AudioPlaybackService : Service() {
             val prefs = getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
             val enabled = prefs.getBoolean("flutter.lyricon_enabled", false)
             val displayTranslation = prefs.getBoolean("flutter.lyricon_display_translation", true)
+            val displayRoma = prefs.getBoolean("flutter.lyricon_display_roma", false)
             android.util.Log.d("LyriconDebug",
                 "restoreLyriconStateIfNeeded: enabled=$enabled, displayTranslation=$displayTranslation, " +
-                "channelSet=${lyriconChannel != null}")
+                "displayRoma=$displayRoma, channelSet=${lyriconChannel != null}")
             if (enabled) {
                 provider.register()
                 android.util.Log.d("LyriconDebug", "restoreLyriconStateIfNeeded: provider.register() done")
@@ -241,9 +244,12 @@ class AudioPlaybackService : Service() {
                 // 让 Dart 端同步 _state 并重推当前歌曲
                 invokeLyriconChannelOnMain("onConnectionStateChanged", "auto_restored")
             }
-            // 同步恢复 displayTranslation 偏好（Roma 已删除，不再恢复）
+            // 同步恢复 displayTranslation / displayRoma 偏好
             try { provider.player.setDisplayTranslation(displayTranslation) } catch (e: Exception) {
                 android.util.Log.w("LyriconDebug", "setDisplayTranslation failed: ${e.message}")
+            }
+            try { provider.player.setDisplayRoma(displayRoma) } catch (e: Exception) {
+                android.util.Log.w("LyriconDebug", "setDisplayRoma failed: ${e.message}")
             }
         } catch (e: Exception) {
             android.util.Log.e("LyriconDebug", "restoreLyriconStateIfNeeded failed", e)

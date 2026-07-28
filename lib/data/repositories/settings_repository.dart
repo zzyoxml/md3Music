@@ -225,6 +225,20 @@ class SettingsRepository {
     await prefs.setBool('lyricon_display_roma', v);
   }
 
+  /// 同时存在翻译和罗马音时是否优先推送翻译。
+  /// 开启后：setSong 时若某行同时携带 translation 和 roma，则丢弃 roma，
+  /// 让 Lyricon 设备只显示翻译。关闭后：二者都推送，由 setDisplayTranslation
+  /// 和 setDisplayRoma 开关分别控制显示。
+  Future<bool> getLyriconPreferTranslation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('lyricon_prefer_translation') ?? true;
+  }
+
+  Future<void> setLyriconPreferTranslation(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lyricon_prefer_translation', v);
+  }
+
   // ===== 蓝牙歌词配置 =====
   // 通过修改 MediaSession 元数据（title 显示歌词，artist 显示「作者 - 标题」），
   // 在蓝牙 AVRCP 协议下让汽车主机等设备显示当前歌词。

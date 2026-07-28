@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/models/song.dart';
 import '../../widgets/apple_lyrics/models/lyric_line.dart';
@@ -112,14 +113,31 @@ class LyriconProviderService {
   /// - Song.duration 是 Duration，需 .inMilliseconds 转 int
   /// - LyricLine.startTime / endTime 均为 int（毫秒），endTime 是 getter
   /// - LyricWord.startTime 是 int（毫秒），无 endTime getter，用 startTime + duration
-  /// - LyricLine.translation 是 String?，原样透传
+  /// - LyricLine.translation / roma 是 String?，原样透传
+  ///
+  /// preferTranslation 行为：读取 SharedPreferences 的 lyricon_prefer_translation
+  /// 偏好。当某行同时携带 translation 和 roma 时二选一推送：
+  /// - preferTranslation=true（默认）：保留 translation，丢弃 roma
+  /// - preferTranslation=false：保留 roma，丢弃 translation
+  /// 单独存在 translation 或 roma 时不受影响，原样透传。
   Future<void> setSong(Song? song, List<LyricLine> lines) async {
+    // 缓存本次参数，供 repushLastSong 重新推送（用户切换 preferTranslation 后触发）
+    _lastSong = song;
+    _lastLines = lines;
+
     if (song == null) {
       try {
         await _channel.invokeMethod('setSong', {'song': null});
       } catch (_) {}
       return;
     }
+    // 读取 preferTranslation 偏好（默认 true：同时存在时优先推送翻译）
+    bool preferTranslation = true;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      preferTranslation = prefs.getBool('lyricon_prefer_translation') ?? true;
+    } catch (_) {}
+
     // 预处理：为每行计算一个合法的 end。
     // LRC 解析器输出的 duration=0，导致 endTime==startTime，会被 SDK 的
     // Song.normalize() 过滤（条件 begin < end 失败）。兜底策略：
@@ -139,11 +157,32 @@ class LyriconProviderService {
       } else {
         end = begin + 5000; // 末行兜底 5 秒
       }
+      // 同时存在翻译和罗马音时二选一：
+      // - preferTranslation=true：保留 translation，丢弃 roma
+      // - preferTranslation=false：保留 roma，丢弃 translation
+      final hasTranslation = line.translation != null &&
+          line.translation!.isNotEmpty;
+      final hasRoma = line.roma != null && line.roma!.isNotEmpty;
+      final String? translationValue;
+      final String? romaValue;
+      if (hasTranslation && hasRoma) {
+        if (preferTranslation) {
+          translationValue = line.translation;
+          romaValue = null;
+        } else {
+          translationValue = null;
+          romaValue = line.roma;
+        }
+      } else {
+        translationValue = line.translation;
+        romaValue = line.roma;
+      }
       lyricMaps.add(<String, dynamic>{
         'begin': begin,
         'end': end,
         'text': line.text,
-        if (line.translation != null) 'translation': line.translation,
+        if (translationValue != null) 'translation': translationValue,
+        if (romaValue != null) 'roma': romaValue,
         'words': line.words
             .map((w) => <String, dynamic>{
                   'text': w.text,
@@ -165,6 +204,17 @@ class LyriconProviderService {
     try {
       await _channel.invokeMethod('setSong', {'song': songMap});
     } catch (_) {}
+  }
+
+  /// 缓存上次 setSong 的参数，供 repushLastSong 重新推送。
+  Song? _lastSong;
+  List<LyricLine> _lastLines = const [];
+
+  /// 重新推送上次的歌曲（用户切换 preferTranslation 偏好后调用，
+  /// 让过滤逻辑立即生效）。
+  Future<void> repushLastSong() async {
+    if (!enabled) return;
+    await setSong(_lastSong, _lastLines);
   }
 
   /// 由 PlayerProvider 在切歌时调用。
