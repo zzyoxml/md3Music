@@ -17,16 +17,20 @@ class OnboardingPageData {
   /// 是否为播放器风格选择页（交互式特殊页面）。
   final bool isPlayerStylePicker;
 
+  /// 是否为播放页隐藏操作页（交互式特殊页面）。
+  final bool isHiddenOpsPage;
+
   const OnboardingPageData({
     required this.icon,
     required this.title,
     required this.description,
     this.highlights = const [],
     this.isPlayerStylePicker = false,
+    this.isHiddenOpsPage = false,
   });
 }
 
-/// 7 页引导内容静态配置。
+/// 8 页引导内容静态配置。
 const List<OnboardingPageData> onboardingPages = [
   OnboardingPageData(
     icon: Icons.explore,
@@ -39,6 +43,12 @@ const List<OnboardingPageData> onboardingPages = [
     title: '播放与歌词',
     description: '点击任意歌曲弹出迷你播放条，点击展开全屏播放器，享受逐字歌词体验。',
     highlights: ['全屏播放器', '逐字歌词', '桌面歌词'],
+  ),
+  OnboardingPageData(
+    icon: Icons.touch_app,
+    title: '播放页隐藏操作',
+    description: '播放页藏着许多快捷功能，长按图标即可解锁。',
+    isHiddenOpsPage: true,
   ),
   OnboardingPageData(
     icon: Icons.radio,
@@ -111,23 +121,24 @@ class OnboardingIllustration extends StatelessWidget {
                   colorScheme: colorScheme,
                   progress: animation.value,
                 );
-              case 2:
+              // case 2 是播放页隐藏操作页，不使用插画（交互式列表）
+              case 3:
                 return _FmFavoritesIllustration(
                   colorScheme: colorScheme,
                   progress: animation.value,
                 );
-              case 3:
+              case 4:
                 return _LongPressDeleteIllustration(
                   colorScheme: colorScheme,
                   progress: animation.value,
                 );
-              case 4:
+              case 5:
                 return _PersonalizationIllustration(
                   colorScheme: colorScheme,
                   progress: animation.value,
                 );
-              // case 5 是播放器风格选择页，不使用插画（交互式卡片）
-              case 6:
+              // case 6 是播放器风格选择页，不使用插画（交互式卡片）
+              case 7:
                 return _GetStartedIllustration(
                   colorScheme: colorScheme,
                   progress: animation.value,
@@ -354,7 +365,7 @@ class _PlayLyricsIllustration extends StatelessWidget {
   }
 }
 
-// ── Page 2: 私人FM与收藏 ─────────────────────────────────────────────
+// ── Page 3: 私人FM与收藏 ─────────────────────────────────────────────
 
 class _FmFavoritesIllustration extends StatelessWidget {
   final ColorScheme colorScheme;
@@ -464,7 +475,7 @@ class _FmFavoritesIllustration extends StatelessWidget {
   }
 }
 
-// ── Page 3: 长按批量管理 ─────────────────────────────────────────────
+// ── Page 4: 长按批量管理 ─────────────────────────────────────────────
 
 class _LongPressDeleteIllustration extends StatelessWidget {
   final ColorScheme colorScheme;
@@ -675,7 +686,7 @@ class _LongPressDeleteIllustration extends StatelessWidget {
   }
 }
 
-// ── Page 4: 个性化设置 ───────────────────────────────────────────────
+// ── Page 5: 个性化设置 ───────────────────────────────────────────────
 
 class _PersonalizationIllustration extends StatelessWidget {
   final ColorScheme colorScheme;
@@ -773,7 +784,7 @@ class _PersonalizationIllustration extends StatelessWidget {
   }
 }
 
-// ── Page 6: 开始使用 ─────────────────────────────────────────────────
+// ── Page 7: 开始使用 ─────────────────────────────────────────────────
 
 class _GetStartedIllustration extends StatelessWidget {
   final ColorScheme colorScheme;

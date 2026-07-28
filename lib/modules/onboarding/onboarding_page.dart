@@ -191,6 +191,11 @@ class _OnboardingPageState extends State<OnboardingPage>
           return _buildPlayerStylePickerPage(page, animation, isLandscape: isLandscape);
         }
 
+        // 播放页隐藏操作页：交互式列表渲染
+        if (page.isHiddenOpsPage) {
+          return _buildHiddenOpsPage(page, animation, isLandscape: isLandscape);
+        }
+
         if (isLandscape) {
           return _buildLandscapePage(page, index, animation);
         }
@@ -249,6 +254,205 @@ class _OnboardingPageState extends State<OnboardingPage>
                 ],
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── 播放页隐藏操作页（交互式列表） ──────────────────────────────────
+
+  Widget _buildHiddenOpsPage(
+    OnboardingPageData page,
+    Animation<double> animation, {
+    required bool isLandscape,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    final ops = [
+      _HiddenOp(
+        icon: Icons.album,
+        gesture: '点击',
+        target: '歌曲封面下文字',
+        action: '跳转专辑详情',
+        color: colorScheme.primary,
+        onColor: colorScheme.onPrimary,
+      ),
+      _HiddenOp(
+        icon: Icons.download,
+        gesture: '长按',
+        target: '第3个 · 封面图标',
+        action: '下载当前歌曲',
+        color: colorScheme.tertiary,
+        onColor: colorScheme.onTertiary,
+      ),
+      _HiddenOp(
+        icon: Icons.lyrics,
+        gesture: '长按',
+        target: '第4个 · 歌词图标',
+        action: '呼出悬浮窗歌词',
+        color: colorScheme.secondary,
+        onColor: colorScheme.onSecondary,
+      ),
+      _HiddenOp(
+        icon: Icons.translate,
+        gesture: '长按',
+        target: '右下方 · 翻译图标',
+        action: '切换罗马音和翻译',
+        color: colorScheme.primary,
+        onColor: colorScheme.onPrimary,
+      ),
+      _HiddenOp(
+        icon: Icons.volume_up,
+        gesture: '长按',
+        target: '右上角 · 音质选项',
+        action: '调节应用内音量',
+        color: colorScheme.tertiary,
+        onColor: colorScheme.onTertiary,
+      ),
+    ];
+
+    Widget listWidget = FadeTransition(
+      opacity: animation,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (int i = 0; i < ops.length; i++) ...[
+            _buildHiddenOpItem(ops[i], colorScheme, i),
+            if (i < ops.length - 1)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Divider(
+                  height: 1,
+                  color: colorScheme.outlineVariant
+                      .withValues(alpha: 0.5),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+
+    if (isLandscape) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 48),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTitle(page.title, animation, isCenter: false),
+                  const SizedBox(height: 8),
+                  _buildDescription(
+                    page.description, animation, isCenter: false),
+                ],
+              ),
+            ),
+            const SizedBox(width: 32),
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 340),
+              child: listWidget,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _buildTitle(page.title, animation, isCenter: true),
+          const SizedBox(height: 8),
+          _buildDescription(page.description, animation, isCenter: true),
+          const SizedBox(height: 24),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: listWidget,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHiddenOpItem(
+    _HiddenOp op,
+    ColorScheme colorScheme,
+    int index,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      child: Row(
+        children: [
+          // 图标圆形背景
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: op.color,
+            ),
+            child: Icon(op.icon, size: 20, color: op.onColor),
+          ),
+          const SizedBox(width: 14),
+          // 文字区
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    // 手势标签
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: colorScheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        op.gesture,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: colorScheme.onSecondaryContainer,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        op.target,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  op.action,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // 长按手势指示
+          Icon(
+            Icons.touch_app,
+            size: 18,
+            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
           ),
         ],
       ),
@@ -761,4 +965,26 @@ class _AmStylePreview extends StatelessWidget {
       ),
     );
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 播放页隐藏操作数据模型
+// ─────────────────────────────────────────────────────────────────────
+
+class _HiddenOp {
+  final IconData icon;
+  final String gesture;
+  final String target;
+  final String action;
+  final Color color;
+  final Color onColor;
+
+  const _HiddenOp({
+    required this.icon,
+    required this.gesture,
+    required this.target,
+    required this.action,
+    required this.color,
+    required this.onColor,
+  });
 }
