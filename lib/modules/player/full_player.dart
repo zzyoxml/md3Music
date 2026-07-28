@@ -1394,7 +1394,7 @@ class _FullPlayerState extends State<FullPlayer>
                 ),
               ),
             ),
-            // 3. 封面 — 跳转到封面 tab
+            // 3. 封面 — 短按跳转到封面 tab，长按弹出下载音质选择
             Expanded(
               child: InkWell(
                 onTap: () {
@@ -1402,6 +1402,9 @@ class _FullPlayerState extends State<FullPlayer>
                     _tabController.animateTo(0);
                   }
                 },
+                onLongPress: song != null
+                    ? () => _downloadSong(song)
+                    : null,
                 child: Center(
                   child: Icon(
                     Icons.album,
@@ -1679,9 +1682,7 @@ class _FullPlayerState extends State<FullPlayer>
     return '$minutes:$seconds';
   }
 
-  // MD3E v2: 原 _buildSecondaryControls 已替换为 _buildActionBar，
-  // 此方法保留供未来 more_vert 菜单接入"下载"入口。
-  // ignore: unused_element
+  // MD3E v2: 下方 ActionBar 第 3 个按钮（封面）长按触发。
   void _downloadSong(dynamic song) {
     final downloadsProvider = context.read<DownloadsProvider>();
     final isDownloaded = downloadsProvider.isDownloaded(song.id);
