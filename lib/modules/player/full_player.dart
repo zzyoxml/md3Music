@@ -1435,8 +1435,18 @@ class _FullPlayerState extends State<FullPlayer>
                     // 同步通知栏"桌面歌词"按钮状态
                     final player = context.read<PlayerProvider>();
                     final song = player.currentSong;
+                    // 收藏状态需实时查询，避免暂停时显示为未收藏
+                    bool isFavorited = false;
+                    if (song != null) {
+                      try {
+                        isFavorited = context
+                            .read<FavoritesProvider>()
+                            .isFavorite(song.id);
+                      } catch (_) {}
+                    }
                     await MediaNotificationService.updateNotification(
-                      title: song?.title ?? '',
+                      // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
+                      title: song?.displayName ?? '',
                       artist: song?.artist ?? '',
                       artUrl: song?.artworkUri,
                       isPlaying: player.isPlaying,
@@ -1444,6 +1454,7 @@ class _FullPlayerState extends State<FullPlayer>
                       duration: player.duration ?? Duration.zero,
                       desktopLyricEnabled:
                           DesktopLyricService.instance.enabled,
+                      isFavorited: isFavorited,
                     );
                   }
                 },
