@@ -12,6 +12,7 @@ import '../data/repositories/settings_repository.dart';
 import '../services/download_manager.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import '../services/metadata_writer.dart';
+import '../widgets/apple_lyrics/parsers/krc_parser.dart';
 
 /// 下载服务 Provider。
 ///
@@ -294,8 +295,8 @@ class DownloadsProvider extends ChangeNotifier {
       }
 
       // 2. 歌词：尝试从酷狗拉取（best-effort，失败也不影响嵌入）
-      // 注意：嵌入音频文件必须用标准 LRC 格式（[mm:ss.xx]歌词），
-      // 不能用 KRC 逐字格式（<start,duration,?>字），否则播放器无法解析。
+      // 嵌入格式由用户设置决定：字级 LRC（逐字）或行级 LRC（逐行）。
+      // 字级 LRC 是标准 LRC 格式（[mm:ss.xxx]字），播放器可正常解析。
       String? lyrics;
       try {
         debugPrint(
@@ -304,17 +305,33 @@ class DownloadsProvider extends ChangeNotifier {
         final lyric = await _api.getLyric(
           task.songId,
           songName: task.title,
-          fmt: 'lrc',
+          fmt: 'lrc', // 并发拉取 LRC + KRC
         );
-        // 优先用 LRC 明文（标准格式），降级到原始 content
-        final raw = lyric?.displayLrcLyric ?? lyric?.content;
-        if (raw != null && raw.isNotEmpty) {
-          lyrics = raw;
-          debugPrint('[DownloadsProvider] lyric fetched: ${raw.length} chars');
+
+        // 读取用户设置：是否嵌入字级 LRC
+        final wantWordLevel = await SettingsRepository().getDownloadWordLevelLyrics();
+        final lrcText = lyric?.displayLrcLyric ?? lyric?.content;
+        final krcText = lyric?.displayKrcLyric;
+
+        if (wantWordLevel && krcText != null && krcText.isNotEmpty) {
+          // 尝试将 KRC 转换为字级 LRC
+          final wordLevelLrc = KrcParser.toWordLevelLrc(krcText);
+          if (wordLevelLrc.isNotEmpty) {
+            lyrics = wordLevelLrc;
+            debugPrint('[DownloadsProvider] embedded word-level LRC: ${wordLevelLrc.length} chars');
+          } else {
+            // 降级：KRC 转换失败，使用行级 LRC
+            lyrics = lrcText;
+            debugPrint('[DownloadsProvider] KRC conversion empty, fallback to line-level LRC');
+          }
         } else {
-          debugPrint(
-            '[DownloadsProvider] lyric returned empty for ${task.songId}',
-          );
+          // 行级 LRC 或未开启逐字
+          lyrics = lrcText;
+          if (lyrics != null && lyrics.isNotEmpty) {
+            debugPrint('[DownloadsProvider] embedded line-level LRC: ${lyrics.length} chars');
+          } else {
+            debugPrint('[DownloadsProvider] lyric returned empty for ${task.songId}');
+          }
         }
       } catch (e) {
         debugPrint('[DownloadsProvider] fetch lyric failed: $e');

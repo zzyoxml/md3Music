@@ -64,8 +64,10 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _lyriconPreferTranslation = true;
   // 蓝牙歌词开关：通过 MediaSession 元数据替换在车机等设备显示歌词
   bool _bluetoothLyricEnabled = false;
-  // 自定义下载目录：null/空表示使用默认目录
+  // 自定义下载目录：null/空 表示使用默认目录
   String? _downloadDir;
+  // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
+  bool _downloadWordLevelLyrics = true;
   double _uiScale = 1.0;
 
   @override
@@ -150,6 +152,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final uiScale = context.read<ThemeProvider>().uiScale;
     // 读取蓝牙歌词开关
     final bluetoothLyricEnabled = await _settingsRepository.getBluetoothLyricEnabled();
+    final downloadWordLevelLyrics = await _settingsRepository.getDownloadWordLevelLyrics();
 
     setState(() {
       _themeMode = themeMode;
@@ -162,6 +165,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _useGlowEffect = LyricPreferences.instance.useGlowEffect;
       _useFlowingBackground = LyricPreferences.instance.useFlowingBackground;
       _downloadDir = downloadDir;
+      _downloadWordLevelLyrics = downloadWordLevelLyrics;
       _uiScale = uiScale;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
     });
@@ -919,6 +923,16 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _showDownloadDirDialog(),
+        ),
+        SwitchListTile(
+          secondary: const Icon(Icons.lyrics),
+          title: const Text('下载内嵌逐字歌词'),
+          subtitle: const Text('开启后嵌入字级 LRC 歌词，关闭则嵌入行级 LRC。无逐字数据时自动降级为行级'),
+          value: _downloadWordLevelLyrics,
+          onChanged: (value) async {
+            setState(() => _downloadWordLevelLyrics = value);
+            await _settingsRepository.setDownloadWordLevelLyrics(value);
+          },
         ),
       ],
     );

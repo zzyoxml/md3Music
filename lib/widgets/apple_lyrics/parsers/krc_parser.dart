@@ -194,4 +194,41 @@ class KrcParser {
 
     return words;
   }
+
+  /// 将 KRC 明文转换为字级 LRC 格式文本。
+  ///
+  /// 输入已解密的 KRC 明文，输出标准 LRC 格式但包含逐字时间戳：
+  /// ```
+  /// [00:08.467]湘[00:08.803]女[00:09.035]...
+  /// [00:12.500]命運の華が咲く
+  /// ```
+  ///
+  /// 解析失败或无逐字数据时返回空字符串，调用方应降级为行级 LRC。
+  static String toWordLevelLrc(String krcText) {
+    final lines = parse(krcText);
+    if (lines.isEmpty) return '';
+
+    final buffer = StringBuffer();
+    for (final line in lines) {
+      if (line.words.isEmpty) {
+        // 无逐字信息，输出行级 LRC
+        buffer.writeln('${_formatTimestamp(line.startTime)}${line.text}');
+      } else {
+        // 逐字 LRC：每个字前加时间戳
+        for (final word in line.words) {
+          buffer.write('${_formatTimestamp(word.startTime)}${word.text}');
+        }
+        buffer.writeln();
+      }
+    }
+    return buffer.toString().trimRight();
+  }
+
+  /// 毫秒 → LRC 时间戳 `[mm:ss.xxx]`
+  static String _formatTimestamp(int ms) {
+    final min = (ms ~/ 60000).toString().padLeft(2, '0');
+    final sec = ((ms % 60000) ~/ 1000).toString().padLeft(2, '0');
+    final millis = (ms % 1000).toString().padLeft(3, '0');
+    return '[$min:$sec.$millis]';
+  }
 }

@@ -12,6 +12,8 @@ class SettingsRepository {
   static const String _keySignedDays = 'settings_signed_days';
   // 自定义下载目录：空字符串表示使用默认目录（应用私有 documents/downloads）
   static const String _keyDownloadDir = 'settings_download_dir';
+  // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
+  static const String _keyDownloadWordLevelLyrics = 'settings_download_word_level_lyrics';
   static const String _keyUiScale = 'settings_ui_scale';
 
   /// 读取本地打卡日期集合（格式 yyyy-MM-dd）
@@ -119,6 +121,18 @@ class SettingsRepository {
     } else {
       await prefs.setString(_keyDownloadDir, path);
     }
+  }
+
+  /// 下载时是否内嵌字级 LRC 歌词（逐字时间戳）。
+  /// 默认 true：尝试嵌入逐字 LRC，无逐字数据时自动降级为行级 LRC。
+  Future<bool> getDownloadWordLevelLyrics() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyDownloadWordLevelLyrics) ?? true;
+  }
+
+  Future<void> setDownloadWordLevelLyrics(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyDownloadWordLevelLyrics, value);
   }
 
   // ===== 桌面歌词配置 =====
