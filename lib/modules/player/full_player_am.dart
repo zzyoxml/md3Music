@@ -130,6 +130,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     // 与手机端统一：3 个 tab（封面 / 歌词 / 评论），ActionBar 按钮索引对齐
     const newTabLength = 3;
 
+    // Pad 模式首次进入（从非 pad → pad 且当前停在默认封面 index 0）
+    // 时直接跳到歌词（index 1），无需重建 TabController。
+    // 避免每次从 miniplayer 点开都停在封面 tab。
+    // 后续用户手动切换 tab 后保留用户当前选择。
+    if (shouldBePadMode && !_isPadMode && _tabController.index == 0) {
+      _tabController.index = 1;
+    }
+
     if (_currentTabLength != newTabLength) {
       // 保存当前 tab 索引
       final currentIndex = _tabController.index.clamp(0, newTabLength - 1);
