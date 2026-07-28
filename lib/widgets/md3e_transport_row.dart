@@ -70,8 +70,8 @@ class _MD3ETransportRowState extends State<MD3ETransportRow>
     with TickerProviderStateMixin {
   // ===== 常量 =====
 
-  /// 松开后过渡动画总时长（缩短到 200ms，消除 400ms 感知延迟）
-  static const Duration _transitionDuration = Duration(milliseconds: 200);
+  /// 松开后过渡动画总时长（350ms：放慢让挤压形变更明显）
+  static const Duration _transitionDuration = Duration(milliseconds: 350);
 
   /// 按下反馈动画时长
   static const Duration _pressDuration = Duration(milliseconds: 120);

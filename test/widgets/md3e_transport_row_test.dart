@@ -174,14 +174,14 @@ void main() {
 
       // 推进 50ms 验证第二次点击被锁定
       await tester.pump(const Duration(milliseconds: 50));
-      // _controller.value ≈ 50/200 = 0.25，< 0.5，回调仍未触发
+      // _controller.value ≈ 50/350 ≈ 0.14，< 0.5，回调仍未触发
       // 第二次点击被锁定，nextCallCount 仍为 0
       expect(nextCallCount, 0,
           reason: '动画进行中（_controller.value < 0.5），第二次点击被锁定');
       // 手动 pump 到 phase2 末段（_controller.value >= 0.5）
-      // 总动画时长 200ms，phase2 在 44ms~110ms，phase2 末段约 100ms
-      await tester.pump(const Duration(milliseconds: 50));
-      // _controller.value ≈ 100/200 = 0.5，回调触发，nextCallCount = 1
+      // 总动画时长 350ms，phase2 末段约 175ms，再推进 150ms 达到 200ms
+      await tester.pump(const Duration(milliseconds: 150));
+      // _controller.value ≈ 200/350 ≈ 0.57，回调触发，nextCallCount = 1
       expect(nextCallCount, 1, reason: 'phase2 末段触发一次 onNext 回调');
       // pump 到动画结束
       await tester.pumpAndSettle();
