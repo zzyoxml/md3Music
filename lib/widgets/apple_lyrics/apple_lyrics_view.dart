@@ -625,7 +625,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 用指数衰减逼近目标值：progress += (target - progress) * (1 - exp(-speed * dt))
     // speed = 18 对应 ~300ms 内基本到位（AMLL 视觉过渡感）
     final double interludeTarget = _activeInterludeIdx >= 0 ? 1.0 : 0.0;
-    const double interludeSpeed = 18.0;
+    // 展开用 18.0（~300ms 快速展开），收起用 9.0（~767ms 平滑收起，匹配间奏点消失动画 750ms）
+    final double interludeSpeed = _activeInterludeIdx >= 0 ? 18.0 : 9.0;
     _interludeExpandProgress += (interludeTarget - _interludeExpandProgress) *
         (1 - math.exp(-interludeSpeed * dt));
     // 收起到接近 0 时直接归零，避免无限逼近占着微小高度
@@ -729,7 +730,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
             (_interludeExpandProgress - _lastRepaintInterludeProgress).abs() >
                 0.001 ||
             _hasPerLineOffsetChanged() ||
-            _hasRendererAlphaChanged();
+            _hasRendererAlphaChanged() ||
+            _interludeDots.shouldRender;
 
     if (hasVisualChange) {
       _lastRepaintCurrentLineIndex = _currentLineIndex;

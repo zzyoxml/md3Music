@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/theme/motion_constants.dart';
+import '../../providers/favorites_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/smart_artwork_image.dart';
 import 'full_player_route.dart';
@@ -295,8 +296,18 @@ class _MiniPlayerState extends State<MiniPlayer>
                         // 同步通知栏"桌面歌词"按钮状态
                         final player = context.read<PlayerProvider>();
                         final song = player.currentSong;
+                        // 收藏状态需实时查询，避免暂停时显示为未收藏
+                        bool isFavorited = false;
+                        if (song != null) {
+                          try {
+                            isFavorited = context
+                                .read<FavoritesProvider>()
+                                .isFavorite(song.id);
+                          } catch (_) {}
+                        }
                         await MediaNotificationService.updateNotification(
-                          title: song?.title ?? '',
+                          // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
+                          title: song?.displayName ?? '',
                           artist: song?.artist ?? '',
                           artUrl: song?.artworkUri,
                           isPlaying: player.isPlaying,
@@ -304,6 +315,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                           duration: player.duration ?? Duration.zero,
                           desktopLyricEnabled:
                               DesktopLyricService.instance.enabled,
+                          isFavorited: isFavorited,
                         );
                       }
                     },
