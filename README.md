@@ -444,6 +444,6 @@ node index.js
 
 <div align="center">
 
-**Made with ❤️ by zzyoxml**
+**Made with ❤️ by zzyoxml and Little-White3110**
 
 </div>

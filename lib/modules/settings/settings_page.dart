@@ -17,6 +17,7 @@ import '../../core/services/lyricon_provider_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/repositories/settings_repository.dart';
+import '../onboarding/onboarding_page.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
@@ -1098,6 +1099,19 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildAboutSection(ColorScheme colorScheme) {
     return Column(
       children: [
+        ListTile(
+          title: const Text('新手教程'),
+          subtitle: const Text('重新查看功能引导'),
+          leading: const Icon(Icons.school_outlined),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const OnboardingPage(isReview: true),
+              ),
+            );
+          },
+        ),
         ListTile(
           title: const Text('应用版本'),
           subtitle: Text(_appVersion.isEmpty ? kBuildAppVersion : _appVersion),

@@ -83,6 +83,14 @@ Future<void> main() async {
   }
 
   runApp(const MyApp());
+  // 检测是否需要显示首次启动引导页
+  bool needsOnboarding = false;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    needsOnboarding = !(prefs.getBool('onboarding_completed') ?? false);
+  } catch (_) {}
+
+  runApp(MyApp(showOnboarding: needsOnboarding));
 }
 
 /// 根据 shortcut 类型路由到对应页面。
