@@ -22,6 +22,7 @@ import 'modules/search/search_page.dart';
 import 'modules/settings/settings_page.dart';
 import 'modules/library/library_page.dart';
 import 'modules/login/login_page.dart';
+import 'modules/onboarding/onboarding_page.dart';
 import 'modules/personal_fm/personal_fm_page.dart';
 import 'modules/recognition/song_recognition_page.dart';
 import 'providers/downloads_provider.dart';
@@ -92,7 +93,9 @@ class _UpFadeMainRoute<T> extends MaterialPageRoute<T> {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final bool showOnboarding;
+
+  const MyApp({super.key, this.showOnboarding = false});
 
   @override
   Widget build(BuildContext context) {
@@ -108,13 +111,15 @@ class MyApp extends StatelessWidget {
         // 跨页面广播「收藏的歌单」变更（详情页 → 我的收藏 tab 立即刷新）
         ChangeNotifierProvider(create: (_) => PlaylistCollectionNotifier()),
       ],
-      child: const _AppView(),
+      child: _AppView(showOnboarding: showOnboarding),
     );
   }
 }
 
 class _AppView extends StatelessWidget {
-  const _AppView();
+  final bool showOnboarding;
+
+  const _AppView({this.showOnboarding = false});
 
   @override
   Widget build(BuildContext context) {
@@ -151,7 +156,7 @@ class _AppView extends StatelessWidget {
         );
       },
       navigatorKey: appNavigatorKey,
-      initialRoute: '/',
+      initialRoute: showOnboarding ? '/onboarding' : '/',
       routes: {
         // '/' 不在 routes 注册，改在 onGenerateRoute 用 _UpFadeMainRoute 创建，
         // 以便 push FullPlayer 时主页面向上淡出（仅 FullPlayer 生效）
@@ -164,6 +169,15 @@ class _AppView extends StatelessWidget {
         '/personal_fm': (_) => const PersonalFmPage(),
       },
       onGenerateRoute: (settings) {
+        if (settings.name == '/onboarding') {
+          return PageRouteBuilder(
+            pageBuilder: (_, _, _) => const OnboardingPage(),
+            transitionsBuilder: (_, animation, _, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+            transitionDuration: M3ExpressiveMotion.emphasisDuration,
+          );
+        }
         if (settings.name == '/') {
           return _UpFadeMainRoute<void>(builder: (_) => const _MainLayout());
         }
