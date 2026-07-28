@@ -11,6 +11,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// - [LyricFontSource.custom]：使用用户通过 SAF 选择的 TTF/OTF 文件
 enum LyricFontSource { system, bundled, custom }
 
+/// 歌词辅助行显示模式：翻译 or 罗马音。
+///
+/// - [LyricDisplayMode.translation]：显示中文翻译（默认）
+/// - [LyricDisplayMode.roma]：显示罗马音/音译
+///
+/// 仅当 [LyricPreferences.showTranslation] 为 true 时副行才显示，
+/// [displayMode] 决定显示哪个字段。
+enum LyricDisplayMode { translation, roma }
+
 /// 歌词显示偏好设置（字号 + 行间距 + 字体）。
 ///
 /// 提供全局静态访问 + ChangeNotifier 通知，供 AppleLyricsView、
@@ -72,6 +81,8 @@ class LyricPreferences extends ChangeNotifier {
   static const String _keyUseFlowingBackground = 'lyric_use_flowing_background';
   static const String _keyFontSource = 'lyric_font_source';
   static const String _keyCustomFontPath = 'lyric_custom_font_path';
+  static const String _keyShowTranslation = 'lyric_show_translation';
+  static const String _keyDisplayMode = 'lyric_display_mode';
 
   // ============== 当前值 ==============
 
@@ -80,6 +91,8 @@ class LyricPreferences extends ChangeNotifier {
   bool _useGaussianBlur = true;
   bool _useGlowEffect = true;
   bool _useFlowingBackground = true;
+  bool _showTranslation = true;
+  LyricDisplayMode _displayMode = LyricDisplayMode.translation;
   LyricFontSource _fontSource = LyricFontSource.system;
   String? _customFontPath;
   // 运行时加载成功后填充的 family（仅 custom 模式且加载成功时非 null）
@@ -91,6 +104,8 @@ class LyricPreferences extends ChangeNotifier {
   bool get useGaussianBlur => _useGaussianBlur;
   bool get useGlowEffect => _useGlowEffect;
   bool get useFlowingBackground => _useFlowingBackground;
+  bool get showTranslation => _showTranslation;
+  LyricDisplayMode get displayMode => _displayMode;
   LyricFontSource get fontSource => _fontSource;
   String? get customFontPath => _customFontPath;
 
@@ -129,6 +144,8 @@ class LyricPreferences extends ChangeNotifier {
     _useGaussianBlur = prefs.getBool(_keyUseGaussianBlur) ?? true;
     _useGlowEffect = prefs.getBool(_keyUseGlowEffect) ?? true;
     _useFlowingBackground = prefs.getBool(_keyUseFlowingBackground) ?? true;
+    _showTranslation = prefs.getBool(_keyShowTranslation) ?? true;
+    _displayMode = _displayModeFromName(prefs.getString(_keyDisplayMode));
     _fontSource = _fontSourceFromName(prefs.getString(_keyFontSource));
     _customFontPath = prefs.getString(_keyCustomFontPath);
     _loaded = true;
@@ -184,6 +201,24 @@ class LyricPreferences extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyUseFlowingBackground, enabled);
+  }
+
+  /// 设置歌词翻译副行显示开关并持久化。
+  Future<void> setShowTranslation(bool enabled) async {
+    if (_showTranslation == enabled) return;
+    _showTranslation = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyShowTranslation, enabled);
+  }
+
+  /// 设置辅助行显示模式（翻译/罗马音）并持久化。
+  Future<void> setDisplayMode(LyricDisplayMode mode) async {
+    if (_displayMode == mode) return;
+    _displayMode = mode;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyDisplayMode, mode.name);
   }
 
   // ============== 歌词字体来源 ==============
@@ -259,6 +294,10 @@ class LyricPreferences extends ChangeNotifier {
     }
   }
 
+  static LyricDisplayMode _displayModeFromName(String? name) {
+    return name == 'roma' ? LyricDisplayMode.roma : LyricDisplayMode.translation;
+  }
+
   /// 重置为默认值。
   Future<void> reset() async {
     _fontSize = defaultUserFontSize;
@@ -266,6 +305,8 @@ class LyricPreferences extends ChangeNotifier {
     _useGaussianBlur = true;
     _useGlowEffect = true;
     _useFlowingBackground = true;
+    _showTranslation = true;
+    _displayMode = LyricDisplayMode.translation;
     _fontSource = LyricFontSource.system;
     _customFontPath = null;
     _loadedCustomFontFamily = null;
@@ -276,6 +317,8 @@ class LyricPreferences extends ChangeNotifier {
     await prefs.setBool(_keyUseGaussianBlur, _useGaussianBlur);
     await prefs.setBool(_keyUseGlowEffect, _useGlowEffect);
     await prefs.setBool(_keyUseFlowingBackground, _useFlowingBackground);
+    await prefs.setBool(_keyShowTranslation, _showTranslation);
+    await prefs.setString(_keyDisplayMode, _displayMode.name);
     await prefs.remove(_keyFontSource);
     await prefs.remove(_keyCustomFontPath);
   }

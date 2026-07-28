@@ -1068,15 +1068,25 @@ class KugouApiClient {
       }
     }
 
-    // 从 KRC [language:] 字段提取翻译（酷狗翻译只在 KRC 里，LRC 接口无翻译）
+    // 从 KRC [language:] 字段提取翻译和罗马音（酷狗翻译只在 KRC 里，LRC 接口无翻译）
     // 格式：[language:<base64>] 解码后是 JSON：
     //   {"content":[{"language":0,"lyricContent":[["行1"],["行2"],...]}, ...]}
     // language=0 是中文翻译，language=1 是音译（罗马音）
     // lyricContent 按行序对应 KRC 歌词行，无时间戳，需要从 KRC 明文提取每行时间戳合成 LRC
     String? translationLrc =
         lrcLyric?.translatedContent ?? krcLyric?.translatedContent;
-    if (translationLrc == null && krcContent != null) {
-      translationLrc = _extractTranslationFromKrc(krcContent);
+    // 空字符串视为 null，允许后续 ??= 生效（避免 LRC JSON 返回空翻译截断 KRC 提取）
+    if (translationLrc != null && translationLrc.trim().isEmpty) {
+      translationLrc = null;
+    }
+    String? romaLrc;
+    if (krcContent != null) {
+      final extracted = _extractTranslationFromKrc(krcContent);
+      translationLrc ??= extracted.translation;
+      romaLrc = extracted.roma;
+    }
+    if (romaLrc != null && romaLrc.trim().isEmpty) {
+      romaLrc = null;
     }
 
     final merged = KugouLyric(
@@ -1084,78 +1094,117 @@ class KugouApiClient {
       decodedContent: lrcLyric?.decodedContent,
       decodedKrcContent: krcContent,
       translatedContent: translationLrc,
+      romaContent: romaLrc,
     );
     return merged;
   }
 
-  /// 从 KRC 明文中提取翻译，合成 LRC 格式返回。
+  /// 从 KRC 明文中同时提取翻译和罗马音，各自合成 LRC 格式返回。
   ///
   /// KRC 明文包含：
   /// - 歌词行：`[start_ms,duration_ms]<offset,duration,0>字<offset,duration,0>字...`
   /// - 元数据行：`[language:<base64>]`，解码后为 JSON：
   ///   `{"content":[{"language":0,"lyricContent":[["行1"],["行2"],...]}, ...]}`
   ///
-  /// 返回合成的 LRC：
-  /// ```
-  /// [mm:ss.xx]翻译行1
-  /// [mm:ss.xx]翻译行2
-  /// ...
-  /// ```
-  /// 翻译行的 startTime 来自对应 KRC 歌词行。
-  static String? _extractTranslationFromKrc(String krcContent) {
+  /// - `language=0`：中文翻译，每行 `lyricContent` 是单元素数组 `[["整行翻译"]]`
+  /// - `language=1`：音译/罗马音，每行是多元素数组 `[["yi","er","ta"]]`（一字一音节）
+  ///
+  /// 返回记录 `(translation, roma)`，任一为空表示无对应数据。
+  /// 翻译/罗马音行的 startTime 来自对应 KRC 歌词行。
+  static ({String? translation, String? roma}) _extractTranslationFromKrc(
+      String krcContent) {
     try {
       final langMatch = RegExp(r'\[language:([^\]]*)\]').firstMatch(krcContent);
-      if (langMatch == null) return null;
+      if (langMatch == null) return (translation: null, roma: null);
       final b64 = langMatch.group(1)!;
       // Base64 padding 修正
       final padding = '=' * ((4 - b64.length % 4) % 4);
       final decoded = utf8.decode(base64.decode(b64 + padding));
       final json = jsonDecode(decoded) as Map<String, dynamic>;
       final contentList = json['content'] as List;
-      // 优先 language=0（中文翻译），降级取第一个
-      Map<String, dynamic>? translationEntry;
-      for (final entry in contentList) {
-        final e = entry as Map<String, dynamic>;
-        if (e['language'] == 0) {
-          translationEntry = e;
-          break;
-        }
-      }
-      translationEntry ??= contentList.first as Map<String, dynamic>;
-      final lyricContent = translationEntry['lyricContent'] as List;
-      final translationLines = <String>[];
-      for (final line in lyricContent) {
-        // 每行是单元素数组 ["翻译文本"]
-        if (line is List && line.isNotEmpty) {
-          translationLines.add(line.first.toString());
-        } else {
-          translationLines.add('');
-        }
-      }
 
-      // 提取 KRC 歌词行的 startTime
+      // 提取 KRC 歌词行的 startTime（所有 language 共用同一套时间戳）
       final lineTimestampRegex = RegExp(r'^\[(\d+),(\d+)\]', multiLine: true);
       final lineMatches = lineTimestampRegex.allMatches(krcContent).toList();
 
-      // 按 startTime 合成 LRC
-      final sb = StringBuffer();
-      final count = lineMatches.length < translationLines.length
-          ? lineMatches.length
-          : translationLines.length;
-      for (int i = 0; i < count; i++) {
-        final startMs = int.parse(lineMatches[i].group(1)!);
-        final translation = translationLines[i].trim();
-        if (translation.isEmpty) continue;
-        // 转成 [mm:ss.xx] 格式
-        final mm = (startMs ~/ 60000).toString().padLeft(2, '0');
-        final ss = ((startMs % 60000) ~/ 1000).toString().padLeft(2, '0');
-        final xx = ((startMs % 1000) ~/ 10).toString().padLeft(2, '0');
-        sb.writeln('[$mm:$ss.$xx]$translation');
+      /// 把指定 entry 的 lyricContent 合成为 LRC 字符串
+      String? buildLrcFromEntry(Map<String, dynamic>? entry) {
+        if (entry == null) return null;
+        final lyricContent = entry['lyricContent'] as List;
+        final lines = <String>[];
+        for (final line in lyricContent) {
+          if (line is List && line.isNotEmpty) {
+            // ★ 修复根因 B：多元素数组用空格拼接，而非 line.first
+            // 翻译: ["而他的苍老感"] → "而他的苍老感"
+            // 罗马音: ["yi","er","ta"] → "yi er ta"
+            lines.add(line.map((e) => e.toString()).join(' '));
+          } else {
+            lines.add('');
+          }
+        }
+
+        // 按 startTime 合成 LRC
+        final sb = StringBuffer();
+        final count = lineMatches.length < lines.length
+            ? lineMatches.length
+            : lines.length;
+        for (int i = 0; i < count; i++) {
+          final startMs = int.parse(lineMatches[i].group(1)!);
+          final text = lines[i].trim();
+          if (text.isEmpty) continue;
+          final mm = (startMs ~/ 60000).toString().padLeft(2, '0');
+          final ss = ((startMs % 60000) ~/ 1000).toString().padLeft(2, '0');
+          final xx = ((startMs % 1000) ~/ 10).toString().padLeft(2, '0');
+          sb.writeln('[$mm:$ss.$xx]$text');
+        }
+        final result = sb.toString();
+        return result.isEmpty ? null : result;
       }
-      final result = sb.toString();
-      return result.isEmpty ? null : result;
-    } catch (e) {
-      return null;
+
+      /// 判断字符串是否包含中日韩字符（用于区分翻译和罗马音）
+      bool hasCjk(String s) {
+        // CJK 统一表意文字 + 日文假名 + 韩文音节
+        final cjkRegex = RegExp(r'[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]');
+        return cjkRegex.hasMatch(s);
+      }
+
+      /// 把所有 language 条目的 lyricContent 拼成纯文本，用于内容特征判断
+      String entryFullText(Map<String, dynamic> entry) {
+        final lc = entry['lyricContent'] as List;
+        final sb = StringBuffer();
+        for (final line in lc) {
+          if (line is List) {
+            sb.write(line.map((e) => e.toString()).join(' '));
+            sb.write(' ');
+          }
+        }
+        return sb.toString();
+      }
+
+      // 收集所有条目，按内容特征分类：
+      // - 含 CJK 字符 → 翻译（中文/日文/韩文翻译）
+      // - 纯 ASCII 拉丁 → 罗马音
+      // 不依赖 language 字段（酷狗数据标注不规范，日语歌可能把罗马音也标成 language=0）
+      Map<String, dynamic>? translationEntry;
+      Map<String, dynamic>? romaEntry;
+      for (final e in contentList) {
+        final entry = e as Map<String, dynamic>;
+        final text = entryFullText(entry);
+        if (hasCjk(text)) {
+          // 含 CJK 字符，归为翻译
+          translationEntry ??= entry;
+        } else if (text.trim().isNotEmpty) {
+          // 非空且不含 CJK，归为罗马音
+          romaEntry ??= entry;
+        }
+      }
+
+      return (
+        translation: buildLrcFromEntry(translationEntry),
+        roma: buildLrcFromEntry(romaEntry),
+      );
+    } catch (_) {
+      return (translation: null, roma: null);
     }
   }
 

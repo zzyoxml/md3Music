@@ -321,10 +321,17 @@ class _FullPlayerState extends State<FullPlayer>
       final currentIndex = _tabController.index.clamp(0, newTabLength - 1);
       _tabController.dispose();
       _currentTabLength = newTabLength;
+      // Pad 模式首次进入时（从 3 tab 切到 2 tab）默认打开歌词。
+      // 注意：children 列表在 pad 模式被 `if (!_isPadMode)` 跳过 SongInfo，
+      // 所以 children 实际只有 2 个：index 0 = LyricsView, index 1 = CommentsView。
+      // 因此歌词在 pad 模式下的 index 是 0，不是 1。
+      // 后续用户手动切换 tab 后不强制重置，保留用户当前选择。
+      final isFirstEnterPad = shouldBePadMode && newTabLength == 2;
       _tabController = TabController(
         length: newTabLength,
         vsync: this,
-        initialIndex: shouldBePadMode && currentIndex == 0 ? 0 : currentIndex,
+        initialIndex:
+            isFirstEnterPad ? 0 : currentIndex,
       );
       _isPadMode = shouldBePadMode;
       _isPhoneLandscape = shouldBePhoneLandscape;

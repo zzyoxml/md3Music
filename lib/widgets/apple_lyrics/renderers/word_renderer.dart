@@ -106,6 +106,10 @@ class WordRenderer {
   /// 仅依赖 [LyricWord.text] 与 [LyricWord.duration]，在 [_ensureBound] 时计算。
   List<bool> _wordEmphasisFlags = const <bool>[];
 
+  /// 翻译副行专用 TextPainter（复用避免每帧创建，仅 active 行使用）。
+  final TextPainter _translationPainter =
+      TextPainter(textDirection: TextDirection.ltr);
+
   // ============== 状态查询 ==============
 
   /// 当前 alpha map（不可变视图，供测试断言）。
@@ -412,6 +416,34 @@ class WordRenderer {
       }
 
       dx += width;
+    }
+
+    // 辅助副行（翻译或罗马音）：WordRenderer 仅在当前行（KRC）被调用，故无需再判 _isActive。
+    // 根据 displayMode 选择显示 translation 还是 roma
+    // 副行字号为主行 70%，alpha 固定 translationOpacity（不随逐字 mask 变化）。
+    final auxText = LyricPreferences.instance.displayMode == LyricDisplayMode.roma
+        ? line.roma
+        : line.translation;
+    if (LyricPreferences.instance.showTranslation &&
+        auxText != null &&
+        auxText.isNotEmpty) {
+      final transFontSize = LyricLayout.translationFontSize(fontSize);
+      // currentY 是循环结束后的最后视觉行 Y；副行 Y = currentY + 主行高 + 0.3em 间隙
+      final transY =
+          currentY + fontSize * LyricLayout.lineHeight + transFontSize * 0.3;
+      _translationPainter.text = TextSpan(
+        text: auxText,
+        style: TextStyle(
+          color: Color.fromRGBO(255, 255, 255, LyricLayout.translationOpacity),
+          fontSize: transFontSize,
+          height: LyricLayout.translationLineHeight,
+          fontFamily: LyricLayout.fontFamily,
+        ),
+      );
+      _translationPainter.layout(
+          maxWidth:
+              maxWidth == double.infinity ? double.infinity : maxWidth);
+      _translationPainter.paint(canvas, Offset(offset.dx, transY));
     }
   }
 

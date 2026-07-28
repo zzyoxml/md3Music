@@ -1219,8 +1219,13 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
             // DesktopLyricService 同一解析入口，不重复实现解析逻辑）
             final text = kugou.lyric?.displayLyric;
             final translationText = kugou.lyric?.translatedContent;
+            final romaText = kugou.lyric?.romaContent;
             if (text != null && text.isNotEmpty) {
-              lines = LyricParserChain.parse(text, translationText: translationText);
+              lines = LyricParserChain.parse(
+                text,
+                translationText: translationText,
+                romaText: romaText,
+              );
             }
           } catch (_) {}
         }

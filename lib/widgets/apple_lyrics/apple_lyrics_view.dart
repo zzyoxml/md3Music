@@ -219,6 +219,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   // 字体缓存：字体变化时强制重算行高 + 失效所有模糊图片缓存
   // （TextPainter 用 fontFamily 测量，旧缓存会与新字体渲染尺寸不一致）
   String? _cachedFontFamily;
+  // 翻译副行缓存：当前行变化或 showTranslation 开关切换时，
+  // 当前行高度需重算（副行高度仅计入当前行）
+  // displayMode 切换也需重算（虽副行高度不变，但需触发重绘）
+  int _cachedCurrentLineIndex = -1;
+  bool _cachedShowTranslation = false;
+  LyricDisplayMode _cachedDisplayMode = LyricDisplayMode.translation;
 
   /// 返回指定行索引上方所有激活间奏占位的累计高度。
   ///
@@ -247,12 +253,17 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   void _recomputeLineHeightsIfNeeded(double fontSize, double viewportWidth) {
     final identitySame = identical(widget.lines, _cachedLinesRef);
     final currentFontFamily = LyricLayout.fontFamily;
+    final currentShowTranslation = LyricPreferences.instance.showTranslation;
+    final currentDisplayMode = LyricPreferences.instance.displayMode;
     if (fontSize == _cachedFontSize &&
         viewportWidth == _cachedViewportWidth &&
         widget.lines.length == _cachedLinesLength &&
         identitySame &&
         _lineHeights.length == widget.lines.length &&
-        currentFontFamily == _cachedFontFamily) {
+        currentFontFamily == _cachedFontFamily &&
+        _currentLineIndex == _cachedCurrentLineIndex &&
+        currentShowTranslation == _cachedShowTranslation &&
+        currentDisplayMode == _cachedDisplayMode) {
       return; // 缓存命中
     }
     _cachedFontSize = fontSize;
@@ -260,6 +271,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _cachedLinesLength = widget.lines.length;
     _cachedLinesRef = widget.lines;
     _cachedFontFamily = currentFontFamily;
+    _cachedCurrentLineIndex = _currentLineIndex;
+    _cachedShowTranslation = currentShowTranslation;
+    _cachedDisplayMode = currentDisplayMode;
 
     // v3 优化：列表内容变化时递增 generation counter。
     // lines 用 identical 比较，只有引用变化才递增；
@@ -284,11 +298,15 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     double acc = 0;
     for (int i = 0; i < widget.lines.length; i++) {
       final line = widget.lines[i];
+      // 当前行 + 开关开启时，把翻译副行高度计入（仅当前行预留空间）
+      final showTrans = i == _currentLineIndex &&
+          LyricPreferences.instance.showTranslation;
       heights.add(LyricLayout.measureLineHeight(
         line,
         fontSize,
         mainLineHeight,
         maxLineWidth,
+        showTranslation: showTrans,
       ));
       tops.add(acc);
       acc += heights.last;
@@ -896,48 +914,59 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           onTapUp: _onTapUp,
           onVerticalDragUpdate: _onVerticalDragUpdate,
           onVerticalDragEnd: _onVerticalDragEnd,
-          child: useGaussian
-              ? ClipRect(
-                  child: Builder(
-                    builder: (context) {
-                      // 检测视口宽度变化，清除模糊缓存
-                      if (_viewportWidth != constraints.maxWidth && _viewportWidth > 0) {
-                        for (final entry in _lineBlurImages.values) {
-                          entry.$1.dispose();
+          child: ShaderMask(
+            // 歌词界面上下边界 alpha 渐变（参数与评论区一致：24px 渐变高度），
+            // 顶部 24px alpha 0→1，底部 24px alpha 1→0，
+            // 让歌词从边界柔和淡入/淡出。
+            shaderCallback: (Rect bounds) {
+              const double fadeHeight = 24.0;
+              final double fadeRatio =
+                  (fadeHeight / bounds.height).clamp(0.0, 0.5);
+              return LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: const [
+                  Colors.transparent,
+                  Colors.black,
+                  Colors.black,
+                  Colors.transparent,
+                ],
+                stops: [
+                  0.0,
+                  fadeRatio,
+                  1.0 - fadeRatio,
+                  1.0,
+                ],
+              ).createShader(bounds);
+            },
+            blendMode: BlendMode.dstIn,
+            child: useGaussian
+                ? ClipRect(
+                    child: Builder(
+                      builder: (context) {
+                        // 检测视口宽度变化，清除模糊缓存
+                        if (_viewportWidth != constraints.maxWidth && _viewportWidth > 0) {
+                          for (final entry in _lineBlurImages.values) {
+                            entry.$1.dispose();
+                          }
+                          _lineBlurImages.clear();
+                          _cachedBlurLineIndex = -1;
                         }
-                        _lineBlurImages.clear();
-                        _cachedBlurLineIndex = -1;
-                      }
-                      _viewportWidth = constraints.maxWidth;
-                      return Stack(
-                        children: [
-                          lyricsContent,
-                          ..._buildBlurLayers(
-                            constraints.maxHeight,
-                            mainLineHeight,
-                          ),
-                        ],
-                      );
-                    },
-                  ),
-                )
-              : ShaderMask(
-                  shaderCallback: (Rect bounds) {
-                    return LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: const <Color>[
-                        Color(0x00000000),
-                        Color(0xFF000000),
-                        Color(0xFF000000),
-                        Color(0x00000000),
-                      ],
-                      stops: const <double>[0.0, 0.15, 0.85, 1.0],
-                    ).createShader(bounds);
-                  },
-                  blendMode: BlendMode.dstIn,
-                  child: lyricsContent,
-                ),
+                        _viewportWidth = constraints.maxWidth;
+                        return Stack(
+                          children: [
+                            lyricsContent,
+                            ..._buildBlurLayers(
+                              constraints.maxHeight,
+                              mainLineHeight,
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  )
+                : lyricsContent,
+          ),
         );
       },
     );

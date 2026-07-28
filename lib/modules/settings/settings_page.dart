@@ -59,6 +59,9 @@ class _SettingsPageState extends State<SettingsPage> {
   // Lyricon 词幕推送相关状态
   bool _lyriconEnabled = false;
   bool _lyriconDisplayTranslation = true;
+  bool _lyriconDisplayRoma = false;
+  // 同时存在翻译和罗马音时优先推送翻译（开启后 roma 在 Dart 侧被过滤）
+  bool _lyriconPreferTranslation = true;
   // 蓝牙歌词开关：通过 MediaSession 元数据替换在车机等设备显示歌词
   bool _bluetoothLyricEnabled = false;
   // 自定义下载目录：null/空表示使用默认目录
@@ -88,16 +91,31 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  /// 从 SettingsRepository 加载 Lyricon 三个偏好
+  /// 从 SettingsRepository 加载 Lyricon 相关偏好
   Future<void> _loadLyriconSettings() async {
     final enabled = await _settingsRepository.getLyriconEnabled();
     final displayTranslation = await _settingsRepository
         .getLyriconDisplayTranslation();
+    final displayRoma = await _settingsRepository.getLyriconDisplayRoma();
+    final preferTranslation = await _settingsRepository
+        .getLyriconPreferTranslation();
     if (mounted) {
       setState(() {
         _lyriconEnabled = enabled;
         _lyriconDisplayTranslation = displayTranslation;
+        _lyriconDisplayRoma = displayRoma;
+        _lyriconPreferTranslation = preferTranslation;
       });
+    }
+    // 同步推送当前已保存的偏好到原生侧（冷启动后 Service 可能已自动恢复，
+    // 这里再推一次保证一致；未启用时 SDK 调用会被 try-catch 吞掉）
+    if (enabled) {
+      try {
+        await LyriconProviderService.instance.setDisplayTranslation(
+          displayTranslation,
+        );
+        await LyriconProviderService.instance.setDisplayRoma(displayRoma);
+      } catch (_) {}
     }
   }
 
@@ -314,6 +332,7 @@ class _SettingsPageState extends State<SettingsPage> {
         // 次级开关：翻译歌词（主开关关闭时禁用）
         SwitchListTile(
           title: const Text('翻译歌词'),
+          subtitle: const Text('在 Lyricon 设备上显示翻译文本'),
           value: _lyriconDisplayTranslation,
           onChanged: _lyriconEnabled
               ? (value) {
@@ -322,6 +341,42 @@ class _SettingsPageState extends State<SettingsPage> {
                   });
                   LyriconProviderService.instance.setDisplayTranslation(value);
                   _settingsRepository.setLyriconDisplayTranslation(value);
+                }
+              : null,
+        ),
+        // 次级开关：罗马音歌词（主开关关闭时禁用）
+        SwitchListTile(
+          title: const Text('罗马音歌词'),
+          subtitle: const Text('在 Lyricon 设备上显示罗马音/音译文本'),
+          value: _lyriconDisplayRoma,
+          onChanged: _lyriconEnabled
+              ? (value) {
+                  setState(() {
+                    _lyriconDisplayRoma = value;
+                  });
+                  LyriconProviderService.instance.setDisplayRoma(value);
+                  _settingsRepository.setLyriconDisplayRoma(value);
+                }
+              : null,
+        ),
+        // 次级开关：同时存在翻译和罗马音时二选一推送
+        // 仅当主开关开启时可用：
+        // - 开启：保留翻译，丢弃罗马音
+        // - 关闭：保留罗马音，丢弃翻译
+        SwitchListTile(
+          title: const Text('优先翻译（同时存在时）'),
+          subtitle: const Text('一行同时有翻译和罗马音时，开启推送翻译、关闭推送罗马音'),
+          value: _lyriconPreferTranslation,
+          onChanged: _lyriconEnabled
+              ? (value) async {
+                  setState(() {
+                    _lyriconPreferTranslation = value;
+                  });
+                  await _settingsRepository.setLyriconPreferTranslation(value);
+                  // 偏好变化后重新推送当前歌曲，让过滤逻辑立即生效
+                  try {
+                    await LyriconProviderService.instance.repushLastSong();
+                  } catch (_) {}
                 }
               : null,
         ),

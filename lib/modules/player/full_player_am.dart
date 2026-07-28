@@ -60,6 +60,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   String? _lastSongId;
   // 当前歌词格式（KRC / LRC / plaintext），用于底部标注；null 表示尚未检测
   LyricFormat? _lyricFormat;
+  // 当前歌曲是否有翻译/罗马音数据，用于 ActionBar 长按切换模式判断
+  bool _hasTranslation = false;
+  bool _hasRoma = false;
 
   // 封面 + 背景淡入淡出动画
   late final AnimationController _artworkFadeController;
@@ -127,7 +130,16 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final shouldBePadMode = deviceIsPad || width >= 600;
     // 手机横屏：宽度 >= 600 但设备不是 Pad
     final shouldBePhoneLandscape = !deviceIsPad && width >= 600;
-    final newTabLength = shouldBePadMode ? 2 : 3;
+    // 与手机端统一：3 个 tab（封面 / 歌词 / 评论），ActionBar 按钮索引对齐
+    const newTabLength = 3;
+
+    // Pad 模式首次进入（从非 pad → pad 且当前停在默认封面 index 0）
+    // 时直接跳到歌词（index 1），无需重建 TabController。
+    // 避免每次从 miniplayer 点开都停在封面 tab。
+    // 后续用户手动切换 tab 后保留用户当前选择。
+    if (shouldBePadMode && !_isPadMode && _tabController.index == 0) {
+      _tabController.index = 1;
+    }
 
     if (_currentTabLength != newTabLength) {
       // 保存当前 tab 索引
@@ -137,7 +149,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       _tabController = TabController(
         length: newTabLength,
         vsync: this,
-        initialIndex: shouldBePadMode && currentIndex == 0 ? 0 : currentIndex,
+        initialIndex: currentIndex,
       );
       _isPadMode = shouldBePadMode;
       _isPhoneLandscape = shouldBePhoneLandscape;
@@ -243,10 +255,21 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             lyric?.displayLrcLyric ??
             lyric?.displayLyric ??
             '';
+        // 合并翻译和罗马音：酷狗 API 返回的 translatedContent/romaContent，
+        // 按时间戳最近邻匹配到各行。即使 showTranslation 关闭也合并数据，
+        // toggle 时无需重新 fetch
+        final translationText = lyric?.translatedContent;
+        final romaText = lyric?.romaContent;
         setState(() {
           _isLoadingLyrics = false;
+          _hasTranslation = translationText != null && translationText.isNotEmpty;
+          _hasRoma = romaText != null && romaText.isNotEmpty;
           // 解析器链自动检测格式（KRC/LRC/纯文本）并输出统一 List<LyricLine>
-          _parsedLyrics = LyricParserChain.parse(lyricText);
+          _parsedLyrics = LyricParserChain.parse(
+            lyricText,
+            translationText: translationText,
+            romaText: romaText,
+          );
           // 同步记录格式，用于底部标注
           _lyricFormat = LyricParserChain.detectFormat(lyricText);
         });
@@ -315,7 +338,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
-  /// 模糊背景淡入淡出
+  /// 模糊背景淡入淡出（无 alpha 渐变；渐变移到 AppleLyricsView 歌词界面边界）
   Widget _buildCrossfadeBlurredBackground(String? artworkUrl) {
     return AnimatedBuilder(
       animation: _artworkFadeAnimation,
@@ -333,7 +356,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     child: Image.network(
                       _previousArtworkUrl!,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black),
+                      errorBuilder: (_, __, ___) =>
+                          const ColoredBox(color: Colors.black),
                     ),
                   ),
                 ),
@@ -347,7 +371,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         child: Image.network(
                           artworkUrl,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const ColoredBox(color: Colors.black),
+                          errorBuilder: (_, __, ___) =>
+                              const ColoredBox(color: Colors.black),
                         ),
                       )
                     : const ColoredBox(color: Colors.black),
@@ -495,11 +520,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   /// 通过歌手名搜索后跳转歌手详情页。
   /// 显示 loading → 调用 searchArtists → 取第一个匹配 → 跳转
   Future<void> _pushArtistPageByName(String name) async {
-    // 显示 loading
+    // 显示 loading（AM 风格：白色，与深色模糊背景协调）
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(child: MD3ELoadingIndicator()),
+      builder: (_) => const Center(
+        child: MD3ELoadingIndicator(color: Colors.white),
+      ),
     );
     try {
       final api = KugouApiClient();
@@ -700,7 +727,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   // 避免父级 TabBarView/Column 被牵连重建
                   child: RepaintBoundary(
                     child: _isLoadingLyrics
-                        ? const Center(child: MD3ELoadingIndicator())
+                        // AM 风格：歌词 loading 改为白色，与深色背景协调
+                        ? const Center(
+                            child: MD3ELoadingIndicator(color: Colors.white),
+                          )
                         // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
                         : Selector<PlayerProvider, int>(
                             selector: (_, p) =>
@@ -749,171 +779,176 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
     return SafeArea(
       bottom: false,
-      child: Row(
+      child: Column(
         children: [
-          // ── 左侧：封面 + 歌曲信息 ──
+          // 顶部栏放在最外层，占据整行：返回按钮真正在屏幕最左上角
+          _buildTopBar(playerProvider),
           Expanded(
-            flex: 4,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // 横屏时封面最大不超过可用宽度，保持正方形
-                  final size = constraints.maxWidth.clamp(120.0, 300.0);
-                  return Stack(
-                    children: [
-                      // 封面居中
-                      Center(
-                        child: SizedBox(
-                          width: size,
-                          height: size,
-                          child: AnimatedScale(
-                            scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                            duration: const Duration(milliseconds: 500),
-                            curve: Curves.easeOutBack,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              // Selector 让封面仅在 artworkUri 变化时重建
-                              child: Selector<PlayerProvider, String?>(
-                                selector: (_, p) => p.currentSong?.artworkUri,
-                                builder: (context, artworkUri, __) =>
-                                    _buildCrossfadeArtwork(
-                                  artworkUri,
-                                  colorScheme,
-                                  iconSize: 48,
+            child: Row(
+              children: [
+                // ── 左侧：封面 + 歌曲信息 ──
+                Expanded(
+                  flex: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        // 横屏时封面最大不超过可用宽度，保持正方形
+                        final size = constraints.maxWidth.clamp(120.0, 300.0);
+                        return Stack(
+                          children: [
+                            // 封面居中
+                            Center(
+                              child: SizedBox(
+                                width: size,
+                                height: size,
+                                child: AnimatedScale(
+                                  scale: playerProvider.isPlaying ? 1.0 : 0.85,
+                                  duration: const Duration(milliseconds: 500),
+                                  curve: Curves.easeOutBack,
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    // Selector 让封面仅在 artworkUri 变化时重建
+                                    child: Selector<PlayerProvider, String?>(
+                                      selector: (_, p) => p.currentSong?.artworkUri,
+                                      builder: (context, artworkUri, __) =>
+                                          _buildCrossfadeArtwork(
+                                        artworkUri,
+                                        colorScheme,
+                                        iconSize: 48,
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                      ),
-                      // 歌曲信息：垂直方向 80% 位置，水平居中（手机横屏时隐藏）
-                      if (!_isPhoneLandscape)
-                        Positioned(
-                        top: constraints.maxHeight * 0.8,
-                        left: 0,
-                        right: 0,
-                        child: Column(
+                            // 歌曲信息：垂直方向 80% 位置，水平居中（手机横屏时隐藏）
+                            // 与手机端 _buildArtworkView 一致：标题用 titleLarge
+                            if (!_isPhoneLandscape)
+                              Positioned(
+                                top: constraints.maxHeight * 0.8,
+                                left: 0,
+                                right: 0,
+                                child: Column(
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      child: Text(
+                                        currentSong.displayName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleLarge
+                                            ?.copyWith(color: Colors.white),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    GestureDetector(
+                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      child: Text(
+                                        currentSong.artist,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(color: Colors.white70),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      child: Text(
+                                        currentSong.album,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(color: Colors.white54),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                // ── 右侧：Tab + 内容 + 控制 ──
+                Expanded(
+                  flex: 6,
+                  child: Column(
+                    children: [
+                      // 内容区（歌词 / 评论 / 封面信息）
+                      // 与手机端统一：3 个 tab（封面 / 歌词 / 评论），ActionBar 按钮索引对齐
+                      Expanded(
+                        child: TabBarView(
+                          controller: _tabController,
                           children: [
-                            GestureDetector(
-                              onTap: () => _navigateToAlbum(currentSong as Song),
-                              child: Text(
-                                currentSong.displayName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(color: Colors.white),
-                                textAlign: TextAlign.center,
-                              ),
+                            Selector<PlayerProvider, String?>(
+                              selector: (_, p) => p.currentSong?.id,
+                              builder: (context, songId, __) {
+                                final song = playerProvider.currentSong;
+                                if (song == null) return const SizedBox.shrink();
+                                return _buildSongInfo(
+                                  playerProvider,
+                                  song,
+                                  colorScheme,
+                                );
+                              },
                             ),
-                            const SizedBox(height: 2),
-                            GestureDetector(
-                              onTap: () => _navigateToAlbum(currentSong as Song),
-                              child: Text(
-                                currentSong.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: Colors.white70),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () => _navigateToAlbum(currentSong as Song),
-                              child: Text(
-                                currentSong.album,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: Colors.white54),
-                                textAlign: TextAlign.center,
+                            _isLoadingLyrics
+                                // AM 风格：歌词 loading 改为白色，与深色背景协调
+                                ? const Center(
+                                    child:
+                                        MD3ELoadingIndicator(color: Colors.white),
+                                  )
+                                : RepaintBoundary(
+                                    // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
+                                    child: Selector<PlayerProvider, int>(
+                                      selector: (_, p) =>
+                                          p.position.inMilliseconds,
+                                      builder: (context, positionMs, _) =>
+                                          AppleLyricsView(
+                                        lines: _parsedLyrics,
+                                        currentTimeMs: positionMs,
+                                        isPlaying: playerProvider.isPlaying,
+                                        onSeek: (ms) => playerProvider.seek(
+                                          Duration(milliseconds: ms),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                            // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
+                            Selector<PlayerProvider, String?>(
+                              selector: (_, p) => p.currentSong?.id,
+                              builder: (_, _, __) => CommentsView(
+                                songHash: currentSong.id,
+                                albumAudioId: currentSong.albumAudioId,
+                                artworkUri: currentSong.artworkUri,
+                                isAmStyle: true,
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
-          // ── 右侧：TopBar + Tab + 内容 + 控制 ──
-          Expanded(
-            flex: 6,
-            child: Column(
-              children: [
-                _buildTopBar(playerProvider),
 
-                // 内容区（歌词 / 评论 / 封面信息）
-                // Pad模式下无封面Tab；手机横屏保留封面Tab
-                Expanded(
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      if (!_isPadMode || _isPhoneLandscape)
-                        GestureDetector(
-                          onTap: () => _tabController.animateTo(1),
-                          behavior: HitTestBehavior.opaque,
-                          // Selector 让 _buildSongInfo 仅在 currentSong 变化时重建（切歌时）
-                          child: Selector<PlayerProvider, String?>(
-                            selector: (_, p) => p.currentSong?.id,
-                            builder: (context, songId, __) {
-                              final song = playerProvider.currentSong;
-                              if (song == null) return const SizedBox.shrink();
-                              return _buildSongInfo(
-                                playerProvider,
-                                song,
-                                colorScheme,
-                              );
-                            },
-                          ),
-                        ),
-                      _isLoadingLyrics
-                          ? const Center(child: MD3ELoadingIndicator())
-                          : RepaintBoundary(
-                              // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
-                              child: Selector<PlayerProvider, int>(
-                                selector: (_, p) =>
-                                    p.position.inMilliseconds,
-                                builder: (context, positionMs, _) =>
-                                    AppleLyricsView(
-                                  lines: _parsedLyrics,
-                                  currentTimeMs: positionMs,
-                                  isPlaying: playerProvider.isPlaying,
-                                  onSeek: (ms) => playerProvider.seek(
-                                    Duration(milliseconds: ms),
-                                  ),
-                                ),
-                              ),
-                            ),
-                      // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
-                      Selector<PlayerProvider, String?>(
-                        selector: (_, p) => p.currentSong?.id,
-                        builder: (_, _, __) => CommentsView(
-                          songHash: currentSong.id,
-                          albumAudioId: currentSong.albumAudioId,
-                          artworkUri: currentSong.artworkUri,
-                          isAmStyle: true,
+                      // 控制区：底部 padding 包含导航栏高度
+                      Padding(
+                        padding: EdgeInsets.only(bottom: bottomPadding),
+                        child: _buildControls(
+                          playerProvider,
+                          colorScheme,
+                          isExpanded: true,
                         ),
                       ),
                     ],
-                  ),
-                ),
-
-                // 控制区：底部 padding 包含导航栏高度
-                Padding(
-                  padding: EdgeInsets.only(bottom: bottomPadding),
-                  child: _buildControls(
-                    playerProvider,
-                    colorScheme,
-                    isExpanded: true,
                   ),
                 ),
               ],
@@ -934,162 +969,175 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
     return SafeArea(
       bottom: false,
-      child: Row(
+      child: Column(
         children: [
+          // 顶部栏放在最外层，占据整行：返回按钮真正在屏幕最左上角
+          _buildTopBar(playerProvider),
           Expanded(
-            flex: 4,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final maxSize = (constraints.maxWidth - 32).clamp(0.0, 380.0);
-                  return Stack(
-                    children: [
-                      // 封面居中
-                      Center(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: maxSize,
-                            maxHeight: maxSize,
-                          ),
-                          child: AspectRatio(
-                            aspectRatio: 1,
-                            child: AnimatedScale(
-                              scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                              duration: const Duration(milliseconds: 500),
-                              curve: Curves.easeOutBack,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                // Selector 让封面仅在 artworkUri 变化时重建
-                                child: Selector<PlayerProvider, String?>(
-                                  selector: (_, p) => p.currentSong?.artworkUri,
-                                  builder: (context, artworkUri, __) =>
-                                      _buildCrossfadeArtwork(
-                                    artworkUri,
-                                    colorScheme,
-                                    iconSize: 48,
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final maxSize = (constraints.maxWidth - 32).clamp(0.0, 380.0);
+                        return Stack(
+                          children: [
+                            // 封面居中
+                            Center(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxWidth: maxSize,
+                                  maxHeight: maxSize,
+                                ),
+                                child: AspectRatio(
+                                  aspectRatio: 1,
+                                  child: AnimatedScale(
+                                    scale: playerProvider.isPlaying ? 1.0 : 0.85,
+                                    duration: const Duration(milliseconds: 500),
+                                    curve: Curves.easeOutBack,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      // Selector 让封面仅在 artworkUri 变化时重建
+                                      child: Selector<PlayerProvider, String?>(
+                                        selector: (_, p) => p.currentSong?.artworkUri,
+                                        builder: (context, artworkUri, __) =>
+                                            _buildCrossfadeArtwork(
+                                          artworkUri,
+                                          colorScheme,
+                                          iconSize: 48,
+                                        ),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        ),
-                      ),
-                      // 歌曲信息：垂直方向 80% 位置，水平居中（手机横屏时隐藏）
-                      if (!_isPhoneLandscape)
-                        Positioned(
-                        top: constraints.maxHeight * 0.8,
-                        left: 0,
-                        right: 0,
-                        child: Column(
+                            // 歌曲信息：垂直方向 80% 位置，水平居中（手机横屏时隐藏）
+                            // 与手机端 _buildArtworkView 一致：标题用 titleLarge
+                            if (!_isPhoneLandscape)
+                              Positioned(
+                                top: constraints.maxHeight * 0.8,
+                                left: 0,
+                                right: 0,
+                                child: Column(
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      child: Text(
+                                        currentSong.displayName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleLarge
+                                            ?.copyWith(color: Colors.white),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    GestureDetector(
+                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      child: Text(
+                                        currentSong.artist,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(color: Colors.white70),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      child: Text(
+                                        currentSong.album,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(color: Colors.white54),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 6,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: TabBarView(
+                          controller: _tabController,
                           children: [
-                            GestureDetector(
-                              onTap: () => _navigateToAlbum(currentSong as Song),
-                              child: Text(
-                                currentSong.displayName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(color: Colors.white),
-                                textAlign: TextAlign.center,
-                              ),
+                            // 与手机端统一：3 个 tab（封面 / 歌词 / 评论），
+                            // ActionBar 按钮 tab 索引对齐。
+                            // Pad 模式左侧已有封面，但 ActionBar 仍依赖标准 tab 顺序。
+                            Selector<PlayerProvider, String?>(
+                              selector: (_, p) => p.currentSong?.id,
+                              builder: (context, songId, __) {
+                                final song = playerProvider.currentSong;
+                                if (song == null) return const SizedBox.shrink();
+                                return _buildSongInfo(
+                                  playerProvider,
+                                  song,
+                                  colorScheme,
+                                );
+                              },
                             ),
-                            const SizedBox(height: 2),
-                            GestureDetector(
-                              onTap: () => _navigateToAlbum(currentSong as Song),
-                              child: Text(
-                                currentSong.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: Colors.white70),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                            GestureDetector(
-                              onTap: () => _navigateToAlbum(currentSong as Song),
-                              child: Text(
-                                currentSong.album,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodySmall
-                                    ?.copyWith(color: Colors.white54),
-                                textAlign: TextAlign.center,
+                            _isLoadingLyrics
+                                // AM 风格：歌词 loading 改为白色，与深色背景协调
+                                ? const Center(
+                                    child:
+                                        MD3ELoadingIndicator(color: Colors.white),
+                                  )
+                                : RepaintBoundary(
+                                    // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
+                                    child: Selector<PlayerProvider, int>(
+                                      selector: (_, p) =>
+                                          p.position.inMilliseconds,
+                                      builder: (context, positionMs, _) =>
+                                          AppleLyricsView(
+                                        lines: _parsedLyrics,
+                                        currentTimeMs: positionMs,
+                                        isPlaying: playerProvider.isPlaying,
+                                        onSeek: (ms) => playerProvider.seek(
+                                          Duration(milliseconds: ms),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                            // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
+                            Selector<PlayerProvider, String?>(
+                              selector: (_, p) => p.currentSong?.id,
+                              builder: (_, _, __) => CommentsView(
+                                songHash: currentSong.id,
+                                albumAudioId: currentSong.albumAudioId,
+                                artworkUri: currentSong.artworkUri,
+                                isAmStyle: true,
                               ),
                             ),
                           ],
                         ),
                       ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 6,
-            child: Column(
-              children: [
-                _buildTopBar(playerProvider),
-                Expanded(
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      if (!_isPadMode || _isPhoneLandscape)
-                        // Selector 让 _buildSongInfo 仅在 currentSong 变化时重建（切歌时）
-                        Selector<PlayerProvider, String?>(
-                          selector: (_, p) => p.currentSong?.id,
-                          builder: (context, songId, __) {
-                            final song = playerProvider.currentSong;
-                            if (song == null) return const SizedBox.shrink();
-                            return _buildSongInfo(
-                              playerProvider,
-                              song,
-                              colorScheme,
-                            );
-                          },
-                        ),
-                      _isLoadingLyrics
-                          ? const Center(child: MD3ELoadingIndicator())
-                          : RepaintBoundary(
-                              // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
-                              child: Selector<PlayerProvider, int>(
-                                selector: (_, p) =>
-                                    p.position.inMilliseconds,
-                                builder: (context, positionMs, _) =>
-                                    AppleLyricsView(
-                                  lines: _parsedLyrics,
-                                  currentTimeMs: positionMs,
-                                  isPlaying: playerProvider.isPlaying,
-                                  onSeek: (ms) => playerProvider.seek(
-                                    Duration(milliseconds: ms),
-                                  ),
-                                ),
-                              ),
-                            ),
-                      // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
-                      Selector<PlayerProvider, String?>(
-                        selector: (_, p) => p.currentSong?.id,
-                        builder: (_, _, __) => CommentsView(
-                          songHash: currentSong.id,
-                          albumAudioId: currentSong.albumAudioId,
-                          artworkUri: currentSong.artworkUri,
-                          isAmStyle: true,
-                        ),
+                      // 控制区：底部 padding 包含导航栏高度
+                      Padding(
+                        padding: EdgeInsets.only(bottom: bottomPadding),
+                        child: _buildControls(playerProvider, colorScheme, isExpanded: true),
                       ),
                     ],
                   ),
-                ),
-                // 控制区：底部 padding 包含导航栏高度
-                Padding(
-                  padding: EdgeInsets.only(bottom: bottomPadding),
-                  child: _buildControls(playerProvider, colorScheme, isExpanded: true),
                 ),
               ],
             ),
@@ -1630,7 +1678,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final textTheme = Theme.of(context).textTheme;
     // AM 风格：深色蒙版背景上用 15% 透明度白色作 pill 底，图标纯白，
     // 桌面歌词开启时用实心 icon（与 mini_player 一致）。
-    return Material(
+    // ListenableBuilder 监听 LyricPreferences：翻译开关 toggle 时刷新按钮颜色
+    return ListenableBuilder(
+      listenable: LyricPreferences.instance,
+      builder: (context, _) => Material(
       color: Colors.white.withValues(alpha: 0.15),
       shape: const StadiumBorder(),
       clipBehavior: Clip.antiAlias,
@@ -1758,8 +1809,51 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 ),
               ),
             ),
+            // 7. 翻译/罗马音开关 — 短按 toggle 副行显示，长按切换模式
+            Expanded(
+              child: InkWell(
+                onTap: () {
+                  LyricPreferences.instance.setShowTranslation(
+                    !LyricPreferences.instance.showTranslation,
+                  );
+                },
+                onLongPress: () {
+                  // 仅当歌曲同时有翻译和罗马音时才切换模式
+                  if (!_hasTranslation || !_hasRoma) return;
+                  final next =
+                      LyricPreferences.instance.displayMode ==
+                              LyricDisplayMode.translation
+                          ? LyricDisplayMode.roma
+                          : LyricDisplayMode.translation;
+                  LyricPreferences.instance.setDisplayMode(next);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(next == LyricDisplayMode.roma
+                          ? '已切换到罗马音'
+                          : '已切换到翻译'),
+                      duration: const Duration(milliseconds: 800),
+                    ),
+                  );
+                },
+                child: Center(
+                  child: Icon(
+                    // 罗马音模式用 Icons.abc 区分，翻译模式用 Icons.translate
+                    LyricPreferences.instance.displayMode ==
+                            LyricDisplayMode.roma
+                        ? Icons.abc
+                        : Icons.translate,
+                    size: 22,
+                    // 开启时纯白，关闭时 50% 白（视觉上与其它按钮激活态一致）
+                    color: LyricPreferences.instance.showTranslation
+                        ? Colors.white
+                        : Colors.white.withValues(alpha: 0.5),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
+      ),
       ),
     );
   }
@@ -2151,7 +2245,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    MD3ELoadingIndicator(size: 32),
+                    // AM 风格：白色 loading，与深色对话框背景协调
+                    MD3ELoadingIndicator(size: 32, color: Colors.white),
                     SizedBox(height: 16),
                     Text('加载歌单中...'),
                   ],

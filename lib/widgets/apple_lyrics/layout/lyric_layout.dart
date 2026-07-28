@@ -83,15 +83,21 @@ class LyricLayout {
   /// - 无 word 时间戳：用 [TextPainter] 对整行 text 自动换行测量。
   /// - 有 word 时间戳：按 word 累加 dx 超过 [maxWidth] 即换行。
   ///
+  /// [showTranslation] 为 true 时，把翻译副行高度（[translationFontSize] ×
+  /// [translationLineHeight] + 0.3em 间隙）追加到返回值。调用方应仅对当前行
+  /// 传 true，非当前行不预留空间，符合"只在当前行显示翻译"的视觉要求。
+  ///
   /// 返回值即该行在垂直方向占用的像素高度。
   static double measureLineHeight(
     LyricLine line,
     double fontSize,
     double mainLineHeight,
-    double maxWidth,
-  ) {
+    double maxWidth, {
+    bool showTranslation = false,
+  }) {
     if (maxWidth <= 0 || line.text.isEmpty) return mainLineHeight;
 
+    double mainHeight;
     if (line.words.isEmpty) {
       // 纯文本行：用 TextPainter 自动换行
       final painter = TextPainter(
@@ -104,51 +110,63 @@ class LyricLayout {
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: maxWidth);
       final lineCount = painter.computeLineMetrics().length;
-      return lineCount <= 1
+      mainHeight = lineCount <= 1
           ? mainLineHeight
           : mainLineHeight +
               (lineCount - 1) * mainLineHeight * wrapLineHeightFactor;
+    } else {
+      // 逐字行：按 word 累加，超宽即换行
+      double dx = 0;
+      int rowCount = 1;
+      for (final word in line.words) {
+        final painter = TextPainter(
+          text: TextSpan(
+            text: word.text,
+            // 显式注入歌词 fontFamily，必须与 word_renderer 测量路径一致
+            style: TextStyle(fontSize: fontSize, height: lineHeight, fontFamily: fontFamily),
+          ),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        if (dx + painter.width > maxWidth && dx > 0) {
+          dx = 0;
+          rowCount++;
+        }
+        dx += painter.width;
+      }
+      mainHeight = rowCount <= 1
+          ? mainLineHeight
+          : mainLineHeight +
+              (rowCount - 1) * mainLineHeight * wrapLineHeightFactor;
     }
 
-    // 逐字行：按 word 累加，超宽即换行
-    double dx = 0;
-    int rowCount = 1;
-    for (final word in line.words) {
-      final painter = TextPainter(
-        text: TextSpan(
-          text: word.text,
-          // 显式注入歌词 fontFamily，必须与 word_renderer 测量路径一致
-          style: TextStyle(fontSize: fontSize, height: lineHeight, fontFamily: fontFamily),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      if (dx + painter.width > maxWidth && dx > 0) {
-        dx = 0;
-        rowCount++;
-      }
-      dx += painter.width;
+    // 翻译副行高度：副行字号 × 行高 + 0.3em 主副行间隙
+    if (showTranslation &&
+        line.translation != null &&
+        line.translation!.isNotEmpty) {
+      final transFontSize = translationFontSize(fontSize);
+      mainHeight += transFontSize * translationLineHeight +
+          transFontSize * 0.3; // 0.3em 间隙，与 renderer 中绘制位置一致
     }
-    return rowCount <= 1
-        ? mainLineHeight
-        : mainLineHeight +
-            (rowCount - 1) * mainLineHeight * wrapLineHeightFactor;
+    return mainHeight;
   }
 
   // ============== 副行（翻译） ==============
 
-  /// 副行（翻译）字号：`max(0.5em, 10px)`
+  /// 副行（翻译）字号：`max(0.7em, 12px)`
   ///
-  /// 0.5em 为主行字号的一半，再与 10px 取下限保护。
+  /// 0.7em 为主行字号的 70%，再与 12px 取下限保护。
   static double translationFontSize(double fontSize) {
-    final half = fontSize * 0.5;
-    return half > 10 ? half : 10;
+    final scaled = fontSize * 0.7;
+    return scaled > 12 ? scaled : 12;
   }
 
   /// 副行行高：1.5em
   static const double translationLineHeight = 1.5;
 
   /// 副行透明度
-  static const double translationOpacity = 0.3;
+  ///
+  /// 0.5 居中于"已播字(0.8~1.0)"和"未播字(0.2~0.4)"之间，符合"翻译半透明介于已播未播之间"的视觉要求。
+  static const double translationOpacity = 0.5;
 
   // ============== 背景行（人声） ==============
 
