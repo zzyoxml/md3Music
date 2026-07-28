@@ -16,6 +16,7 @@ import '../artist/artist_detail_page.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
+import '../../providers/local_favorites_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/downloads_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
@@ -1246,15 +1247,19 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   }
 
   /// AM v2 质量徽章 — 白色 15% 透明度背景 + StadiumBorder + 图标 + 文字。
-  /// 点击复用 _showQualityDialog，长按复用 _showVolumeDialog。
+  /// 本地歌曲：只读显示码率推断的音质，禁用点击切换。
+  /// 在线歌曲：点击复用 _showQualityDialog，长按复用 _showVolumeDialog。
   Widget _buildQualityPill(PlayerProvider playerProvider) {
     final textTheme = Theme.of(context).textTheme;
+    final song = playerProvider.currentSong;
+    final isLocal = song is Song && !song.isOnline;
     // AM 风格：深色背景蒙版（0.35 黑色）上用白色 15% 透明度作 pill 底
     return Material(
       color: Colors.white.withValues(alpha: 0.15),
       shape: const StadiumBorder(),
       child: InkWell(
-        onTap: () => _showQualityDialog(playerProvider),
+        // 本地歌曲屏蔽音质选择
+        onTap: isLocal ? null : () => _showQualityDialog(playerProvider),
         onLongPress: () => _showVolumeDialog(playerProvider),
         customBorder: const StadiumBorder(),
         child: Padding(
@@ -1269,7 +1274,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               ),
               const SizedBox(width: 4),
               Text(
-                playerProvider.audioQualityLabel,
+                // 本地歌曲显示基于码率推断的音质标签
+                playerProvider.currentQualityLabel,
                 style: textTheme.labelMedium?.copyWith(
                   color: Colors.white,
                   fontWeight: FontWeight.w600,
@@ -1509,13 +1515,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             ),
           ),
           SizedBox(height: verticalSpacing),
-          // Selector 让副控制按钮仅在 currentSong / speed / audioQuality 变化时重建
+          // Selector 让副控制按钮在 currentSong / speed / 音质标签变化时重建
           Selector<PlayerProvider,
-              ({String? songId, double speed, String audioQualityLabel})>(
+              ({String? songId, double speed, String currentQualityLabel})>(
             selector: (_, p) => (
               songId: p.currentSong?.id,
               speed: p.speed,
-              audioQualityLabel: p.audioQualityLabel,
+              currentQualityLabel: p.currentQualityLabel,
             ),
             builder: (context, _, __) => _buildSecondaryControls(
               playerProvider,
@@ -1746,8 +1752,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     bool isExpanded = false,
   }) {
     final song = playerProvider.currentSong;
-    final isFavorited =
-        song != null && context.watch<FavoritesProvider>().isFavorite(song.id);
+    // 根据歌曲来源（本地/在线）选择对应的收藏 Provider
+    final isOnline = song is Song && song.isOnline;
+    final isFavorited = song != null &&
+        (isOnline
+            ? context.watch<FavoritesProvider>().isFavorite(song.id)
+            : context.watch<LocalFavoritesProvider>().isFavorite(song.id));
     final textTheme = Theme.of(context).textTheme;
     // AM 风格：深色蒙版背景上用 15% 透明度白色作 pill 底，图标纯白，
     // 桌面歌词开启时用实心 icon（与 mini_player 一致）。
@@ -1790,7 +1800,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 ),
               ),
             ),
-            // 3. 封面 — 短按跳转到封面 tab，长按弹出下载音质选择
+            // 3. 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
             Expanded(
               child: InkWell(
                 onTap: () {
@@ -1798,7 +1808,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     _tabController.animateTo(0);
                   }
                 },
-                onLongPress: song != null
+                onLongPress: song != null && isOnline
                     ? () => _downloadSong(song)
                     : null,
                 child: Center(
@@ -1880,8 +1890,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             Expanded(
               child: InkWell(
                 onTap: song != null
-                    ? () =>
-                        context.read<FavoritesProvider>().toggleFavorite(song)
+                    ? () {
+                        // 本地歌曲走 LocalFavoritesProvider，在线走 FavoritesProvider
+                        if (isOnline) {
+                          context.read<FavoritesProvider>().toggleFavorite(song);
+                        } else {
+                          context.read<LocalFavoritesProvider>().toggleFavorite(song.id);
+                        }
+                      }
                     : null,
                 child: Center(
                   child: Icon(

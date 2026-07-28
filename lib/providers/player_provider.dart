@@ -66,6 +66,27 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   AudioQuality get audioQuality => _audioQuality;
   String get audioQualityLabel => _audioQuality.label;
 
+  /// 当前歌曲的实际音质标签。
+  /// 本地歌曲优先使用 song.quality 推断的标签，在线歌曲使用全局音质偏好。
+  String get currentQualityLabel {
+    final song = _currentSong;
+    if (song != null && !song.isOnline && song.quality != null) {
+      switch (song.quality) {
+        case '128':
+          return '标准音质';
+        case '320':
+          return '高音质';
+        case 'flac':
+          return '无损音质';
+        case 'high':
+          return 'Hi-Res 无损';
+        default:
+          return song.quality!;
+      }
+    }
+    return _audioQuality.label;
+  }
+
   StreamSubscription<Duration>? _positionSubscription;
   StreamSubscription<Duration?>? _durationSubscription;
   StreamSubscription<bool>? _playingSubscription;

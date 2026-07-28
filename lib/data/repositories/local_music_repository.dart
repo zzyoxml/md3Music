@@ -94,6 +94,28 @@ class LocalMusicRepository {
     return false;
   }
 
+  /// 根据码率和文件扩展名推断本地音质标签。
+  ///
+  /// 规则：
+  /// - FLAC/APE/WAV → 'flac'（无损格式直接判定为无损）
+  /// - bitrate > 320kbps → 'flac'（码率超过 320 判定为无损）
+  /// - bitrate > 128kbps → '320'（高品质）
+  /// - bitrate > 0 → '128'（标准音质）
+  /// - bitrate == 0 且无法判定 → null
+  static String? _inferQuality(int? bitrate, String? filePath) {
+    // 无损格式直接判定
+    if (filePath != null) {
+      final ext = filePath.toLowerCase().split('.').last;
+      if (ext == 'flac' || ext == 'ape' || ext == 'wav' || ext == 'aiff') {
+        return 'flac';
+      }
+    }
+    if (bitrate == null || bitrate <= 0) return null;
+    if (bitrate > 320) return 'flac';
+    if (bitrate > 128) return '320';
+    return '128';
+  }
+
   /// 扫描所有音频文件并返回 Song 列表。
   ///
   /// 优先使用 MediaStore（沙箱兼容），再补充文件系统扫描用户自定义目录。
@@ -142,6 +164,7 @@ class LocalMusicRepository {
         // CachedNetworkImage 加载（它支持任意 https:// 和 file:// 协议，
         // 对 content:// 需要 Image.network + httpHeader）
         final albumArtUri = data['albumArtUri'] as String?;
+        final bitrate = data['bitrate'] as int?;
         songs.add(Song(
           id: 'local_$filePath',
           title: (data['title'] as String?) ?? '未知标题',
@@ -153,6 +176,7 @@ class LocalMusicRepository {
           // 为空时用 local://<filePath> 标识内嵌封面，UI 层据此懒加载
           artworkUri: albumArtUri ?? 'local://$filePath',
           isOnline: false,
+          quality: _inferQuality(bitrate, filePath),
         ));
       }
     } catch (e) {
@@ -180,6 +204,7 @@ class LocalMusicRepository {
         for (final data in results) {
           final filePath = data['filePath'] as String;
           if (!seenPaths.add(filePath)) continue;
+          final bitrate = data['bitrate'] as int?;
           songs.add(Song(
             id: 'local_$filePath',
             title: data['title'] as String,
@@ -190,6 +215,7 @@ class LocalMusicRepository {
             // 用 local:// 前缀标识内嵌封面，UI 层通过 LocalArtworkCache 懒加载
             artworkUri: 'local://$filePath',
             isOnline: false,
+            quality: _inferQuality(bitrate, filePath),
           ));
         }
       }

@@ -29,6 +29,8 @@ import 'providers/downloads_provider.dart';
 import 'providers/favorites_provider.dart';
 import 'providers/kugou_provider.dart';
 import 'providers/library_provider.dart';
+// ignore: unused_import  // 类型用于 ChangeNotifierProvider(create: ...) 的 T 推断
+import 'providers/local_favorites_provider.dart';
 import 'providers/player_provider.dart';
 import 'providers/playlist_collection_notifier.dart';
 import 'providers/device_provider.dart';
@@ -107,6 +109,7 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => LibraryProvider()),
         ChangeNotifierProvider(create: (_) => KugouProvider()),
         ChangeNotifierProvider(create: (_) => FavoritesProvider()),
+        ChangeNotifierProvider(create: (_) => LocalFavoritesProvider()),
         ChangeNotifierProvider(create: (_) => DownloadsProvider()),
         // 跨页面广播「收藏的歌单」变更（详情页 → 我的收藏 tab 立即刷新）
         ChangeNotifierProvider(create: (_) => PlaylistCollectionNotifier()),

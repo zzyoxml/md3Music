@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../data/models/song.dart';
 import '../providers/downloads_provider.dart';
 import '../providers/favorites_provider.dart';
+import '../providers/local_favorites_provider.dart';
 import '../providers/player_provider.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import 'playing_spectrum_indicator.dart';
@@ -162,9 +163,14 @@ class SongListItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final playerProvider = context.watch<PlayerProvider>();
     final favoritesProvider = context.watch<FavoritesProvider>();
+    final localFavoritesProvider = context.watch<LocalFavoritesProvider>();
     context.watch<DownloadsProvider>();
     final isCurrentSong = playerProvider.currentSong?.id == song.id;
-    final isFavorited = forceFavorited || favoritesProvider.isFavorite(song.id);
+    final isFavorited = forceFavorited
+        ? true
+        : (song.isOnline
+            ? favoritesProvider.isFavorite(song.id)
+            : localFavoritesProvider.isFavorite(song.id));
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
@@ -247,7 +253,9 @@ class SongListItem extends StatelessWidget {
                       child: Text(song.displayDuration, style: textTheme.labelSmall),
                     ),
                   GestureDetector(
-                    onTap: () => favoritesProvider.toggleFavorite(song),
+                    onTap: () => song.isOnline
+                        ? favoritesProvider.toggleFavorite(song)
+                        : localFavoritesProvider.toggleFavorite(song.id),
                     behavior: HitTestBehavior.opaque,
                     child: Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 4),

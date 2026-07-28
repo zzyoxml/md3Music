@@ -41,6 +41,7 @@ List<Map<String, dynamic>> scanAudioFilesInIsolate(List<String> filePaths) {
         'artist': metadata.artist ?? '未知艺术家',
         'album': metadata.album ?? '未知专辑',
         'durationMs': metadata.duration?.inMilliseconds ?? 0,
+        'bitrate': metadata.bitrate ?? 0,
       });
     } catch (e) {
       skipped++;

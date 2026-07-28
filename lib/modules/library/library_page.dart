@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/library_provider.dart';
+import '../../providers/local_favorites_provider.dart';
 import '../../widgets/md3e_loading_indicator.dart';
+import '../player/full_player_route.dart';
 import 'albums_page.dart';
 import 'artists_page.dart';
 import 'folders_page.dart';
@@ -24,8 +26,10 @@ class _LibraryPageState extends State<LibraryPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _searchFocusNode = FocusNode();
+    // 监听 FullPlayer 展开状态：展开时取消搜索框焦点，防止返回时自动弹输入法
+    playerExpansion.addListener(_onPlayerExpansionChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // 页面加载后立即取消搜索框焦点，防止输入法自动弹出
       _searchFocusNode.unfocus();
@@ -38,8 +42,16 @@ class _LibraryPageState extends State<LibraryPage>
     });
   }
 
+  /// FullPlayer 展开时取消搜索框焦点，避免返回后输入法自动弹出
+  void _onPlayerExpansionChanged() {
+    if (playerExpansion.value > 0.5) {
+      _searchFocusNode.unfocus();
+    }
+  }
+
   @override
   void dispose() {
+    playerExpansion.removeListener(_onPlayerExpansionChanged);
     _tabController.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -63,7 +75,7 @@ class _LibraryPageState extends State<LibraryPage>
         ),
         bottom: hasMusic || isScanning
             ? PreferredSize(
-                preferredSize: const Size.fromHeight(100),
+                preferredSize: const Size.fromHeight(108),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -114,8 +126,10 @@ class _LibraryPageState extends State<LibraryPage>
                         Tab(text: '专辑'),
                         Tab(text: '艺术家'),
                         Tab(text: '文件夹'),
+                        Tab(text: '收藏'),
                       ],
-                      isScrollable: false,
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
                     ),
                   ],
                 ),
@@ -133,6 +147,7 @@ class _LibraryPageState extends State<LibraryPage>
                     AlbumsPage(albums: libraryProvider.albums),
                     ArtistsPage(artists: libraryProvider.artists),
                     FoldersPage(folders: libraryProvider.folders),
+                    const _LocalFavoritesTab(),
                   ],
                 ),
       floatingActionButton: _buildScanFAB(context, colorScheme),
@@ -357,5 +372,83 @@ class _LibraryPageState extends State<LibraryPage>
         ],
       ),
     );
+  }
+}
+
+/// 本地音乐收藏 tab：从 `LocalFavoritesProvider` 读取 id 集合，再从
+/// `LibraryProvider.allSongs` 中按 id 匹配出完整 Song，传入 `SongsPage`
+/// 复用其随机播放 / 排序 / 定位当前播放等交互。
+class _LocalFavoritesTab extends StatelessWidget {
+  const _LocalFavoritesTab();
+
+  @override
+  Widget build(BuildContext context) {
+    final library = context.watch<LibraryProvider>();
+    final localFavorites = context.watch<LocalFavoritesProvider>();
+    final favoriteIds = localFavorites.favoriteIds;
+
+    // 收藏的歌曲列表：未过滤的本地歌曲 × 收藏 id 集合
+    final allFavorites = library.allSongs
+        .where((s) => favoriteIds.contains(s.id))
+        .toList();
+
+    // 跟随 LibraryProvider 搜索框过滤
+    final query = library.searchQuery.trim().toLowerCase();
+    final filtered = query.isEmpty
+        ? allFavorites
+        : allFavorites
+            .where((s) =>
+                s.title.toLowerCase().contains(query) ||
+                s.artist.toLowerCase().contains(query) ||
+                s.album.toLowerCase().contains(query))
+            .toList();
+
+    if (allFavorites.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.favorite_border,
+              size: 64,
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurfaceVariant
+                  .withValues(alpha: 0.5),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              '还没有本地收藏',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '在曲目列表中点击心形图标即可收藏',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurfaceVariant
+                        .withValues(alpha: 0.7),
+                  ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (filtered.isEmpty) {
+      return Center(
+        child: Text(
+          '没有匹配的收藏',
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+        ),
+      );
+    }
+
+    return SongsPage(songs: filtered);
   }
 }

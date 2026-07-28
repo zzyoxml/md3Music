@@ -13,6 +13,7 @@ import '../artist/artist_detail_page.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
+import '../../providers/local_favorites_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/downloads_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
@@ -937,15 +938,19 @@ class _FullPlayerState extends State<FullPlayer>
   }
 
   /// MD3E v2 质量徽章 — primaryContainer 背景 + StadiumBorder + 图标 + 文字。
-  /// 点击复用 _showQualityDialog。
+  /// 本地歌曲：只读显示码率推断的音质，禁用点击切换。
+  /// 在线歌曲：点击复用 _showQualityDialog。
   Widget _buildQualityPill(PlayerProvider playerProvider) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final song = playerProvider.currentSong;
+    final isLocal = song is Song && !song.isOnline;
     return Material(
       color: colorScheme.primaryContainer,
       shape: const StadiumBorder(),
       child: InkWell(
-        onTap: () => _showQualityDialog(playerProvider),
+        // 本地歌曲屏蔽音质选择
+        onTap: isLocal ? null : () => _showQualityDialog(playerProvider),
         onLongPress: () => _showVolumeDialog(playerProvider),
         customBorder: const StadiumBorder(),
         child: Padding(
@@ -960,7 +965,8 @@ class _FullPlayerState extends State<FullPlayer>
               ),
               const SizedBox(width: 4),
               Text(
-                playerProvider.audioQualityLabel,
+                // 本地歌曲显示基于码率推断的音质标签
+                playerProvider.currentQualityLabel,
                 style: textTheme.labelMedium?.copyWith(
                   color: colorScheme.onPrimaryContainer,
                   fontWeight: FontWeight.w600,
@@ -1399,8 +1405,12 @@ class _FullPlayerState extends State<FullPlayer>
     bool isExpanded = false,
   }) {
     final song = playerProvider.currentSong;
-    final isFavorited =
-        song != null && context.watch<FavoritesProvider>().isFavorite(song.id);
+    // 根据歌曲来源（本地/在线）选择对应的收藏 Provider
+    final isOnline = song is Song && song.isOnline;
+    final isFavorited = song != null &&
+        (isOnline
+            ? context.watch<FavoritesProvider>().isFavorite(song.id)
+            : context.watch<LocalFavoritesProvider>().isFavorite(song.id));
     final textTheme = Theme.of(context).textTheme;
 
     return Material(
@@ -1439,7 +1449,7 @@ class _FullPlayerState extends State<FullPlayer>
                 ),
               ),
             ),
-            // 3. 封面 — 短按跳转到封面 tab，长按弹出下载音质选择
+            // 3. 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
             Expanded(
               child: InkWell(
                 onTap: () {
@@ -1447,7 +1457,7 @@ class _FullPlayerState extends State<FullPlayer>
                     _tabController.animateTo(0);
                   }
                 },
-                onLongPress: song != null
+                onLongPress: song != null && isOnline
                     ? () => _downloadSong(song)
                     : null,
                 child: Center(
@@ -1531,8 +1541,14 @@ class _FullPlayerState extends State<FullPlayer>
             Expanded(
               child: InkWell(
                 onTap: song != null
-                    ? () =>
-                        context.read<FavoritesProvider>().toggleFavorite(song)
+                    ? () {
+                        // 本地歌曲走 LocalFavoritesProvider，在线走 FavoritesProvider
+                        if (isOnline) {
+                          context.read<FavoritesProvider>().toggleFavorite(song);
+                        } else {
+                          context.read<LocalFavoritesProvider>().toggleFavorite(song.id);
+                        }
+                      }
                     : null,
                 child: Center(
                   child: Icon(

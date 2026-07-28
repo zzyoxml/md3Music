@@ -17,6 +17,9 @@ class Song {
   final double? climaxStart;
   /// 高潮部分结束时间（秒），由酷狗 /song/climax 接口返回。
   final double? climaxEnd;
+  /// 本地收藏标志位（区别于云端"我喜欢"）。
+  /// true 表示用户在本机收藏过；旧 JSON 缺省时默认为 false，向后兼容。
+  final bool isLocallyFavorited;
 
   const Song({
     required this.id,
@@ -35,6 +38,7 @@ class Song {
     this.fileId,
     this.climaxStart,
     this.climaxEnd,
+    this.isLocallyFavorited = false,
   });
 
   String get displayDuration {
@@ -72,6 +76,7 @@ class Song {
       fileId: json['fileId'] as int?,
       climaxStart: (json['climaxStart'] as num?)?.toDouble(),
       climaxEnd: (json['climaxEnd'] as num?)?.toDouble(),
+      isLocallyFavorited: (json['isLocallyFavorited'] as bool?) ?? false,
     );
   }
 
@@ -93,6 +98,7 @@ class Song {
       'fileId': fileId,
       'climaxStart': climaxStart,
       'climaxEnd': climaxEnd,
+      'isLocallyFavorited': isLocallyFavorited,
     };
   }
 
@@ -113,6 +119,7 @@ class Song {
     int? fileId,
     double? climaxStart,
     double? climaxEnd,
+    bool? isLocallyFavorited,
   }) {
     return Song(
       id: id ?? this.id,
@@ -131,6 +138,7 @@ class Song {
       fileId: fileId ?? this.fileId,
       climaxStart: climaxStart ?? this.climaxStart,
       climaxEnd: climaxEnd ?? this.climaxEnd,
+      isLocallyFavorited: isLocallyFavorited ?? this.isLocallyFavorited,
     );
   }
 

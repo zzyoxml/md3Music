@@ -1,4 +1,4 @@
-﻿package com.md3music.md3music
+package com.md3music.md3music
 
 import android.app.Activity
 import android.content.ContentUris
@@ -44,6 +44,8 @@ object MediaStoreScanner {
             MediaStore.Audio.Media.MIME_TYPE,
             MediaStore.Audio.Media.RELATIVE_PATH,
             MediaStore.Audio.Media.IS_MUSIC,
+            // BITRATE 列在 API 30+ 可用，低版本查询会忽略不认识的列
+            "bitrate",
         )
 
         val selection = "${'$'}{MediaStore.Audio.Media.IS_MUSIC} != 0"
@@ -63,6 +65,8 @@ object MediaStoreScanner {
             val durationCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
             val relativePathCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.RELATIVE_PATH)
             val mimeTypeCol = c.getColumnIndexOrThrow(MediaStore.Audio.Media.MIME_TYPE)
+            // bitrate 列可能不存在（API < 30），用 getColumnIndex 安全获取
+            val bitrateCol = c.getColumnIndex("bitrate")
 
             while (c.moveToNext()) {
                 val id = c.getLong(idCol)
@@ -91,6 +95,8 @@ object MediaStoreScanner {
                         "durationMs" to duration,
                         "relativePath" to relativePath,
                         "mimeType" to mimeType,
+                        // bitrate 可能不存在（API < 30 或部分设备不填充）
+                        "bitrate" to if (bitrateCol >= 0) c.getInt(bitrateCol) else 0,
                     )
                 )
             }
