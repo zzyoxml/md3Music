@@ -6,8 +6,7 @@ import 'local_artwork_image.dart';
 ///
 /// 支持：
 /// - **http(s)://** 在线封面：使用 [Image.network]
-/// - **content://** MediaStore 封面：使用 [Image.network]（Android 框架内部走
-///   ContentResolver，对 content://media/external/audio/albumart 自动处理）
+/// - **content://** MediaStore 封面：通过 fallbackFilePath 读内嵌封面
 /// - **local://<filePath>** 本地文件：使用 [LocalArtworkCache] 懒加载
 /// - **null** 或未知：显示占位符
 class SmartArtworkImage extends StatefulWidget {
@@ -61,11 +60,24 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
         borderRadius: BorderRadius.circular(widget.borderRadius),
         child: child,
       );
-    } else if (uri.startsWith('content://') ||
-        uri.startsWith('http://') ||
+    } else if (uri.startsWith('content://')) {
+      // content:// URI 无法被 Image.network 加载（非 HTTP 协议），
+      // 直接用 fallbackFilePath 走 LocalArtworkImage 懒加载内嵌封面
+      if (widget.fallbackFilePath != null) {
+        child = LocalArtworkImage(
+          filePath: widget.fallbackFilePath!,
+          size: widget.size,
+          borderRadius: widget.borderRadius,
+        );
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(widget.borderRadius),
+          child: child,
+        );
+      }
+      child = _placeholder(colorScheme);
+    } else if (uri.startsWith('http://') ||
         uri.startsWith('https://')) {
-      // content://media/... 和 http(s):// 都用 Image.network，
-      // Android 框架会自动处理 content URI
+      // http(s):// 在线封面用 Image.network
       final isFill = widget.size == double.infinity;
       child = Image.network(
         uri,
@@ -73,7 +85,6 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
         height: isFill ? double.infinity : widget.size,
         fit: BoxFit.cover,
         errorBuilder: (_, _, _) {
-          // content:// 加载失败时（如权限问题），降级到 filePath 懒加载
           if (widget.fallbackFilePath != null) {
             return LocalArtworkImage(
               filePath: widget.fallbackFilePath!,

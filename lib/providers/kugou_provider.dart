@@ -512,7 +512,10 @@ class KugouProvider extends ChangeNotifier {
     _error = null;
     // 先清空旧歌词，避免切换歌曲时残留上首歌的歌词
     _lyric = null;
-    _lyricSongId = hash;
+    // 本地歌曲 hash 为空时，用 songName 作为追踪键，避免多首本地歌曲
+    // 共享空 hash 导致竞态检查失效（旧请求覆盖新请求结果）
+    final trackKey = hash.isEmpty ? 'local_${songName ?? ''}' : hash;
+    _lyricSongId = trackKey;
     notifyListeners();
     try {
       // Task 15：默认 fmt='lrc' 时，API 客户端会并发发起 LRC + KRC 两个请求，
@@ -526,7 +529,7 @@ class KugouProvider extends ChangeNotifier {
         songName: songName,
         fmt: fmt,
       );
-      if (_lyricSongId != hash) {
+      if (_lyricSongId != trackKey) {
         // 期间切换了歌曲，丢弃旧结果
         return;
       }
@@ -536,7 +539,7 @@ class KugouProvider extends ChangeNotifier {
         _error = '获取歌词失败';
       }
     } catch (e) {
-      if (_lyricSongId == hash) {
+      if (_lyricSongId == trackKey) {
         _error = e.toString();
       }
     }

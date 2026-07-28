@@ -11,7 +11,7 @@ import 'local_artwork_image.dart';
 ///
 /// 与 [SmartArtworkImage] 的区别：
 /// - 针对播放器场景优化：支持 [fit]、[isFill]、无固定尺寸的流式布局
-/// - 支持 `content://`（MediaStore albumart）通过 [Image.network] 加载
+/// - 支持 `content://`（MediaStore albumart）通过 fallbackFilePath 读内嵌封面
 /// - 支持 `local://<filePath>` 通过 [LocalArtworkCache] 懒加载内嵌封面
 /// - 支持 `file://` URI
 /// - 支持 `http(s)://` 通过 [CachedNetworkImage] 加载（带磁盘缓存）
@@ -57,21 +57,32 @@ class _PlayerArtworkImageState extends State<PlayerArtworkImage> {
   /// 内嵌封面字节（仅 local:// 和 fallback 时使用）
   Uint8List? _embeddedBytes;
   bool _embeddedLoaded = false;
+  /// 版本计数器：防止旧异步加载完成后覆盖新 URI 的状态
+  int _loadVersion = 0;
+  /// 当前正在加载的文件路径，避免重复加载同一文件
+  String? _loadingPath;
 
   @override
   void didUpdateWidget(PlayerArtworkImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // artworkUri 变化时重置内嵌封面状态
-    if (oldWidget.artworkUri != widget.artworkUri) {
+    // artworkUri 或 fallbackFilePath 变化时重置内嵌封面状态
+    if (oldWidget.artworkUri != widget.artworkUri ||
+        oldWidget.fallbackFilePath != widget.fallbackFilePath) {
       _embeddedBytes = null;
       _embeddedLoaded = false;
+      _loadingPath = null;
     }
   }
 
   /// 从文件路径读取内嵌封面
   Future<void> _loadEmbedded(String filePath) async {
+    // 避免重复加载同一文件
+    if (_loadingPath == filePath && _embeddedLoaded) return;
+    _loadingPath = filePath;
+    final currentVersion = ++_loadVersion;
     final result = await LocalArtworkCache().getArtwork(filePath);
-    if (mounted) {
+    // 仅当版本号匹配时才更新状态，丢弃过期的异步结果
+    if (mounted && currentVersion == _loadVersion) {
       setState(() {
         _embeddedBytes = result;
         _embeddedLoaded = true;
@@ -142,28 +153,24 @@ class _PlayerArtworkImageState extends State<PlayerArtworkImage> {
       );
     }
 
-    // content:// URI：MediaStore albumart
+    // content:// URI：Image.network 无法加载（非 HTTP 协议），
+    // 直接用 fallbackFilePath 走 LocalArtworkImage 懒加载内嵌封面
     if (uri.startsWith('content://')) {
-      return Image.network(
-        uri,
-        width: widget.isFill ? double.infinity : null,
-        height: widget.isFill ? double.infinity : null,
-        fit: widget.fit,
-        errorBuilder: (_, _, _) {
-          // content:// 加载失败，用 fallbackFilePath 读内嵌封面
-          if (widget.fallbackFilePath != null && !_embeddedLoaded) {
-            _loadEmbedded(widget.fallbackFilePath!);
-          }
-          if (_embeddedBytes != null) {
-            return Image.memory(_embeddedBytes!, fit: widget.fit);
-          }
-          return _placeholder(bg, icon, iSize);
-        },
-        loadingBuilder: (context, child, progress) {
-          if (progress == null) return child;
-          return _placeholder(bg, icon, iSize);
-        },
-      );
+      if (widget.fallbackFilePath != null) {
+        if (!_embeddedLoaded) {
+          _loadEmbedded(widget.fallbackFilePath!);
+        }
+        if (_embeddedBytes != null) {
+          return Image.memory(
+            _embeddedBytes!,
+            width: widget.isFill ? double.infinity : null,
+            height: widget.isFill ? double.infinity : null,
+            fit: widget.fit,
+          );
+        }
+        return _placeholder(bg, icon, iSize);
+      }
+      return _placeholder(bg, icon, iSize);
     }
 
     // http(s):// 在线封面：用 CachedNetworkImage（带磁盘缓存）

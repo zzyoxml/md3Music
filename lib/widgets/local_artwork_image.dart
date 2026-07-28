@@ -27,6 +27,8 @@ class LocalArtworkImage extends StatefulWidget {
 class _LocalArtworkImageState extends State<LocalArtworkImage> {
   Uint8List? _bytes;
   bool _loaded = false;
+  // 版本计数器：防止旧异步加载完成后覆盖新 filePath 的状态
+  int _loadVersion = 0;
 
   @override
   void initState() {
@@ -34,9 +36,22 @@ class _LocalArtworkImageState extends State<LocalArtworkImage> {
     _loadArtwork();
   }
 
+  @override
+  void didUpdateWidget(LocalArtworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // filePath 变化时（如搜索过滤导致列表项复用），重新加载封面
+    if (oldWidget.filePath != widget.filePath) {
+      _bytes = null;
+      _loaded = false;
+      _loadArtwork();
+    }
+  }
+
   Future<void> _loadArtwork() async {
+    final currentVersion = ++_loadVersion;
     final result = await LocalArtworkCache().getArtwork(widget.filePath);
-    if (mounted) {
+    // 仅当版本号匹配时才更新状态，丢弃过期的异步结果
+    if (mounted && currentVersion == _loadVersion) {
       setState(() {
         _bytes = result;
         _loaded = true;

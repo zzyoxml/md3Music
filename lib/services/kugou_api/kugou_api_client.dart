@@ -955,18 +955,37 @@ class KugouApiClient {
     String? lyricId;
     String? lyricAccesskey;
 
-    Map<String, dynamic>? searchResult = await _get(
-      KugouEndpoints.searchLyric,
-      queryParameters: {'hash': hash.toLowerCase()},
-    );
+    Map<String, dynamic>? searchResult;
+
+    // 本地歌曲 hash 为空时，跳过 hash 搜索，直接用关键词搜索
+    if (hash.isNotEmpty) {
+      searchResult = await _get(
+        KugouEndpoints.searchLyric,
+        queryParameters: {'hash': hash.toLowerCase()},
+      );
+    }
 
     if (searchResult != null &&
         !_hasCandidates(searchResult) &&
         songName != null &&
         songName.isNotEmpty) {
+      // 关键词搜索：hash 为空时不传 hash 参数，避免 API 干扰
+      final params = <String, dynamic>{'keywords': songName};
+      if (hash.isNotEmpty) {
+        params['hash'] = hash.toLowerCase();
+      }
       searchResult = await _get(
         KugouEndpoints.searchLyric,
-        queryParameters: {'keywords': songName, 'hash': hash.toLowerCase()},
+        queryParameters: params,
+      );
+    } else if (searchResult == null &&
+        hash.isEmpty &&
+        songName != null &&
+        songName.isNotEmpty) {
+      // hash 为空且第一次搜索被跳过时，用关键词搜索
+      searchResult = await _get(
+        KugouEndpoints.searchLyric,
+        queryParameters: {'keywords': songName},
       );
     }
 

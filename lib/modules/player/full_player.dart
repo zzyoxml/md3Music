@@ -18,7 +18,9 @@ import '../../providers/downloads_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import 'comments_view.dart';
-import 'lyrics_view.dart';
+import '../../widgets/apple_lyrics/apple_lyrics_view.dart';
+import '../../widgets/apple_lyrics/models/lyric_line.dart';
+import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_transport_row.dart';
@@ -52,8 +54,7 @@ class FullPlayer extends StatefulWidget {
 class _FullPlayerState extends State<FullPlayer>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
-  final GlobalKey<LyricsViewState> _lyricsKey = GlobalKey<LyricsViewState>();
-  String _lyrics = '';
+  List<LyricLine> _parsedLyrics = const [];
   bool _isLoadingLyrics = false;
   String? _lastSongId;
 
@@ -328,7 +329,7 @@ class _FullPlayerState extends State<FullPlayer>
       _currentTabLength = newTabLength;
       // Pad 模式首次进入时（从 3 tab 切到 2 tab）默认打开歌词。
       // 注意：children 列表在 pad 模式被 `if (!_isPadMode)` 跳过 SongInfo，
-      // 所以 children 实际只有 2 个：index 0 = LyricsView, index 1 = CommentsView。
+      // 所以 children 实际只有 2 个：index 0 = AppleLyricsView, index 1 = CommentsView。
       // 因此歌词在 pad 模式下的 index 是 0，不是 1。
       // 后续用户手动切换 tab 后不强制重置，保留用户当前选择。
       final isFirstEnterPad = shouldBePadMode && newTabLength == 2;
@@ -419,11 +420,13 @@ class _FullPlayerState extends State<FullPlayer>
 
     setState(() {
       _isLoadingLyrics = true;
-      _lyrics = '';
+      _parsedLyrics = const [];
     });
 
     try {
       String lyricText = '';
+      String? translationText;
+      String? romaText;
 
       // 本地歌曲优先读取内嵌歌词（ID3 USLT / Vorbis LYRICS / MP4 ©lyr）
       if (song is Song && !song.isOnline) {
@@ -443,24 +446,40 @@ class _FullPlayerState extends State<FullPlayer>
       // 内嵌歌词为空时回退到酷狗 API
       if (lyricText.isEmpty) {
         final kugouProvider = context.read<KugouProvider>();
-        await kugouProvider.getLyric(songId, songName: song.title);
+        // 本地歌曲的 songId 是 'local_<path>'，不是酷狗 hash，
+        // 传空 hash 让酷狗 API 完全基于 songName 搜索歌词
+        final lyricHash = (song is Song && !song.isOnline) ? '' : songId;
+        // 搜索关键词用"歌名 艺术家"提高匹配准确度
+        final searchName = (song is Song && song.artist != '未知艺术家')
+            ? '${song.title} ${song.artist}'
+            : song.title;
+        await kugouProvider.getLyric(lyricHash, songName: searchName);
         if (mounted) {
           final lyric = kugouProvider.lyric;
-          lyricText = lyric?.displayLyric ?? '';
+          lyricText = lyric?.displayKrcLyric ??
+              lyric?.displayLrcLyric ??
+              lyric?.displayLyric ??
+              '';
+          translationText = lyric?.translatedContent;
+          romaText = lyric?.romaContent;
         }
       }
 
       if (mounted) {
         setState(() {
           _isLoadingLyrics = false;
-          _lyrics = lyricText;
+          _parsedLyrics = LyricParserChain.parse(
+            lyricText,
+            translationText: translationText,
+            romaText: romaText,
+          );
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
           _isLoadingLyrics = false;
-          _lyrics = '';
+          _parsedLyrics = const [];
         });
       }
     }
@@ -596,12 +615,14 @@ class _FullPlayerState extends State<FullPlayer>
                   behavior: HitTestBehavior.translucent,
                   child: _isLoadingLyrics
                       ? const Center(child: MD3ELoadingIndicator())
-                      : LyricsView(
-                          key: _lyricsKey,
-                          lyrics: _lyrics,
-                          position: playerProvider.position,
-                          onSeek: (position) {
-                            playerProvider.seek(position);
+                      : AppleLyricsView(
+                          lines: _parsedLyrics,
+                          currentTimeMs:
+                              playerProvider.position.inMilliseconds,
+                          isPlaying: playerProvider.isPlaying,
+                          onSeek: (timeMs) {
+                            playerProvider
+                                .seek(Duration(milliseconds: timeMs));
                           },
                         ),
                 ),
@@ -739,12 +760,14 @@ class _FullPlayerState extends State<FullPlayer>
                         ),
                       _isLoadingLyrics
                           ? const Center(child: MD3ELoadingIndicator())
-                          : LyricsView(
-                              key: _lyricsKey,
-                              lyrics: _lyrics,
-                              position: playerProvider.position,
-                              onSeek: (position) {
-                                playerProvider.seek(position);
+                          : AppleLyricsView(
+                              lines: _parsedLyrics,
+                              currentTimeMs:
+                                  playerProvider.position.inMilliseconds,
+                              isPlaying: playerProvider.isPlaying,
+                              onSeek: (timeMs) {
+                                playerProvider
+                                    .seek(Duration(milliseconds: timeMs));
                               },
                             ),
                       CommentsView(
@@ -880,11 +903,14 @@ class _FullPlayerState extends State<FullPlayer>
                         _buildSongInfo(playerProvider, currentSong, colorScheme),
                       _isLoadingLyrics
                           ? const Center(child: MD3ELoadingIndicator())
-                          : LyricsView(
-                              lyrics: _lyrics,
-                              position: playerProvider.position,
-                              onSeek: (position) {
-                                playerProvider.seek(position);
+                          : AppleLyricsView(
+                              lines: _parsedLyrics,
+                              currentTimeMs:
+                                  playerProvider.position.inMilliseconds,
+                              isPlaying: playerProvider.isPlaying,
+                              onSeek: (timeMs) {
+                                playerProvider
+                                    .seek(Duration(milliseconds: timeMs));
                               },
                             ),
                       CommentsView(
@@ -1231,8 +1257,6 @@ class _FullPlayerState extends State<FullPlayer>
                           (duration.inMilliseconds * value).round(),
                     );
                     playerProvider.seek(newPosition);
-                    _lyricsKey.currentState
-                        ?.forceScrollToPosition(newPosition);
                   },
                   onChangeEnd: (_) {
                     if (_wasPlayingBeforeDrag) {
@@ -1298,7 +1322,6 @@ class _FullPlayerState extends State<FullPlayer>
                   milliseconds: (totalMs * value).round(),
                 );
                 playerProvider.seek(newPosition);
-                _lyricsKey.currentState?.forceScrollToPosition(newPosition);
               },
               onChangeEnd: (_) {
                 if (_wasPlayingBeforeDrag) {

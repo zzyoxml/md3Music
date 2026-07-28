@@ -19,12 +19,16 @@ class _LibraryPageState extends State<LibraryPage>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchController = TextEditingController();
+  late FocusNode _searchFocusNode;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 4, vsync: this);
+    _searchFocusNode = FocusNode();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // 页面加载后立即取消搜索框焦点，防止输入法自动弹出
+      _searchFocusNode.unfocus();
       final provider = context.read<LibraryProvider>();
       provider.loadScanFolders();
       // 如果没有歌曲数据且不在扫描中，自动扫描
@@ -38,6 +42,7 @@ class _LibraryPageState extends State<LibraryPage>
   void dispose() {
     _tabController.dispose();
     _searchController.dispose();
+    _searchFocusNode.dispose();
     super.dispose();
   }
 
@@ -68,6 +73,11 @@ class _LibraryPageState extends State<LibraryPage>
                           horizontal: 16, vertical: 4),
                       child: TextField(
                         controller: _searchController,
+                        focusNode: _searchFocusNode,
+                        onTap: () {
+                          // 点击搜索框时请求焦点并弹出键盘
+                          _searchFocusNode.requestFocus();
+                        },
                         decoration: InputDecoration(
                           hintText: '搜索本地音乐',
                           prefixIcon: const Icon(Icons.search, size: 20),

@@ -272,7 +272,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       // 内嵌歌词为空时回退到酷狗 API
       if (lyricText.isEmpty) {
         final kugouProvider = context.read<KugouProvider>();
-        await kugouProvider.getLyric(songId, songName: song.title);
+        // 本地歌曲的 songId 是 'local_<path>'，不是酷狗 hash，
+        // 传空 hash 让酷狗 API 完全基于 songName 搜索歌词
+        final lyricHash = (song is Song && !song.isOnline) ? '' : songId;
+        // 搜索关键词用"歌名 艺术家"提高匹配准确度
+        final searchName = (song is Song && song.artist != '未知艺术家')
+            ? '${song.title} ${song.artist}'
+            : song.title;
+        await kugouProvider.getLyric(lyricHash, songName: searchName);
 
         if (mounted) {
           final lyric = kugouProvider.lyric;
