@@ -314,9 +314,9 @@ class _MD3ETransportRowState extends State<MD3ETransportRow>
         );
       case _Button.next:
         return (
-          normalBg: cs.surfaceContainerHighest,
+          normalBg: cs.primaryContainer,
           pressedBg: cs.primary,
-          normalFg: cs.onSurfaceVariant,
+          normalFg: cs.onPrimaryContainer,
           pressedFg: cs.onPrimary,
         );
     }
@@ -645,7 +645,7 @@ class _MD3ETransportRowState extends State<MD3ETransportRow>
         // toPrev 期间 play 按钮向右被挤压形变成 next 形态：
         // - left 从 _playLeft 滑到 _nextLeft（向右挤压）
         // - width 从 72 缩到 56
-        // - color primary → surfaceContainerHighest
+        // - color primary → primaryContainer
         // - icon play/pause → skip_next
         if (_phase2.value > 0) {
           final widthDiff = widget.playButtonSize - widget.sideButtonSize;
@@ -654,12 +654,12 @@ class _MD3ETransportRowState extends State<MD3ETransportRow>
           final cs = Theme.of(context).colorScheme;
           bgOverride = Color.lerp(
             cs.primary,
-            cs.surfaceContainerHighest,
+            cs.primaryContainer,
             _phase2.value,
           )!;
           fgOverride = Color.lerp(
             cs.onPrimary,
-            cs.onSurfaceVariant,
+            cs.onPrimaryContainer,
             _phase2.value,
           )!;
           iconOverride = Icons.skip_next;
@@ -679,8 +679,8 @@ class _MD3ETransportRowState extends State<MD3ETransportRow>
         left = _nextLeft;
         currentWidth = widget.sideButtonSize;
         final cs = Theme.of(context).colorScheme;
-        bgOverride = cs.surfaceContainerHighest;
-        fgOverride = cs.onSurfaceVariant;
+        bgOverride = cs.primaryContainer;
+        fgOverride = cs.onPrimaryContainer;
         iconOverride = Icons.skip_next;
         break;
       case _Transition.playBounce:
@@ -755,7 +755,7 @@ class _MD3ETransportRowState extends State<MD3ETransportRow>
         // toNext 期间旧 next 向左滑到 _playLeft 变成 play 形态：
         // - left 从 _nextLeft 滑到 _playLeft
         // - width 从 56 扩到 72
-        // - color surfaceContainerHighest → primary
+        // - color primaryContainer → primary
         // - icon skip_next → play/pause
         if (_phase2.value > 0) {
           final widthDiff = widget.playButtonSize - widget.sideButtonSize;
@@ -763,12 +763,12 @@ class _MD3ETransportRowState extends State<MD3ETransportRow>
           left = _nextLeft - (_nextLeft - _playLeft) * _phase2.value;
           final cs = Theme.of(context).colorScheme;
           bgOverride = Color.lerp(
-            cs.surfaceContainerHighest,
+            cs.primaryContainer,
             cs.primary,
             _phase2.value,
           )!;
           fgOverride = Color.lerp(
-            cs.onSurfaceVariant,
+            cs.onPrimaryContainer,
             cs.onPrimary,
             _phase2.value,
           )!;
@@ -963,7 +963,7 @@ class _MD3ETransportRowState extends State<MD3ETransportRow>
     final double pressT = isPressed ? _pressColor.value : 0.0;
     final double pressScale = isPressed ? _pressScale.value : 1.0;
     final double iconOffset = isPressed ? _pressIconOffset.value : 0;
-    // 按压配色跟随当前视觉形态（next 形态 = surfaceContainerHighest ↔ primary）
+    // 按压配色跟随当前视觉形态（next 形态 = primaryContainer ↔ primary）
     final cs = Theme.of(context).colorScheme;
     final pressColors = _resolvePressColors(_Button.next, cs);
     final Color bg = pressT > 0
