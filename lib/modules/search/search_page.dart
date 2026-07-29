@@ -7,6 +7,7 @@ import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../services/kugou_api/cloud_song_mapper.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/md3e_loading_indicator.dart';
@@ -33,12 +34,20 @@ class _SearchPageState extends State<SearchPage>
   bool _hasSearched = false;
   String _currentSearchType = 'song';
 
+  // 云盘搜索 tab 的本地状态
+  // 云盘不走通用 /search 接口，进入云盘 tab 时按需懒加载一次用户云盘歌单，
+  // 之后用 [_query] 在内存中过滤。生命周期跟随 SearchPage。
+  List<Song> _cloudSongs = [];
+  bool _cloudLoaded = false;
+  bool _cloudLoading = false;
+  String? _cloudError;
+
   static const _historyKey = 'search_history';
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
     _tabController.addListener(_onTabChanged);
     _loadSearchHistory();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -56,10 +65,17 @@ class _SearchPageState extends State<SearchPage>
 
   void _onTabChanged() {
     if (_tabController.indexIsChanging) return;
-    final types = ['song', 'album', 'artist', 'special'];
+    final types = ['song', 'album', 'artist', 'special', 'cloud'];
     final newType = types[_tabController.index];
     if (newType != _currentSearchType && _query.isNotEmpty) {
       _currentSearchType = newType;
+      if (newType == 'cloud') {
+        // 云盘是本地过滤：未加载过就触发懒加载，加载完成后由 _query 在内存过滤
+        if (!_cloudLoaded && !_cloudLoading) {
+          _loadCloudSongsForSearch();
+        }
+        return;
+      }
       final kugouProvider = context.read<KugouProvider>();
       if (kugouProvider.hasSearchResultForType(_query, newType)) {
         kugouProvider.restoreSearchResultFromCache(_query, newType);
@@ -197,6 +213,7 @@ class _SearchPageState extends State<SearchPage>
                             Tab(text: '专辑'),
                             Tab(text: '歌手'),
                             Tab(text: '歌单'),
+                            Tab(text: '云盘'),
                           ],
                         ),
                       ),
@@ -307,6 +324,7 @@ class _SearchPageState extends State<SearchPage>
         _buildAlbumResults(),
         _buildArtistResults(),
         _buildPlaylistResults(),
+        _buildCloudResults(),
       ],
     );
   }
@@ -621,6 +639,113 @@ class _SearchPageState extends State<SearchPage>
             ),
         ],
       ),
+    );
+  }
+
+  /// 加载云盘歌曲列表（仅进入云盘 tab 时按需调用一次）。
+  /// 与 [CloudMusicPage] 一样使用 `getUserCloud(pagesize: 100)`，
+  /// 加载完成后由 [_query] 在 [_filteredCloudSongs] 中过滤。
+  Future<void> _loadCloudSongsForSearch() async {
+    if (_cloudLoading) return;
+    setState(() {
+      _cloudLoading = true;
+      _cloudError = null;
+    });
+    try {
+      final api = KugouApiClient();
+      if (!api.isLoggedIn) {
+        setState(() {
+          _cloudLoading = false;
+          _cloudError = '请先登录';
+        });
+        return;
+      }
+      final result = await api.getUserCloud(pagesize: 100);
+      if (!mounted) return;
+      if (result == null) {
+        setState(() {
+          _cloudLoading = false;
+          _cloudError = '加载失败，请稍后重试';
+        });
+        return;
+      }
+      final data = result['data'];
+      List<dynamic>? list;
+      if (data is List) {
+        list = data;
+      } else if (data is Map<String, dynamic>) {
+        list = data['info'] as List<dynamic>?;
+        list ??= data['list'] as List<dynamic>?;
+      }
+      final songs = <Song>[];
+      if (list != null) {
+        for (final e in list) {
+          if (e is Map<String, dynamic>) {
+            final song = mapCloudApiItemToSong(e);
+            if (song.id.isNotEmpty) songs.add(song);
+          }
+        }
+      }
+      setState(() {
+        _cloudSongs = songs;
+        _cloudLoaded = true;
+        _cloudLoading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _cloudLoading = false;
+          _cloudError = '加载失败：$e';
+        });
+      }
+    }
+  }
+
+  /// 根据 [_query] 内存过滤已加载的云盘歌曲（title/artist 子串、不区分大小写）。
+  List<Song> get _filteredCloudSongs {
+    final q = _query.trim().toLowerCase();
+    if (q.isEmpty) return _cloudSongs;
+    return _cloudSongs.where((s) {
+      return s.title.toLowerCase().contains(q) ||
+          s.artist.toLowerCase().contains(q);
+    }).toList();
+  }
+
+  Widget _buildCloudResults() {
+    if (_cloudLoading) {
+      return const Center(child: MD3ELoadingIndicator());
+    }
+    if (_cloudError != null) {
+      return _buildErrorState(_cloudError!, _loadCloudSongsForSearch);
+    }
+    if (!_cloudLoaded) {
+      // 极端情况：未搜索过就跳到云盘 tab —— 主动触发加载
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_cloudLoaded && !_cloudLoading) {
+          _loadCloudSongsForSearch();
+        }
+      });
+      return const Center(child: MD3ELoadingIndicator());
+    }
+    final results = _filteredCloudSongs;
+    if (results.isEmpty) {
+      return _buildNoResult();
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      itemCount: results.length,
+      itemBuilder: (context, index) {
+        return SongListItem(
+          song: results[index],
+          onTap: () {
+            // 必须用 playCloudPlaylist 走 /user/cloud/url 解析
+            context
+                .read<PlayerProvider>()
+                .playCloudPlaylist(results, index);
+          },
+          onMoreTap: () {},
+        );
+      },
     );
   }
 

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
+import '../../services/kugou_api/cloud_song_mapper.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_refresh_indicator.dart';
@@ -21,11 +22,29 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
   List<Song> _songs = [];
   bool _isLoading = true;
   String? _error;
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     _loadCloudSongs();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  /// 内存过滤：根据当前搜索词匹配 title / artist（不区分大小写、子串）。
+  List<Song> get _filteredSongs {
+    final q = _searchQuery.trim().toLowerCase();
+    if (q.isEmpty) return _songs;
+    return _songs.where((s) {
+      return s.title.toLowerCase().contains(q) ||
+          s.artist.toLowerCase().contains(q);
+    }).toList();
   }
 
   Future<void> _loadCloudSongs() async {
@@ -77,7 +96,7 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
         }
         for (final e in list) {
           if (e is Map<String, dynamic>) {
-            final song = _cloudItemToSong(e);
+            final song = mapCloudApiItemToSong(e);
             if (song.id.isNotEmpty) songs.add(song);
           }
         }
@@ -97,71 +116,6 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
     }
   }
 
-  /// 将云盘列表项 JSON 映射为 Song 对象。
-  /// 酷狗云盘 /v1/get_list 返回的 filename 通常是 "歌手 - 歌名.ext" 格式，
-  /// 需剥离扩展名并按 " - " 拆分歌手与歌名；duration 单位通常为秒，需 ×1000。
-  Song _cloudItemToSong(Map<String, dynamic> item) {
-    final hash = (item['hash'] ?? '').toString();
-
-    // 优先使用独立字段（若存在）
-    String songname = (item['songname'] ?? '').toString();
-    String singer =
-        (item['singername'] ?? item['singer'] ?? item['artist'] ?? '').toString();
-
-    // songname 为空时，从 filename 解析 "歌手 - 歌名.ext"
-    if (songname.isEmpty) {
-      final filename =
-          (item['filename'] ?? item['FileName'] ?? item['name'] ?? '').toString();
-      // 剥离音频扩展名
-      final withoutExt = filename.replaceFirst(
-        RegExp(r'\.(mp3|flac|wav|ape|m4a|ogg|aac|wma|opus)$',
-            caseSensitive: false),
-        '',
-      );
-      // 按 " - " 拆分歌手与歌名
-      final dashIdx = withoutExt.indexOf(' - ');
-      if (dashIdx > 0) {
-        if (singer.isEmpty) {
-          singer = withoutExt.substring(0, dashIdx).trim();
-        }
-        songname = withoutExt.substring(dashIdx + 3).trim();
-      } else {
-        songname = withoutExt;
-      }
-    }
-
-    if (songname.isEmpty) songname = '未知歌曲';
-    if (singer.isEmpty) singer = '未知歌手';
-
-    final albumId = item['album_id']?.toString();
-    final albumAudioId = item['album_audio_id']?.toString();
-
-    // 时长：云盘 duration 单位通常为秒，需 ×1000 转毫秒
-    // 兼容 timelength/time_length/timelen 等可能的字段名
-    final dur = item['duration'] ??
-        item['timelength'] ??
-        item['time_length'] ??
-        item['timelen'];
-    int durationMs = 0;
-    if (dur is num) {
-      durationMs = dur.toInt();
-      // 值介于 (0, 1000) 认为是秒，转毫秒
-      if (durationMs > 0 && durationMs < 1000) {
-        durationMs = durationMs * 1000;
-      }
-    }
-
-    return Song(
-      id: hash,
-      title: songname,
-      artist: singer,
-      album: '',
-      duration: Duration(milliseconds: durationMs),
-      isOnline: true,
-      albumId: albumId,
-      albumAudioId: albumAudioId,
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -185,21 +139,27 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
                       child: Column(
                         children: [
                           _buildHeader(),
+                          _buildSearchBar(),
                           Expanded(
-                            child: ListView.builder(
-                              itemCount: _songs.length,
-                              itemBuilder: (context, index) {
-                                return SongListItem(
-                                  song: _songs[index],
-                                  onTap: () {
-                                    context
-                                        .read<PlayerProvider>()
-                                        .playCloudPlaylist(_songs, index);
-                                  },
-                                  onMoreTap: () {},
-                                );
-                              },
-                            ),
+                            child: _filteredSongs.isEmpty
+                                ? _buildNoMatch()
+                                : ListView.builder(
+                                    itemCount: _filteredSongs.length,
+                                    itemBuilder: (context, index) {
+                                      return SongListItem(
+                                        song: _filteredSongs[index],
+                                        onTap: () {
+                                          context
+                                              .read<PlayerProvider>()
+                                              .playCloudPlaylist(
+                                                _filteredSongs,
+                                                index,
+                                              );
+                                        },
+                                        onMoreTap: () {},
+                                      );
+                                    },
+                                  ),
                           ),
                           const MiniPlayer(),
                         ],
@@ -230,6 +190,73 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
             },
             icon: const Icon(Icons.play_arrow),
             label: const Text('播放全部'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: TextField(
+        controller: _searchController,
+        decoration: InputDecoration(
+          hintText: '搜索云盘歌曲',
+          hintStyle: Theme.of(context)
+              .textTheme
+              .bodyMedium
+              ?.copyWith(color: colorScheme.onSurfaceVariant),
+          prefixIcon: Icon(
+            Icons.search,
+            size: 20,
+            color: colorScheme.onSurfaceVariant,
+          ),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? IconButton(
+                  icon: Icon(
+                    Icons.clear,
+                    size: 18,
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                )
+              : null,
+          filled: true,
+          fillColor: colorScheme.surfaceContainerHighest,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(20),
+            borderSide: BorderSide.none,
+          ),
+          contentPadding: const EdgeInsets.symmetric(vertical: 0),
+          isDense: true,
+        ),
+        onChanged: (value) => setState(() => _searchQuery = value),
+      ),
+    );
+  }
+
+  Widget _buildNoMatch() {
+    final cs = Theme.of(context).colorScheme;
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            Icons.search_off,
+            size: 48,
+            color: cs.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            '没有匹配 "${_searchQuery.trim()}" 的歌曲',
+            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: cs.onSurfaceVariant,
+                ),
           ),
         ],
       ),
