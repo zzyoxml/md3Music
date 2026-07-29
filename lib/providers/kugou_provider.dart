@@ -6,6 +6,7 @@ import '../data/models/artist.dart';
 import '../data/models/playlist.dart';
 import '../data/models/song.dart';
 import '../data/repositories/settings_repository.dart';
+import '../services/stream_cache_manager.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import '../services/kugou_api/kugou_models.dart';
 
@@ -508,13 +509,30 @@ class KugouProvider extends ChangeNotifier {
     String? songName,
     String fmt = 'lrc',
   }) async {
+    // 本地歌曲 hash 为空时，用 songName 作为追踪键，避免多首本地歌曲
+    // 共享空 hash 导致竞态检查失效（旧请求覆盖新请求结果）
+    final trackKey = hash.isEmpty ? 'local_${songName ?? ''}' : hash;
+
+    // 边听边存：检查歌词本地缓存
+    final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
+    if (cacheEnabled) {
+      await StreamCacheManager.instance.ensureInitialized();
+      final cachedLyric =
+          await StreamCacheManager.instance.getCachedLyric(hash);
+      if (cachedLyric != null) {
+        // 缓存命中，直接返回
+        _lyric = cachedLyric;
+        _lyricSongId = trackKey; // 更新歌词歌曲 ID（用于竞态控制）
+        _error = null;
+        notifyListeners();
+        return;
+      }
+    }
+
     _beginLoading();
     _error = null;
     // 先清空旧歌词，避免切换歌曲时残留上首歌的歌词
     _lyric = null;
-    // 本地歌曲 hash 为空时，用 songName 作为追踪键，避免多首本地歌曲
-    // 共享空 hash 导致竞态检查失效（旧请求覆盖新请求结果）
-    final trackKey = hash.isEmpty ? 'local_${songName ?? ''}' : hash;
     _lyricSongId = trackKey;
     notifyListeners();
     try {
@@ -535,6 +553,10 @@ class KugouProvider extends ChangeNotifier {
       }
       if (result != null) {
         _lyric = result;
+        // 边听边存：异步缓存歌词（fire-and-forget，不阻塞歌词显示）
+        if (cacheEnabled) {
+          StreamCacheManager.instance.cacheLyric(hash, result);
+        }
       } else {
         _error = '获取歌词失败';
       }

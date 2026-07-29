@@ -16,6 +16,7 @@ import '../data/repositories/history_repository.dart';
 import '../data/repositories/player_state_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../main.dart';
+import '../services/stream_cache_manager.dart';
 import '../widgets/apple_lyrics/models/lyric_line.dart';
 import '../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import 'favorites_provider.dart';
@@ -404,6 +405,18 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       onLoginRequired?.call();
       return;
     }
+
+    // 边听边存：检查本地缓存（登录检查通过后才查缓存，避免未登录时静默播放）
+    final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
+    String? cachedPath;
+    if (cacheEnabled) {
+      await StreamCacheManager.instance.ensureInitialized();
+      cachedPath = await StreamCacheManager.instance.getCachedAudioPath(
+        song.id,
+        _audioQuality.value,
+      );
+    }
+
     _currentSong = song;
     _playlist = [song];
     _originalPlaylist = [song];
@@ -417,6 +430,24 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     try {
+      // 缓存命中：直接用本地路径播放
+      if (cachedPath != null) {
+        final fileUri = Uri.file(cachedPath).toString();
+        final resolvedSong = song.copyWith(url: fileUri);
+        _currentSong = resolvedSong;
+        _playlist = [resolvedSong];
+        _isResolvingUrl = false;
+        _saveState();
+        notifyListeners();
+
+        if (_audioService != null) {
+          final source = _createAudioSource(resolvedSong);
+          await _audioService.setPlaylist([source], startIndex: 0);
+          await _audioService.play();
+        }
+        return;
+      }
+
       final apiClient = KugouApiClient();
 
       final result = await apiClient.getSongUrlWithFallback(
@@ -439,6 +470,25 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           await _audioService.setPlaylist([source], startIndex: 0);
           await _audioService.play();
         } else {}
+
+        // 边听边存：异步缓存音频（不阻塞播放）
+        if (cacheEnabled) {
+          // fire-and-forget，不 await
+          StreamCacheManager.instance.cacheAudio(
+            resolvedSong,
+            result.quality,
+            result.url,
+          );
+          // 同时缓存封面（如果 URL 存在）
+          if (song.artworkUri != null && song.artworkUri!.isNotEmpty) {
+            StreamCacheManager.instance.cacheArtwork(
+              song.id,
+              song.artworkUri!,
+            );
+          }
+          // 缓存元数据
+          StreamCacheManager.instance.cacheSongMetadata(song);
+        }
       } else {
         _isResolvingUrl = false;
         _resolveError = '无法获取播放链接';
@@ -770,33 +820,95 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<bool> _resolveAndPlayCurrentSong({Duration? seekTo, bool play = true}) async {
     if (_currentSong == null) return false;
 
-    if (_currentSong!.isOnline && _currentSong!.url == null) {
-      if (!KugouApiClient().isLoggedIn) {
-        onLoginRequired?.call();
-        return false;
-      }
-      _isResolvingUrl = true;
-      notifyListeners();
-
-      try {
-        final result = await KugouApiClient().getSongUrlWithFallback(
-          _currentSong!.id,
-          quality: _audioQuality.value,
-          albumId: _currentSong!.albumId,
-          albumAudioId: _currentSong!.albumAudioId,
+    if (_currentSong!.isOnline) {
+      // 边听边存：检查本地缓存（无论 URL 是否已预取都先查缓存）
+      final song = _currentSong!;
+      final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
+      if (cacheEnabled) {
+        await StreamCacheManager.instance.ensureInitialized();
+        final cachedPath = await StreamCacheManager.instance.getCachedAudioPath(
+          song.id,
+          _audioQuality.value,
         );
+        if (cachedPath != null) {
+          // 缓存命中，直接播放本地文件
+          await _setUrlAndPlay(
+            Uri.file(cachedPath).toString(),
+            seekTo: seekTo,
+            playAfter: play,
+          );
+          // 异步获取高潮时间（不阻塞播放）
+          _fetchClimaxData();
+          return true;
+        }
+      }
 
-        if (result != null && result.url.isNotEmpty) {
-          final resolvedSong = _currentSong!.copyWith(url: result.url);
-          _currentSong = resolvedSong;
-          _playlist[_currentIndex] = resolvedSong;
-        } else {
+      // 缓存未命中：需要 URL 来播放
+      if (song.url == null) {
+        // URL 不存在，需要解析
+        if (!KugouApiClient().isLoggedIn) {
+          onLoginRequired?.call();
+          return false;
+        }
+        _isResolvingUrl = true;
+        notifyListeners();
+
+        try {
+          final result = await KugouApiClient().getSongUrlWithFallback(
+            _currentSong!.id,
+            quality: _audioQuality.value,
+            albumId: _currentSong!.albumId,
+            albumAudioId: _currentSong!.albumAudioId,
+          );
+
+          if (result != null && result.url.isNotEmpty) {
+            final resolvedSong = _currentSong!.copyWith(url: result.url);
+            _currentSong = resolvedSong;
+            _playlist[_currentIndex] = resolvedSong;
+            // 边听边存：异步缓存音频（不阻塞播放）
+            if (cacheEnabled) {
+              final songToCache = _currentSong!.copyWith(url: result.url);
+              // fire-and-forget，不 await
+              StreamCacheManager.instance.cacheAudio(
+                songToCache,
+                result.quality,
+                result.url,
+              );
+              // 同时缓存封面（如果 URL 存在）
+              if (song.artworkUri != null && song.artworkUri!.isNotEmpty) {
+                StreamCacheManager.instance.cacheArtwork(
+                  song.id,
+                  song.artworkUri!,
+                );
+              }
+              // 缓存元数据
+              StreamCacheManager.instance.cacheSongMetadata(song);
+            }
+          } else {
+            _isResolvingUrl = false;
+            return false;
+          }
+        } catch (e) {
           _isResolvingUrl = false;
           return false;
         }
-      } catch (e) {
-        _isResolvingUrl = false;
-        return false;
+      } else {
+        // URL 已存在（预取过），边听边存：异步缓存
+        if (cacheEnabled) {
+          // fire-and-forget，不 await
+          StreamCacheManager.instance.cacheAudio(
+            song,
+            _audioQuality.value,
+            song.url!,
+          );
+          if (song.artworkUri != null && song.artworkUri!.isNotEmpty) {
+            StreamCacheManager.instance.cacheArtwork(
+              song.id,
+              song.artworkUri!,
+            );
+          }
+          StreamCacheManager.instance.cacheSongMetadata(song);
+        }
       }
     }
 
@@ -859,6 +971,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> next() async {
     if (_playlist.isEmpty) return;
 
+    // 取消当前歌曲的缓存下载
+    if (_currentSong != null && _currentSong!.isOnline) {
+      StreamCacheManager.instance.cancelAudioDownload(_currentSong!.id);
+    }
+
     if (_loopMode == AppLoopMode.one) {
       await seek(Duration.zero);
       await _audioService?.play();
@@ -889,9 +1006,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> previous() async {
     if (_playlist.isEmpty) return;
 
-    if (_position.inSeconds > 3) {
-      await seek(Duration.zero);
-      return;
+    // 取消当前歌曲的缓存下载
+    if (_currentSong != null && _currentSong!.isOnline) {
+      StreamCacheManager.instance.cancelAudioDownload(_currentSong!.id);
     }
 
     final startIndex = _currentIndex;
@@ -922,6 +1039,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> playSongAt(int index) async {
     if (index < 0 || index >= _playlist.length) return;
 
+    // 取消当前歌曲的缓存下载
+    if (_currentSong != null && _currentSong!.isOnline) {
+      StreamCacheManager.instance.cancelAudioDownload(_currentSong!.id);
+    }
+
     _currentIndex = index;
     _currentSong = _playlist[index];
     _resolveError = null;
@@ -933,6 +1055,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> clearPlaylist() async {
+    // 取消当前歌曲的缓存下载
+    if (_currentSong != null && _currentSong!.isOnline) {
+      StreamCacheManager.instance.cancelAudioDownload(_currentSong!.id);
+    }
+
     await _audioService?.stop();
     _playlist = [];
     _originalPlaylist = [];

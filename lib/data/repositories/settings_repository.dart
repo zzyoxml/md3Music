@@ -5,6 +5,10 @@ class SettingsRepository {
   static const String _keyThemeMode = 'settings_theme_mode';
   static const String _keyDefaultQuality = 'settings_default_quality';
   static const String _keyCacheSize = 'settings_cache_size';
+  // 边听边存开关
+  static const String _keyStreamCacheEnabled = 'settings_stream_cache_enabled';
+  // 边听边存容量上限（单位 MB）
+  static const String _keyStreamCacheLimitMb = 'settings_stream_cache_limit_mb';
   static const String _keyAutoPlay = 'settings_auto_play';
   static const String _keyShowLyrics = 'settings_show_lyrics';
   static const String _keyAutoReceiveVip = 'settings_auto_receive_vip';
@@ -71,6 +75,28 @@ class SettingsRepository {
   Future<void> setCacheSize(int sizeMb) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyCacheSize, sizeMb);
+  }
+
+  /// 边听边存功能是否开启，默认开启。
+  Future<bool> getStreamCacheEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyStreamCacheEnabled) ?? true;
+  }
+
+  Future<void> setStreamCacheEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyStreamCacheEnabled, value);
+  }
+
+  /// 边听边存容量上限（单位 MB），默认 2048（即 2GB）。
+  Future<int> getStreamCacheLimitMb() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keyStreamCacheLimitMb) ?? 2048;
+  }
+
+  Future<void> setStreamCacheLimitMb(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyStreamCacheLimitMb, value);
   }
 
   Future<bool> getAutoPlay() async {

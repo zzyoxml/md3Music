@@ -20,6 +20,7 @@ import '../../data/repositories/settings_repository.dart';
 import '../onboarding/onboarding_page.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../services/stream_cache_manager.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/apple_lyrics/preview/lyrics_preview_page.dart';
@@ -239,6 +240,9 @@ class _SettingsPageState extends State<SettingsPage> {
           const Divider(),
           _buildSectionHeader('播放'),
           _buildPlaybackSection(colorScheme),
+          const Divider(),
+          _buildSectionHeader('边听边存'),
+          _buildStreamCacheSection(colorScheme),
           const Divider(),
           _buildSectionHeader('下载'),
           _buildDownloadSection(colorScheme),
@@ -902,6 +906,197 @@ class _SettingsPageState extends State<SettingsPage> {
           },
         ),
       ],
+    );
+  }
+
+  /// 边听边存 section：开关、容量上限、缓存可视化、清理按钮
+  Widget _buildStreamCacheSection(ColorScheme colorScheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 1. 启用开关
+        FutureBuilder<bool>(
+          future: SettingsRepository().getStreamCacheEnabled(),
+          builder: (context, snapshot) {
+            final enabled = snapshot.data ?? true;
+            return SwitchListTile(
+              title: const Text('启用边听边存'),
+              subtitle: const Text('播放时自动缓存音频、歌词和封面，减少流量消耗'),
+              value: enabled,
+              onChanged: (v) async {
+                await SettingsRepository().setStreamCacheEnabled(v);
+                setState(() {}); // 刷新整个页面
+              },
+            );
+          },
+        ),
+        // 2. 缓存上限选择
+        FutureBuilder<int>(
+          future: SettingsRepository().getStreamCacheLimitMb(),
+          builder: (context, snapshot) {
+            final limitMb = snapshot.data ?? 2048;
+            final label = limitMb == 0 ? '无限制' : _formatLimit(limitMb);
+            return ListTile(
+              leading: const Icon(Icons.storage),
+              title: const Text('缓存上限'),
+              subtitle: Text(label),
+              onTap: () => _showCacheLimitDialog(limitMb),
+            );
+          },
+        ),
+        // 3. 缓存可视化
+        _buildCacheStatsWidget(colorScheme),
+        // 4. 清理缓存按钮
+        ListTile(
+          leading: const Icon(Icons.delete_outline),
+          title: const Text('清理缓存'),
+          onTap: () => _showClearCacheConfirmDialog(),
+        ),
+      ],
+    );
+  }
+
+  /// 格式化缓存上限：MB → GB 显示（1024 MB = 1 GB）
+  String _formatLimit(int mb) {
+    if (mb >= 1024) {
+      return '${(mb / 1024).toStringAsFixed(mb % 1024 == 0 ? 0 : 1)} GB';
+    }
+    return '$mb MB';
+  }
+
+  /// 缓存上限选择对话框：1GB / 2GB / 4GB / 8GB / 无限制
+  void _showCacheLimitDialog(int currentMb) {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: const Text('缓存上限'),
+          children: [
+            _buildLimitOption(1024, currentMb, '1 GB'),
+            _buildLimitOption(2048, currentMb, '2 GB'),
+            _buildLimitOption(4096, currentMb, '4 GB'),
+            _buildLimitOption(8192, currentMb, '8 GB'),
+            _buildLimitOption(0, currentMb, '无限制'),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 单个上限选项：选中项左侧显示勾号
+  Widget _buildLimitOption(int value, int currentMb, String label) {
+    return SimpleDialogOption(
+      onPressed: () async {
+        await SettingsRepository().setStreamCacheLimitMb(value);
+        if (context.mounted) Navigator.pop(context);
+        setState(() {});
+      },
+      child: Row(
+        children: [
+          if (value == currentMb)
+            Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
+          else
+            const SizedBox(width: 24),
+          const SizedBox(width: 8),
+          Text(label),
+        ],
+      ),
+    );
+  }
+
+  /// 缓存可视化组件：进度条 + 各分类占用明细
+  /// 嵌套 FutureBuilder 同时获取缓存统计与上限
+  Widget _buildCacheStatsWidget(ColorScheme colorScheme) {
+    return FutureBuilder<CacheStats>(
+      future: StreamCacheManager.instance.getCacheStats(),
+      builder: (context, snapshot) {
+        final stats = snapshot.data;
+        final totalBytes = stats?.totalBytes ?? 0;
+        final audioBytes = stats?.audioBytes ?? 0;
+        final lyricsBytes = stats?.lyricsBytes ?? 0;
+        final artworkBytes = stats?.artworkBytes ?? 0;
+        final songCount = stats?.songCount ?? 0;
+
+        // 再获取上限计算进度
+        return FutureBuilder<int>(
+          future: SettingsRepository().getStreamCacheLimitMb(),
+          builder: (context, limitSnapshot) {
+            final limitMb = limitSnapshot.data ?? 2048;
+            final limitBytes = limitMb * 1024 * 1024;
+            final progress = limitBytes > 0
+                ? (totalBytes / limitBytes).clamp(0.0, 1.0)
+                : 0.0;
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '已使用 ${_formatBytes(totalBytes)} / '
+                    '${limitMb == 0 ? "无限制" : _formatBytes(limitBytes)}',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 8),
+                  LinearProgressIndicator(
+                    value: progress,
+                    backgroundColor: colorScheme.surfaceContainerHighest,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '音频 ${_formatBytes(audioBytes)} · '
+                    '歌词 ${_formatBytes(lyricsBytes)} · '
+                    '封面 ${_formatBytes(artworkBytes)} · '
+                    '$songCount 首',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// 文件大小格式化：B / KB / MB / GB
+  String _formatBytes(int bytes) {
+    if (bytes >= 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
+    } else if (bytes >= 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    } else if (bytes >= 1024) {
+      return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    }
+    return '$bytes B';
+  }
+
+  /// 清理边听边存缓存确认对话框
+  void _showClearCacheConfirmDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('清理缓存'),
+          content: const Text('确定要清理所有边听边存的缓存吗？此操作不可撤销。'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            TextButton(
+              onPressed: () async {
+                await StreamCacheManager.instance.clearCache();
+                if (context.mounted) Navigator.pop(context);
+                setState(() {}); // 刷新显示
+              },
+              child: const Text('确定'),
+            ),
+          ],
+        );
+      },
     );
   }
 
