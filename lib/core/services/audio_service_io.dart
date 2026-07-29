@@ -176,6 +176,12 @@ class AudioService {
     await _playlistSource.addAll(sources);
   }
 
+  /// 在指定位置插入音频源，不打断当前播放。
+  /// 用于"下一首播放"等需要在队列中间插入的场景。
+  Future<void> insertAudioSourceAt(int index, UriAudioSource source) async {
+    await _playlistSource.insert(index, source);
+  }
+
   Future<void> setSpeed(double speed) async {
     await _player.setSpeed(speed);
   }
