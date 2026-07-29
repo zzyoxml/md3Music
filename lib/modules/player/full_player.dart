@@ -1973,19 +1973,6 @@ class _FullPlayerState extends State<FullPlayer>
                     ).showSnackBar(const SnackBar(content: Text('分享功能开发中')));
                   },
                 ),
-                ListTile(
-                  leading: const Icon(Icons.music_video),
-                  title: const Text('查看 MV'),
-                  onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MvPlayerPage(song: song),
-                      ),
-                    );
-                  },
-                ),
               ],
             ),
           ),
