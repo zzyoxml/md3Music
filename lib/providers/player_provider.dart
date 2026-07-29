@@ -594,6 +594,113 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// 播放云盘歌曲列表。
+  /// 与 [playOnlinePlaylist] 的区别：URL 解析优先走 /user/cloud/url，
+  /// 失败再回退到 /song/url，适配用户上传到云盘的音乐。
+  Future<void> playCloudPlaylist(List<Song> songs, int startIndex) async {
+    if (songs.isEmpty) return;
+    if (!KugouApiClient().isLoggedIn) {
+      onLoginRequired?.call();
+      return;
+    }
+
+    _playlist = List.from(songs);
+    _originalPlaylist = List.from(songs);
+    _currentIndex = startIndex;
+    _currentSong = songs[startIndex];
+    _isResolvingUrl = true;
+    _resolveError = null;
+    _position = Duration.zero;
+    _recordHistory(songs[startIndex]);
+    _updateNotification();
+    notifyListeners();
+
+    try {
+      final apiClient = KugouApiClient();
+      final url = await _resolveCloudUrl(apiClient, songs[startIndex]);
+      if (url != null && url.isNotEmpty) {
+        final resolvedSong = songs[startIndex].copyWith(url: url);
+        _currentSong = resolvedSong;
+        _playlist[startIndex] = resolvedSong;
+        _isResolvingUrl = false;
+        notifyListeners();
+        if (_audioService != null) {
+          await _setUrlAndPlay(url);
+        }
+      } else {
+        _isResolvingUrl = false;
+        _resolveError = '无法获取云盘播放链接';
+        notifyListeners();
+      }
+    } catch (e) {
+      _isResolvingUrl = false;
+      _resolveError = e.toString();
+      notifyListeners();
+    }
+
+    _prefetchCloudSongs(startIndex);
+    _fetchClimaxData();
+  }
+
+  /// 云盘歌曲 URL 解析：先 /user/cloud/url，后 /song/url 兜底
+  Future<String?> _resolveCloudUrl(
+    KugouApiClient apiClient,
+    Song song,
+  ) async {
+    try {
+      final cloudResult = await apiClient.getUserCloudUrl(
+        song.id,
+        albumId: song.albumId,
+        name: song.title,
+        albumAudioId: song.albumAudioId,
+      );
+      if (cloudResult != null) {
+        final data = cloudResult['data'];
+        if (data is Map<String, dynamic>) {
+          final rawUrl = data['url'];
+          if (rawUrl is String && rawUrl.isNotEmpty) {
+            return rawUrl;
+          }
+          if (rawUrl is List && rawUrl.isNotEmpty) {
+            return rawUrl.first.toString();
+          }
+        }
+      }
+    } catch (_) {}
+
+    // 回退到通用 /song/url
+    try {
+      final result = await apiClient.getSongUrlWithFallback(
+        song.id,
+        quality: _audioQuality.value,
+        albumId: song.albumId,
+        albumAudioId: song.albumAudioId,
+      );
+      if (result != null && result.url.isNotEmpty) {
+        return result.url;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// 预取云盘列表后续歌曲 URL（对齐 _prefetchNextSongs）
+  void _prefetchCloudSongs(int startIndex) {
+    final prefetchCount = 3;
+    final apiClient = KugouApiClient();
+    for (int i = startIndex + 1;
+        i < _playlist.length && i <= startIndex + prefetchCount;
+        i++) {
+      final song = _playlist[i];
+      if (song.isOnline && song.url == null) {
+        _resolveCloudUrl(apiClient, song).then((url) {
+          if (url != null && url.isNotEmpty) {
+            _playlist[i] = song.copyWith(url: url);
+          }
+        });
+      }
+    }
+  }
+
   /// 设置音频源并等待就绪后播放。
   ///
   /// 不直接使用 [playerStateStream.firstWhere] 等待 ready 状态,因为

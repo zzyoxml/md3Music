@@ -2084,6 +2084,18 @@ class KugouApiClient {
     return await _get(KugouEndpoints.userCloudUrl, queryParameters: params);
   }
 
+  /// 获取用户上传到酷狗云盘的音乐列表。
+  /// 返回原始 JSON，由调用方解析（云盘列表字段与标准歌单不同）。
+  Future<Map<String, dynamic>?> getUserCloud({
+    int page = 1,
+    int pagesize = 30,
+  }) async {
+    return await _get(
+      KugouEndpoints.userCloud,
+      queryParameters: {'page': page, 'pagesize': pagesize},
+    );
+  }
+
   Future<Map<String, dynamic>?> getUserVideoCollect({
     int page = 1,
     int pagesize = 30,

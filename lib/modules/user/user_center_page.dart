@@ -10,6 +10,7 @@ import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../login/login_page.dart';
 import '../settings/settings_page.dart';
+import 'cloud_music_page.dart';
 import 'downloads_page.dart';
 import 'play_history_page.dart';
 
@@ -309,6 +310,11 @@ class _UserCenterPageState extends State<UserCenterPage> {
               _actionItem(cs, Icons.history, '历史', () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const PlayHistoryPage()),
+                );
+              }),
+              _actionItem(cs, Icons.cloud, '云盘', () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const CloudMusicPage()),
                 );
               }),
               _actionItem(cs, Icons.download, '下载', () {
