@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
+import '../../widgets/app_animation.dart';
 import '../../widgets/song_list_item.dart';
 
 enum SongSortBy { title, artist, dateAdded }
@@ -172,7 +173,8 @@ class _SongsPageState extends State<SongsPage> {
       );
     }
 
-    return Column(
+    return ContentEntrance(
+      child: Column(
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -242,6 +244,6 @@ class _SongsPageState extends State<SongsPage> {
           ),
         ),
       ],
-    );
+    ));
   }
 }

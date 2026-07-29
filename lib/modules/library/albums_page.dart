@@ -9,6 +9,7 @@ import '../../providers/grid_columns_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/album_card.dart';
+import '../../widgets/app_animation.dart';
 import '../../widgets/song_list_item.dart';
 
 class AlbumsPage extends StatefulWidget {
@@ -55,7 +56,8 @@ class _AlbumsPageState extends State<AlbumsPage> {
       );
     }
 
-    return LayoutBuilder(
+    return ContentEntrance(
+      child: LayoutBuilder(
       builder: (context, constraints) {
         // Pad 模式取用户捏合调整的列数；非 Pad 模式按屏幕宽度响应式适配
         final isPad = context.read<DeviceProvider>().isPad;
@@ -133,7 +135,7 @@ class _AlbumsPageState extends State<AlbumsPage> {
           child: gridContent,
         );
       },
-    );
+    ));
   }
 }
 

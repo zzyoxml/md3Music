@@ -6,6 +6,7 @@ import '../../data/models/song.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/artist_tile.dart';
+import '../../widgets/app_animation.dart';
 import '../../widgets/song_list_item.dart';
 
 class ArtistsPage extends StatelessWidget {
@@ -26,7 +27,8 @@ class ArtistsPage extends StatelessWidget {
       );
     }
 
-    return ListView.builder(
+    return ContentEntrance(
+      child: ListView.builder(
       itemCount: artists.length,
       itemBuilder: (context, index) {
         return ArtistTile(
@@ -46,7 +48,7 @@ class ArtistsPage extends StatelessWidget {
           },
         );
       },
-    );
+    ));
   }
 }
 

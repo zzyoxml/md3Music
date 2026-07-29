@@ -59,6 +59,65 @@ class _FadeInUpState extends State<FadeInUp>
   }
 }
 
+/// 内容入场动画：向上淡入滑动，仅在首次创建时播放。
+/// 与 [FadeInUp] 不同，当父组件 rebuild 时不会重播动画，
+/// 适用于 TabBarView 子页面等需要保持动画状态的场景。
+class ContentEntrance extends StatefulWidget {
+  final Widget child;
+  final Duration duration;
+  final Offset offset;
+
+  const ContentEntrance({
+    super.key,
+    required this.child,
+    this.duration = const Duration(milliseconds: 400),
+    this.offset = const Offset(0, 0.08),
+  });
+
+  @override
+  State<ContentEntrance> createState() => _ContentEntranceState();
+}
+
+class _ContentEntranceState extends State<ContentEntrance>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _opacity;
+  late Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: widget.duration,
+    );
+    _opacity = Tween<double>(begin: 0, end: 1).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+    );
+    _slide = Tween<Offset>(
+      begin: widget.offset,
+      end: Offset.zero,
+    ).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
+    );
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SlideTransition(
+      position: _slide,
+      child: FadeTransition(opacity: _opacity, child: widget.child),
+    );
+  }
+}
+
 class ScaleIn extends StatefulWidget {
   final Widget child;
   final int delayMs;
