@@ -7,6 +7,7 @@ import '../providers/favorites_provider.dart';
 import '../providers/local_favorites_provider.dart';
 import '../providers/player_provider.dart';
 import '../services/kugou_api/kugou_api_client.dart';
+import '../services/kugou_api/kugou_models.dart';
 import 'playing_spectrum_indicator.dart';
 import 'smart_artwork_image.dart';
 
@@ -90,7 +91,7 @@ class SongListItem extends StatelessWidget {
     );
   }
 
-  void _showDownloadDialog(BuildContext context) {
+  void _showDownloadDialog(BuildContext context) async {
     final downloadsProvider = context.read<DownloadsProvider>();
     final api = KugouApiClient();
 
@@ -104,6 +105,21 @@ class SongListItem extends StatelessWidget {
       return;
     }
 
+    // 查询歌曲实际可用音质
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('正在查询可用音质...'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+    final available = await api.getAvailableQualities(
+      song.id,
+      albumId: song.albumId,
+      albumAudioId: song.albumAudioId,
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -115,15 +131,10 @@ class SongListItem extends StatelessWidget {
             const SizedBox(height: 16),
             Text('选择音质', style: Theme.of(ctx).textTheme.titleSmall),
             const SizedBox(height: 8),
-            _buildQualityOption(
-              ctx,
-              '标准音质 (128kbps)',
-              '128',
-              downloadsProvider,
-            ),
-            _buildQualityOption(ctx, '高音质 (320kbps)', '320', downloadsProvider),
-            _buildQualityOption(ctx, '无损音质 (FLAC)', 'flac', downloadsProvider),
-            _buildQualityOption(ctx, 'Hi-Res 无损', 'high', downloadsProvider),
+            _buildQualityOption(ctx, '标准音质 (128kbps)', '128', downloadsProvider, enabled: available.contains('128')),
+            _buildQualityOption(ctx, '高音质 (320kbps)', '320', downloadsProvider, enabled: available.contains('320')),
+            _buildQualityOption(ctx, '无损音质 (FLAC)', 'flac', downloadsProvider, enabled: available.contains('flac')),
+            _buildQualityOption(ctx, 'Hi-Res 无损', 'high', downloadsProvider, enabled: available.contains('high')),
           ],
         ),
         actions: [
@@ -140,13 +151,29 @@ class SongListItem extends StatelessWidget {
     BuildContext context,
     String label,
     String quality,
-    DownloadsProvider provider,
-  ) {
+    DownloadsProvider provider, {
+    bool enabled = true,
+  }) {
     return ListTile(
       dense: true,
-      leading: const Icon(Icons.music_note, size: 20),
-      title: Text(label),
-      onTap: () {
+      leading: Icon(
+        Icons.music_note,
+        size: 20,
+        color: enabled ? null : Theme.of(context).disabledColor,
+      ),
+      title: Text(
+        label,
+        style: TextStyle(
+          color: enabled ? null : Theme.of(context).disabledColor,
+        ),
+      ),
+      trailing: enabled
+          ? null
+          : Text('需要VIP', style: TextStyle(
+              fontSize: 11,
+              color: Theme.of(context).disabledColor,
+            )),
+      onTap: enabled ? () async {
         Navigator.pop(context);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -154,8 +181,16 @@ class SongListItem extends StatelessWidget {
             duration: const Duration(seconds: 2),
           ),
         );
-        provider.downloadSong(song, quality: quality);
-      },
+        final actual = await provider.downloadSong(song, quality: quality);
+        if (actual != null && actual != quality && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      } : null,
     );
   }
 

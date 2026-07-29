@@ -2144,7 +2144,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     return '$minutes:$seconds';
   }
 
-  void _downloadSong(dynamic song) {
+  void _downloadSong(dynamic song) async {
     final downloadsProvider = context.read<DownloadsProvider>();
     final isDownloaded = downloadsProvider.isDownloaded(song.id);
     final isDownloading = downloadsProvider.isDownloading(song.id);
@@ -2152,7 +2152,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     if (isDownloaded) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('已下载: ${song.title}'),
+          content: Text('已下载: ${song.displayName}'),
           duration: const Duration(seconds: 2),
         ),
       );
@@ -2162,12 +2162,28 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     if (isDownloading) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('正在下载: ${song.title}'),
+          content: Text('正在下载: ${song.displayName}'),
           duration: const Duration(seconds: 2),
         ),
       );
       return;
     }
+
+    // 查询歌曲实际可用音质
+    final api = KugouApiClient();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('正在查询可用音质...'),
+        duration: Duration(seconds: 3),
+      ),
+    );
+    final available = await api.getAvailableQualities(
+      song.id,
+      albumId: song.albumId,
+      albumAudioId: song.albumAudioId,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
     // 弹出音质选择对话框
     showDialog(
@@ -2181,10 +2197,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             const SizedBox(height: 16),
             Text('选择音质', style: Theme.of(ctx).textTheme.titleSmall),
             const SizedBox(height: 8),
-            _buildDownloadQualityOption(ctx, '标准音质 (128kbps)', '128', song, downloadsProvider),
-            _buildDownloadQualityOption(ctx, '高音质 (320kbps)', '320', song, downloadsProvider),
-            _buildDownloadQualityOption(ctx, '无损音质 (FLAC)', 'flac', song, downloadsProvider),
-            _buildDownloadQualityOption(ctx, 'Hi-Res 无损', 'high', song, downloadsProvider),
+            _buildDownloadQualityOption(ctx, '标准音质 (128kbps)', '128', song, downloadsProvider, enabled: available.contains('128')),
+            _buildDownloadQualityOption(ctx, '高音质 (320kbps)', '320', song, downloadsProvider, enabled: available.contains('320')),
+            _buildDownloadQualityOption(ctx, '无损音质 (FLAC)', 'flac', song, downloadsProvider, enabled: available.contains('flac')),
+            _buildDownloadQualityOption(ctx, 'Hi-Res 无损', 'high', song, downloadsProvider, enabled: available.contains('high')),
           ],
         ),
         actions: [
@@ -2202,13 +2218,30 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     String label,
     String quality,
     dynamic song,
-    DownloadsProvider provider,
-  ) {
+    DownloadsProvider provider, {
+    bool enabled = true,
+  }) {
     return ListTile(
       dense: true,
-      leading: const Icon(Icons.music_note, size: 20),
-      title: Text(label, style: const TextStyle(fontSize: 14)),
-      onTap: () {
+      leading: Icon(
+        Icons.music_note,
+        size: 20,
+        color: enabled ? null : Theme.of(context).disabledColor,
+      ),
+      title: Text(
+        label,
+        style: TextStyle(
+          fontSize: 14,
+          color: enabled ? null : Theme.of(context).disabledColor,
+        ),
+      ),
+      trailing: enabled
+          ? null
+          : Text('需要VIP', style: TextStyle(
+              fontSize: 11,
+              color: Theme.of(context).disabledColor,
+            )),
+      onTap: enabled ? () async {
         Navigator.pop(context);
         final displayName = song.displayName ?? song.title;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2217,8 +2250,16 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             duration: const Duration(seconds: 2),
           ),
         );
-        provider.downloadSong(song, quality: quality);
-      },
+        final actual = await provider.downloadSong(song, quality: quality);
+        if (actual != null && actual != quality && context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+      } : null,
     );
   }
 

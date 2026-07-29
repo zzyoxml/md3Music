@@ -1230,6 +1230,16 @@ class KugouQuality {
   static const String lossless = 'flac';
   static const String hires = 'high';
   static const String master = 'hi-res';
+
+  /// 音质代号 → 中文标签
+  static const labels = {
+    standard: '标准音质',
+    high: '高音质',
+    lossless: '无损音质',
+    hires: 'Hi-Res',
+  };
+
+  static String labelOf(String quality) => labels[quality] ?? quality;
 }
 
 class KugouUserDetail {

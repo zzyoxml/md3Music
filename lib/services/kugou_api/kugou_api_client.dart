@@ -850,6 +850,48 @@ class KugouApiClient {
     return null;
   }
 
+  /// 查询歌曲实际可用的音质集合。
+  ///
+  /// 原理：调用 [getSongUrlWithFallback] 请求最高音质（Hi-Res），
+  /// 返回的 actualQuality 即为该歌曲当前账号可获取的最高音质。
+  /// 由于音质可用性递减（高音质可用 ⇒ 低音质必可用），
+  /// 可直接从 actualQuality 推断完整可用集合。
+  /// 失败时回退为仅 standard。
+  Future<Set<String>> getAvailableQualities(
+    String hash, {
+    String? albumId,
+    String? albumAudioId,
+  }) async {
+    try {
+      final result = await getSongUrlWithFallback(
+        hash,
+        quality: KugouQuality.hires,
+        albumId: albumId,
+        albumAudioId: albumAudioId,
+      );
+      if (result == null || result.url.isEmpty) {
+        return {KugouQuality.standard};
+      }
+      switch (result.quality) {
+        case KugouQuality.hires:
+          return {
+            KugouQuality.standard,
+            KugouQuality.high,
+            KugouQuality.lossless,
+            KugouQuality.hires,
+          };
+        case KugouQuality.lossless:
+          return {KugouQuality.standard, KugouQuality.high, KugouQuality.lossless};
+        case KugouQuality.high:
+          return {KugouQuality.standard, KugouQuality.high};
+        default:
+          return {KugouQuality.standard};
+      }
+    } catch (_) {
+      return {KugouQuality.standard};
+    }
+  }
+
   int _parseInt(dynamic v) {
     if (v is int) return v;
     if (v is num) return v.toInt();

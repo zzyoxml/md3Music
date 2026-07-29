@@ -130,8 +130,9 @@ class DownloadsProvider extends ChangeNotifier {
     return '${docs.path}${sep}downloads';
   }
 
-  Future<void> downloadSong(Song song, {String quality = '128'}) async {
-    if (isDownloading(song.id)) return;
+  /// 下载歌曲。返回实际使用的音质（可能因自动降级与请求的不同），失败返回 null。
+  Future<String?> downloadSong(Song song, {String quality = '128'}) async {
+    if (isDownloading(song.id)) return null;
 
     // 始终调用 API 获取指定音质的下载链接，不使用 song.url 缓存
     // 因为播放时获取的 URL 可能是最高音质（VIP 用户），与用户选择的音质不一致
@@ -151,11 +152,11 @@ class DownloadsProvider extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('[DownloadsProvider] getSongUrl failed: $e');
-      return;
+      return null;
     }
 
     if (downloadUrl == null || downloadUrl.isEmpty) {
-      return;
+      return null;
     }
 
     final task = DownloadTask(
@@ -173,6 +174,7 @@ class DownloadsProvider extends ChangeNotifier {
     await _repository.saveTask(task);
     final dir = await _resolveDownloadDir();
     _manager.download(task, dir, quality: actualQuality);
+    return actualQuality;
   }
 
   void cancelDownload(String songId) {
