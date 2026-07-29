@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -69,6 +70,11 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
 
       final songs = <Song>[];
       if (list != null) {
+        // 打印首条原始数据，便于字段确认（仅 debug 模式）
+        if (list.isNotEmpty && kDebugMode) {
+          debugPrint('[CloudMusic] first item keys: ${list.first is Map<String, dynamic> ? (list.first as Map<String, dynamic>).keys.toList() : list.first.runtimeType}');
+          debugPrint('[CloudMusic] first item: ${list.first}');
+        }
         for (final e in list) {
           if (e is Map<String, dynamic>) {
             final song = _cloudItemToSong(e);
@@ -92,26 +98,59 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
   }
 
   /// 将云盘列表项 JSON 映射为 Song 对象。
-  /// 字段兼容酷狗云盘接口返回的多种命名。
+  /// 酷狗云盘 /v1/get_list 返回的 filename 通常是 "歌手 - 歌名.ext" 格式，
+  /// 需剥离扩展名并按 " - " 拆分歌手与歌名；duration 单位通常为秒，需 ×1000。
   Song _cloudItemToSong(Map<String, dynamic> item) {
     final hash = (item['hash'] ?? '').toString();
-    final songname = (item['songname'] ??
-            item['FileName'] ??
-            item['filename'] ??
-            item['name'] ??
-            '未知歌曲')
-        .toString();
-    final singer = (item['singername'] ??
-            item['singer'] ??
-            item['artist'] ??
-            '未知歌手')
-        .toString();
+
+    // 优先使用独立字段（若存在）
+    String songname = (item['songname'] ?? '').toString();
+    String singer =
+        (item['singername'] ?? item['singer'] ?? item['artist'] ?? '').toString();
+
+    // songname 为空时，从 filename 解析 "歌手 - 歌名.ext"
+    if (songname.isEmpty) {
+      final filename =
+          (item['filename'] ?? item['FileName'] ?? item['name'] ?? '').toString();
+      // 剥离音频扩展名
+      final withoutExt = filename.replaceFirst(
+        RegExp(r'\.(mp3|flac|wav|ape|m4a|ogg|aac|wma|opus)$',
+            caseSensitive: false),
+        '',
+      );
+      // 按 " - " 拆分歌手与歌名
+      final dashIdx = withoutExt.indexOf(' - ');
+      if (dashIdx > 0) {
+        if (singer.isEmpty) {
+          singer = withoutExt.substring(0, dashIdx).trim();
+        }
+        songname = withoutExt.substring(dashIdx + 3).trim();
+      } else {
+        songname = withoutExt;
+      }
+    }
+
+    if (songname.isEmpty) songname = '未知歌曲';
+    if (singer.isEmpty) singer = '未知歌手';
+
     final albumId = item['album_id']?.toString();
     final albumAudioId = item['album_audio_id']?.toString();
-    // 时长字段可能不存在或为 0，缺省 0
-    final durationMs = (item['duration'] is num)
-        ? (item['duration'] as num).toInt()
-        : 0;
+
+    // 时长：云盘 duration 单位通常为秒，需 ×1000 转毫秒
+    // 兼容 timelength/time_length/timelen 等可能的字段名
+    final dur = item['duration'] ??
+        item['timelength'] ??
+        item['time_length'] ??
+        item['timelen'];
+    int durationMs = 0;
+    if (dur is num) {
+      durationMs = dur.toInt();
+      // 值介于 (0, 1000) 认为是秒，转毫秒
+      if (durationMs > 0 && durationMs < 1000) {
+        durationMs = durationMs * 1000;
+      }
+    }
+
     return Song(
       id: hash,
       title: songname,
