@@ -8,6 +8,7 @@ import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/app_animation.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_refresh_indicator.dart';
+import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/song_list_item.dart';
 
@@ -237,15 +238,13 @@ class _ChartsPageState extends State<ChartsPage> {
         }
         return MD3ERefreshIndicator(
           onRefresh: () => context.read<KugouProvider>().getRankList(forceRefresh: true),
-          child: GridView.builder(
+          // 使用 PinchableGridView 替代固定2列 GridView：
+          // Pad 模式下双指捏合可动态调整列数，非 Pad 模式仍固定 2 列
+          child: PinchableGridView(
             controller: _scrollController,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: 12,
-              crossAxisSpacing: 12,
-              childAspectRatio: 0.78,
-            ),
+            spacing: 12.0,
+            childAspectRatio: 0.78,
             itemCount: ranks.ranks.length,
             itemBuilder: (context, i) {
               final rank = ranks.ranks[i];

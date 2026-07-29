@@ -34,6 +34,7 @@ import 'providers/local_favorites_provider.dart';
 import 'providers/player_provider.dart';
 import 'providers/playlist_collection_notifier.dart';
 import 'providers/device_provider.dart';
+import 'providers/grid_columns_provider.dart';
 import 'providers/theme_provider.dart';
 import 'services/nodejs_server.dart';
 
@@ -105,6 +106,7 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProvider(create: (_) => DeviceProvider()),
+        ChangeNotifierProvider(create: (_) => GridColumnsProvider()),
         ChangeNotifierProvider(create: (_) => PlayerProvider()),
         ChangeNotifierProvider(create: (_) => LibraryProvider()),
         ChangeNotifierProvider(create: (_) => KugouProvider()),

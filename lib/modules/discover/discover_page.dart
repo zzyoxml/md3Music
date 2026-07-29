@@ -11,6 +11,7 @@ import '../../widgets/album_card.dart';
 import '../../widgets/app_animation.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_refresh_indicator.dart';
+import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/song_list_item.dart';
 import '../charts/charts_page.dart';
@@ -741,14 +742,12 @@ class _PlaylistBrowsePageState extends State<_PlaylistBrowsePage> {
               selector: (_, kugou) => kugou.playlistList,
               builder: (context, list, _) {
                 if (list.isEmpty) return const Center(child: Text('暂无数据'));
-                return GridView.builder(
+                // 使用 PinchableGridView：Pad 模式下双指捏合可动态调整列数，
+                // 非 Pad 模式内部固定 2 列；保持原 childAspectRatio=0.85、spacing=12、padding=16
+                return PinchableGridView(
                   padding: const EdgeInsets.all(16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 0.85,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                  ),
+                  childAspectRatio: 0.85,
+                  spacing: 12,
                   itemCount: list.length,
                   itemBuilder: (context, i) => FadeInUp(
                     delayMs: i * 30,

@@ -4,19 +4,47 @@ import 'package:provider/provider.dart';
 import '../../core/layout/responsive_layout.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
+import '../../providers/device_provider.dart';
+import '../../providers/grid_columns_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/album_card.dart';
 import '../../widgets/song_list_item.dart';
 
-class AlbumsPage extends StatelessWidget {
+class AlbumsPage extends StatefulWidget {
   final List<Album> albums;
 
   const AlbumsPage({super.key, required this.albums});
 
   @override
+  State<AlbumsPage> createState() => _AlbumsPageState();
+}
+
+class _AlbumsPageState extends State<AlbumsPage> {
+  // 捏合手势的缩放基准：onScaleStart 时重置为 1.0，
+  // 触发阈值后重置为当前 scale，避免一次捏合连续多次触发。
+  double _scaleStart = 1.0;
+
+  void _onScaleStart(ScaleStartDetails details) {
+    _scaleStart = 1.0;
+  }
+
+  void _onScaleUpdate(ScaleUpdateDetails details) {
+    final ratio = details.scale / _scaleStart;
+    if (ratio <= 0.8) {
+      // 向内捏合（缩小）：增加列数
+      context.read<GridColumnsProvider>().increment();
+      _scaleStart = details.scale;
+    } else if (ratio >= 1.2) {
+      // 向外捏合（放大）：减少列数
+      context.read<GridColumnsProvider>().decrement();
+      _scaleStart = details.scale;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (albums.isEmpty) {
+    if (widget.albums.isEmpty) {
       return Center(
         child: Text(
           '暂无专辑',
@@ -29,20 +57,33 @@ class AlbumsPage extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final screenType = getScreenType(constraints.maxWidth);
+        // Pad 模式取用户捏合调整的列数；非 Pad 模式按屏幕宽度响应式适配
+        final isPad = context.read<DeviceProvider>().isPad;
+        // watch 以便列数变化时重建网格
+        final gridColumns = context.watch<GridColumnsProvider>().gridColumns;
+
         int crossAxisCount;
-        switch (screenType) {
-          case ScreenType.compact:
-            crossAxisCount = 2;
-            break;
-          case ScreenType.medium:
-            crossAxisCount = 3;
-            break;
-          case ScreenType.expanded:
-            crossAxisCount = 4;
+        if (isPad) {
+          // Pad 模式：使用用户捏合手势调整的列数偏好
+          crossAxisCount = gridColumns;
+        } else {
+          // 手机端：保留原有屏幕宽度响应式逻辑
+          final screenType = getScreenType(constraints.maxWidth);
+          switch (screenType) {
+            case ScreenType.compact:
+              crossAxisCount = 2;
+              break;
+            case ScreenType.medium:
+              crossAxisCount = 3;
+              break;
+            case ScreenType.expanded:
+              crossAxisCount = 4;
+          }
         }
 
-        return GridView.builder(
+        final gridView = GridView.builder(
+          // 列数变化时让 AnimatedSwitcher 识别为新 child，触发淡入淡出过渡
+          key: ValueKey(crossAxisCount),
           padding: const EdgeInsets.all(16),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
@@ -50,18 +91,18 @@ class AlbumsPage extends StatelessWidget {
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
           ),
-          itemCount: albums.length,
+          itemCount: widget.albums.length,
           itemBuilder: (context, index) {
             return AlbumCard(
-              album: albums[index],
+              album: widget.albums[index],
               onTap: () {
                 final library = context.read<LibraryProvider>();
-                final songs = library.getSongsInAlbum(albums[index].name);
+                final songs = library.getSongsInAlbum(widget.albums[index].name);
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) => AlbumSongsPage(
-                      album: albums[index],
+                      album: widget.albums[index],
                       songs: songs,
                     ),
                   ),
@@ -69,6 +110,27 @@ class AlbumsPage extends StatelessWidget {
               },
             );
           },
+        );
+
+        // 列数变化时淡入淡出过渡（约 250ms）
+        final gridContent = AnimatedSwitcher(
+          duration: const Duration(milliseconds: 250),
+          transitionBuilder: (child, animation) =>
+              FadeTransition(opacity: animation, child: child),
+          child: gridView,
+        );
+
+        // 非 Pad 模式不挂载捏合手势
+        if (!isPad) {
+          return gridContent;
+        }
+
+        // Pad 模式包裹捏合手势
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onScaleStart: _onScaleStart,
+          onScaleUpdate: _onScaleUpdate,
+          child: gridContent,
         );
       },
     );

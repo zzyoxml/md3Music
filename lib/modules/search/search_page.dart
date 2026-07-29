@@ -10,6 +10,7 @@ import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/song_list_item.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
@@ -440,14 +441,13 @@ class _SearchPageState extends State<SearchPage>
       child: Column(
         children: [
           Expanded(
-            child: GridView.builder(
+            // 用 PinchableGridView 替代固定 2 列的 GridView，
+            // Pad 模式下可双指捏合动态调整列数，非 Pad 模式仍固定 2 列
+            child: PinchableGridView(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 0.75,
-              ),
+              // 原 childAspectRatio 0.75、spacing 12 保持不变
+              childAspectRatio: 0.75,
+              spacing: 12,
               itemCount: results.length,
               itemBuilder: (context, index) {
                 final album = results[index];
@@ -587,14 +587,13 @@ class _SearchPageState extends State<SearchPage>
       child: Column(
         children: [
           Expanded(
-            child: GridView.builder(
+            // 用 PinchableGridView 替代固定 2 列的 GridView，
+            // Pad 模式下可双指捏合动态调整列数，非 Pad 模式仍固定 2 列
+            child: PinchableGridView(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 12,
-                crossAxisSpacing: 12,
-                childAspectRatio: 0.75,
-              ),
+              // 原 childAspectRatio 0.75、spacing 12 保持不变
+              childAspectRatio: 0.75,
+              spacing: 12,
               itemCount: results.length,
               itemBuilder: (context, index) {
                 final pl = results[index];
