@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -17,6 +18,7 @@ import '../data/repositories/player_state_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../main.dart';
 import '../services/stream_cache_manager.dart';
+import '../services/nodejs_server.dart';
 import '../widgets/apple_lyrics/models/lyric_line.dart';
 import '../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import 'favorites_provider.dart';
@@ -53,6 +55,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   // 边听边存：当前歌曲的本地缓存封面路径（缓存命中时设置，供 MediaSession 兜底）
   String? _cachedArtworkPath;
   AudioQuality _audioQuality = AudioQuality.standard;
+
+  // —— 在线歌曲异常结束重试限制 ——
+  // 当在线歌曲播放不足 80% 就触发 completed 时（URL 过期 / 流中断），
+  // 最多重试 _maxAbnormalRetries 次；超过后跳过该歌曲，避免死循环。
+  static const int _maxAbnormalRetries = 3;
+  int _abnormalEndRetries = 0;
+  // 记录正在重试的歌曲 ID，切歌后自动重置计数器
+  String? _retryingSongId;
 
   Song? get currentSong => _currentSong;
   bool get isPlaying => _isPlaying;
@@ -186,6 +196,17 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _shuffleEnabled = state.shuffleEnabled;
       _position = Duration.zero; // 先置零，等 setUrl 成功后 seek 到目标位置
 
+      // 冷启动时清除在线歌曲的旧 URL（酷狗播放链接有时效性，上次会话的 URL 大概率已过期）
+      // 强制 _resolveAndPlayCurrentSong 重新通过 API 获取有效链接
+      if (_currentSong != null && _currentSong!.isOnline) {
+        _currentSong = _currentSong!.copyWith(url: null);
+      }
+      for (int i = 0; i < _playlist.length; i++) {
+        if (_playlist[i].isOnline) {
+          _playlist[i] = _playlist[i].copyWith(url: null);
+        }
+      }
+
       // 设置循环模式
       if (_audioService != null) {
         await _audioService.setLoopMode(_loopMode == AppLoopMode.one
@@ -313,8 +334,49 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _handlingCompletion = true;
     try {
       if (_loopMode == AppLoopMode.one) {
-        seek(Duration.zero);
-        _audioService?.play();
+        // 单曲循环：检测在线歌曲是否异常结束（URL 过期 / 流中断），
+        // 避免无限重播损坏的链接
+        final lastPosition = _position;
+        final songDuration = _currentSong?.duration ?? Duration.zero;
+        final bool isAbnormal = lastPosition.inMilliseconds > 500 &&
+            songDuration.inSeconds > 0 &&
+            lastPosition.inSeconds < songDuration.inSeconds * 0.8;
+
+        if (isAbnormal &&
+            _currentSong != null &&
+            _currentSong!.isOnline) {
+          final songId = _currentSong!.id;
+          if (_retryingSongId != songId) {
+            _retryingSongId = songId;
+            _abnormalEndRetries = 0;
+          }
+          _abnormalEndRetries++;
+          if (_abnormalEndRetries > _maxAbnormalRetries) {
+            // 重试次数耗尽，停止播放
+            _abnormalEndRetries = 0;
+            _retryingSongId = null;
+            await _audioService?.pause();
+            _resolveError = '播放失败，请检查网络';
+            notifyListeners();
+            return;
+          }
+          // 清除旧 URL，从上次位置继续
+          _currentSong = _currentSong!.copyWith(url: null);
+          _playlist[_currentIndex] = _currentSong!;
+          final ok = await _resolveAndPlayCurrentSong(seekTo: lastPosition);
+          if (ok) {
+            _resolveError = null;
+          } else {
+            _resolveError = '无法获取播放链接';
+          }
+          notifyListeners();
+        } else {
+          // 正常结束或本地歌曲，从头重播
+          _abnormalEndRetries = 0;
+          _retryingSongId = null;
+          seek(Duration.zero);
+          _audioService?.play();
+        }
       } else if (_currentIndex >= _playlist.length - 1) {
         // 走到这里：当前是最后一首（含单首歌场景），且非 FM、非列表循环
         if (onPlaylistEnd != null) {
@@ -324,9 +386,47 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           // （URL 过期 / 试听片段提前 completed 时，position 明显小于歌曲时长）
           final lastPosition = _position;
           final songDuration = _currentSong?.duration ?? Duration.zero;
-          final bool isAbnormalEnd = lastPosition.inSeconds > 5 &&
+          final bool isAbnormalEnd = lastPosition.inMilliseconds > 500 &&
               songDuration.inSeconds > 0 &&
               lastPosition.inSeconds < songDuration.inSeconds * 0.8;
+
+          // 异常结束时更新重试计数
+          if (isAbnormalEnd &&
+              _currentSong != null &&
+              _currentSong!.isOnline) {
+            final songId = _currentSong!.id;
+            if (_retryingSongId != songId) {
+              _retryingSongId = songId;
+              _abnormalEndRetries = 0;
+            }
+            _abnormalEndRetries++;
+          }
+
+          // 重试次数耗尽：跳过该歌曲，不回到开头
+          if (isAbnormalEnd && _abnormalEndRetries > _maxAbnormalRetries) {
+            _abnormalEndRetries = 0;
+            _retryingSongId = null;
+            if (_playlist.length > 1) {
+              // 多首歌时删除当前故障歌曲，播放上一首（保持索引有效）
+              _playlist.removeAt(_currentIndex);
+              _currentIndex = (_currentIndex - 1).clamp(0, _playlist.length - 1);
+              _currentSong = _playlist[_currentIndex];
+              final ok = await _resolveAndPlayCurrentSong();
+              if (!ok) _resolveError = '无法获取播放链接';
+            } else {
+              // 仅一首歌时直接停止
+              await _audioService?.pause();
+              _resolveError = '播放失败，请检查网络';
+            }
+            notifyListeners();
+            return;
+          }
+
+          // 正常结束时重置计数器
+          if (!isAbnormalEnd) {
+            _abnormalEndRetries = 0;
+            _retryingSongId = null;
+          }
 
           // 非 FM：最后一曲播完回到第一曲
           if (_shuffleEnabled) {
@@ -352,12 +452,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           // 异常结束时从上次位置继续播放；正常播完从 0 开始
           final seekTo = isAbnormalEnd ? lastPosition : null;
           final ok = await _resolveAndPlayCurrentSong(seekTo: seekTo);
-          if (!ok) {
+          if (ok) {
+            _resolveError = null;
+          } else {
             _resolveError = '无法获取播放链接';
           }
           notifyListeners();
         }
       } else {
+        // 不在末尾：正常切下一首（用户切歌会重置计数器）
         next();
       }
     } finally {
@@ -365,7 +468,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// 重置异常结束重试计数（用户主动切歌时调用）
+  void _resetAbnormalRetry() {
+    _abnormalEndRetries = 0;
+    _retryingSongId = null;
+  }
+
   Future<void> playSong(Song song) async {
+    _resetAbnormalRetry();
     if (song.isOnline && song.url == null) {
       await playOnlineSong(song);
       return;
@@ -407,6 +517,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       onLoginRequired?.call();
       return;
     }
+    _resetAbnormalRetry();
 
     // 边听边存：检查本地缓存（登录检查通过后才查缓存，避免未登录时静默播放）
     final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
@@ -453,6 +564,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       _cachedArtworkPath = null;
+
+      // 确保 Node.js 本地代理服务器已启动
+      await _ensureNodeJsServerReady();
 
       final apiClient = KugouApiClient();
 
@@ -509,6 +623,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> playPlaylist(List<Song> songs, int startIndex) async {
     if (songs.isEmpty) return;
+    _resetAbnormalRetry();
 
     _playlist = List.from(songs);
     _originalPlaylist = List.from(songs);
@@ -525,6 +640,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
 
       try {
+        await _ensureNodeJsServerReady();
         final apiClient = KugouApiClient();
         final result = await apiClient.getSongUrlWithFallback(
           _currentSong!.id,
@@ -574,6 +690,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> playOnlinePlaylist(List<Song> songs, int startIndex) async {
     if (songs.isEmpty) return;
+    _resetAbnormalRetry();
 
     // 边听边存：先查本地缓存（断网时仍可播放已缓存歌曲）
     final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
@@ -621,6 +738,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
       } else {
         _cachedArtworkPath = null;
+        await _ensureNodeJsServerReady();
         final apiClient = KugouApiClient();
         final result = await apiClient.getSongUrlWithFallback(
           _currentSong!.id,
@@ -907,6 +1025,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           onLoginRequired?.call();
           return false;
         }
+
+        // 确保 Node.js 本地代理服务器已启动（所有酷狗 API 走 127.0.0.1:8080）
+        // 冷启动时 MethodChannel 可能尚未注册，导致 NodeJsServer.start() 失败，
+        // 此处做二次兜底检查，避免 API 请求因服务器未就绪而全部失败
+        await _ensureNodeJsServerReady();
+
         _isResolvingUrl = true;
         notifyListeners();
 
@@ -994,6 +1118,27 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     return true;
   }
 
+  /// 确保 Node.js 本地代理服务器已就绪（127.0.0.1:8080）。
+  ///
+  /// 冷启动时 main() 中的 NodeJsServer.start() 可能因 MethodChannel 尚未注册
+  /// 而失败（MissingPluginException），导致后续所有 API 请求因连接被拒绝而失败。
+  /// 此方法在播放流程中做二次兜底：探测端口，若不通则重新尝试启动。
+  Future<void> _ensureNodeJsServerReady() async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    // 快速探测 8080 端口是否可用
+    try {
+      final socket = await Socket.connect('127.0.0.1', 8080,
+          timeout: const Duration(milliseconds: 500));
+      await socket.close();
+      return; // 服务器已就绪
+    } catch (_) {
+      // 端口不通，尝试重新启动
+    }
+    try {
+      await NodeJsServer.start();
+    } catch (_) {}
+  }
+
   /// 异步获取当前歌曲的高潮时间数据。
   ///
   /// 调用酷狗 /song/climax 接口，获取高潮起止时间后更新 [_currentSong]。
@@ -1027,6 +1172,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> next() async {
     if (_playlist.isEmpty) return;
+    _resetAbnormalRetry();
 
     // 取消当前歌曲的缓存下载
     if (_currentSong != null && _currentSong!.isOnline) {
@@ -1062,6 +1208,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> previous() async {
     if (_playlist.isEmpty) return;
+    _resetAbnormalRetry();
 
     // 取消当前歌曲的缓存下载
     if (_currentSong != null && _currentSong!.isOnline) {
@@ -1095,6 +1242,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> playSongAt(int index) async {
     if (index < 0 || index >= _playlist.length) return;
+    _resetAbnormalRetry();
 
     // 取消当前歌曲的缓存下载
     if (_currentSong != null && _currentSong!.isOnline) {

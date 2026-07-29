@@ -16,7 +16,19 @@ class AudioService {
 
   AudioService._internal();
 
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _player = AudioPlayer(
+    // 增大 ExoPlayer 缓冲区：默认仅 ~10s，在国产安卓设备 CPU 降频时
+    // 流媒体下载速度跟不上播放速度，1-2 秒就耗尽缓冲触发 completed。
+    // 60s 缓冲给降频状态下的网络足够时间预加载数据。
+    audioLoadConfiguration: AudioLoadConfiguration(
+      androidLoadControl: AndroidLoadControl(
+        minBufferDuration: Duration(seconds: 30),
+        maxBufferDuration: Duration(seconds: 60),
+        bufferForPlaybackDuration: Duration(seconds: 3),
+        bufferForPlaybackAfterRebufferDuration: Duration(seconds: 10),
+      ),
+    ),
+  );
   final ConcatenatingAudioSource _playlistSource = ConcatenatingAudioSource(children: []);
 
   AudioPlayer get player => _player;

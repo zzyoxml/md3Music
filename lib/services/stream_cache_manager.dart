@@ -49,7 +49,15 @@ class StreamCacheManager {
 
   /// 初始化缓存目录与索引。所有公开方法调用前都会先确保初始化完成。
   Future<void> ensureInitialized() async {
-    if (_initialized) return;
+    if (_initialized) {
+      // 目录可能被系统清理（Android 外部存储），每次检查并重建
+      try {
+        if (!await _audioDir.exists()) await _audioDir.create(recursive: true);
+        if (!await _lyricsDir.exists()) await _lyricsDir.create(recursive: true);
+        if (!await _artworkDir.exists()) await _artworkDir.create(recursive: true);
+      } catch (_) {}
+      return;
+    }
     // 选择缓存根目录：优先外部存储，兜底应用文档目录
     Directory? base;
     try {
@@ -65,6 +73,7 @@ class StreamCacheManager {
     _lyricsDir = Directory('${_cacheRoot.path}${sep}lyrics');
     _artworkDir = Directory('${_cacheRoot.path}${sep}artwork');
 
+    await _cacheRoot.create(recursive: true);
     await _audioDir.create(recursive: true);
     await _lyricsDir.create(recursive: true);
     await _artworkDir.create(recursive: true);
