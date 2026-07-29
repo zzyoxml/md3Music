@@ -9,7 +9,12 @@ import 'core/layout/responsive_layout.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/motion_constants.dart';
 import 'data/models/playlist.dart';
-import 'main.dart' show appNavigatorKey, handleShortcut, pendingShortcutType, shortcutTabRequest;
+import 'main.dart'
+    show
+        appNavigatorKey,
+        handleShortcut,
+        pendingShortcutType,
+        shortcutTabRequest;
 import 'modules/discover/discover_page.dart';
 import 'modules/user/user_center_page.dart';
 import 'modules/user/favorites_page.dart';
@@ -194,9 +199,9 @@ class _AppViewState extends State<_AppView> {
       builder: (context, child) {
         final scale = context.watch<ThemeProvider>().uiScale;
         return MediaQuery(
-          data: MediaQuery.of(context).copyWith(
-            textScaler: TextScaler.linear(scale),
-          ),
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: TextScaler.linear(scale)),
           child: _SystemUiUpdater(child: child!),
         );
       },
@@ -251,7 +256,8 @@ class _SystemUiUpdater extends StatefulWidget {
   State<_SystemUiUpdater> createState() => _SystemUiUpdaterState();
 }
 
-class _SystemUiUpdaterState extends State<_SystemUiUpdater> with WidgetsBindingObserver {
+class _SystemUiUpdaterState extends State<_SystemUiUpdater>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
@@ -286,12 +292,16 @@ class _SystemUiUpdaterState extends State<_SystemUiUpdater> with WidgetsBindingO
     // 主界面使用非沉浸模式：状态栏不透明（用 surface 色填充），
     // 导航栏跟随 surface 色，确保从播放器沉浸模式返回后恢复正常显示。
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
-      statusBarColor: surfaceColor,
-      statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
-      systemNavigationBarColor: surfaceColor,
-      systemNavigationBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
-    ));
+    SystemChrome.setSystemUIOverlayStyle(
+      SystemUiOverlayStyle(
+        statusBarColor: surfaceColor,
+        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
+        systemNavigationBarColor: surfaceColor,
+        systemNavigationBarIconBrightness: isDark
+            ? Brightness.light
+            : Brightness.dark,
+      ),
+    );
   }
 
   @override
@@ -315,10 +325,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _pages = [
-      DiscoverPage(onAvatarTap: () => setState(() {
-        _previousSelectedIndex = _selectedIndex;
-        _selectedIndex = 4;
-      })),
+      DiscoverPage(
+        onAvatarTap: () => setState(() {
+          _previousSelectedIndex = _selectedIndex;
+          _selectedIndex = 4;
+        }),
+      ),
       const LibraryPage(),
       const FavoritesPage(),
       const PersonalFmPage(),
@@ -521,8 +533,16 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         Expanded(
           child: AnimatedSwitcher(
             duration: M3ExpressiveMotion.defaultDuration,
-            switchInCurve: const Interval(0.5, 1.0, curve: M3ExpressiveMotion.expressiveEasing),
-            switchOutCurve: const Interval(0.0, 0.5, curve: M3ExpressiveMotion.expressiveEasing),
+            switchInCurve: const Interval(
+              0.5,
+              1.0,
+              curve: M3ExpressiveMotion.expressiveEasing,
+            ),
+            switchOutCurve: const Interval(
+              0.0,
+              0.5,
+              curve: M3ExpressiveMotion.expressiveEasing,
+            ),
             transitionBuilder: (child, animation) {
               final isEntering = child.key == ValueKey(_selectedIndex);
 

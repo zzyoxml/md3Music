@@ -1,7 +1,7 @@
 name: md3music
 description: "MD3Music - Music player with Material Design 3"
 publish_to: 'none'
-version: 3.6.0+14
+version: 4.0.0+15
 
 environment:
   sdk: ^3.12.0

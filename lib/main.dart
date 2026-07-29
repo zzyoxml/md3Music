@@ -82,8 +82,7 @@ Future<void> main() async {
     });
   }
 
-  runApp(const MyApp());
-  // 检测是否需要显示首次启动引导页
+  // 检测是否需要显示首次启动引导页（仅新安装/未完成教程时弹出）
   bool needsOnboarding = false;
   try {
     final prefs = await SharedPreferences.getInstance();
@@ -104,9 +103,7 @@ void handleShortcut(String shortcutType) {
       shortcutTabRequest.value = 2;
       break;
     case 'action_open_recognition':
-      nav.push(MaterialPageRoute(
-        builder: (_) => const SongRecognitionPage(),
-      ));
+      nav.push(MaterialPageRoute(builder: (_) => const SongRecognitionPage()));
       break;
     case 'action_open_search':
       nav.push(MaterialPageRoute(builder: (_) => const SearchPage()));

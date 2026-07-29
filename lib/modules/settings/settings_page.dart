@@ -30,7 +30,7 @@ import '../../widgets/seed_color_picker.dart';
 /// Fallback display when runtime PackageInfo read fails.
 const String kBuildAppVersion = String.fromEnvironment(
   'APP_VERSION',
-  defaultValue: '3.6.0',
+  defaultValue: '4.0.0',
 );
 
 class SettingsPage extends StatefulWidget {
@@ -152,8 +152,10 @@ class _SettingsPageState extends State<SettingsPage> {
     // 从 ThemeProvider 同步 UI 缩放
     final uiScale = context.read<ThemeProvider>().uiScale;
     // 读取蓝牙歌词开关
-    final bluetoothLyricEnabled = await _settingsRepository.getBluetoothLyricEnabled();
-    final downloadWordLevelLyrics = await _settingsRepository.getDownloadWordLevelLyrics();
+    final bluetoothLyricEnabled = await _settingsRepository
+        .getBluetoothLyricEnabled();
+    final downloadWordLevelLyrics = await _settingsRepository
+        .getDownloadWordLevelLyrics();
 
     setState(() {
       _themeMode = themeMode;
@@ -300,9 +302,11 @@ class _SettingsPageState extends State<SettingsPage> {
             return ListTile(
               leading: const Icon(Icons.text_fields),
               title: const Text('歌词字体'),
-              subtitle: Text(_useAmStylePlayer
-                  ? _lyricFontSourceLabel(prefs.fontSource)
-                  : '仅 Apple Music 风格播放页可用'),
+              subtitle: Text(
+                _useAmStylePlayer
+                    ? _lyricFontSourceLabel(prefs.fontSource)
+                    : '仅 Apple Music 风格播放页可用',
+              ),
               trailing: const Icon(Icons.chevron_right, size: 18),
               enabled: _useAmStylePlayer,
               onTap: _useAmStylePlayer
@@ -639,7 +643,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: SliderTheme(
                   data: SliderTheme.of(context).copyWith(
                     trackHeight: 4,
-                    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+                    thumbShape: const RoundSliderThumbShape(
+                      enabledThumbRadius: 8,
+                    ),
                   ),
                   child: Slider(
                     value: _uiScale,
@@ -1315,9 +1321,7 @@ class _SettingsPageState extends State<SettingsPage> {
           trailing: const Icon(Icons.chevron_right, size: 18),
           onTap: () {
             Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const OnboardingPage(isReview: true),
-              ),
+              MaterialPageRoute(builder: (_) => OnboardingPage(isReview: true)),
             );
           },
         ),
