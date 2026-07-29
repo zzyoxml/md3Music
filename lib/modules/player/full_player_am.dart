@@ -1180,6 +1180,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                         lines: _parsedLyrics,
                                         currentTimeMs: positionMs,
                                         isPlaying: playerProvider.isPlaying,
+                                        forceDarkBackground: true,
                                         // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
                                         enableInterludeDots:
                                             !_isLocalLrcLyricWithoutWordTiming(

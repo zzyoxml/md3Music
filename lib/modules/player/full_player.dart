@@ -786,126 +786,133 @@ class _FullPlayerState extends State<FullPlayer>
 
     return SafeArea(
       bottom: false,
-      child: Row(
+      child: Column(
         children: [
+          // 顶部栏放在最外层，占据整行：返回按钮真正在屏幕最左上角
+          _buildTopBar(playerProvider),
           Expanded(
-            flex: 4,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final maxSize = (constraints.maxWidth - 32).clamp(0.0, 380.0);
-                  return Stack(
-                    children: [
-                      // 封面居中
-                      Center(
-                        child: ConstrainedBox(
-                          constraints: BoxConstraints(
-                            maxWidth: maxSize,
-                            maxHeight: maxSize,
-                          ),
-                          child: AspectRatio(
-                            aspectRatio: 1,
-                            child: AnimatedScale(
-                              scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                              duration: const Duration(milliseconds: 500),
-                              curve: Curves.easeOutBack,
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(16),
-                                child: _buildCrossfadeArtwork(
-                                  currentSong.artworkUri,
-                                  colorScheme,
-                                  iconSize: 48,
-                                  fallbackFilePath: currentSong.localPath,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      // 歌曲信息：垂直方向 80% 位置，水平居中（手机横屏时隐藏）
-                      if (!_isPhoneLandscape)
-                        Positioned(
-                        top: constraints.maxHeight * 0.8,
-                        left: 0,
-                        right: 0,
-                        child: Column(
+            child: Row(
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final maxSize = (constraints.maxWidth - 32).clamp(0.0, 380.0);
+                        return Stack(
                           children: [
-                            GestureDetector(
-                              onTap: () => _navigateToAlbum(currentSong as Song),
-                              child: Text(
-                                currentSong.displayName,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium,
-                                textAlign: TextAlign.center,
+                            // 封面居中
+                            Center(
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(
+                                  maxWidth: maxSize,
+                                  maxHeight: maxSize,
+                                ),
+                                child: AspectRatio(
+                                  aspectRatio: 1,
+                                  child: AnimatedScale(
+                                    scale: playerProvider.isPlaying ? 1.0 : 0.85,
+                                    duration: const Duration(milliseconds: 500),
+                                    curve: Curves.easeOutBack,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: _buildCrossfadeArtwork(
+                                        currentSong.artworkUri,
+                                        colorScheme,
+                                        iconSize: 48,
+                                        fallbackFilePath: currentSong.localPath,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
-                            const SizedBox(height: 2),
-                            GestureDetector(
-                              onTap: () => _navigateToAlbum(currentSong as Song),
-                              child: Text(
-                                currentSong.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: colorScheme.onSurfaceVariant,
+                            // 歌曲信息：垂直方向 80% 位置，水平居中（手机横屏时隐藏）
+                            if (!_isPhoneLandscape)
+                              Positioned(
+                                top: constraints.maxHeight * 0.8,
+                                left: 0,
+                                right: 0,
+                                child: Column(
+                                  children: [
+                                    GestureDetector(
+                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      child: Text(
+                                        currentSong.displayName,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context).textTheme.titleMedium,
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    GestureDetector(
+                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      child: Text(
+                                        currentSong.artist,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                    GestureDetector(
+                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      child: Text(
+                                        currentSong.album,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+                                        ),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                textAlign: TextAlign.center,
                               ),
-                            ),
-                            GestureDetector(
-                              onTap: () => _navigateToAlbum(currentSong as Song),
-                              child: Text(
-                                currentSong.album,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                Expanded(
+                  flex: 6,
+                  child: Column(
+                    children: [
+                      Expanded(
+                        child: TabBarView(
+                          controller: _tabController,
+                          children: [
+                            if (!_isPadMode || _isPhoneLandscape)
+                              _buildSongInfo(playerProvider, currentSong, colorScheme),
+                            _isLoadingLyrics
+                                ? const Center(child: MD3ELoadingIndicator())
+                                : LyricsView(
+                                    lyrics: _lyrics,
+                                    position: playerProvider.position,
+                                    onSeek: (duration) {
+                                      playerProvider.seek(duration);
+                                    },
+                                  ),
+                            CommentsView(
+                              songHash: currentSong.id,
+                              albumAudioId: currentSong.albumAudioId,
                             ),
                           ],
                         ),
                       ),
-                    ],
-                  );
-                },
-              ),
-            ),
-          ),
-          Expanded(
-            flex: 6,
-            child: Column(
-              children: [
-                _buildTopBar(playerProvider),
-                Expanded(
-                  child: TabBarView(
-                    controller: _tabController,
-                    children: [
-                      if (!_isPadMode || _isPhoneLandscape)
-                        _buildSongInfo(playerProvider, currentSong, colorScheme),
-                      _isLoadingLyrics
-                          ? const Center(child: MD3ELoadingIndicator())
-                          : LyricsView(
-                              lyrics: _lyrics,
-                              position: playerProvider.position,
-                              onSeek: (duration) {
-                                playerProvider.seek(duration);
-                              },
-                            ),
-                      CommentsView(
-                        songHash: currentSong.id,
-                        albumAudioId: currentSong.albumAudioId,
+                      // 底部 padding 包含导航栏高度
+                      Padding(
+                        padding: EdgeInsets.only(bottom: bottomPadding),
+                        child: _buildControls(playerProvider, colorScheme, isExpanded: true),
                       ),
                     ],
                   ),
-                ),
-                // 底部 padding 包含导航栏高度
-                Padding(
-                  padding: EdgeInsets.only(bottom: bottomPadding),
-                  child: _buildControls(playerProvider, colorScheme, isExpanded: true),
                 ),
               ],
             ),
