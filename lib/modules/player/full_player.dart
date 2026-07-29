@@ -656,26 +656,35 @@ class _FullPlayerState extends State<FullPlayer>
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        // 横屏时封面最大不超过可用宽度，保持正方形
-                        final size = constraints.maxWidth.clamp(120.0, 300.0);
+                        // 横屏时封面为正方形，需同时受可用宽度与高度约束：
+                        // 减去 56 顶栏补偿后的可用高度，避免高度不足时正方形上下被裁切
+                        final availableHeight = constraints.maxHeight - 56;
+                        final size = (constraints.maxWidth < availableHeight
+                                ? constraints.maxWidth
+                                : availableHeight)
+                            .clamp(120.0, 300.0);
                         return Stack(
                           children: [
-                            // 封面居中
-                            Center(
-                              child: SizedBox(
-                                width: size,
-                                height: size,
-                                child: AnimatedScale(
-                                  scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                                  duration: const Duration(milliseconds: 500),
-                                  curve: Curves.easeOutBack,
-                                  child: ClipRRect(
-                                    borderRadius: BorderRadius.circular(16),
-                                    child: _buildCrossfadeArtwork(
-                                      currentSong.artworkUri,
-                                      colorScheme,
-                                      iconSize: 48,
-                                      fallbackFilePath: currentSong.localPath,
+                            // 封面居中：补偿顶栏高度（IconButton 48 + Padding 4×2 = 56），
+                            // 使封面在整个屏幕垂直方向居中，而非画布（去除顶栏后的空间）居中
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 56),
+                              child: Center(
+                                child: SizedBox(
+                                  width: size,
+                                  height: size,
+                                  child: AnimatedScale(
+                                    scale: playerProvider.isPlaying ? 1.0 : 0.85,
+                                    duration: const Duration(milliseconds: 500),
+                                    curve: Curves.easeOutBack,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: _buildCrossfadeArtwork(
+                                        currentSong.artworkUri,
+                                        colorScheme,
+                                        iconSize: 48,
+                                        fallbackFilePath: currentSong.localPath,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -808,26 +817,29 @@ class _FullPlayerState extends State<FullPlayer>
                         final maxSize = (constraints.maxWidth - 32).clamp(0.0, 380.0);
                         return Stack(
                           children: [
-                            // 封面居中
-                            Center(
-                              child: ConstrainedBox(
-                                constraints: BoxConstraints(
-                                  maxWidth: maxSize,
-                                  maxHeight: maxSize,
-                                ),
-                                child: AspectRatio(
-                                  aspectRatio: 1,
-                                  child: AnimatedScale(
-                                    scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                                    duration: const Duration(milliseconds: 500),
-                                    curve: Curves.easeOutBack,
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(16),
-                                      child: _buildCrossfadeArtwork(
-                                        currentSong.artworkUri,
-                                        colorScheme,
-                                        iconSize: 48,
-                                        fallbackFilePath: currentSong.localPath,
+                            // 封面居中：补偿顶栏高度，使封面在整个屏幕垂直方向居中
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 56),
+                              child: Center(
+                                child: ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxWidth: maxSize,
+                                    maxHeight: maxSize,
+                                  ),
+                                  child: AspectRatio(
+                                    aspectRatio: 1,
+                                    child: AnimatedScale(
+                                      scale: playerProvider.isPlaying ? 1.0 : 0.85,
+                                      duration: const Duration(milliseconds: 500),
+                                      curve: Curves.easeOutBack,
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: _buildCrossfadeArtwork(
+                                          currentSong.artworkUri,
+                                          colorScheme,
+                                          iconSize: 48,
+                                          fallbackFilePath: currentSong.localPath,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -1897,55 +1909,58 @@ class _FullPlayerState extends State<FullPlayer>
 
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       builder: (context) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: const Icon(Icons.album),
-                title: Text(
-                  albumTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.album),
+                  title: Text(
+                    albumTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _navigateToAlbum(song);
+                  },
                 ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _navigateToAlbum(song);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.person),
-                title: Text(
-                  artistTitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                ListTile(
+                  leading: const Icon(Icons.person),
+                  title: Text(
+                    artistTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _navigateToArtist(song);
+                  },
                 ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _navigateToArtist(song);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.playlist_add),
-                title: const Text('添加到歌单'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showAddToPlaylistDialog(context, song);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.share),
-                title: const Text('分享'),
-                onTap: () {
-                  Navigator.pop(context);
-                  // TODO: 实现分享功能
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(const SnackBar(content: Text('分享功能开发中')));
-                },
-              ),
-            ],
+                ListTile(
+                  leading: const Icon(Icons.playlist_add),
+                  title: const Text('添加到歌单'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showAddToPlaylistDialog(context, song);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.share),
+                  title: const Text('分享'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    // TODO: 实现分享功能
+                    ScaffoldMessenger.of(
+                      context,
+                    ).showSnackBar(const SnackBar(content: Text('分享功能开发中')));
+                  },
+                ),
+              ],
+            ),
           ),
         );
       },

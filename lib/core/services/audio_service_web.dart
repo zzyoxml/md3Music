@@ -109,6 +109,15 @@ class AudioService {
     await _playlistSource.addAll(blobSources);
   }
 
+  /// 在指定位置插入音频源，不打断当前播放。
+  Future<void> insertAudioSourceAt(int index, UriAudioSource source) async {
+    final blobUrl = await _fetchAudioBlob(source.uri.toString());
+    await _playlistSource.insert(index, AudioSource.uri(
+      Uri.parse(blobUrl),
+      tag: source.tag,
+    ));
+  }
+
   Future<void> setSpeed(double speed) async {
     await _player.setSpeed(speed);
   }

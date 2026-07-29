@@ -1161,47 +1161,80 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// 在当前播放歌曲之后插入歌曲（"下一首播放"功能）。
+  ///
+  /// - 不在播放列表中的歌曲：新增并插入到当前歌曲之后，同步 audio_service 队列。
+  /// - 已在播放列表中的歌曲：移动到当前歌曲之后（不重复添加），仅调整 Dart 端
+  ///   顺序，不重建 audio_service 队列（与 [reorderPlaylist] 策略一致，避免
+  ///   打断当前播放；切歌走 _currentIndex/_playlist，不依赖 audio_service 队列）。
   Future<void> insertAfterCurrent(List<Song> songs) async {
+    if (songs.isEmpty) return;
     if (_playlist.isEmpty || _currentIndex < 0) {
       // 播放列表为空，直接追加
       await appendPlaylist(songs);
       return;
     }
 
-    final newSongs = <Song>[];
-    final insertIndex = _currentIndex + 1;
+    final currentId = _playlist[_currentIndex].id;
+    final newSongs = <Song>[]; // 不在列表中：需新增
+    final moveSongs = <Song>[]; // 已在列表中：需移动
     for (final song in songs) {
-      if (!_playlist.any((s) => s.id == song.id)) {
+      // 当前正在播放的歌曲本身就是"当前"，无需移动
+      if (song.id == currentId) continue;
+      if (_playlist.any((s) => s.id == song.id)) {
+        moveSongs.add(song);
+      } else {
         newSongs.add(song);
       }
     }
+    if (newSongs.isEmpty && moveSongs.isEmpty) return;
 
-    if (newSongs.isEmpty) return;
+    // 1. 先从 _playlist 移除待移动歌曲（稍后统一插回当前歌曲之后）
+    if (moveSongs.isNotEmpty) {
+      final moveIds = moveSongs.map((s) => s.id).toSet();
+      _playlist.removeWhere((s) => moveIds.contains(s.id));
+    }
 
-    // 在当前歌曲之后插入
-    _playlist.insertAll(insertIndex, newSongs);
-    // 同步 originalPlaylist
-    _originalPlaylist.insertAll(
-      (_originalPlaylist.indexWhere((s) => s.id == _playlist[_currentIndex].id) + 1).clamp(0, _originalPlaylist.length),
-      newSongs,
-    );
+    // 2. 重新定位当前歌曲索引（前面被移除的歌曲会使当前歌曲前移）
+    int curIdx = _playlist.indexWhere((s) => s.id == currentId);
+    if (curIdx < 0) curIdx = _playlist.isEmpty ? 0 : _playlist.length - 1;
+    final insertIndex = curIdx + 1;
+
+    // 3. 插入：新增歌曲在前，移动歌曲在后，保持调用顺序
+    _playlist.insertAll(insertIndex, [...newSongs, ...moveSongs]);
+
+    // 4. 当前歌曲本身未移动，但其前后增删歌曲会改变索引，按 id 重新定位
+    _currentIndex = _playlist.indexWhere((s) => s.id == currentId);
+    if (_currentIndex < 0) _currentIndex = 0;
+
+    // 5. 同步 _originalPlaylist：把新增+移动的歌曲插到当前歌曲之后
+    if (moveSongs.isNotEmpty) {
+      final moveIds = moveSongs.map((s) => s.id).toSet();
+      _originalPlaylist.removeWhere((s) => moveIds.contains(s.id));
+    }
+    final origCurIdx = _originalPlaylist.indexWhere((s) => s.id == currentId);
+    final origInsert = origCurIdx >= 0
+        ? (origCurIdx + 1).clamp(0, _originalPlaylist.length)
+        : _originalPlaylist.length;
+    _originalPlaylist.insertAll(origInsert, [...newSongs, ...moveSongs]);
+
     notifyListeners();
 
-    // 重建 audio_service 队列以反映新顺序
-    if (_audioService != null && _currentSong != null) {
-      // 全部本地歌曲批量解析 content:// → 真实路径
-      final resolved = await _resolveLocalPathsForBatch(_playlist);
-      // 回写
-      for (int i = 0; i < resolved.length && i < _playlist.length; i++) {
-        _playlist[i] = resolved[i];
+    // 6. audio_service 队列同步：仅对新增歌曲插入 source。
+    //    移动歌曲不重建队列（Dart 端顺序已正确，切歌走 _currentIndex）。
+    if (_audioService != null && _currentSong != null && newSongs.isNotEmpty) {
+      final resolvedSongs = await _resolveLocalPathsForBatch(newSongs);
+      // 回写真实路径到 _playlist（newSongs 占据 insertIndex 起的位置）
+      for (int i = 0; i < resolvedSongs.length; i++) {
+        final idx = insertIndex + i;
+        if (idx < _playlist.length) {
+          _playlist[idx] = resolvedSongs[i];
+        }
       }
-      final sources = _playlist
-          .map((song) => _createAudioSource(song))
-          .toList();
-      await _audioService.setPlaylist(sources, startIndex: _currentIndex);
-      // seek 到当前位置，保持播放连续性
-      await _audioService.seek(_position);
-      if (_isPlaying) await _audioService.play();
+      // 逐个插入到 audio_service 队列，不打断当前播放
+      for (int i = 0; i < resolvedSongs.length; i++) {
+        final source = _createAudioSource(resolvedSongs[i]);
+        await _audioService.insertAudioSourceAt(insertIndex + i, source);
+      }
       notifyListeners();
     }
     _prefetchNextSongs(_currentIndex);
@@ -1489,7 +1522,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
     } catch (_) {}
     // 边听边存兜底：缓存命中时 artUrl 用本地 file:// 路径，避免断网时 MediaSession 无封面
-    final effectiveArtUrl = _cachedArtworkPath != null
+    // 仅对在线歌曲生效，本地歌曲使用自身的 artworkUri，避免上一首在线缓存封面残留
+    final effectiveArtUrl = (song.isOnline && _cachedArtworkPath != null)
         ? Uri.file(_cachedArtworkPath!).toString()
         : song.artworkUri;
     MediaNotificationService.updateNotification(
