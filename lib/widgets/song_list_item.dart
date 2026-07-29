@@ -229,6 +229,7 @@ class SongListItem extends StatelessWidget {
               SmartArtworkImage(
                 artworkUri: song.artworkUri,
                 fallbackFilePath: song.localPath,
+                songId: song.id,
                 size: imgSize,
                 borderRadius: 8,
               ),

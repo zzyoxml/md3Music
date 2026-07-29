@@ -474,7 +474,7 @@ class AudioPlaybackService : Service() {
             return null
         }
 
-        // 3. local://<path> 或 file://<path>：提取文件路径后读内嵌封面
+        // 3. local://<path> 或 file://<path>：提取文件路径
         val filePath = when {
             artUri.startsWith("local://") -> artUri.substring("local://".length)
             artUri.startsWith("file://") -> {
@@ -482,6 +482,16 @@ class AudioPlaybackService : Service() {
                 uri.path ?: artUri.substring("file://".length)
             }
             else -> artUri
+        }
+        // 边听边存兜底：如果是图片文件（jpg/png/webp），直接 decodeFile；
+        // 否则当作音频文件用 MediaMetadataRetriever 读内嵌封面
+        val lower = filePath.lowercase()
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg") ||
+            lower.endsWith(".png") || lower.endsWith(".webp")
+        ) {
+            return try {
+                BitmapFactory.decodeFile(filePath)
+            } catch (_: Exception) { null }
         }
         return extractEmbeddedArtwork(filePath)
     }

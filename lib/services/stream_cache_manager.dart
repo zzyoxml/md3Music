@@ -350,6 +350,29 @@ class StreamCacheManager {
     }
   }
 
+  /// 获取已缓存的封面图片本地文件路径。索引无或文件不存在返回 null。
+  /// 命中后更新 artwork 的 lastAccessedAt。
+  /// 用于 MediaSession / 系统通知栏等需要 file:// URI 的场景（断网兜底）。
+  Future<String?> getCachedArtworkPath(String hash) async {
+    await ensureInitialized();
+    try {
+      final entry = StreamCacheRepository.instance.getEntry(hash);
+      final artwork = entry?.artwork;
+      if (artwork == null) return null;
+
+      final fullPath = _resolvePath(artwork.path);
+      final file = File(fullPath);
+      if (!await file.exists()) return null;
+
+      await StreamCacheRepository.instance.touchArtwork(hash);
+      return fullPath;
+    } catch (e) {
+      // ignore: avoid_print
+      print('[StreamCacheManager] getCachedArtworkPath 失败: $e');
+      return null;
+    }
+  }
+
   /// 下载并缓存封面图片。url 为空时直接返回。
   Future<void> cacheArtwork(String hash, String url) async {
     await ensureInitialized();

@@ -1,11 +1,14 @@
-﻿import 'package:flutter/material.dart';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
 
 import 'local_artwork_image.dart';
+import '../services/stream_cache_manager.dart';
 
 /// 智能封面图组件：根据 artworkUri 类型选择不同的加载策略。
 ///
 /// 支持：
-/// - **http(s)://** 在线封面：使用 [Image.network]
+/// - **http(s)://** 在线封面：使用 [Image.network]，加载失败时回查 StreamCache 兜底
 /// - **content://** MediaStore 封面：通过 fallbackFilePath 读内嵌封面
 /// - **local://<filePath>** 本地文件：使用 [LocalArtworkCache] 懒加载
 /// - **null** 或未知：显示占位符
@@ -15,12 +18,17 @@ class SmartArtworkImage extends StatefulWidget {
   final double size;
   final double borderRadius;
 
+  /// 歌曲 ID，用于在线封面加载失败时从 StreamCache 兜底。
+  /// 在线播放场景建议传入；本地音乐场景可不传。
+  final String? songId;
+
   const SmartArtworkImage({
     super.key,
     this.artworkUri,
     this.fallbackFilePath,
     required this.size,
     this.borderRadius = 8,
+    this.songId,
   });
 
   @override
@@ -28,6 +36,49 @@ class SmartArtworkImage extends StatefulWidget {
 }
 
 class _SmartArtworkImageState extends State<SmartArtworkImage> {
+  // 断网/加载失败时从 StreamCache 兜底读到的封面字节
+  Uint8List? _cachedArtworkBytes;
+  bool _hasTriedCacheFallback = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 预检缓存：如果是 http 封面且有 songId，先查 StreamCache。
+    // 命中则直接用 Image.memory，跳过 Image.network 网络请求，
+    // 避免断网时大量并发 SocketException 闪现。
+    _prefetchCachedArtwork();
+  }
+
+  @override
+  void didUpdateWidget(covariant SmartArtworkImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // songId 变化时重新预查缓存（列表项复用场景）
+    if (widget.songId != oldWidget.songId) {
+      _cachedArtworkBytes = null;
+      _hasTriedCacheFallback = false;
+      _prefetchCachedArtwork();
+    }
+  }
+
+  Future<void> _prefetchCachedArtwork() async {
+    if (widget.songId == null || widget.songId!.isEmpty) return;
+    final uri = widget.artworkUri;
+    if (uri == null || !uri.startsWith('http://') && !uri.startsWith('https://')) {
+      return;
+    }
+    try {
+      final bytes =
+          await StreamCacheManager.instance.getCachedArtwork(widget.songId!);
+      if (bytes != null && mounted) {
+        setState(() {
+          _cachedArtworkBytes = bytes;
+        });
+      }
+    } catch (_) {
+      // 预查失败静默处理，后续走 Image.network 正常流程
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
@@ -79,35 +130,58 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
         uri.startsWith('https://')) {
       // http(s):// 在线封面用 Image.network
       final isFill = widget.size == double.infinity;
-      child = Image.network(
-        uri,
-        width: isFill ? double.infinity : widget.size,
-        height: isFill ? double.infinity : widget.size,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) {
-          if (widget.fallbackFilePath != null) {
-            return LocalArtworkImage(
-              filePath: widget.fallbackFilePath!,
-              size: widget.size,
-              borderRadius: widget.borderRadius,
+      // 如果已经从缓存兜底拿到了字节，直接用 Image.memory 显示
+      if (_cachedArtworkBytes != null) {
+        child = Image.memory(
+          _cachedArtworkBytes!,
+          width: isFill ? double.infinity : widget.size,
+          height: isFill ? double.infinity : widget.size,
+          fit: BoxFit.cover,
+        );
+      } else {
+        child = Image.network(
+          uri,
+          width: isFill ? double.infinity : widget.size,
+          height: isFill ? double.infinity : widget.size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) {
+            // 在线加载失败：先尝试 StreamCache 兜底，再退到 fallbackFilePath / 占位符
+            if (!_hasTriedCacheFallback) {
+              _hasTriedCacheFallback = true;
+              _loadArtworkFromStreamCache();
+            }
+            if (_cachedArtworkBytes != null) {
+              return Image.memory(
+                _cachedArtworkBytes!,
+                width: isFill ? double.infinity : widget.size,
+                height: isFill ? double.infinity : widget.size,
+                fit: BoxFit.cover,
+              );
+            }
+            if (widget.fallbackFilePath != null) {
+              return LocalArtworkImage(
+                filePath: widget.fallbackFilePath!,
+                size: widget.size,
+                borderRadius: widget.borderRadius,
+              );
+            }
+            return _placeholder(colorScheme);
+          },
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) return child;
+            return Container(
+              width: isFill ? double.infinity : widget.size,
+              height: isFill ? double.infinity : widget.size,
+              color: colorScheme.surfaceContainerHighest,
+              child: Icon(
+                Icons.hourglass_empty,
+                size: isFill ? 40 : widget.size * 0.4,
+                color: colorScheme.onSurfaceVariant,
+              ),
             );
-          }
-          return _placeholder(colorScheme);
-        },
-        loadingBuilder: (context, child, progress) {
-          if (progress == null) return child;
-          return Container(
-            width: isFill ? double.infinity : widget.size,
-            height: isFill ? double.infinity : widget.size,
-            color: colorScheme.surfaceContainerHighest,
-            child: Icon(
-              Icons.hourglass_empty,
-              size: isFill ? 40 : widget.size * 0.4,
-              color: colorScheme.onSurfaceVariant,
-            ),
-          );
-        },
-      );
+          },
+        );
+      }
     } else if (uri.startsWith('file://')) {
       // file:// URI
       final isFill = widget.size == double.infinity;
@@ -133,6 +207,23 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
       borderRadius: BorderRadius.circular(widget.borderRadius),
       child: child,
     );
+  }
+
+  /// 断网或在线加载失败时，从 StreamCache 兜底读取封面字节。
+  /// 读取成功后触发重建，用 Image.memory 显示。
+  Future<void> _loadArtworkFromStreamCache() async {
+    if (widget.songId == null || widget.songId!.isEmpty) return;
+    try {
+      final bytes =
+          await StreamCacheManager.instance.getCachedArtwork(widget.songId!);
+      if (bytes != null && mounted) {
+        setState(() {
+          _cachedArtworkBytes = bytes;
+        });
+      }
+    } catch (_) {
+      // 兜底失败静默处理
+    }
   }
 
   Widget _placeholder(ColorScheme colorScheme) {

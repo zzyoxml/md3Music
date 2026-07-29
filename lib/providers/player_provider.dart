@@ -50,6 +50,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   double _speed = 1.0;
   bool _isResolvingUrl = false;
   String? _resolveError;
+  // 边听边存：当前歌曲的本地缓存封面路径（缓存命中时设置，供 MediaSession 兜底）
+  String? _cachedArtworkPath;
   AudioQuality _audioQuality = AudioQuality.standard;
 
   Song? get currentSong => _currentSong;
@@ -437,6 +439,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         _currentSong = resolvedSong;
         _playlist = [resolvedSong];
         _isResolvingUrl = false;
+        // 查询本地缓存封面路径，供 MediaSession 断网兜底
+        _cachedArtworkPath =
+            await StreamCacheManager.instance.getCachedArtworkPath(song.id);
         _saveState();
         notifyListeners();
 
@@ -447,6 +452,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
         return;
       }
+      _cachedArtworkPath = null;
 
       final apiClient = KugouApiClient();
 
@@ -569,7 +575,19 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> playOnlinePlaylist(List<Song> songs, int startIndex) async {
     if (songs.isEmpty) return;
 
-    if (!KugouApiClient().isLoggedIn) {
+    // 边听边存：先查本地缓存（断网时仍可播放已缓存歌曲）
+    final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
+    String? cachedPath;
+    if (cacheEnabled) {
+      await StreamCacheManager.instance.ensureInitialized();
+      cachedPath = await StreamCacheManager.instance.getCachedAudioPath(
+        songs[startIndex].id,
+        _audioQuality.value,
+      );
+    }
+
+    // 缓存未命中且未登录时才提示登录
+    if (cachedPath == null && !KugouApiClient().isLoggedIn) {
       onLoginRequired?.call();
       return;
     }
@@ -586,28 +604,63 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     try {
-      final apiClient = KugouApiClient();
-      final result = await apiClient.getSongUrlWithFallback(
-        _currentSong!.id,
-        quality: _audioQuality.value,
-        albumId: _currentSong!.albumId,
-        albumAudioId: _currentSong!.albumAudioId,
-      );
-
-      if (result != null && result.url.isNotEmpty) {
-        final resolvedSong = _currentSong!.copyWith(url: result.url);
+      // 缓存命中：直接播放本地文件
+      if (cachedPath != null) {
+        final fileUri = Uri.file(cachedPath).toString();
+        final resolvedSong = _currentSong!.copyWith(url: fileUri);
         _currentSong = resolvedSong;
         _playlist[startIndex] = resolvedSong;
         _isResolvingUrl = false;
+        // 查询本地缓存封面路径，供 MediaSession 断网兜底
+        _cachedArtworkPath = await StreamCacheManager.instance
+            .getCachedArtworkPath(_currentSong!.id);
         notifyListeners();
 
         if (_audioService != null) {
-          await _setUrlAndPlay(result.url);
+          await _setUrlAndPlay(fileUri);
         }
       } else {
-        _isResolvingUrl = false;
-        _resolveError = '无法获取播放链接';
-        notifyListeners();
+        _cachedArtworkPath = null;
+        final apiClient = KugouApiClient();
+        final result = await apiClient.getSongUrlWithFallback(
+          _currentSong!.id,
+          quality: _audioQuality.value,
+          albumId: _currentSong!.albumId,
+          albumAudioId: _currentSong!.albumAudioId,
+        );
+
+        if (result != null && result.url.isNotEmpty) {
+          final resolvedSong = _currentSong!.copyWith(url: result.url);
+          _currentSong = resolvedSong;
+          _playlist[startIndex] = resolvedSong;
+          _isResolvingUrl = false;
+          notifyListeners();
+
+          if (_audioService != null) {
+            await _setUrlAndPlay(result.url);
+          }
+
+          // 边听边存：异步缓存音频（不阻塞播放）
+          if (cacheEnabled) {
+            StreamCacheManager.instance.cacheAudio(
+              resolvedSong,
+              result.quality,
+              result.url,
+            );
+            if (_currentSong!.artworkUri != null &&
+                _currentSong!.artworkUri!.isNotEmpty) {
+              StreamCacheManager.instance.cacheArtwork(
+                _currentSong!.id,
+                _currentSong!.artworkUri!,
+              );
+            }
+            StreamCacheManager.instance.cacheSongMetadata(_currentSong!);
+          }
+        } else {
+          _isResolvingUrl = false;
+          _resolveError = '无法获取播放链接';
+          notifyListeners();
+        }
       }
     } catch (e) {
       _isResolvingUrl = false;
@@ -832,6 +885,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         );
         if (cachedPath != null) {
           // 缓存命中，直接播放本地文件
+          // 查询本地缓存封面路径，供 MediaSession 断网兜底
+          _cachedArtworkPath = await StreamCacheManager.instance
+              .getCachedArtworkPath(song.id);
           await _setUrlAndPlay(
             Uri.file(cachedPath).toString(),
             seekTo: seekTo,
@@ -841,6 +897,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           _fetchClimaxData();
           return true;
         }
+        _cachedArtworkPath = null;
       }
 
       // 缓存未命中：需要 URL 来播放
@@ -1431,11 +1488,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         isFavorited = ctx.read<FavoritesProvider>().isFavorite(song.id);
       }
     } catch (_) {}
+    // 边听边存兜底：缓存命中时 artUrl 用本地 file:// 路径，避免断网时 MediaSession 无封面
+    final effectiveArtUrl = _cachedArtworkPath != null
+        ? Uri.file(_cachedArtworkPath!).toString()
+        : song.artworkUri;
     MediaNotificationService.updateNotification(
       // 使用 displayName 剥离 .mp3 等扩展名，与 _createAudioSource 行为保持一致
       title: song.displayName,
       artist: song.artist,
-      artUrl: song.artworkUri,
+      artUrl: effectiveArtUrl,
       // 本地歌曲传递文件路径，供原生侧提取内嵌封面
       fallbackFilePath: song.localPath,
       isPlaying: _isPlaying,

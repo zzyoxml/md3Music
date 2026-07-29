@@ -221,6 +221,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                                     child: SmartArtworkImage(
                                       artworkUri: currentSong.artworkUri,
                                       fallbackFilePath: currentSong.localPath,
+                                      songId: currentSong.id,
                                       size: 44,
                                       borderRadius: 6,
                                     ),
