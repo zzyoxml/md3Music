@@ -19,6 +19,8 @@ class SettingsRepository {
   // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
   static const String _keyDownloadWordLevelLyrics = 'settings_download_word_level_lyrics';
   static const String _keyUiScale = 'settings_ui_scale';
+  // Pad 端网格页面列数偏好
+  static const String _keyGridColumns = 'grid_columns';
 
   /// 读取本地打卡日期集合（格式 yyyy-MM-dd）
   Future<Set<String>> getSignedDays() async {
@@ -304,5 +306,19 @@ class SettingsRepository {
   Future<void> setUiScale(double scale) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyUiScale, scale);
+  }
+
+  // ===== Pad 端网格列数 =====
+
+  /// 读取 Pad 端网格页面列数偏好，默认 4。
+  Future<int> getGridColumns() async {
+    final prefs = await SharedPreferences.getInstance();
+    // Pad 端默认 4 栏
+    return prefs.getInt(_keyGridColumns) ?? 4;
+  }
+
+  Future<void> setGridColumns(int count) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyGridColumns, count);
   }
 }
