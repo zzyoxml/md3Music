@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="action_open_favorites"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_favorite"
+        android:shortcutShortLabel="@string/shortcut_favorites"
+        android:shortcutLongLabel="@string/shortcut_favorites">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.md3music.md3music"
+            android:targetClass="com.md3music.md3music.MainActivity">
+            <extra android:name="shortcutType" android:value="action_open_favorites" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="action_open_recognition"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_mic"
+        android:shortcutShortLabel="@string/shortcut_recognition"
+        android:shortcutLongLabel="@string/shortcut_recognition">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.md3music.md3music"
+            android:targetClass="com.md3music.md3music.MainActivity">
+            <extra android:name="shortcutType" android:value="action_open_recognition" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="action_open_search"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_search"
+        android:shortcutShortLabel="@string/shortcut_search"
+        android:shortcutLongLabel="@string/shortcut_search">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.md3music.md3music"
+            android:targetClass="com.md3music.md3music.MainActivity">
+            <extra android:name="shortcutType" android:value="action_open_search" />
+        </intent>
+    </shortcut>
+</shortcuts>

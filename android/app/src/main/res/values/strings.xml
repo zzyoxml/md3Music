@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_favorites">我的收藏</string>
+    <string name="shortcut_recognition">听歌识曲</string>
+    <string name="shortcut_search">搜索</string>
+</resources>
