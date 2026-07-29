@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/models/song.dart';
+import '../modules/player/mv_player_page.dart';
 import '../providers/downloads_provider.dart';
 import '../providers/favorites_provider.dart';
 import '../providers/local_favorites_provider.dart';
@@ -85,6 +86,20 @@ class SongListItem extends StatelessWidget {
                 );
               },
             ),
+            if (song.isOnline)
+              ListTile(
+                leading: const Icon(Icons.music_video),
+                title: const Text('查看 MV'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => MvPlayerPage(song: song),
+                    ),
+                  );
+                },
+              ),
           ],
         ),
       ),
