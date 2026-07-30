@@ -23,6 +23,7 @@ class MainActivity : FlutterActivity() {
     private val FOLDER_PICKER_CHANNEL = "com.md3music.md3music/folder_picker"
     private val FONT_PICKER_CHANNEL = "com.md3music.md3music/font_picker"
     private val MEDIA_STORE_CHANNEL = "com.md3music.md3music/media_store"
+    private val HOME_WIDGET_CHANNEL = "com.md3music.md3music/home_widget"
     private var pendingDesktopLyricAction: String? = null
     private var folderPickerResult: MethodChannel.Result? = null
     private var fontPickerResult: MethodChannel.Result? = null
@@ -463,6 +464,28 @@ class MainActivity : FlutterActivity() {
                             }
                         }
                     }.start()
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // 注册桌面小组件 MethodChannel：Flutter 侧推送播放状态到 AppWidget
+        val homeWidgetChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            HOME_WIDGET_CHANNEL
+        )
+        homeWidgetChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "updateWidget" -> {
+                    val title = call.argument<String>("title") ?: ""
+                    val artist = call.argument<String>("artist") ?: ""
+                    val isPlaying = call.argument<Boolean>("isPlaying") ?: false
+                    val position = call.argument<Number>("position")?.toLong() ?: 0L
+                    val duration = call.argument<Number>("duration")?.toLong() ?: 0L
+                    MusicWidgetProvider.updateAllWidgets(
+                        this, title, artist, isPlaying, position, duration
+                    )
+                    result.success(true)
                 }
                 else -> result.notImplemented()
             }

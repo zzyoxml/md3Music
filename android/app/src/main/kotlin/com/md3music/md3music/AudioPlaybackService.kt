@@ -58,6 +58,9 @@ class AudioPlaybackService : Service() {
         const val EXTRA_IS_FAVORITED = "isFavorited"
         const val EXTRA_BT_LYRIC_TEXT = "btLyricText"
         const val EXTRA_BT_LYRIC_ENABLED = "btLyricEnabled"
+        // 桌面小组件按钮动作（由 MusicWidgetProvider 转发）
+        const val ACTION_WIDGET_PLAY_PAUSE = "com.md3music.md3music.ACTION_WIDGET_PLAY_PAUSE"
+        const val ACTION_WIDGET_NEXT = "com.md3music.md3music.ACTION_WIDGET_NEXT"
 
         // 静态变量用于跨组件传递 FlutterEngine
         private var staticFlutterEngine: FlutterEngine? = null
@@ -65,6 +68,11 @@ class AudioPlaybackService : Service() {
 
         fun setFlutterEngine(engine: FlutterEngine) {
             staticFlutterEngine = engine
+        }
+
+        /** 检查是否有可用的 FlutterEngine（供 MusicWidgetProvider 判断是否需要拉起 app） */
+        fun hasFlutterEngine(): Boolean {
+            return staticFlutterEngine != null
         }
 
         fun acquireWakeLock(context: Context) {
@@ -267,7 +275,8 @@ class AudioPlaybackService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            ACTION_PREV, ACTION_PLAY_PAUSE, ACTION_NEXT, ACTION_TOGGLE_DESKTOP_LYRIC, ACTION_TOGGLE_FAVORITE -> {
+            ACTION_PREV, ACTION_PLAY_PAUSE, ACTION_NEXT, ACTION_TOGGLE_DESKTOP_LYRIC, ACTION_TOGGLE_FAVORITE,
+            ACTION_WIDGET_PLAY_PAUSE, ACTION_WIDGET_NEXT -> {
                 handleAction(intent.action!!)
                 return START_STICKY
             }
@@ -309,8 +318,8 @@ class AudioPlaybackService : Service() {
         if (engine != null) {
             val method = when (action) {
                 ACTION_PREV -> "previous"
-                ACTION_PLAY_PAUSE -> "togglePlayPause"
-                ACTION_NEXT -> "next"
+                ACTION_PLAY_PAUSE, ACTION_WIDGET_PLAY_PAUSE -> "togglePlayPause"
+                ACTION_NEXT, ACTION_WIDGET_NEXT -> "next"
                 ACTION_TOGGLE_DESKTOP_LYRIC -> "toggleDesktopLyric"
                 ACTION_TOGGLE_FAVORITE -> "toggleFavorite"
                 else -> return
@@ -612,6 +621,9 @@ class AudioPlaybackService : Service() {
                     if (originalBitmap != null) {
                         // 缓存原始 bitmap 供蓝牙歌词 refreshMetadata 复用，避免重复下载
                         lastArtBitmap = originalBitmap
+                        // 同步封面到桌面小组件（与通知栏/MediaSession 一致）
+                        MusicWidgetProvider.cachedArtwork = resizeBitmap(originalBitmap, 200)
+                        MusicWidgetProvider.notifyArtworkChanged(this@AudioPlaybackService)
                         // 通知 LargeIcon：缩放到 192px（~64dp @ xxhdpi）
                         val iconBitmap = resizeBitmap(originalBitmap, 192)
                         builder.setLargeIcon(iconBitmap)
