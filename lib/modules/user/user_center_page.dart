@@ -12,6 +12,7 @@ import '../login/login_page.dart';
 import '../settings/settings_page.dart';
 import 'cloud_music_page.dart';
 import 'downloads_page.dart';
+import 'listen_ranking_page.dart';
 import 'play_history_page.dart';
 
 class UserCenterPage extends StatefulWidget {
@@ -310,6 +311,11 @@ class _UserCenterPageState extends State<UserCenterPage> {
               _actionItem(cs, Icons.history, '历史', () {
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const PlayHistoryPage()),
+                );
+              }),
+              _actionItem(cs, Icons.bar_chart, '排行', () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const ListenRankingPage()),
                 );
               }),
               _actionItem(cs, Icons.cloud, '云盘', () {

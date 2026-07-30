@@ -842,21 +842,25 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  // 淡入淡出竞态 token：每次新的 fade 操作自增，旧 fade 循环检测到过期则中止
+  int _fadeToken = 0;
+
   Future<void> pause() async {
-    // 淡出：暂停前平滑降低音量
+    // 取消正在进行的淡入
+    _fadeToken++;
     final fadeEnabled = await SettingsRepository().getPauseFadeEnabled();
     if (fadeEnabled && _audioService != null) {
-      final originalVolume = _volume;
-      const fadeDuration = Duration(milliseconds: 250);
+      // 从播放器实际当前音量开始淡出（避免淡入未完成时音量跳变）
+      final currentVol = _audioService!.player.volume;
       const steps = 10;
-      final stepDuration = fadeDuration ~/ steps;
+      const stepMs = 50; // 10步 x 50ms = 500ms
       for (int i = steps - 1; i >= 0; i--) {
-        await _audioService?.player?.setVolume(originalVolume * i / steps);
-        await Future.delayed(stepDuration);
+        _audioService!.player.setVolume(currentVol * i / steps);
+        await Future.delayed(const Duration(milliseconds: stepMs));
       }
       await _audioService?.pause();
       // 恢复音量设置（下次播放时使用）
-      await _audioService?.player?.setVolume(originalVolume);
+      _audioService!.player.setVolume(_volume);
     } else {
       await _audioService?.pause();
     }
@@ -864,18 +868,22 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> resume() async {
-    // 淡入：播放后平滑提升音量
     final fadeEnabled = await SettingsRepository().getPauseFadeEnabled();
     if (fadeEnabled && _audioService != null) {
       final targetVolume = _volume;
-      await _audioService?.player?.setVolume(0);
-      await _audioService?.play();
-      const fadeDuration = Duration(milliseconds: 250);
+      final token = ++_fadeToken;
+      // 先设置低音量再播放，避免突然出声
+      _audioService!.player.setVolume(0.01);
+      // 不 await play()：避免 play() 的 Future 阻塞导致淡入代码不执行
+      _audioService!.play();
+      // 淡入：逐步提升音量到目标值
       const steps = 10;
-      final stepDuration = fadeDuration ~/ steps;
+      const stepMs = 50; // 10步 x 50ms = 500ms
       for (int i = 1; i <= steps; i++) {
-        await _audioService?.player?.setVolume(targetVolume * i / steps);
-        await Future.delayed(stepDuration);
+        if (token != _fadeToken) return;
+        await Future.delayed(const Duration(milliseconds: stepMs));
+        if (token != _fadeToken) return;
+        _audioService!.player.setVolume(targetVolume * i / steps);
       }
     } else {
       await _audioService?.play();

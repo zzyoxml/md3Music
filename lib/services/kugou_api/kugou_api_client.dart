@@ -2283,13 +2283,29 @@ class KugouApiClient {
     return await _get(KugouEndpoints.userHistory);
   }
 
+  /// 获取用户听歌历史排行。
+  ///
+  /// [type] 0 = 最近一周前 120 首，1 = 全部累计前 120 首
+  Future<Map<String, dynamic>?> getUserListenRanking({int type = 0}) async {
+    return await _get(
+      KugouEndpoints.userListen,
+      queryParameters: {'type': type},
+    );
+  }
+
+  /// 提交听歌历史到云端（支持跨设备同步）。
+  ///
+  /// [mxid] 专辑音乐 id（album_audio_id 或 MixSongID）
+  /// [playCount] 当前播放次数，可选
   Future<Map<String, dynamic>?> uploadPlayHistory(
-    String hash,
-    String songName, {
-    String? albumAudioId,
+    String mxid, {
+    int? playCount,
   }) async {
-    final params = <String, dynamic>{'hash': hash, 'songname': songName};
-    if (albumAudioId != null) params['album_audio_id'] = albumAudioId;
+    final params = <String, dynamic>{
+      'mxid': mxid,
+      'ot': DateTime.now().millisecondsSinceEpoch ~/ 1000, // 秒级时间戳
+    };
+    if (playCount != null) params['pc'] = playCount;
     return await _get(
       KugouEndpoints.playhistoryUpload,
       queryParameters: params,
