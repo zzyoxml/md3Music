@@ -308,6 +308,62 @@ class SettingsRepository {
     await prefs.setDouble(_keyUiScale, scale);
   }
 
+  // ===== 忽略音频焦点 =====
+  static const String _keyIgnoreAudioFocus = 'settings_ignore_audio_focus';
+
+  /// 是否忽略音频焦点（允许多声音同时播放），默认 false。
+  Future<bool> getIgnoreAudioFocus() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyIgnoreAudioFocus) ?? false;
+  }
+
+  Future<void> setIgnoreAudioFocus(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyIgnoreAudioFocus, value);
+  }
+
+  // ===== 暂停淡入淡出 =====
+  static const String _keyPauseFadeEnabled = 'settings_pause_fade_enabled';
+
+  /// 暂停/播放时是否启用音量淡入淡出，默认 false。
+  Future<bool> getPauseFadeEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyPauseFadeEnabled) ?? false;
+  }
+
+  Future<void> setPauseFadeEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyPauseFadeEnabled, value);
+  }
+
+  // ===== 主页 Tab 配置 =====
+  static const String _keyTabOrder = 'settings_tab_order';
+  static const String _keyHiddenTabs = 'settings_hidden_tabs';
+
+  /// 读取 tab 排序（存储为 tab id 列表）。
+  /// 返回 null 表示使用默认顺序。
+  Future<List<String>?> getTabOrder() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_keyTabOrder);
+  }
+
+  Future<void> setTabOrder(List<String> order) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyTabOrder, order);
+  }
+
+  /// 读取隐藏的 tab id 集合。
+  Future<Set<String>> getHiddenTabs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_keyHiddenTabs);
+    return list != null ? Set<String>.from(list) : {};
+  }
+
+  Future<void> setHiddenTabs(Set<String> hidden) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyHiddenTabs, hidden.toList());
+  }
+
   // ===== Pad 端网格列数 =====
 
   /// 读取 Pad 端网格页面列数偏好，默认 4。

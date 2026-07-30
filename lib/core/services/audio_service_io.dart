@@ -1,14 +1,16 @@
 import 'package:just_audio/just_audio.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// 音频焦点 / 音频会话管理。
 ///
 /// 关键设计：
-/// - [_pausedByInterruption]：标记"暂停是由音频焦点丢失引起的"。
+/// - [_pausedByInterruption]：标记“暂停是由音频焦点丢失引起的”。
 ///   仅在这种情况下才在重新获得焦点时自动恢复播放，
 ///   避免覆盖用户主动的暂停。
 /// - 区分临时中断（pause / unknown → 之后会自动恢复）和永久丢失
 ///   （如电话来电、强制中断），后者由 audio_session 标记 `dispose` 状态。
+/// - [ignoreAudioFocus]：开启后不响应音频焦点中断事件，允许多声音同时播放。
 class AudioService {
   static final AudioService _instance = AudioService._internal();
 
@@ -47,8 +49,17 @@ class AudioService {
   bool _pausedByInterruption = false;
   bool get wasPausedByInterruption => _pausedByInterruption;
 
+  /// 是否忽略音频焦点（允许多声音同时播放）。
+  /// 开启后不响应中断事件，不自动暂停/恢复。
+  bool ignoreAudioFocus = false;
+
   Future<void> init() async {
     await _player.setLoopMode(LoopMode.off);
+    // 加载忽略音频焦点偏好
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      ignoreAudioFocus = prefs.getBool('settings_ignore_audio_focus') ?? false;
+    } catch (_) {}
     await _configureAudioSession();
   }
 
@@ -57,6 +68,8 @@ class AudioService {
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration.music());
       session.interruptionEventStream.listen((event) {
+        // 忽略音频焦点模式：不响应任何中断事件
+        if (ignoreAudioFocus) return;
         if (event.begin) {
           switch (event.type) {
             case AudioInterruptionType.duck:
@@ -90,6 +103,8 @@ class AudioService {
       // 拔耳机 / 蓝牙断开：通常伴随系统焦点变更，但 just_audio 也会收到
       // becomingNoisyEvent。统一标记为「中断暂停」以便外层恢复逻辑复用。
       session.becomingNoisyEventStream.listen((_) {
+        // 忽略音频焦点模式：拔耳机也不暂停
+        if (ignoreAudioFocus) return;
         if (_player.playing) {
           _pausedByInterruption = true;
           pause();

@@ -843,12 +843,43 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> pause() async {
-    await _audioService?.pause();
+    // 淡出：暂停前平滑降低音量
+    final fadeEnabled = await SettingsRepository().getPauseFadeEnabled();
+    if (fadeEnabled && _audioService != null) {
+      final originalVolume = _volume;
+      const fadeDuration = Duration(milliseconds: 250);
+      const steps = 10;
+      final stepDuration = fadeDuration ~/ steps;
+      for (int i = steps - 1; i >= 0; i--) {
+        await _audioService?.player?.setVolume(originalVolume * i / steps);
+        await Future.delayed(stepDuration);
+      }
+      await _audioService?.pause();
+      // 恢复音量设置（下次播放时使用）
+      await _audioService?.player?.setVolume(originalVolume);
+    } else {
+      await _audioService?.pause();
+    }
     _saveState();
   }
 
   Future<void> resume() async {
-    await _audioService?.play();
+    // 淡入：播放后平滑提升音量
+    final fadeEnabled = await SettingsRepository().getPauseFadeEnabled();
+    if (fadeEnabled && _audioService != null) {
+      final targetVolume = _volume;
+      await _audioService?.player?.setVolume(0);
+      await _audioService?.play();
+      const fadeDuration = Duration(milliseconds: 250);
+      const steps = 10;
+      final stepDuration = fadeDuration ~/ steps;
+      for (int i = 1; i <= steps; i++) {
+        await _audioService?.player?.setVolume(targetVolume * i / steps);
+        await Future.delayed(stepDuration);
+      }
+    } else {
+      await _audioService?.play();
+    }
     _saveState();
   }
 
@@ -1557,6 +1588,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   void _recordHistory(Song song) {
     HistoryRepository().addHistory(song);
+    // 在线歌曲且已登录时，同步听歌历史到云端
+    if (song.isOnline && KugouApiClient().isLoggedIn) {
+      final mxid = song.albumAudioId ?? song.id;
+      KugouApiClient().uploadPlayHistory(mxid).then((_) {}).catchError((_) => null);
+    }
   }
 
   just_audio.UriAudioSource _createAudioSource(Song song) {

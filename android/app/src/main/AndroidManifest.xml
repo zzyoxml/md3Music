@@ -68,6 +68,20 @@
             android:name=".FloatingLyricService"
             android:foregroundServiceType="specialUse"
             android:exported="false" />
+        <!-- 桌面播放器小组件 -->
+        <receiver
+            android:name=".MusicWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.md3music.md3music.ACTION_UPDATE_WIDGET" />
+                <action android:name="com.md3music.md3music.ACTION_WIDGET_PLAY_PAUSE" />
+                <action android:name="com.md3music.md3music.ACTION_WIDGET_NEXT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/music_widget_info" />
+        </receiver>
         <meta-data android:name="lyricon_module" android:value="true" />
         <meta-data android:name="lyricon_module_author" android:value="𝒗𝒄𝒆𝒙𝒎𝒍 &amp; Little-White3110" />
         <meta-data android:name="lyricon_module_description" android:value="MD3Music Lyricon Provider" />

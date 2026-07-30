@@ -40,6 +40,7 @@ import 'providers/player_provider.dart';
 import 'providers/playlist_collection_notifier.dart';
 import 'providers/device_provider.dart';
 import 'providers/grid_columns_provider.dart';
+import 'providers/tab_config_provider.dart';
 import 'providers/theme_provider.dart';
 import 'services/nodejs_server.dart';
 
@@ -120,6 +121,8 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => DownloadsProvider()),
         // 跨页面广播「收藏的歌单」变更（详情页 → 我的收藏 tab 立即刷新）
         ChangeNotifierProvider(create: (_) => PlaylistCollectionNotifier()),
+        // 主页 Tab 配置（显示/隐藏、排序）
+        ChangeNotifierProvider(create: (_) => TabConfigProvider()),
       ],
       child: _AppView(showOnboarding: showOnboarding),
     );
@@ -319,23 +322,162 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   int _previousSelectedIndex = 0;
 
-  late final List<Widget> _pages;
+  /// 根据 tab id 构建对应页面 Widget。
+  Widget _buildPageForTab(String tabId) {
+    switch (tabId) {
+      case 'discover':
+        return DiscoverPage(
+          onAvatarTap: () {
+            final tabConfig = context.read<TabConfigProvider>();
+            final userIdx = tabConfig.visibleIndexOf('user');
+            if (userIdx >= 0) {
+              setState(() {
+                _previousSelectedIndex = _selectedIndex;
+                _selectedIndex = userIdx;
+              });
+            }
+          },
+        );
+      case 'library':
+        return const LibraryPage();
+      case 'favorites':
+        return const FavoritesPage();
+      case 'fm':
+        return const PersonalFmPage();
+      case 'user':
+        return const UserCenterPage();
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  /// 根据 tab id 获取对应的 NavigationDestination 图标。
+  NavigationDestination _buildDestination(TabItem tab) {
+    switch (tab.id) {
+      case 'discover':
+        return NavigationDestination(
+          icon: const Icon(Icons.explore_outlined),
+          selectedIcon: const Icon(Icons.explore),
+          label: tab.label,
+        );
+      case 'library':
+        return NavigationDestination(
+          icon: const Icon(Icons.library_music_outlined),
+          selectedIcon: const Icon(Icons.library_music),
+          label: tab.label,
+        );
+      case 'favorites':
+        return NavigationDestination(
+          icon: const Icon(Icons.favorite_outline),
+          selectedIcon: const Icon(Icons.favorite),
+          label: tab.label,
+        );
+      case 'fm':
+        return NavigationDestination(
+          icon: const Icon(Icons.radio_outlined),
+          selectedIcon: const Icon(Icons.radio),
+          label: tab.label,
+        );
+      case 'user':
+        return NavigationDestination(
+          icon: const Icon(Icons.person_outlined),
+          selectedIcon: const Icon(Icons.person),
+          label: tab.label,
+        );
+      default:
+        return NavigationDestination(
+          icon: const Icon(Icons.circle_outlined),
+          selectedIcon: const Icon(Icons.circle),
+          label: tab.label,
+        );
+    }
+  }
+
+  NavigationRailDestination _buildRailDestination(TabItem tab) {
+    switch (tab.id) {
+      case 'discover':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.explore_outlined),
+          selectedIcon: const Icon(Icons.explore),
+          label: Text(tab.label),
+        );
+      case 'library':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.library_music_outlined),
+          selectedIcon: const Icon(Icons.library_music),
+          label: Text(tab.label),
+        );
+      case 'favorites':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.favorite_outline),
+          selectedIcon: const Icon(Icons.favorite),
+          label: Text(tab.label),
+        );
+      case 'fm':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.radio_outlined),
+          selectedIcon: const Icon(Icons.radio),
+          label: Text(tab.label),
+        );
+      case 'user':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.person_outlined),
+          selectedIcon: const Icon(Icons.person),
+          label: Text(tab.label),
+        );
+      default:
+        return NavigationRailDestination(
+          icon: const Icon(Icons.circle_outlined),
+          selectedIcon: const Icon(Icons.circle),
+          label: Text(tab.label),
+        );
+    }
+  }
+
+  NavigationDrawerDestination _buildDrawerDestination(TabItem tab) {
+    switch (tab.id) {
+      case 'discover':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.explore_outlined),
+          selectedIcon: const Icon(Icons.explore),
+          label: Text(tab.label),
+        );
+      case 'library':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.library_music_outlined),
+          selectedIcon: const Icon(Icons.library_music),
+          label: Text(tab.label),
+        );
+      case 'favorites':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.favorite_outline),
+          selectedIcon: const Icon(Icons.favorite),
+          label: Text(tab.label),
+        );
+      case 'fm':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.radio_outlined),
+          selectedIcon: const Icon(Icons.radio),
+          label: Text(tab.label),
+        );
+      case 'user':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.person_outlined),
+          selectedIcon: const Icon(Icons.person),
+          label: Text(tab.label),
+        );
+      default:
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.circle_outlined),
+          selectedIcon: const Icon(Icons.circle),
+          label: Text(tab.label),
+        );
+    }
+  }
 
   @override
   void initState() {
     super.initState();
-    _pages = [
-      DiscoverPage(
-        onAvatarTap: () => setState(() {
-          _previousSelectedIndex = _selectedIndex;
-          _selectedIndex = 4;
-        }),
-      ),
-      const LibraryPage(),
-      const FavoritesPage(),
-      const PersonalFmPage(),
-      const UserCenterPage(),
-    ];
     // 未登录时尝试播放联网歌曲,弹出登录提示
     context.read<PlayerProvider>().onLoginRequired = _showLoginRequiredDialog;
     // 监听应用生命周期：detached（进程被系统销毁前的最后窗口）时尝试关停本地 Node.js
@@ -397,99 +539,27 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     );
   }
 
-  static const List<NavigationDestination> _destinations = [
-    NavigationDestination(
-      icon: Icon(Icons.explore_outlined),
-      selectedIcon: Icon(Icons.explore),
-      label: '发现',
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.library_music_outlined),
-      selectedIcon: Icon(Icons.library_music),
-      label: '本地音乐',
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.favorite_outline),
-      selectedIcon: Icon(Icons.favorite),
-      label: '我收藏',
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.radio_outlined),
-      selectedIcon: Icon(Icons.radio),
-      label: '私人FM',
-    ),
-    NavigationDestination(
-      icon: Icon(Icons.person_outlined),
-      selectedIcon: Icon(Icons.person),
-      label: '我的',
-    ),
-  ];
-
-  static const List<NavigationRailDestination> _railDestinations = [
-    NavigationRailDestination(
-      icon: Icon(Icons.explore_outlined),
-      selectedIcon: Icon(Icons.explore),
-      label: Text('发现'),
-    ),
-    NavigationRailDestination(
-      icon: Icon(Icons.library_music_outlined),
-      selectedIcon: Icon(Icons.library_music),
-      label: Text('本地音乐'),
-    ),
-    NavigationRailDestination(
-      icon: Icon(Icons.favorite_outline),
-      selectedIcon: Icon(Icons.favorite),
-      label: Text('我收藏'),
-    ),
-    NavigationRailDestination(
-      icon: Icon(Icons.radio_outlined),
-      selectedIcon: Icon(Icons.radio),
-      label: Text('私人FM'),
-    ),
-    NavigationRailDestination(
-      icon: Icon(Icons.person_outlined),
-      selectedIcon: Icon(Icons.person),
-      label: Text('我的'),
-    ),
-  ];
-
-  static const List<NavigationDrawerDestination> _drawerDestinations = [
-    NavigationDrawerDestination(
-      icon: Icon(Icons.explore_outlined),
-      selectedIcon: Icon(Icons.explore),
-      label: Text('发现'),
-    ),
-    NavigationDrawerDestination(
-      icon: Icon(Icons.library_music_outlined),
-      selectedIcon: Icon(Icons.library_music),
-      label: Text('本地音乐'),
-    ),
-    NavigationDrawerDestination(
-      icon: Icon(Icons.favorite_outline),
-      selectedIcon: Icon(Icons.favorite),
-      label: Text('我收藏'),
-    ),
-    NavigationDrawerDestination(
-      icon: Icon(Icons.radio_outlined),
-      selectedIcon: Icon(Icons.radio),
-      label: Text('私人FM'),
-    ),
-    NavigationDrawerDestination(
-      icon: Icon(Icons.person_outlined),
-      selectedIcon: Icon(Icons.person),
-      label: Text('我的'),
-    ),
-  ];
-
   @override
   Widget build(BuildContext context) {
+    final tabConfig = context.watch<TabConfigProvider>();
+    final visibleTabs = tabConfig.visibleTabs;
+  
+    // 安全守卫：如果当前选中索引超出可见 tab 范围，重置到最后一个
+    if (_selectedIndex >= visibleTabs.length) {
+      _selectedIndex = visibleTabs.length - 1;
+      if (_selectedIndex < 0) _selectedIndex = 0;
+    }
+  
+    // 动态生成导航目标
+    final destinations = visibleTabs.map(_buildDestination).toList();
+    final railDestinations = visibleTabs.map(_buildRailDestination).toList();
+    final drawerDestinations =
+        visibleTabs.map(_buildDrawerDestination).toList();
+  
     // 一级页面返回拦截：
     // 1) PopScope 拦截系统返回手势 / 物理返回键，canPop=false → 触发 onPopInvoked
-    // 2) 弹"退出 App"确认对话框
+    // 2) 弹“退出 App”确认对话框
     // 3) 确认后顺序关停：暂停播放 → 关停本地 Node.js → SystemNavigator.pop 杀进程
-    //    任务栈为空时系统默认行为是退出 App，但不会主动关停 Node.js server 和
-    //    audio service，端口会被占用（下一次冷启动会冲突），通知栏会残留。
-    //    因此需要这个拦截 + 手动 cleanup。
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -497,14 +567,13 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         _showExitConfirmDialog();
       },
       child: ResponsiveScaffold(
-        destinations: _destinations,
-        railDestinations: _railDestinations,
-        drawerDestinations: _drawerDestinations,
+        destinations: destinations,
+        railDestinations: railDestinations,
+        drawerDestinations: drawerDestinations,
         selectedIndex: _selectedIndex,
         onDestinationSelected: (index) {
           // 守卫：FullPlayer 在栈顶时（展开进度 > 0.5），忽略 tab 切换，
           // 避免与 FullPlayer 动画叠加导致状态混乱。
-          // 阈值用 0.5 与 isFullPlayerOnTop 一致，避免 dismiss 期间残留的小数值误拦截
           if (isFullPlayerOnTop) {
             return;
           }
@@ -513,20 +582,25 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
             _selectedIndex = index;
           });
         },
-        body: _buildBody(context),
-        compactBody: _buildBody(context),
-        mediumBody: _buildBody(context),
-        expandedBody: _buildBody(context),
+        body: _buildBody(context, visibleTabs),
+        compactBody: _buildBody(context, visibleTabs),
+        mediumBody: _buildBody(context, visibleTabs),
+        expandedBody: _buildBody(context, visibleTabs),
       ),
     );
   }
 
-  Widget _buildBody(BuildContext context) {
+  Widget _buildBody(BuildContext context, List<TabItem> visibleTabs) {
     // 切换方向：横屏（侧边导航栏）用上下淡入，竖屏（底部导航栏）用左右滑动
     final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
     final useVerticalTransition = isLandscape;
     final goingRight = _selectedIndex > _previousSelectedIndex;
+
+    // 安全守卫
+    final safeIndex =
+        _selectedIndex.clamp(0, visibleTabs.length - 1);
+    final currentTab = visibleTabs[safeIndex];
 
     return Column(
       children: [
@@ -544,7 +618,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
               curve: M3ExpressiveMotion.expressiveEasing,
             ),
             transitionBuilder: (child, animation) {
-              final isEntering = child.key == ValueKey(_selectedIndex);
+              final isEntering = child.key == ValueKey(currentTab.id);
 
               if (useVerticalTransition) {
                 // 侧边导航栏：基于 tab 顺序上下滑动
@@ -579,8 +653,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
               }
             },
             child: KeyedSubtree(
-              key: ValueKey(_selectedIndex),
-              child: _pages[_selectedIndex],
+              key: ValueKey(currentTab.id),
+              child: _buildPageForTab(currentTab.id),
             ),
           ),
         ),
