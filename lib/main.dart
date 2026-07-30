@@ -15,6 +15,7 @@ import 'modules/recognition/song_recognition_page.dart';
 import 'modules/search/search_page.dart';
 import 'services/nodejs_server.dart';
 import 'widgets/apple_lyrics/layout/lyric_preferences.dart';
+import 'widgets/md3_lyric_preferences.dart';
 
 const String _kBatteryPromptShownKey = 'battery_prompt_shown';
 
@@ -37,6 +38,8 @@ Future<void> main() async {
   await initializeDateFormatting('zh_CN');
   // 加载歌词字号/行间距偏好（从 SharedPreferences）
   await LyricPreferences.instance.load();
+  // 加载 MD3 风格播放页的独立歌词偏好（与 Apple Music 风格完全分离）
+  await Md3LyricPreferences.instance.load();
   // 注册通知栏/悬浮窗回调（悬浮窗内按钮 → DesktopLyricService；通知栏桌面歌词按钮 → toggle）
   MediaNotificationService.initCallbacks();
   DesktopLyricService.instance.registerNativeCallbacks();

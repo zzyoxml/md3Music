@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../widgets/md3_lyric_preferences.dart';
+
 class LyricsView extends StatefulWidget {
   final String lyrics;
   final Duration position;
@@ -29,10 +31,11 @@ class LyricsViewState extends State<LyricsView> {
   // 用户松手后，延迟恢复自动滚动的定时器
   Timer? _resumeAutoScrollTimer;
 
-  // 每行歌词固定高度
-  static const double _lineHeight = 48.0;
   // ListView 顶部 padding
   static const double _topPadding = 100.0;
+
+  // 当前 MD3 歌词偏好快照（行高 = fontSize * lineSpacing）
+  Md3LyricPreferences get _prefs => Md3LyricPreferences.instance;
 
   void forceScrollToPosition([Duration? target]) {
     _cancelResumeTimer();
@@ -97,6 +100,8 @@ class LyricsViewState extends State<LyricsView> {
   void initState() {
     super.initState();
     _parseLyrics();
+    // 监听 MD3 歌词偏好变化（字号/行间距/字体），实时刷新视图
+    _prefs.addListener(_onPrefsChanged);
   }
 
   @override
@@ -113,9 +118,14 @@ class LyricsViewState extends State<LyricsView> {
 
   @override
   void dispose() {
+    _prefs.removeListener(_onPrefsChanged);
     _cancelResumeTimer();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _onPrefsChanged() {
+    if (mounted) setState(() {});
   }
 
   void _parseLyrics() {
@@ -266,8 +276,9 @@ class LyricsViewState extends State<LyricsView> {
     final viewportHeight = _scrollController.position.viewportDimension;
     if (viewportHeight <= 0) return;
 
+    final lineHeight = _lineHeightFor(_prefs);
     final targetOffset =
-        _topPadding + index * _lineHeight - viewportHeight * 0.4;
+        _topPadding + index * lineHeight - viewportHeight * 0.4;
     final clampedOffset =
         targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent);
 
@@ -282,6 +293,11 @@ class LyricsViewState extends State<LyricsView> {
     }
   }
 
+  /// 计算单行高度 = fontSize * lineSpacing。
+  double _lineHeightFor(Md3LyricPreferences prefs) {
+    return prefs.fontSize * prefs.lineSpacing;
+  }
+
   void _onLineTap(int index) {
     if (index < _parsedLyrics.length) {
       widget.onSeek(_parsedLyrics[index].timestamp);
@@ -293,6 +309,11 @@ class LyricsViewState extends State<LyricsView> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final prefs = _prefs;
+    final fontSize = prefs.fontSize;
+    final otherFontSize = (fontSize - 3).clamp(10.0, fontSize);
+    final lineHeight = _lineHeightFor(prefs);
+    final fontFamily = prefs.effectiveFontFamily;
 
     // 排除全局 UI 缩放，歌词保持原始大小
     Widget content;
@@ -332,18 +353,19 @@ class LyricsViewState extends State<LyricsView> {
           return GestureDetector(
             onTap: () => _onLineTap(index),
             child: Container(
-              height: _lineHeight,
+              height: lineHeight,
               alignment: Alignment.center,
               child: AnimatedDefaultTextStyle(
                 duration: const Duration(milliseconds: 200),
                 curve: Curves.easeInOut,
                 style: DefaultTextStyle.of(context).style.copyWith(
-                  fontSize: isCurrent ? 18 : 15,
+                  fontSize: isCurrent ? fontSize : otherFontSize,
                   fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400,
+                  fontFamily: fontFamily,
                   color: isCurrent
                       ? colorScheme.primary
                       : colorScheme.onSurfaceVariant,
-                  height: 1.4,
+                  height: 1.2,
                 ),
                 child: Text(
                   line.text.isEmpty ? '...' : line.text,

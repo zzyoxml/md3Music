@@ -58,7 +58,7 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _useGaussianBlur = true;
   bool _useArtistPhotoBackground = false;
   int _artistPhotoInterval = 15;
-  double _artistPhotoOpacity = 0.72;
+  double _artistPhotoOpacity = 0.55;
   bool _useGlowEffect = true;
   bool _useFlowingBackground = true;
   String _appVersion = '';
@@ -297,46 +297,12 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  /// 歌词设置 section：点击进入字号/行间距调节面板。
+  /// 歌词设置 section：MD3 与 Apple Music 两种风格播放页的歌词
+  /// （字号/行间距/字体）均已移入播放页右上角菜单的"歌词显示设置"入口，
+  /// 设置页不再保留独立入口。
   Widget _buildLyricSection(ColorScheme colorScheme) {
     return Column(
       children: [
-        ListTile(
-          leading: const Icon(Icons.lyrics),
-          title: const Text('歌词显示'),
-          subtitle: const Text('字号、行间距'),
-          trailing: const Icon(Icons.chevron_right, size: 18),
-          onTap: () {
-            showModalBottomSheet(
-              context: context,
-              isScrollControlled: true,
-              builder: (context) =>
-                  SafeArea(child: const LyricPreferencesPanel()),
-            );
-          },
-        ),
-        // 歌词字体独立选择入口（与全局字体解耦）
-        // 仅 Apple Music 风格播放页开启时可用，因为歌词字体专为 AM 歌词渲染适配
-        AnimatedBuilder(
-          animation: LyricPreferences.instance,
-          builder: (context, _) {
-            final prefs = LyricPreferences.instance;
-            return ListTile(
-              leading: const Icon(Icons.text_fields),
-              title: const Text('歌词字体'),
-              subtitle: Text(
-                _useAmStylePlayer
-                    ? _lyricFontSourceLabel(prefs.fontSource)
-                    : '仅 Apple Music 风格播放页可用',
-              ),
-              trailing: const Icon(Icons.chevron_right, size: 18),
-              enabled: _useAmStylePlayer,
-              onTap: _useAmStylePlayer
-                  ? () => _showLyricFontSourceSheet(prefs)
-                  : null,
-            );
-          },
-        ),
         // Lyricon 词幕推送主开关
         SwitchListTile(
           title: const Text('Lyricon 词幕推送'),

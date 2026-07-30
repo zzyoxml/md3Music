@@ -24,6 +24,7 @@ import '../../services/kugou_api/kugou_models.dart';
 import 'comments_view.dart';
 import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
+import '../../widgets/md3_lyric_preferences_panel.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_transport_row.dart';
 import '../../widgets/player_artwork_image.dart';
@@ -1942,6 +1943,14 @@ class _FullPlayerState extends State<FullPlayer>
               mainAxisSize: MainAxisSize.min,
               children: [
                 ListTile(
+                  leading: const Icon(Icons.lyrics),
+                  title: const Text('歌词显示设置'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showLyricPreferencesSheet(context);
+                  },
+                ),
+                ListTile(
                   leading: const Icon(Icons.album),
                   title: Text(
                     albumTitle,
@@ -1997,6 +2006,16 @@ class _FullPlayerState extends State<FullPlayer>
           ),
         );
       },
+    );
+  }
+
+  /// 弹出 MD3 风格播放页的歌词显示设置面板（字号/行间距/字体）。
+  /// 与 Apple Music 风格的 `LyricPreferences` 完全独立。
+  void _showLyricPreferencesSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(child: const Md3LyricPreferencesPanel()),
     );
   }
 

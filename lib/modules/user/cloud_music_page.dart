@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -77,15 +79,10 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
         return;
       }
 
-      // 响应结构兼容：data 可能是 List 或 Map，列表字段可能是 info/list
+      // 响应结构兼容：data 可能是 List 或 Map，列表字段可能是 info/list，
+      // 且这些字段在酷狗接口下有时是 JSON 编码的字符串（需安全解析，避免强转崩溃）。
       final data = result['data'];
-      List<dynamic>? list;
-      if (data is List) {
-        list = data;
-      } else if (data is Map<String, dynamic>) {
-        list = data['info'] as List<dynamic>?;
-        list ??= data['list'] as List<dynamic>?;
-      }
+      final list = _safeExtractList(data);
 
       final songs = <Song>[];
       if (list != null) {
@@ -114,6 +111,51 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
         });
       }
     }
+  }
+
+  /// 安全地从响应字段提取歌曲列表。
+  /// 兼容以下情况：
+  /// 1. 字段本身就是 List（直接返回）。
+  /// 2. 字段是 Map 且 info/list 字段本身是 List。
+  /// 3. 字段是 Map 且 info/list 字段是 JSON 编码的字符串（酷狗部分接口
+  ///    偶发返回 `data = {"info": "[{...},...]"}` 这种格式，
+  ///    直接 `as List<dynamic>?` 会抛类型转换异常）。
+  /// 4. 字段是 JSON 编码的字符串本身。
+  /// 解析失败返回 null（按空列表处理）。
+  static List<dynamic>? _safeExtractList(dynamic data) {
+    if (data is List) return data;
+    if (data is String) {
+      try {
+        final decoded = jsonDecode(data);
+        if (decoded is List) return decoded;
+        if (decoded is Map) {
+          final inner = decoded['info'] ?? decoded['list'];
+          if (inner is List) return inner;
+          if (inner is String) {
+            final innerDecoded = jsonDecode(inner);
+            if (innerDecoded is List) return innerDecoded;
+          }
+        }
+      } catch (_) {
+        return null;
+      }
+      return null;
+    }
+    if (data is Map<String, dynamic>) {
+      for (final key in const ['info', 'list']) {
+        final inner = data[key];
+        if (inner is List) return inner;
+        if (inner is String) {
+          try {
+            final decoded = jsonDecode(inner);
+            if (decoded is List) return decoded;
+          } catch (_) {
+            // 继续尝试下个字段
+          }
+        }
+      }
+    }
+    return null;
   }
 
 
@@ -282,11 +324,21 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
                 ),
           ),
           const SizedBox(height: 8),
-          Text(
-            '下拉刷新重试',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: cs.onSurfaceVariant.withValues(alpha: 0.6),
-                ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              '在酷狗音乐 App 中上传歌曲后即可在此查看',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+                  ),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 16),
+          FilledButton.tonalIcon(
+            onPressed: _loadCloudSongs,
+            icon: const Icon(Icons.refresh, size: 18),
+            label: const Text('刷新'),
           ),
         ],
       ),

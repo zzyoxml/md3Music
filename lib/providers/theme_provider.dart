@@ -34,7 +34,7 @@ class ThemeProvider extends ChangeNotifier {
   String? _loadedCustomFontFamily;
   bool _useArtistPhotoBackground = false;
   int _artistPhotoInterval = 15;
-  double _artistPhotoOpacity = 0.72;
+  double _artistPhotoOpacity = 0.55;
 
   ThemeMode get themeMode => _themeMode;
   bool get useDynamicColor => _useDynamicColor;
@@ -192,7 +192,7 @@ class ThemeProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _useArtistPhotoBackground = prefs.getBool(_artistPhotoBgKey) ?? false;
     _artistPhotoInterval = prefs.getInt(_artistPhotoIntervalKey) ?? 15;
-    _artistPhotoOpacity = prefs.getDouble(_artistPhotoOpacityKey) ?? 0.72;
+    _artistPhotoOpacity = prefs.getDouble(_artistPhotoOpacityKey) ?? 0.55;
     notifyListeners();
   }
 
