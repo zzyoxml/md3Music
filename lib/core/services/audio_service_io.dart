@@ -55,6 +55,10 @@ class AudioService {
 
   double get speed => _player.speed;
 
+  /// Android 音频会话 ID，供均衡器绑定使用。
+  /// just_audio 0.9.x 在播放器初始化后才会有值。
+  int? get androidAudioSessionId => _player.androidAudioSessionId;
+
   /// 是否因为音频焦点丢失 / 设备中断（拔耳机、来电等）而处于暂停状态。
   /// 在此状态下若重新获得音频焦点，可自动恢复播放。
   /// 主动调用 [pause] 不会设置此标志。

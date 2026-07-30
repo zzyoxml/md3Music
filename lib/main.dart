@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
 import 'core/services/desktop_lyric_service.dart';
+import 'core/services/equalizer_service.dart';
 import 'core/services/lyricon_provider_service.dart';
 import 'core/services/media_notification_service.dart';
 import 'data/repositories/settings_repository.dart';
@@ -91,6 +92,9 @@ Future<void> main() async {
     final prefs = await SharedPreferences.getInstance();
     needsOnboarding = !(prefs.getBool('onboarding_completed') ?? false);
   } catch (_) {}
+
+  // 初始化均衡器服务（恢复偏好设置，监听播放状态自动绑定）
+  await EqualizerService.instance.init();
 
   runApp(MyApp(showOnboarding: needsOnboarding));
 }

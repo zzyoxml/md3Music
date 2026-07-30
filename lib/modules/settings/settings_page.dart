@@ -13,6 +13,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/audio_service.dart';
 import '../../core/services/custom_font_loader.dart';
 import '../../core/services/desktop_lyric_service.dart';
+import '../../core/services/equalizer_service.dart';
 import '../../core/services/folder_picker_service.dart';
 import '../../core/services/lyricon_provider_service.dart';
 import '../../core/services/media_notification_service.dart';
@@ -27,6 +28,7 @@ import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/apple_lyrics/preview/lyrics_preview_page.dart';
 import '../../widgets/seed_color_picker.dart';
+import 'equalizer_settings_page.dart';
 
 /// CI compile-time version injection via --dart-define=APP_VERSION=X
 /// Fallback display when runtime PackageInfo read fails.
@@ -933,6 +935,29 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: Text(_getQualityLabel(_defaultQuality)),
           trailing: const Icon(Icons.chevron_right),
           onTap: () => _showQualityDialog(),
+        ),
+        ListenableBuilder(
+          listenable: EqualizerService.instance,
+          builder: (context, _) {
+            final eq = EqualizerService.instance;
+            return ListTile(
+              leading: Icon(Icons.graphic_eq,
+                  color: eq.enabled
+                      ? Theme.of(context).colorScheme.primary
+                      : null),
+              title: const Text('均衡器'),
+              subtitle: Text(eq.enabled
+                  ? '已开启 · ${eq.currentPreset}'
+                  : '未开启'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const EqualizerSettingsPage(),
+                ),
+              ),
+            );
+          },
         ),
         SwitchListTile(
           title: const Text('自动领取VIP'),

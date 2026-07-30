@@ -15,6 +15,8 @@
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <!-- Android 11+ 修改外部存储文件元数据（封面/歌词）需要此权限 -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- 均衡器功能需要此权限 -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <application
         android:label="md3music"
         android:name="${applicationName}"

@@ -34,6 +34,9 @@ class AudioService {
 
   double get speed => _player.speed;
 
+  /// Web 端无 Android 音频会话 ID。
+  int? get androidAudioSessionId => null;
+
   /// 是否忽略音频焦点（Web 端无实际效果，保持接口一致）。
   bool ignoreAudioFocus = false;
 

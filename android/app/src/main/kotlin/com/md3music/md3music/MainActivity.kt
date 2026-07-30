@@ -74,6 +74,9 @@ class MainActivity : FlutterActivity() {
         // 注册 MetadataWriterPlugin：处理下载完成后嵌入元数据（标题/艺术家/专辑/封面/歌词）
         MetadataWriterPlugin().register(flutterEngine)
 
+        // 注册均衡器插件：Android 原生 Equalizer，绑定 just_audio 的 audio session ID
+        EqualizerPlugin().register(flutterEngine)
+
         // 初始化 Node.js 本地 API 服务器
         android.util.Log.d("MainActivity", "Initializing NodeJsService...")
         val nodeSvc = NodeJsService(this, flutterEngine)
