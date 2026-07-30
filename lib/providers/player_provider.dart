@@ -960,13 +960,52 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  // 淡入淡出竞态 token：每次新的 fade 操作自增，旧 fade 循环检测到过期则中止
+  int _fadeToken = 0;
+
   Future<void> pause() async {
-    await _audioService?.pause();
+    // 取消正在进行的淡入
+    _fadeToken++;
+    final fadeEnabled = await SettingsRepository().getPauseFadeEnabled();
+    if (fadeEnabled && _audioService != null) {
+      // 从播放器实际当前音量开始淡出（避免淡入未完成时音量跳变）
+      final currentVol = _audioService!.player.volume;
+      const steps = 10;
+      const stepMs = 50; // 10步 x 50ms = 500ms
+      for (int i = steps - 1; i >= 0; i--) {
+        _audioService!.player.setVolume(currentVol * i / steps);
+        await Future.delayed(const Duration(milliseconds: stepMs));
+      }
+      await _audioService?.pause();
+      // 恢复音量设置（下次播放时使用）
+      _audioService!.player.setVolume(_volume);
+    } else {
+      await _audioService?.pause();
+    }
     _saveState();
   }
 
   Future<void> resume() async {
-    await _audioService?.play();
+    final fadeEnabled = await SettingsRepository().getPauseFadeEnabled();
+    if (fadeEnabled && _audioService != null) {
+      final targetVolume = _volume;
+      final token = ++_fadeToken;
+      // 先设置低音量再播放，避免突然出声
+      _audioService!.player.setVolume(0.01);
+      // 不 await play()：避免 play() 的 Future 阻塞导致淡入代码不执行
+      _audioService!.play();
+      // 淡入：逐步提升音量到目标值
+      const steps = 10;
+      const stepMs = 50; // 10步 x 50ms = 500ms
+      for (int i = 1; i <= steps; i++) {
+        if (token != _fadeToken) return;
+        await Future.delayed(const Duration(milliseconds: stepMs));
+        if (token != _fadeToken) return;
+        _audioService!.player.setVolume(targetVolume * i / steps);
+      }
+    } else {
+      await _audioService?.play();
+    }
     _saveState();
   }
 
@@ -1705,6 +1744,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   void _recordHistory(Song song) {
     HistoryRepository().addHistory(song);
+    // 在线歌曲且已登录时，同步听歌历史到云端
+    if (song.isOnline && KugouApiClient().isLoggedIn) {
+      final mxid = song.albumAudioId ?? song.id;
+      KugouApiClient().uploadPlayHistory(mxid).then((_) {}).catchError((_) => null);
+    }
   }
 
   just_audio.UriAudioSource _createAudioSource(Song song) {

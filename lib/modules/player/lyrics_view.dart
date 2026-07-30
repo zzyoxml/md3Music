@@ -125,6 +125,8 @@ class LyricsViewState extends State<LyricsView> {
     final lines = widget.lyrics.split('\n');
     // LRC 格式: [mm:ss.fff]text
     final lrcRegex = RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\](.*)');
+    // 逐字 LRC 时间戳（用于检测一行内多个时间戳）
+    final lrcTimestampRegex = RegExp(r'\[(\d{2}):(\d{2})\.(\d{2,3})\]');
     // KRC 行首: [start_ms,duration_ms]  后跟 <offset,duration[,property]>word
     final krcLineRegex = RegExp(r'^\[(\d+),(\d+)\](.*)$');
     // KRC 词时间标签：<offset,duration> 或 <offset,duration,property>
@@ -145,6 +147,47 @@ class LyricsViewState extends State<LyricsView> {
     for (final raw in lines) {
       final line = raw.trim();
       if (line.isEmpty) continue;
+
+      // 检测逐字 LRC：一行内有多个时间戳且时间戳之间有文本
+      final allTimestamps = lrcTimestampRegex.allMatches(line).toList();
+      if (allTimestamps.length > 1) {
+        // 检查是否为逐字 LRC（时间戳之间有非空白文本）
+        bool isWordLevel = false;
+        for (int i = 0; i < allTimestamps.length - 1; i++) {
+          final between = line.substring(
+            allTimestamps[i].end,
+            allTimestamps[i + 1].start,
+          );
+          if (between.trim().isNotEmpty) {
+            isWordLevel = true;
+            break;
+          }
+        }
+
+        if (isWordLevel) {
+          // 逐字 LRC：提取第一个时间戳，剥离所有时间戳后拼接文本
+          final firstMatch = allTimestamps.first;
+          final minutes = int.parse(firstMatch.group(1)!);
+          final seconds = int.parse(firstMatch.group(2)!);
+          final millisStr = firstMatch.group(3)!;
+          final millis = millisStr.length == 2
+              ? int.parse(millisStr) * 10
+              : int.parse(millisStr);
+          // 剥离所有时间戳，只保留文本
+          final text = line.replaceAll(lrcTimestampRegex, '').trim();
+          if (text.isNotEmpty) {
+            _parsedLyrics.add(
+              _LyricLine(
+                timestamp: Duration(
+                  milliseconds: minutes * 60000 + seconds * 1000 + millis - offsetMs,
+                ),
+                text: text,
+              ),
+            );
+          }
+          continue;
+        }
+      }
 
       final lrcMatch = lrcRegex.firstMatch(line);
       if (lrcMatch != null) {
@@ -305,7 +348,7 @@ class LyricsViewState extends State<LyricsView> {
                 child: Text(
                   line.text.isEmpty ? '...' : line.text,
                   textAlign: TextAlign.center,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),

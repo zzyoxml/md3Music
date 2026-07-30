@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/services/audio_service.dart';
 import '../../core/services/custom_font_loader.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/folder_picker_service.dart';
@@ -19,6 +20,7 @@ import '../../core/theme/app_theme.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../onboarding/onboarding_page.dart';
 import '../../providers/kugou_provider.dart';
+import '../../providers/tab_config_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/stream_cache_manager.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
@@ -73,6 +75,10 @@ class _SettingsPageState extends State<SettingsPage> {
   // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
   bool _downloadWordLevelLyrics = true;
   double _uiScale = 1.0;
+  // 忽略音频焦点开关（允许多声音同时播放）
+  bool _ignoreAudioFocus = false;
+  // 暂停淡入淡出开关
+  bool _pauseFadeEnabled = false;
 
   @override
   void initState() {
@@ -162,6 +168,8 @@ class _SettingsPageState extends State<SettingsPage> {
         .getBluetoothLyricEnabled();
     final downloadWordLevelLyrics = await _settingsRepository
         .getDownloadWordLevelLyrics();
+    final ignoreAudioFocus = await _settingsRepository.getIgnoreAudioFocus();
+    final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
 
     setState(() {
       _themeMode = themeMode;
@@ -180,6 +188,8 @@ class _SettingsPageState extends State<SettingsPage> {
       _downloadWordLevelLyrics = downloadWordLevelLyrics;
       _uiScale = uiScale;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
+      _ignoreAudioFocus = ignoreAudioFocus;
+      _pauseFadeEnabled = pauseFadeEnabled;
     });
   }
 
@@ -251,6 +261,9 @@ class _SettingsPageState extends State<SettingsPage> {
           const Divider(),
           _buildSectionHeader('播放'),
           _buildPlaybackSection(colorScheme),
+          const Divider(),
+          _buildSectionHeader('主页管理'),
+          _buildTabManagementSection(colorScheme),
           const Divider(),
           _buildSectionHeader('边听边存'),
           _buildStreamCacheSection(colorScheme),
@@ -966,7 +979,56 @@ class _SettingsPageState extends State<SettingsPage> {
             _settingsRepository.setAutoReceiveVip(value);
           },
         ),
+        SwitchListTile(
+          title: const Text('忽略音频焦点'),
+          subtitle: const Text('允许多声音同时播放，不被其他应用打断（拔耳机也不暂停）'),
+          value: _ignoreAudioFocus,
+          onChanged: (value) {
+            setState(() {
+              _ignoreAudioFocus = value;
+            });
+            _settingsRepository.setIgnoreAudioFocus(value);
+            // 实时同步到 AudioService 单例
+            AudioService().ignoreAudioFocus = value;
+          },
+        ),
+        SwitchListTile(
+          title: const Text('暂停淡入淡出'),
+          subtitle: const Text('暂停/播放时音量平滑过渡，避免突然出声'),
+          value: _pauseFadeEnabled,
+          onChanged: (value) {
+            setState(() {
+              _pauseFadeEnabled = value;
+            });
+            _settingsRepository.setPauseFadeEnabled(value);
+          },
+        ),
       ],
+    );
+  }
+
+  /// 主页管理 section：Tab 显示/隐藏开关 + 拖拽排序
+  Widget _buildTabManagementSection(ColorScheme colorScheme) {
+    return Column(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.tab),
+          title: const Text('主页 Tab 管理'),
+          subtitle: const Text('显示/隐藏、拖拽排序'),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => _showTabManagementSheet(),
+        ),
+      ],
+    );
+  }
+
+  /// 弹出 Tab 管理面板：支持拖拽排序 + 显示/隐藏开关。
+  void _showTabManagementSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => const _TabManagementPanel(),
     );
   }
 
@@ -1547,6 +1609,131 @@ class _SettingsPageState extends State<SettingsPage> {
           behavior: SnackBarBehavior.floating,
         ),
       );
+    }
+  }
+}
+
+/// Tab 管理面板：支持拖拽排序 + 显示/隐藏开关。
+///
+/// “我的”页面不允许隐藏（保证用户始终有入口进入设置/登录）。
+class _TabManagementPanel extends StatelessWidget {
+  const _TabManagementPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final tabConfig = context.watch<TabConfigProvider>();
+    final allTabs = tabConfig.allTabs;
+    final hiddenTabs = tabConfig.hiddenTabs;
+
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.6,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '主页 Tab 管理',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => tabConfig.resetToDefault(),
+                    child: const Text('重置'),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                '拖拽排序、开关显示/隐藏（“我的”不可隐藏）',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ReorderableListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                itemCount: allTabs.length,
+                onReorder: (oldIndex, newIndex) {
+                  tabConfig.reorderTabs(oldIndex, newIndex);
+                },
+                itemBuilder: (context, index) {
+                  final tab = allTabs[index];
+                  final isHidden = hiddenTabs.contains(tab.id);
+                  return ListTile(
+                    key: ValueKey(tab.id),
+                    leading: Icon(
+                      _getTabIcon(tab.id),
+                      color: isHidden
+                          ? colorScheme.onSurfaceVariant
+                          : colorScheme.primary,
+                    ),
+                    title: Text(
+                      tab.label,
+                      style: TextStyle(
+                        color: isHidden
+                            ? colorScheme.onSurfaceVariant
+                            : null,
+                      ),
+                    ),
+                    subtitle: !tab.isRemovable
+                        ? Text(
+                            '必显示',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          )
+                        : null,
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (tab.isRemovable)
+                          Switch(
+                            value: !isHidden,
+                            onChanged: (_) {
+                              tabConfig.toggleTabVisibility(tab.id);
+                            },
+                          ),
+                        Icon(
+                          Icons.drag_handle,
+                          size: 20,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _getTabIcon(String tabId) {
+    switch (tabId) {
+      case 'discover':
+        return Icons.explore;
+      case 'library':
+        return Icons.library_music;
+      case 'favorites':
+        return Icons.favorite;
+      case 'fm':
+        return Icons.radio;
+      case 'user':
+        return Icons.person;
+      default:
+        return Icons.circle;
     }
   }
 }

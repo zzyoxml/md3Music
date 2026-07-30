@@ -34,6 +34,9 @@ class AudioService {
 
   double get speed => _player.speed;
 
+  /// 是否忽略音频焦点（Web 端无实际效果，保持接口一致）。
+  bool ignoreAudioFocus = false;
+
   Future<void> init() async {
     await _player.setLoopMode(LoopMode.off);
   }
