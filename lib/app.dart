@@ -292,9 +292,11 @@ class _SystemUiUpdaterState extends State<_SystemUiUpdater>
     final surfaceColor = Theme.of(context).colorScheme.surface;
     final isDark = brightness == Brightness.dark;
 
-    // 主界面使用非沉浸模式：状态栏不透明（用 surface 色填充），
-    // 导航栏跟随 surface 色，确保从播放器沉浸模式返回后恢复正常显示。
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    // 主界面使用非沉浸模式：状态栏和导航栏正常显示，不延伸到系统栏后面。
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle(
         statusBarColor: surfaceColor,

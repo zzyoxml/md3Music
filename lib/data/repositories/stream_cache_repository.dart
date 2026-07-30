@@ -306,15 +306,29 @@ class StreamCacheRepository {
   /// 原子写入：先写 .tmp 再 rename 为 index.json，避免崩溃丢数据
   Future<void> _saveIndex() async {
     if (_cacheDir == null) return;
+    // 确保缓存目录存在（防止目录被系统清理或初始化遗漏）
+    try {
+      if (!await _cacheDir!.exists()) {
+        await _cacheDir!.create(recursive: true);
+      }
+    } catch (_) {
+      // 目录创建失败（如外部存储被系统回收），跳过保存
+      return;
+    }
     final indexFile = _indexFile();
     final tmpFile = _indexTmpFile();
     try {
       await tmpFile.writeAsString(jsonEncode(_index.toJson()));
       await tmpFile.rename(indexFile.path);
     } catch (e) {
-      // 保存失败仅打印日志，不抛出
-      // ignore: avoid_print
-      print('[StreamCacheRepository] _saveIndex 失败: $e');
+      // rename 失败时尝试用 writeAsString 直接写入（跨文件系统 rename 可能失败）
+      try {
+        await indexFile.writeAsString(jsonEncode(_index.toJson()));
+      } catch (e2) {
+        // 保存失败仅打印日志，不抛出
+        // ignore: avoid_print
+        print('[StreamCacheRepository] _saveIndex 失败: $e2');
+      }
     }
   }
 
