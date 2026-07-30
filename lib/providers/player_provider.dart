@@ -8,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../core/services/audio_service.dart';
 import '../core/services/desktop_lyric_service.dart';
+import '../core/services/home_widget_service.dart';
 import '../core/services/lyricon_provider_service.dart';
 import '../core/services/media_notification_service.dart';
 import '../core/services/media_store_service.dart';
@@ -1686,6 +1687,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       duration: _duration ?? Duration.zero,
       desktopLyricEnabled: DesktopLyricService.instance.enabled,
       isFavorited: isFavorited,
+    );
+    // 同步更新桌面小组件（封面由原生侧从 MediaSession 缓存同步，无需传路径）
+    HomeWidgetService.updateWidget(
+      title: song.displayName,
+      artist: song.artist,
+      isPlaying: _isPlaying,
+      position: _position,
+      duration: _duration ?? Duration.zero,
     );
   }
 
