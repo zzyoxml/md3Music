@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -26,9 +27,36 @@ class KugouApiClient {
       ),
     );
 
-    _dio.interceptors.add(InterceptorsWrapper(onRequest: _onRequest));
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: _onRequest,
+      onResponse: (response, handler) {
+        // dio 拿到了响应（无论 statusCode），视为服务端可达
+        networkReachable.value = true;
+        handler.next(response);
+      },
+      onError: (e, handler) {
+        // 只有连接类错误才算"服务端不可达"；
+        // 4xx/5xx 业务错误（如未登录）仍然代表网络可达
+        if (e is DioException && _isConnectionError(e)) {
+          networkReachable.value = false;
+        }
+        handler.next(e);
+      },
+    ));
 
     _initFromStorage();
+  }
+
+  /// 全局网络可达性状态。任意 dio 请求成功 → true；连接类错误 → false。
+  /// 业务错误（4xx/5xx）不影响此值。
+  /// FavoritesPage 等页面用它实时反映 banner 显示。
+  static final ValueNotifier<bool> networkReachable = ValueNotifier(true);
+
+  static bool _isConnectionError(DioException e) {
+    return e.type == DioExceptionType.connectionError ||
+        e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.receiveTimeout;
   }
 
   late final Dio _dio;
