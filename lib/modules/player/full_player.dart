@@ -652,6 +652,12 @@ class _FullPlayerState extends State<FullPlayer>
   ) {
     // 横屏/竖屏 edgeToEdge 模式：底部需要额外 padding 避免被导航栏遮挡
     final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 8;
+    // 横屏 + 写真背景开启时，写真已铺满全屏作为背景，隐藏左侧封面避免视觉重复。
+    // 关闭写真背景时恢复显示封面。
+    final usePhotoBg = context.watch<ThemeProvider>().useArtistPhotoBackground;
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    final hideArtworkForPhotoBg =
+        isLandscape && usePhotoBg && currentSong.isOnline;
 
     return SafeArea(
       bottom: false,
@@ -678,31 +684,33 @@ class _FullPlayerState extends State<FullPlayer>
                             .clamp(120.0, 300.0);
                         return Stack(
                           children: [
-                            // 封面居中：补偿顶栏高度（IconButton 48 + Padding 4×2 = 56），
-                            // 使封面在整个屏幕垂直方向居中，而非画布（去除顶栏后的空间）居中
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 56),
-                              child: Center(
-                                child: SizedBox(
-                                  width: size,
-                                  height: size,
-                                  child: AnimatedScale(
-                                    scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                                    duration: const Duration(milliseconds: 500),
-                                    curve: Curves.easeOutBack,
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(16),
-                                      child: _buildCrossfadeArtwork(
-                                        currentSong.artworkUri,
-                                        colorScheme,
-                                        iconSize: 48,
-                                        fallbackFilePath: currentSong.localPath,
+                            // 封面：横屏 + 写真背景开启时隐藏（避免与背景写真重复）
+                            if (!hideArtworkForPhotoBg)
+                              // 封面居中：补偿顶栏高度（IconButton 48 + Padding 4×2 = 56），
+                              // 使封面在整个屏幕垂直方向居中，而非画布（去除顶栏后的空间）居中
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 56),
+                                child: Center(
+                                  child: SizedBox(
+                                    width: size,
+                                    height: size,
+                                    child: AnimatedScale(
+                                      scale: playerProvider.isPlaying ? 1.0 : 0.85,
+                                      duration: const Duration(milliseconds: 500),
+                                      curve: Curves.easeOutBack,
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: _buildCrossfadeArtwork(
+                                          currentSong.artworkUri,
+                                          colorScheme,
+                                          iconSize: 48,
+                                          fallbackFilePath: currentSong.localPath,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
                             // 歌曲信息：垂直方向 80% 位置，水平居中（手机横屏时隐藏）
                             if (!_isPhoneLandscape)
                               Positioned(
@@ -811,6 +819,12 @@ class _FullPlayerState extends State<FullPlayer>
   ) {
     // 横屏/竖屏 edgeToEdge 模式：底部需要额外 padding 避免被导航栏遮挡
     final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 8;
+    // 横屏 + 写真背景开启时，写真已铺满全屏作为背景，隐藏左侧封面避免视觉重复。
+    // 关闭写真背景时恢复显示封面。
+    final usePhotoBg = context.watch<ThemeProvider>().useArtistPhotoBackground;
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    final hideArtworkForPhotoBg =
+        isLandscape && usePhotoBg && currentSong.isOnline;
 
     return SafeArea(
       bottom: false,
@@ -830,35 +844,37 @@ class _FullPlayerState extends State<FullPlayer>
                         final maxSize = (constraints.maxWidth - 32).clamp(0.0, 380.0);
                         return Stack(
                           children: [
-                            // 封面居中：补偿顶栏高度，使封面在整个屏幕垂直方向居中
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 56),
-                              child: Center(
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    maxWidth: maxSize,
-                                    maxHeight: maxSize,
-                                  ),
-                                  child: AspectRatio(
-                                    aspectRatio: 1,
-                                    child: AnimatedScale(
-                                      scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                                      duration: const Duration(milliseconds: 500),
-                                      curve: Curves.easeOutBack,
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(16),
-                                        child: _buildCrossfadeArtwork(
-                                          currentSong.artworkUri,
-                                          colorScheme,
-                                          iconSize: 48,
-                                          fallbackFilePath: currentSong.localPath,
+                            // 封面：横屏 + 写真背景开启时隐藏（避免与背景写真重复）
+                            if (!hideArtworkForPhotoBg)
+                              // 封面居中：补偿顶栏高度，使封面在整个屏幕垂直方向居中
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 56),
+                                child: Center(
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(
+                                      maxWidth: maxSize,
+                                      maxHeight: maxSize,
+                                    ),
+                                    child: AspectRatio(
+                                      aspectRatio: 1,
+                                      child: AnimatedScale(
+                                        scale: playerProvider.isPlaying ? 1.0 : 0.85,
+                                        duration: const Duration(milliseconds: 500),
+                                        curve: Curves.easeOutBack,
+                                        child: ClipRRect(
+                                          borderRadius: BorderRadius.circular(16),
+                                          child: _buildCrossfadeArtwork(
+                                            currentSong.artworkUri,
+                                            colorScheme,
+                                            iconSize: 48,
+                                            fallbackFilePath: currentSong.localPath,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
                             // 歌曲信息：垂直方向 80% 位置，水平居中（手机横屏时隐藏）
                             if (!_isPhoneLandscape)
                               Positioned(
