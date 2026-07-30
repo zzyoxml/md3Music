@@ -549,8 +549,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _lastElapsed = elapsed;
 
     // 1. 找当前行
-    _currentLineIndex =
-        AppleLyricsView.findCurrentLineIndex(widget.lines, widget.currentTimeMs);
+    // 纯文本歌词（无时间轴）不高亮、不滚动、不模糊，直接平铺显示
+    final hasTimestamps = widget.lines.any((l) => l.startTime > 0);
+    _currentLineIndex = hasTimestamps
+        ? AppleLyricsView.findCurrentLineIndex(widget.lines, widget.currentTimeMs)
+        : -1;
 
     // 2. 推进滚动控制器（需要 lineHeight 与 intervalMs 计算目标 posY）
     if (_currentLineIndex >= 0) {
@@ -610,14 +613,16 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
               ? LyricLayout.inactiveScale
               : LyricLayout.activeScale);
       final bool useWordRenderer = isActive && line.hasWordTiming;
+      // 纯文本歌词无时间轴时强制关闭高斯模糊
+      final bool blurActive = hasTimestamps && LyricPreferences.instance.useGaussianBlur;
       if (useWordRenderer) {
         final renderer = _wordRendererFor(i);
         renderer.emphasizeEffect = _emphasizeEffect;
-        renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade, blurActive: LyricPreferences.instance.useGaussianBlur);
+        renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade, blurActive: blurActive);
         renderer.tick(dt, widget.currentTimeMs);
       } else {
         final renderer = _lineRendererFor(i);
-        renderer.setLineState(isActive: isActive, scale: scale, blurFade: _blurFade, blurActive: LyricPreferences.instance.useGaussianBlur);
+        renderer.setLineState(isActive: isActive, scale: scale, blurFade: _blurFade, blurActive: blurActive);
         renderer.tick(dt);
       }
     }

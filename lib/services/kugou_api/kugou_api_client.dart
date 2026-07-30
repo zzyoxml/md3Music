@@ -77,7 +77,9 @@ class KugouApiClient {
     }
 
     // 关键修复：每次请求前验证用户身份
-    if (_token != null && _userid != null) {
+    // /images 接口不需要登录态，带 token 会导致上游返回不同响应（缺少 imgs 字段）
+    final skipAuth = options.path.contains('/images');
+    if (_token != null && _userid != null && !skipAuth) {
       // 把 vip_token 一并写入 Authorization，服务端的 cookieToJson
       // 会按 ; 切成 cookie 对象，song_url_new 等模块可直接读取。
       final authParts = <String>['token=$_token', 'userid=$_userid'];
@@ -86,11 +88,12 @@ class KugouApiClient {
       }
       options.headers['Authorization'] = authParts.join(';');
     } else {
-      // 未登录，清除 Authorization 头
+      // 未登录或 /images 路径，清除 Authorization 头
       options.headers.remove('Authorization');
     }
 
-    if (_dfid != null) {
+    // /images 也不注入 dfid（避免上游按 dfid 返回不同响应）
+    if (_dfid != null && !skipAuth) {
       options.queryParameters['dfid'] = _dfid;
     }
 
@@ -2629,8 +2632,8 @@ class KugouApiClient {
     return await _get(KugouEndpoints.pcDiantai);
   }
 
-  Future<Map<String, dynamic>?> getImages(String hash) async {
-    return await _get(KugouEndpoints.images, queryParameters: {'hash': hash});
+  Future<Map<String, dynamic>?> getImages(String hash, {bool noCache = false}) async {
+    return await _get(KugouEndpoints.images, queryParameters: {'hash': hash}, noCache: noCache);
   }
 
   Future<Map<String, dynamic>?> getImagesAudio(String hash) async {

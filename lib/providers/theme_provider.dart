@@ -15,6 +15,9 @@ class ThemeProvider extends ChangeNotifier {
   static const String _uiScaleKey = 'ui_scale';
   static const String _fontSourceKey = 'font_source';
   static const String _customFontPathKey = 'custom_font_path';
+  static const String _artistPhotoBgKey = 'use_artist_photo_background';
+  static const String _artistPhotoIntervalKey = 'artist_photo_interval';
+  static const String _artistPhotoOpacityKey = 'artist_photo_opacity';
 
   ThemeMode _themeMode = ThemeMode.system;
   bool _useDynamicColor = false;
@@ -29,6 +32,9 @@ class ThemeProvider extends ChangeNotifier {
   String? _customFontPath;
   // 运行时加载成功后填充的 fontFamily（仅在 custom 模式且加载成功时非 null）
   String? _loadedCustomFontFamily;
+  bool _useArtistPhotoBackground = false;
+  int _artistPhotoInterval = 15;
+  double _artistPhotoOpacity = 0.72;
 
   ThemeMode get themeMode => _themeMode;
   bool get useDynamicColor => _useDynamicColor;
@@ -39,6 +45,9 @@ class ThemeProvider extends ChangeNotifier {
   double get uiScale => _uiScale;
   FontSource get fontSource => _fontSource;
   String? get customFontPath => _customFontPath;
+  bool get useArtistPhotoBackground => _useArtistPhotoBackground;
+  int get artistPhotoInterval => _artistPhotoInterval;
+  double get artistPhotoOpacity => _artistPhotoOpacity;
 
   /// 当前生效的种子色优先级：
   /// 1. 启用系统主题色且成功取到 → 系统主色
@@ -73,6 +82,7 @@ class ThemeProvider extends ChangeNotifier {
     _loadOledBlack();
     _loadUiScale();
     _loadFontSource();
+    _loadArtistPhotoBackground();
   }
 
   Future<void> _loadThemeMode() async {
@@ -175,6 +185,44 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_amStylePlayerKey, enabled);
+  }
+
+  /// 加载「歌手写真背景轮播」开关 + 轮播间隔持久化值，默认关闭 / 15 秒。
+  Future<void> _loadArtistPhotoBackground() async {
+    final prefs = await SharedPreferences.getInstance();
+    _useArtistPhotoBackground = prefs.getBool(_artistPhotoBgKey) ?? false;
+    _artistPhotoInterval = prefs.getInt(_artistPhotoIntervalKey) ?? 15;
+    _artistPhotoOpacity = prefs.getDouble(_artistPhotoOpacityKey) ?? 0.72;
+    notifyListeners();
+  }
+
+  /// 切换「歌手写真背景轮播」开关（仅 MD3 风格播放页生效）。
+  Future<void> setUseArtistPhotoBackground(bool enabled) async {
+    if (_useArtistPhotoBackground == enabled) return;
+    _useArtistPhotoBackground = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_artistPhotoBgKey, enabled);
+  }
+
+  /// 设置写真轮播间隔（秒），限定 5~60。
+  Future<void> setArtistPhotoInterval(int seconds) async {
+    final clamped = seconds.clamp(5, 60);
+    if (_artistPhotoInterval == clamped) return;
+    _artistPhotoInterval = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_artistPhotoIntervalKey, clamped);
+  }
+
+  /// 设置写真背景遮罩透明度（0.0=全透看不清文字 ~ 1.0=全遮看不到写真），限定 0.0~0.95。
+  Future<void> setArtistPhotoOpacity(double opacity) async {
+    final clamped = opacity.clamp(0.0, 0.95);
+    if (_artistPhotoOpacity == clamped) return;
+    _artistPhotoOpacity = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_artistPhotoOpacityKey, clamped);
   }
 
   /// 加载用户手动选择的种子色持久化值。
