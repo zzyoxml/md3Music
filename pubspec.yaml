@@ -35,6 +35,8 @@ dependencies:
   dynamic_color: ^1.7.0
   material_color_utilities: ^0.13.0
   audio_metadata_reader: ^1.4.1
+  video_player: ^2.9.2
+  chewie: ^1.8.5
 
 dev_dependencies:
   flutter_test:

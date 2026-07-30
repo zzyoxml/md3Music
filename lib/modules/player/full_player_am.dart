@@ -13,6 +13,7 @@ import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
+import 'mv_player_page.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
@@ -1249,6 +1250,19 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           // AM v2: 顶部栏右侧 FLAC 质量徽章，点击复用 _showQualityDialog，
           // 长按呼出 _showVolumeDialog（与 MD 风格统一）
           _buildQualityPill(playerProvider),
+          if (playerProvider.currentSong?.isOnline == true)
+            IconButton(
+              icon: const Icon(Icons.music_video_outlined, color: Colors.white),
+              tooltip: '查看 MV',
+              onPressed: () {
+                final song = playerProvider.currentSong;
+                if (song == null) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => MvPlayerPage(song: song)),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.more_vert, color: Colors.white),
             onPressed: () => _showMoreMenu(context),

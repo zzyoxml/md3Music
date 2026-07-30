@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/repositories/collected_playlist_store.dart';
+import '../../data/repositories/favorite_lists_cache.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
@@ -14,6 +17,7 @@ import '../../widgets/scroll_aware_app_bar.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
 import '../playlist/playlist_page.dart';
+import 'widgets/offline_banner.dart';
 
 class FavoritesPage extends StatefulWidget {
   const FavoritesPage({super.key});
@@ -41,6 +45,14 @@ class _FavoritesPageState extends State<FavoritesPage>
   // 专辑原始 global_collection_id 映射
   final Map<String, String> _albumOriginalIds = {};
 
+  // 上次成功同步时间（用于 banner 文字与 cache 同步时间）
+  DateTime? _lastSyncTime;
+
+  // 网络状态主动探测定时器：兜底用于"用户什么操作都不做、但服务端被关"
+  // 的场景。dio 拦截器本身会在任意请求失败时即时更新
+  // KugouApiClient.networkReachable，这里只兜底"长时间没有任何 dio 调用"。
+  Timer? _networkProbeTimer;
+
   // 分组折叠状态
   bool _createdExpanded = true;
   bool _collectedExpanded = true;
@@ -56,10 +68,31 @@ class _FavoritesPageState extends State<FavoritesPage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    // 立即探测一次网络 + 每 30 秒兜底探测（dio 拦截器会同步更新
+    // KugouApiClient.networkReachable，banner 自动跟随）。
+    unawaited(_probeNetwork());
+    _networkProbeTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(_probeNetwork()),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      // 先 await 缓存就位（避免 dio 失败先于 SharedPreferences 读到 cache，
+      // 导致 banner 在 cache 显示后才被清掉，闪烁）。
+      await _loadCachedData();
+      if (!mounted) return;
       _loadAllData();
       context.read<PlaylistCollectionNotifier>().addListener(_onCollectionChanged);
     });
+  }
+
+  /// 轻量级网络探测：用 /server/now 接口。结果通过 dio 拦截器自动
+  /// 反映到 KugouApiClient.networkReachable。
+  Future<void> _probeNetwork() async {
+    try {
+      await KugouApiClient().getServerNow();
+    } catch (_) {
+      // 忽略：dio 拦截器已经处理网络状态
+    }
   }
 
   @override
@@ -68,6 +101,38 @@ class _FavoritesPageState extends State<FavoritesPage>
     _tabController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 从本地缓存读取上次同步的歌单/专辑/歌手与同步时间，立即渲染。
+  /// 不抛异常；任何失败都视为无缓存。
+  Future<void> _loadCachedData() async {
+    try {
+      final cachedPlaylists = await FavoriteListsCache.readPlaylists();
+      final cachedAlbums = await FavoriteListsCache.readAlbums();
+      final cachedArtists = await FavoriteListsCache.readArtists();
+      final lastSync = await FavoriteListsCache.readLastSyncTime();
+      if (!mounted) return;
+      final hasAny = cachedPlaylists.isNotEmpty ||
+          cachedAlbums.isNotEmpty ||
+          cachedArtists.isNotEmpty;
+      if (hasAny) {
+        setState(() {
+          _playlists = cachedPlaylists;
+          _albums = cachedAlbums;
+          _artists = cachedArtists;
+          _lastSyncTime = lastSync;
+          _isLoadingPlaylists = false;
+          _isLoadingAlbums = false;
+          _isLoadingArtists = false;
+        });
+      } else {
+        setState(() {
+          _lastSyncTime = lastSync;
+        });
+      }
+    } catch (_) {
+      // 缓存读取失败，忽略
+    }
   }
 
   void _onCollectionChanged() {
@@ -115,36 +180,56 @@ class _FavoritesPageState extends State<FavoritesPage>
       final result = await api.getUserPlaylist(pagesize: 50, noCache: forceNoCache);
       if (!mounted) return;
 
-      if (result != null) {
-        final data = result['data'];
-        List<dynamic>? list;
-        if (data is List) {
-          list = data;
-        } else if (data is Map<String, dynamic>) {
-          list = data['info'] as List<dynamic>?;
-          list ??= data['list'] as List<dynamic>?;
-        }
-
-        if (list != null && list.isNotEmpty) {
-          setState(() {
-            _playlists = list!
-                .where((e) {
-                  final json = e as Map<String, dynamic>;
-                  final type = json['type'] as int? ?? 0;
-                  final source = json['source'] as int? ?? 0;
-                  if (type == 1 && source == 2) return false;
-                  return true;
-                })
-                .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
-                .toList();
-            _isLoadingPlaylists = false;
-          });
-          return;
-        }
+      // KugouApiClient._get 在网络/服务异常时返回 null（吞了 DioException），
+      // 不抛异常。把 null 视为离线信号。
+      if (result == null) {
+        setState(() {
+          _isLoadingPlaylists = false;
+        });
+        return;
       }
-      setState(() => _isLoadingPlaylists = false);
+
+      final data = result['data'];
+      List<dynamic>? list;
+      if (data is List) {
+        list = data;
+      } else if (data is Map<String, dynamic>) {
+        list = data['info'] as List<dynamic>?;
+        list ??= data['list'] as List<dynamic>?;
+      }
+
+      if (list != null && list.isNotEmpty) {
+        final filtered = list!
+            .where((e) {
+              final json = e as Map<String, dynamic>;
+              final type = json['type'] as int? ?? 0;
+              final source = json['source'] as int? ?? 0;
+              if (type == 1 && source == 2) return false;
+              return true;
+            })
+            .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
+            .toList();
+        final now = DateTime.now();
+        setState(() {
+          _playlists = filtered;
+          _isLoadingPlaylists = false;
+          _lastSyncTime = now;
+        });
+        // 写入本地缓存（异步，不阻塞 UI）
+        FavoriteListsCache.savePlaylists(filtered);
+        FavoriteListsCache.saveLastSyncTime(now);
+        return;
+      }
+      // API 返回 200 但 data 列表为空（合法空状态，非网络问题）
+      setState(() {
+        _isLoadingPlaylists = false;
+      });
     } catch (e) {
-      if (mounted) setState(() => _isLoadingPlaylists = false);
+      if (mounted) {
+        setState(() {
+          _isLoadingPlaylists = false;
+        });
+      }
     }
   }
 
@@ -157,38 +242,50 @@ class _FavoritesPageState extends State<FavoritesPage>
       final result = await api.getUserPlaylist(pagesize: 50, noCache: noCache);
       if (!mounted) return;
 
-      if (result != null) {
-        final data = result['data'];
-        List<dynamic>? list;
-        if (data is List) {
-          list = data;
-        } else if (data is Map<String, dynamic>) {
-          list = data['info'] as List<dynamic>?;
-          list ??= data['list'] as List<dynamic>?;
-        }
+      if (result == null) {
+        setState(() {
+          _isLoadingAlbums = false;
+        });
+        return;
+      }
 
-        if (list != null && list.isNotEmpty) {
-          final albums = list!
-              .where((e) {
-                final json = e as Map<String, dynamic>;
-                final type = json['type'] as int? ?? 0;
-                final source = json['source'] as int? ?? 0;
-                return type == 1 && source == 2;
-              })
-              .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
-              .toList();
-          setState(() {
-            _albums = albums;
-            _isLoadingAlbums = false;
-          });
-          // 并发获取每个专辑的原始 global_collection_id
-          _fetchAlbumGlobalIds(albums);
-          return;
-        }
+      final data = result['data'];
+      List<dynamic>? list;
+      if (data is List) {
+        list = data;
+      } else if (data is Map<String, dynamic>) {
+        list = data['info'] as List<dynamic>?;
+        list ??= data['list'] as List<dynamic>?;
+      }
+
+      if (list != null && list.isNotEmpty) {
+        final albums = list!
+            .where((e) {
+              final json = e as Map<String, dynamic>;
+              final type = json['type'] as int? ?? 0;
+              final source = json['source'] as int? ?? 0;
+              return type == 1 && source == 2;
+            })
+            .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
+            .toList();
+        final now = DateTime.now();
+        setState(() {
+          _albums = albums;
+          _isLoadingAlbums = false;
+          _lastSyncTime = now;
+        });
+        FavoriteListsCache.saveAlbums(albums);
+        FavoriteListsCache.saveLastSyncTime(now);
+        _fetchAlbumGlobalIds(albums);
+        return;
       }
       setState(() => _isLoadingAlbums = false);
     } catch (e) {
-      if (mounted) setState(() => _isLoadingAlbums = false);
+      if (mounted) {
+        setState(() {
+          _isLoadingAlbums = false;
+        });
+      }
     }
   }
 
@@ -228,32 +325,48 @@ class _FavoritesPageState extends State<FavoritesPage>
       final result = await api.getUserFollow();
       if (!mounted) return;
 
-      if (result != null) {
-        final data = result['data'];
-        List<dynamic>? list;
-
-        // API 返回格式: {data: {total: N, lists: [...]}}
-        if (data is Map<String, dynamic>) {
-          list = data['lists'] as List<dynamic>?;
-          list ??= data['info'] as List<dynamic>?;
-          list ??= data['list'] as List<dynamic>?;
-          list ??= data['fans'] as List<dynamic>?;
-        } else if (data is List) {
-          list = data;
-        }
-
-        if (list != null && list.isNotEmpty) {
-          setState(() {
-            _artists = list!.map((e) => e as Map<String, dynamic>).toList();
-            _isLoadingArtists = false;
-          });
-          return;
-        }
+      if (result == null) {
+        setState(() {
+          _isLoadingArtists = false;
+        });
+        return;
       }
-      setState(() => _isLoadingArtists = false);
+
+      final data = result['data'];
+      List<dynamic>? list;
+
+      // API 返回格式: {data: {total: N, lists: [...]}}
+      if (data is Map<String, dynamic>) {
+        list = data['lists'] as List<dynamic>?;
+        list ??= data['info'] as List<dynamic>?;
+        list ??= data['list'] as List<dynamic>?;
+        list ??= data['fans'] as List<dynamic>?;
+      } else if (data is List) {
+        list = data;
+      }
+
+      if (list != null && list.isNotEmpty) {
+        final artists = list!.map((e) => e as Map<String, dynamic>).toList();
+        final now = DateTime.now();
+        setState(() {
+          _artists = artists;
+          _isLoadingArtists = false;
+          _lastSyncTime = now;
+        });
+        FavoriteListsCache.saveArtists(artists);
+        FavoriteListsCache.saveLastSyncTime(now);
+        return;
+      }
+      setState(() {
+        _isLoadingArtists = false;
+      });
     } catch (e) {
       debugPrint('[Follow] Error: $e');
-      if (mounted) setState(() => _isLoadingArtists = false);
+      if (mounted) {
+        setState(() {
+          _isLoadingArtists = false;
+        });
+      }
     }
   }
 
@@ -385,16 +498,44 @@ class _FavoritesPageState extends State<FavoritesPage>
           ],
         ),
       ),
-      body: TabBarView(
-        controller: _tabController,
+      body: Column(
         children: [
-          _buildPlaylistsTab(),
-          _buildAlbumsTab(),
-          _buildArtistsTab(),
+          // 监听 dio 拦截器维护的全局网络状态：任意 dio 请求失败 → 显示 banner
+          ValueListenableBuilder<bool>(
+            valueListenable: KugouApiClient.networkReachable,
+            builder: (context, reachable, _) {
+              if (reachable) return const SizedBox.shrink();
+              return OfflineBanner(
+                lastSyncTime: _lastSyncTime,
+                onRetry: _retryFromBanner,
+              );
+            },
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabController,
+              children: [
+                _buildPlaylistsTab(),
+                _buildAlbumsTab(),
+                _buildArtistsTab(),
+              ],
+            ),
+          ),
         ],
       ),
       ),
     );
+  }
+
+  /// banner 上的"点击重试"：强制无缓存拉一遍三个 tab。
+  /// banner 显示与否已由 dio 拦截器维护的 networkReachable 决定，
+  /// 这里无需手动 setState _isOffline。
+  Future<void> _retryFromBanner() async {
+    await Future.wait([
+      _loadPlaylists(forceNoCache: true),
+      _loadAlbums(noCache: true),
+      _loadArtists(),
+    ]);
   }
 
   // ==================== 歌单Tab ====================

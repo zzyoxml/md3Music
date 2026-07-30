@@ -10,12 +10,15 @@ import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
+import 'artist_photo_background.dart';
+import 'mv_player_page.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/local_favorites_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/downloads_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import 'comments_view.dart';
@@ -535,6 +538,7 @@ class _FullPlayerState extends State<FullPlayer>
   @override
   Widget build(BuildContext context) {
     final playerProvider = context.watch<PlayerProvider>();
+    final usePhotoBg = context.watch<ThemeProvider>().useArtistPhotoBackground;
     final currentSong = playerProvider.currentSong;
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -561,13 +565,21 @@ class _FullPlayerState extends State<FullPlayer>
       },
       child: Scaffold(
       backgroundColor: colorScheme.surface,
-      body: ResponsiveLayout(
-        compact: (_) =>
-            _buildCompactLayout(playerProvider, currentSong, colorScheme),
-        medium: (_) =>
-            _buildLandscapeLayout(playerProvider, currentSong, colorScheme),
-        expanded: (_) =>
-            _buildExpandedLayout(playerProvider, currentSong, colorScheme),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 歌手写真背景轮播（开关开启 + 在线歌曲时显示）
+          if (usePhotoBg && currentSong!.isOnline)
+            ArtistPhotoBackground(hash: currentSong.id),
+          ResponsiveLayout(
+            compact: (_) =>
+                _buildCompactLayout(playerProvider, currentSong, colorScheme),
+            medium: (_) =>
+                _buildLandscapeLayout(playerProvider, currentSong, colorScheme),
+            expanded: (_) =>
+                _buildExpandedLayout(playerProvider, currentSong, colorScheme),
+          ),
+        ],
       ),
     ),
     );
@@ -953,6 +965,19 @@ class _FullPlayerState extends State<FullPlayer>
           const Spacer(),
           // MD3E v2: 顶部栏右侧 FLAC 质量徽章，点击复用 _showQualityDialog
           _buildQualityPill(playerProvider),
+          if (playerProvider.currentSong?.isOnline == true)
+            IconButton(
+              icon: const Icon(Icons.music_video_outlined),
+              tooltip: '查看 MV',
+              onPressed: () {
+                final song = playerProvider.currentSong;
+                if (song == null) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => MvPlayerPage(song: song)),
+                );
+              },
+            ),
           IconButton(
             icon: const Icon(Icons.more_vert),
             onPressed: () => _showMoreMenu(context),
@@ -1957,6 +1982,14 @@ class _FullPlayerState extends State<FullPlayer>
                     ScaffoldMessenger.of(
                       context,
                     ).showSnackBar(const SnackBar(content: Text('分享功能开发中')));
+                  },
+                ),
+                SwitchListTile(
+                  title: const Text('歌手写真背景'),
+                  value: context.read<ThemeProvider>().useArtistPhotoBackground,
+                  onChanged: (v) {
+                    context.read<ThemeProvider>().setUseArtistPhotoBackground(v);
+                    Navigator.pop(context);
                   },
                 ),
               ],

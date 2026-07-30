@@ -5,10 +5,13 @@ import 'package:provider/provider.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/song.dart';
 import '../../data/repositories/collected_playlist_store.dart';
+import '../../data/repositories/favorite_lists_cache.dart';
+import '../../data/repositories/stream_cache_repository.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
+import '../../services/stream_cache_manager.dart';
 import '../../widgets/song_list_item.dart';
 import '../../widgets/playlist_comments_view.dart';
 import '../../widgets/md3e_loading_indicator.dart';
@@ -69,6 +72,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
   final Set<String> _selectedSongIds = {};
   bool _isDeleting = false;
 
+  // 已缓存筛选（与历史记录页一致）
+  bool _showOnlyPlayable = false;
+  Set<String> _playableIds = {};
+
   /// 删除歌曲用的 listid（仅自己创建的歌单有效）
   String? get _deleteListid => widget.playlist.listCreateListid;
 
@@ -91,10 +98,48 @@ class _PlaylistPageState extends State<PlaylistPage> {
   void initState() {
     super.initState();
     _scrollController.addListener(_onScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       _checkCollected();
+      // 「我的收藏」里的歌单：先 await 缓存就位（避免 dio 失败先于
+      // SharedPreferences 读到 cache，导致 _error 覆盖了缓存歌曲列表）
+      if (widget.isInMyFavorites) {
+        await _loadCachedSongs();
+      }
       _fetchSongs();
+      // 等歌曲列表加载完后检测"已缓存"状态
+      Future.delayed(const Duration(milliseconds: 500), _checkPlayableSongs);
     });
+  }
+
+  /// 「我的收藏」歌单的本地缓存读取。无网络时立即显示。失败忽略。
+  Future<void> _loadCachedSongs() async {
+    final key = _cacheKey();
+    if (key == null || key.isEmpty) return;
+    try {
+      final cached = await FavoriteListsCache.readPlaylistSongs(key);
+      if (!mounted) return;
+      if (cached.isNotEmpty && _songs.isEmpty) {
+        setState(() {
+          _songs = cached;
+          _isLoading = false;
+          // 兜底：清掉之前网络失败留下的错误文案（dio 失败通常比
+          // SharedPreferences 快，会先写 _error 覆盖 UI）
+          _error = null;
+        });
+      }
+    } catch (_) {
+      // 忽略
+    }
+  }
+
+  /// 歌单内容缓存 key。与 [_fetchSongs] 实际请求用的 id 对齐：
+  /// `subscribedListId` 优先（用户订阅/收藏版本的 listid），其次 `listCreateListid`（自建），
+  /// 最后 fallback 到 `id`。
+  String? _cacheKey() {
+    if (!widget.isInMyFavorites) return null;
+    return widget.playlist.subscribedListId ??
+        widget.playlist.listCreateListid ??
+        widget.playlist.id;
   }
 
   /// 滚动监听：减少无意义 setState，仅在偏移变化超过 1px 时更新
@@ -113,13 +158,17 @@ class _PlaylistPageState extends State<PlaylistPage> {
   String? _lastSearchQuery;
   _SortBy? _lastSortBy;
   bool? _lastSortAscending;
+  bool? _lastShowOnlyPlayable;
+  int? _lastPlayableIdsHash;
 
   /// 获取当前显示的歌曲列表（带缓存）
   List<Song> get _displaySongs {
     if (_cachedDisplaySongs != null &&
         _lastSearchQuery == _searchQuery &&
         _lastSortBy == _sortBy &&
-        _lastSortAscending == _sortAscending) {
+        _lastSortAscending == _sortAscending &&
+        _lastShowOnlyPlayable == _showOnlyPlayable &&
+        _lastPlayableIdsHash == _playableIds.length) {
       return _cachedDisplaySongs!;
     }
     _rebuildDisplaySongs();
@@ -128,7 +177,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   void _rebuildDisplaySongs() {
     List<Song> list;
-    if (_searchQuery.isEmpty) {
+    // 先按"已缓存"过滤（在搜索/排序之前；空集表示还没检测完）
+    if (_showOnlyPlayable) {
+      list = _songs.where((s) => _playableIds.contains(s.id)).toList();
+    } else if (_searchQuery.isEmpty) {
       list = List.of(_songs);
     } else {
       final q = _searchQuery.toLowerCase();
@@ -157,6 +209,41 @@ class _PlaylistPageState extends State<PlaylistPage> {
     _lastSearchQuery = _searchQuery;
     _lastSortBy = _sortBy;
     _lastSortAscending = _sortAscending;
+    _lastShowOnlyPlayable = _showOnlyPlayable;
+    _lastPlayableIdsHash = _playableIds.length;
+  }
+
+  /// 切换"仅显示已缓存"
+  void _togglePlayableFilter() {
+    setState(() {
+      _showOnlyPlayable = !_showOnlyPlayable;
+      _invalidateDisplaySongs();
+    });
+  }
+
+  /// 检测 _songs 里哪些歌曲已经被流缓存（边听边存），
+  /// 结果存在 _playableIds。完成后 invalidate display cache 触发重 build。
+  Future<void> _checkPlayableSongs() async {
+    if (_songs.isEmpty) return;
+    try {
+      await StreamCacheManager.instance.ensureInitialized();
+    } catch (_) {}
+
+    final ids = <String>{};
+    for (final song in _songs) {
+      try {
+        final entry = StreamCacheRepository.instance.getEntry(song.id);
+        if (entry != null && entry.audio.isNotEmpty) {
+          ids.add(song.id);
+        }
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _playableIds = ids;
+      _invalidateDisplaySongs();
+    });
   }
 
   /// 使显示列表缓存失效
@@ -646,6 +733,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
           widget.playlist.subscribedListId ?? widget.playlist.listCreateListid;
 
       List<Song> all = [];
+      // 追踪 API 是否真的成功过：KugouApiClient._get 在网络异常时返回 null
+      // （吞了 DioException），不抛异常；KugouProvider.getPlaylistTrackAll
+      // 类似，仅设 _error 后吞掉。所以必须主动追踪"有没有成功调用过"。
+      bool apiSucceeded = false;
       if (isLoggedIn && fetchListid != null && fetchListid.isNotEmpty) {
         // 已登录 + 有 listid：用 /playlist/track/all/new 拉（仅支持用户创建/收藏的歌单）
         const int pageSize = 200;
@@ -659,6 +750,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
           );
           if (!mounted) return;
           if (r == null) break;
+          apiSucceeded = true;
           final batch = r.songs.map((s) => s.toSong()).toList();
           all.addAll(batch);
           if (batch.length < pageSize) break;
@@ -681,6 +773,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
               .currentPlaylistSongs
               .map((e) => e.toSong())
               .toList();
+          if (all.isNotEmpty) apiSucceeded = true;
         }
       } else if (widget.playlist.id.isNotEmpty) {
         // 未登录 或 无 listid：用 global_collection_id 调 /playlist/track/all 拉
@@ -694,6 +787,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
             .currentPlaylistSongs
             .map((e) => e.toSong())
             .toList();
+        if (all.isNotEmpty) apiSucceeded = true;
       } else {
         // 普通歌单（未登录）：走 KugouProvider 的分页聚合（/playlist/track/all，30 一次翻页拉全）
         await context.read<KugouProvider>().getPlaylistTrackAll(
@@ -706,24 +800,58 @@ class _PlaylistPageState extends State<PlaylistPage> {
             .currentPlaylistSongs
             .map((e) => e.toSong())
             .toList();
+        if (all.isNotEmpty) apiSucceeded = true;
       }
 
       setState(() {
-        _songs = all.where((song) {
-          final validTitle = song.title.isNotEmpty && song.title != '-';
-          final validDuration = song.duration.inMilliseconds > 0;
-          return validTitle && validDuration;
-        }).toList();
+        // 网络拿到数据时正常覆盖；网络空但本地已有 cache 时保留 cache，
+        // 避免断网重进歌单时被空响应覆盖掉本地缓存的歌曲
+        if (all.isNotEmpty || _songs.isEmpty) {
+          _songs = all.where((song) {
+            final validTitle = song.title.isNotEmpty && song.title != '-';
+            final validDuration = song.duration.inMilliseconds > 0;
+            return validTitle && validDuration;
+          }).toList();
+        }
         _invalidateDisplaySongs();
       });
+      // 「我的收藏」里的歌单：成功拉到歌曲时写本地缓存
+      if (apiSucceeded && _songs.isNotEmpty) {
+        final cacheKey = _cacheKey();
+        if (cacheKey != null && cacheKey.isNotEmpty) {
+          FavoriteListsCache.savePlaylistSongs(cacheKey, _songs);
+        }
+      } else if (!apiSucceeded) {
+        // 网络失败（KugouApiClient._get 把异常吞成 null 时走这里）
+        // 有 cache（_songs 非空）保留显示；无 cache 报错
+        if (mounted) {
+          setState(() {
+            if (_songs.isEmpty) {
+              _error = '加载失败，请检查手机网络连接（WiFi / 移动数据）';
+            } else {
+              _error = null;
+            }
+          });
+        }
+      }
     } catch (e) {
+      // 已有本地缓存（_songs 非空）时，吞掉错误，保留 cache 给用户查看
+      if (mounted) {
+        setState(() {
+          if (_songs.isNotEmpty) {
+            _isLoading = false;
+            _error = null;
+          } else {
+            _error = e.toString();
+          }
+        });
+      }
+    }
+    if (mounted) {
       setState(() {
-        _error = e.toString();
+        _isLoading = false;
       });
     }
-    setState(() {
-      _isLoading = false;
-    });
   }
 
   @override
@@ -738,20 +866,22 @@ class _PlaylistPageState extends State<PlaylistPage> {
         if (!didPop && _isMultiSelectMode) _exitMultiSelectMode();
       },
       child: Scaffold(
-      body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
-          : _error != null
-          ? _buildError(context, colorScheme)
-          : Column(
-              children: [
-                if (_isMultiSelectMode)
-                  _buildMultiSelectBar(colorScheme, textTheme),
-                Expanded(
-                  child: CustomScrollView(
-                    controller: _scrollController,
-                    slivers: [
-                      if (!_isMultiSelectMode)
-                      SliverAppBar(
+      body: Column(
+        children: [
+          if (_isLoading)
+            const Expanded(child: Center(child: MD3ELoadingIndicator()))
+          else ...[
+            // 加载失败时显示顶部 banner（不再完全覆盖 UI，
+            // 歌单的元数据/封面/描述仍可见）
+            if (_error != null) _buildErrorBanner(context, colorScheme, textTheme),
+            if (_isMultiSelectMode)
+              _buildMultiSelectBar(colorScheme, textTheme),
+            Expanded(
+              child: CustomScrollView(
+                controller: _scrollController,
+                slivers: [
+                  if (!_isMultiSelectMode)
+                  SliverAppBar(
                         expandedHeight: 280,
                         pinned: true,
                         // pinned 后顶栏背景色：滚动到 expandedHeight - kToolbarHeight
@@ -765,6 +895,21 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         surfaceTintColor: Colors.transparent,
                         scrolledUnderElevation: 0,
                         actions: [
+                          if (_songs.isNotEmpty)
+                            IconButton(
+                              icon: Icon(
+                                _showOnlyPlayable
+                                    ? Icons.filter_alt
+                                    : Icons.filter_alt_outlined,
+                                color: _showOnlyPlayable
+                                    ? Theme.of(context).colorScheme.primary
+                                    : null,
+                              ),
+                              tooltip: _showOnlyPlayable
+                                  ? '显示全部'
+                                  : '仅显示已缓存',
+                              onPressed: _togglePlayableFilter,
+                            ),
                           if (_songs.isNotEmpty)
                             IconButton(
                               icon: Icon(
@@ -1208,12 +1353,130 @@ class _PlaylistPageState extends State<PlaylistPage> {
                             ),
                           ),
                         ),
+                      // 离线/首次打开无缓存时：歌单歌曲为空状态
+                      if (!_isMultiSelectMode && _songs.isEmpty)
+                        SliverToBoxAdapter(
+                          child: _buildEmptySongsHint(colorScheme, textTheme),
+                        ),
+                      // 开启"仅显示已缓存"但无匹配歌曲时
+                      if (!_isMultiSelectMode &&
+                          _showOnlyPlayable &&
+                          _songs.isNotEmpty &&
+                          _displaySongs.isEmpty)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.all(32),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.cloud_off_outlined,
+                                  size: 48,
+                                  color: colorScheme.onSurfaceVariant
+                                      .withValues(alpha: 0.5),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  '没有已缓存的歌曲',
+                                  style: textTheme.titleMedium?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '播放歌曲时会自动缓存',
+                                  style: textTheme.bodySmall?.copyWith(
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
                 const MiniPlayer(),
               ],
+            ],
             ),
+      ),
+    );
+  }
+
+  /// 离线时无缓存歌曲的空状态：仅展示歌单元数据，不显示错误页面。
+  Widget _buildEmptySongsHint(ColorScheme colorScheme, TextTheme textTheme) {
+    return Padding(
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        children: [
+          Icon(
+            _error != null ? Icons.cloud_off_outlined : Icons.queue_music,
+            size: 48,
+            color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            _error != null ? '暂无缓存的歌曲' : '暂无歌曲',
+            style: textTheme.titleMedium?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              '联网后下拉刷新即可加载',
+              style: textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.tonal(
+              onPressed: _fetchSongs,
+              child: const Text('重新加载'),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 加载失败顶部 banner：歌单元数据仍可看，不完全覆盖 UI。
+  Widget _buildErrorBanner(
+    BuildContext context,
+    ColorScheme colorScheme,
+    TextTheme textTheme,
+  ) {
+    return Material(
+      color: colorScheme.errorContainer.withValues(alpha: 0.85),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(
+              Icons.cloud_off_outlined,
+              size: 18,
+              color: colorScheme.onErrorContainer,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _error ?? '',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onErrorContainer,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: _fetchSongs,
+              style: TextButton.styleFrom(
+                foregroundColor: colorScheme.onErrorContainer,
+              ),
+              child: const Text('重试'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1277,41 +1540,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
               ],
             ],
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildError(BuildContext context, ColorScheme colorScheme) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.cloud_off,
-              size: 48,
-              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              '加载失败',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _error ?? '未知错误',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonal(onPressed: _fetchSongs, child: const Text('重试')),
-          ],
         ),
       ),
     );

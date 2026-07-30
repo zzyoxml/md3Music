@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/models/song.dart';
+import '../modules/player/mv_player_page.dart';
 import '../providers/downloads_provider.dart';
 import '../providers/favorites_provider.dart';
 import '../providers/local_favorites_provider.dart';
@@ -302,6 +303,18 @@ class SongListItem extends StatelessWidget {
                       ),
                     ),
                   ),
+                  if (song.isOnline)
+                    GestureDetector(
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => MvPlayerPage(song: song)),
+                      ),
+                      behavior: HitTestBehavior.opaque,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+                        child: Icon(Icons.music_video_outlined, size: 18, color: colorScheme.onSurfaceVariant),
+                      ),
+                    ),
                   GestureDetector(
                     onTap: () => _showMoreMenu(context),
                     behavior: HitTestBehavior.opaque,

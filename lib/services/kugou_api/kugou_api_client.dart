@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/models/mv_models.dart';
 import 'kugou_endpoints.dart';
 import 'kugou_models.dart';
 
@@ -25,9 +27,36 @@ class KugouApiClient {
       ),
     );
 
-    _dio.interceptors.add(InterceptorsWrapper(onRequest: _onRequest));
+    _dio.interceptors.add(InterceptorsWrapper(
+      onRequest: _onRequest,
+      onResponse: (response, handler) {
+        // dio 拿到了响应（无论 statusCode），视为服务端可达
+        networkReachable.value = true;
+        handler.next(response);
+      },
+      onError: (e, handler) {
+        // 只有连接类错误才算"服务端不可达"；
+        // 4xx/5xx 业务错误（如未登录）仍然代表网络可达
+        if (e is DioException && _isConnectionError(e)) {
+          networkReachable.value = false;
+        }
+        handler.next(e);
+      },
+    ));
 
     _initFromStorage();
+  }
+
+  /// 全局网络可达性状态。任意 dio 请求成功 → true；连接类错误 → false。
+  /// 业务错误（4xx/5xx）不影响此值。
+  /// FavoritesPage 等页面用它实时反映 banner 显示。
+  static final ValueNotifier<bool> networkReachable = ValueNotifier(true);
+
+  static bool _isConnectionError(DioException e) {
+    return e.type == DioExceptionType.connectionError ||
+        e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.receiveTimeout;
   }
 
   late final Dio _dio;
@@ -76,7 +105,9 @@ class KugouApiClient {
     }
 
     // 关键修复：每次请求前验证用户身份
-    if (_token != null && _userid != null) {
+    // /images 接口不需要登录态，带 token 会导致上游返回不同响应（缺少 imgs 字段）
+    final skipAuth = options.path.contains('/images');
+    if (_token != null && _userid != null && !skipAuth) {
       // 把 vip_token 一并写入 Authorization，服务端的 cookieToJson
       // 会按 ; 切成 cookie 对象，song_url_new 等模块可直接读取。
       final authParts = <String>['token=$_token', 'userid=$_userid'];
@@ -85,11 +116,12 @@ class KugouApiClient {
       }
       options.headers['Authorization'] = authParts.join(';');
     } else {
-      // 未登录，清除 Authorization 头
+      // 未登录或 /images 路径，清除 Authorization 头
       options.headers.remove('Authorization');
     }
 
-    if (_dfid != null) {
+    // /images 也不注入 dfid（避免上游按 dfid 返回不同响应）
+    if (_dfid != null && !skipAuth) {
       options.queryParameters['dfid'] = _dfid;
     }
 
@@ -1871,6 +1903,133 @@ class KugouApiClient {
     return await _get(KugouEndpoints.artistFollowNewsongs);
   }
 
+  // ==================== Video / MV ====================
+
+  /// 根据 album_audio_id/MixSongID 获取歌曲对应的 MV。
+  /// 对应服务端 `/kmr/audio/mv`，上游 openapi.kugou.com。
+  /// 注意：服务端模块从 query 参数读取 album_audio_id（见 server.js:458），
+  /// 故客户端必须用 GET + query 传递，不能用 POST body。
+  /// 返回 [MvInfo]，[MvInfo.hasMv] 为 false 表示该歌曲无 MV。
+  Future<MvInfo?> getMvByAlbumAudioId(String albumAudioId, {String fields = ''}) async {
+    if (albumAudioId.isEmpty) return null;
+    final json = await _get(
+      KugouEndpoints.kmrAudioMv,
+      queryParameters: {
+        'album_audio_id': albumAudioId,
+        'fields': fields,
+      },
+    );
+    if (json == null) {
+      print('[getMvByAlbumAudioId] response null for album_audio_id=$albumAudioId');
+      return null;
+    }
+    print('[getMvByAlbumAudioId] response: $json');
+    try {
+      // 真实响应：{ data: [[ {video_id, mv_name, ...}, ... ]], status, err_code }
+      // data 是二维数组：外层按 album_audio_id 分组，内层是该歌曲的多个 MV 版本。
+      final data = json['data'];
+      if (data is List && data.isNotEmpty) {
+        final first = data.first;
+        // 二维数组：first 是 [ {mv1}, {mv2}, ... ]
+        if (first is List && first.isNotEmpty) {
+          final mv = first.first;
+          if (mv is Map<String, dynamic>) {
+            return MvInfo.fromJson(mv);
+          }
+          return null;
+        }
+        // 一维数组兜底：first 是 {mv1}
+        if (first is Map<String, dynamic>) {
+          return MvInfo.fromJson(first);
+        }
+        return null;
+      }
+      if (data is Map<String, dynamic>) {
+        return MvInfo.fromJson(data);
+      }
+      return MvInfo.fromJson(json);
+    } catch (e) {
+      print('[getMvByAlbumAudioId] parse error: $e');
+      return null;
+    }
+  }
+
+  /// 获取视频详情（含多清晰度 hash）。
+  /// 对应服务端 `/video/detail`，上游 kmr.service.kugou.com。
+  /// show_resolution=1 在服务端模块内硬编码（video_detail.js:21），客户端无需传。
+  /// 服务端从 query 读取 id，故客户端用 GET + query。
+  Future<MvDetail?> getVideoDetail(String mvId) async {
+    if (mvId.isEmpty) return null;
+    final json = await _get(
+      KugouEndpoints.videoDetail,
+      queryParameters: {'id': mvId},
+    );
+    if (json == null) return null;
+    try {
+      // 响应结构：{ data: [ {video_id, title, sv:[...], ...} ] } 或 { data: {...} }
+      final data = json['data'];
+      if (data is List && data.isNotEmpty) {
+        final first = data.first;
+        if (first is Map<String, dynamic>) {
+          return MvDetail.fromJson(first, mvId);
+        }
+        return null;
+      }
+      if (data is Map<String, dynamic>) {
+        return MvDetail.fromJson(data, mvId);
+      }
+      return MvDetail.fromJson(json, mvId);
+    } catch (e) {
+      print('[getVideoDetail] parse error: $e');
+      return null;
+    }
+  }
+
+  /// 根据 视频 hash 获取视频播放地址。
+  /// 对应服务端 `/video/url`（GET），上游 trackermv.kugou.com。
+  Future<String?> getVideoUrl(String hash) async {
+    if (hash.isEmpty) return null;
+    final json = await _get(
+      KugouEndpoints.videoUrl,
+      queryParameters: {'hash': hash},
+    );
+    if (json == null) return null;
+    try {
+      // 真实响应：{ data: { "<hash_lower>": { downurl, backupdownurl, filesize } } }
+      final data = json['data'];
+      if (data is Map<String, dynamic>) {
+        // 优先用 hash 小写匹配 key
+        final key = hash.toLowerCase();
+        final entry = data[key];
+        if (entry is Map<String, dynamic>) {
+          return entry['downurl'] as String?;
+        }
+        // 兜底：取第一个 entry
+        if (data.values.isNotEmpty) {
+          final first = data.values.first;
+          if (first is Map<String, dynamic>) {
+            return first['downurl'] as String?;
+          }
+        }
+      }
+      return null;
+    } catch (e) {
+      print('[getVideoUrl] parse error: $e');
+      return null;
+    }
+  }
+
+  /// 获取视频权限信息。
+  /// 对应服务端 `/video/privilege`，上游 media.store.kugou.com。
+  /// 服务端从 query 读取 hash，故客户端用 GET + query。
+  Future<Map<String, dynamic>?> getVideoPrivilege(String hash) async {
+    if (hash.isEmpty) return null;
+    return await _get(
+      KugouEndpoints.videoPrivilege,
+      queryParameters: {'hash': hash},
+    );
+  }
+
   // ==================== Login ====================
 
   Future<Map<String, dynamic>?> loginByCellphone(
@@ -2228,26 +2387,6 @@ class KugouApiClient {
     );
   }
 
-  // ==================== Video ====================
-
-  Future<Map<String, dynamic>?> getVideoUrl(String hash) async {
-    return await _get(KugouEndpoints.videoUrl, queryParameters: {'hash': hash});
-  }
-
-  Future<Map<String, dynamic>?> getVideoDetail(String hash) async {
-    return await _get(
-      KugouEndpoints.videoDetail,
-      queryParameters: {'hash': hash},
-    );
-  }
-
-  Future<Map<String, dynamic>?> getVideoPrivilege(String hash) async {
-    return await _get(
-      KugouEndpoints.videoPrivilege,
-      queryParameters: {'hash': hash},
-    );
-  }
-
   // ==================== Youth Channel ====================
 
   Future<Map<String, dynamic>?> getYouthChannels() async {
@@ -2521,8 +2660,8 @@ class KugouApiClient {
     return await _get(KugouEndpoints.pcDiantai);
   }
 
-  Future<Map<String, dynamic>?> getImages(String hash) async {
-    return await _get(KugouEndpoints.images, queryParameters: {'hash': hash});
+  Future<Map<String, dynamic>?> getImages(String hash, {bool noCache = false}) async {
+    return await _get(KugouEndpoints.images, queryParameters: {'hash': hash}, noCache: noCache);
   }
 
   Future<Map<String, dynamic>?> getImagesAudio(String hash) async {

@@ -54,6 +54,9 @@ class _SettingsPageState extends State<SettingsPage> {
   // Apple Music 风格播放页开关（默认关闭，开启后用 AM 风格 FullPlayer）
   bool _useAmStylePlayer = false;
   bool _useGaussianBlur = true;
+  bool _useArtistPhotoBackground = false;
+  int _artistPhotoInterval = 15;
+  double _artistPhotoOpacity = 0.72;
   bool _useGlowEffect = true;
   bool _useFlowingBackground = true;
   String _appVersion = '';
@@ -147,6 +150,9 @@ class _SettingsPageState extends State<SettingsPage> {
     final useDynamicColor = context.read<ThemeProvider>().useDynamicColor;
     // 从 ThemeProvider 同步「Apple Music 风格播放页」开关状态
     final useAmStylePlayer = context.read<ThemeProvider>().useAmStylePlayer;
+    final useArtistPhotoBackground = context.read<ThemeProvider>().useArtistPhotoBackground;
+    final artistPhotoInterval = context.read<ThemeProvider>().artistPhotoInterval;
+    final artistPhotoOpacity = context.read<ThemeProvider>().artistPhotoOpacity;
     // 读取自定义下载目录
     final downloadDir = await _settingsRepository.getDownloadDir();
     // 从 ThemeProvider 同步 UI 缩放
@@ -164,6 +170,9 @@ class _SettingsPageState extends State<SettingsPage> {
       _apiServerController.text = apiServerUrl;
       _useDynamicColor = useDynamicColor;
       _useAmStylePlayer = useAmStylePlayer;
+      _useArtistPhotoBackground = useArtistPhotoBackground;
+      _artistPhotoInterval = artistPhotoInterval;
+      _artistPhotoOpacity = artistPhotoOpacity;
       _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
       _useGlowEffect = LyricPreferences.instance.useGlowEffect;
       _useFlowingBackground = LyricPreferences.instance.useFlowingBackground;
@@ -704,6 +713,52 @@ class _SettingsPageState extends State<SettingsPage> {
             context.read<ThemeProvider>().setUseAmStylePlayer(v);
           },
         ),
+        SwitchListTile(
+          title: const Text('歌手写真背景轮播'),
+          subtitle: const Text('MD3 风格播放页显示歌手写真背景（仅在线歌曲）'),
+          value: _useArtistPhotoBackground,
+          onChanged: !_useAmStylePlayer
+              ? (v) {
+                  setState(() => _useArtistPhotoBackground = v);
+                  context.read<ThemeProvider>().setUseArtistPhotoBackground(v);
+                }
+              : null,
+        ),
+        if (_useArtistPhotoBackground && !_useAmStylePlayer)
+          ListTile(
+            title: const Text('轮播间隔'),
+            subtitle: Text('每 $_artistPhotoInterval 秒切换'),
+            trailing: DropdownButton<int>(
+              value: _artistPhotoInterval,
+              items: [5, 10, 15, 20, 30, 45, 60]
+                  .map((s) => DropdownMenuItem(
+                        value: s,
+                        child: Text('$s 秒'),
+                      ))
+                  .toList(),
+              onChanged: (v) {
+                if (v == null) return;
+                setState(() => _artistPhotoInterval = v);
+                context.read<ThemeProvider>().setArtistPhotoInterval(v);
+              },
+            ),
+          ),
+        if (_useArtistPhotoBackground && !_useAmStylePlayer)
+          ListTile(
+            title: const Text('写真背景透明度'),
+            subtitle: Slider(
+              value: _artistPhotoOpacity,
+              min: 0.0,
+              max: 0.95,
+              divisions: 19,
+              label: '${(_artistPhotoOpacity * 100).round()}%',
+              onChanged: (v) {
+                setState(() => _artistPhotoOpacity = v);
+                context.read<ThemeProvider>().setArtistPhotoOpacity(v);
+              },
+            ),
+            trailing: Text('${(_artistPhotoOpacity * 100).round()}%'),
+          ),
         SwitchListTile(
           title: const Text('歌词高斯模糊'),
           subtitle: const Text('开启为高斯模糊渐变，高功耗，关闭为 alpha 淡出'),
