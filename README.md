@@ -446,7 +446,9 @@ node index.js
 
 <div align="center">
 
-[![Star History Chart](https://api.star-history.com/svg?repos=zzyoxml/md3Music&type=Date)](https://star-history.com/#zzyoxml/md3Music&Date)
+<a href="https://star-history.com/#zzyoxml/md3Music&Date">
+  <img src="img/star-history.svg" alt="Star History Chart" width="600" />
+</a>
 
 </div>
 
