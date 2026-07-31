@@ -446,6 +446,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           }
           if (_playlist.isNotEmpty) {
             _currentSong = _playlist[_currentIndex];
+            _recordHistory(_currentSong!);
           }
           // 异常结束时清除旧 URL，强制重新解析（避免复用过期链接）
           if (isAbnormalEnd && _currentSong != null && _currentSong!.isOnline) {
@@ -1238,6 +1239,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentSong = _playlist[nextIndex];
     _resolveError = null;
     _position = Duration.zero; // 切歌时重置位置，避免恢复时跳到上一首的进度
+    _recordHistory(_currentSong!);
     _updateNotification();
     _saveState();
 
@@ -1271,6 +1273,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _currentSong = _playlist[prevIndex];
       _resolveError = null;
       _position = Duration.zero;
+      _recordHistory(_currentSong!);
 
       if (await _resolveAndPlayCurrentSong()) {
         _saveState();
@@ -1295,6 +1298,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentSong = _playlist[index];
     _resolveError = null;
     _position = Duration.zero;
+    _recordHistory(_currentSong!);
     _saveState();
     notifyListeners();
 
@@ -1746,11 +1750,6 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   void _recordHistory(Song song) {
     HistoryRepository().addHistory(song);
-    // 在线歌曲且已登录时，同步听歌历史到云端
-    if (song.isOnline && KugouApiClient().isLoggedIn) {
-      final mxid = song.albumAudioId ?? song.id;
-      KugouApiClient().uploadPlayHistory(mxid).then((_) {}).catchError((_) => null);
-    }
   }
 
   just_audio.UriAudioSource _createAudioSource(Song song) {

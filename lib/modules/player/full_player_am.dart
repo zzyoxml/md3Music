@@ -651,10 +651,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   Widget build(BuildContext context) {
     // v4 优化：父级 build 只在切歌（currentSong.id 变化）或播放/暂停（isPlaying）时执行。
     // position 更新（200ms）通过 AppleLyricsView 与进度条自身的 Selector 注入，不触发父级重建。
-    return Selector<PlayerProvider, ({String? songId, bool isPlaying})>(
+    return Selector<PlayerProvider, ({String? songId, bool isPlaying, AudioQuality audioQuality})>(
       selector: (_, p) => (
         songId: p.currentSong?.id,
         isPlaying: p.isPlaying,
+        audioQuality: p.audioQuality,
       ),
       builder: (context, _, __) {
         final playerProvider = context.read<PlayerProvider>();
