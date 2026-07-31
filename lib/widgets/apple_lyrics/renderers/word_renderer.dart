@@ -473,6 +473,9 @@ class WordRenderer {
       // 翻译副行对齐跟随原文，按副行自身宽度计算 x
       final double transX = _alignX(alignment, offset.dx,
           _translationPainter.width, viewportWidth);
+      // 多行翻译副行需设置 textAlign 让每条视觉行独立对齐到 transX
+      // 单行时 textAlign 不影响，_alignX 已计算正确 x
+      _translationPainter.textAlign = _duetToTextAlign(alignment);
       _translationPainter.paint(canvas, Offset(transX, transY));
     }
   }
@@ -511,6 +514,21 @@ class WordRenderer {
     }
     // center
     return (viewportWidth - textWidth) / 2;
+  }
+
+  /// 对唱对齐方式 → TextAlign 映射（用于多行翻译副行内部对齐）。
+  /// left/defaultAlign → start（左对齐）
+  /// right → end（右对齐）
+  /// center → center（居中）
+  static TextAlign _duetToTextAlign(DuetAlignment alignment) {
+    switch (alignment) {
+      case DuetAlignment.center:
+        return TextAlign.center;
+      case DuetAlignment.right:
+        return TextAlign.end;
+      default:
+        return TextAlign.start;
+    }
   }
 
   /// 整行降级绘制（无 word 时间戳时使用）。

@@ -711,18 +711,22 @@ class _FavoritesPageState extends State<FavoritesPage>
           padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
             if (_createdPlaylists.isNotEmpty)
-              _buildGroupSection(
+              _GroupSection(
                 title: '我创建的歌单',
                 expanded: _createdExpanded,
                 onToggle: () => setState(() => _createdExpanded = !_createdExpanded),
                 playlists: _createdPlaylists,
+                onBuildTile: (playlist) =>
+                    _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
               ),
             if (_collectedPlaylists.isNotEmpty)
-              _buildGroupSection(
+              _GroupSection(
                 title: '我收藏的歌单',
                 expanded: _collectedExpanded,
                 onToggle: () => setState(() => _collectedExpanded = !_collectedExpanded),
                 playlists: _collectedPlaylists,
+                onBuildTile: (playlist) =>
+                    _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
               ),
             // 底部加载更多指示器
             if (_isLoadingMorePlaylists)

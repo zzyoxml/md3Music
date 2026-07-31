@@ -84,6 +84,13 @@ class LineRenderer {
   /// 导致 _painter.width 错误、alignment 计算偏移。
   LyricLine? _boundLine;
 
+  /// 上次绘制时使用的对齐方式。alignment 变化时强制重建（避免缓存不一致）。
+  DuetAlignment _lastAlignment = DuetAlignment.defaultAlign;
+
+  /// 多行对齐绘制时使用的临时 TextPainter（仅 _paintMultiLineAligned 内用）。
+  /// 与 _painter 分离避免污染主 painter 的 layout 缓存。
+  final TextPainter _lineMeasurer = TextPainter(textDirection: TextDirection.ltr);
+
   // ============== 状态查询 ==============
 
   /// 当前 alpha（用于测试与外部协调）。
@@ -164,11 +171,17 @@ class LineRenderer {
 
   /// 绘制整行歌词。
   ///
-  /// [offset] 是行起始绘制原点。文字颜色固定白色 #FFFFFFFF，
+  /// [offset] 是行起始绘制原点（leftPadding, y）。文字颜色固定白色 #FFFFFFFF，
   /// alpha 由 [_currentAlpha] 控制（整行同一 alpha，无 mask 渐变）。
   /// 使用复用的 [_painter] 实例测量整行宽度并绘制。
   ///
   /// [maxWidth] 为可用最大文字宽度，超出时 TextPainter 自动换行（默认不换行）。
+  ///
+  /// **对齐实现**：与 [WordRenderer] 一致采用 [_alignX] 显式计算文本起始 x
+  /// 坐标。不依赖 [TextPainter.textAlign]，因为 textAlign 在某些场景下
+  /// （缓存命中跳过 layout 时）可能不会重新生效，导致非当前行错位到左侧。
+  /// 多行文本（自动换行）通过 [_paintMultiLineAligned] 按视觉行拆分，
+  /// 每行独立应用 [_alignX] 计算对齐。
   ///
   /// **性能优化**：
   /// - 复用 [_painter] 实例，避免每帧创建 TextPainter 对象 + GC
@@ -185,10 +198,13 @@ class LineRenderer {
     // _painter 缓存旧文本（带「男：」前缀）导致 alignment 计算用错误宽度
     final bool colorChanged = LyricLayout.textColorValue != _lastTextColorValue;
     final bool lineChanged = !identical(_boundLine, line);
+    // alignment 变化时也强制重建（避免 _painter 缓存旧 textAlign 影响多行对齐）
+    final bool alignChanged = _lastAlignment != alignment;
     if (lineChanged ||
         (_currentAlpha - _lastSetAlpha).abs() > 0.001 ||
         maxWidth != _lastSetMaxWidth ||
-        colorChanged) {
+        colorChanged ||
+        alignChanged) {
       _painter.text = TextSpan(
         text: line.text,
         style: TextStyle(
@@ -206,10 +222,23 @@ class LineRenderer {
       _lastSetMaxWidth = maxWidth;
       _lastTextColorValue = LyricLayout.textColorValue;
       _boundLine = line;
+      _lastAlignment = alignment;
     }
-    // 对唱对齐：按最长行宽度计算 x（_painter.width 返回 bounding box 宽度）
-    final double mainX = _alignX(alignment, offset.dx, _painter.width, viewportWidth);
-    _painter.paint(canvas, Offset(mainX, offset.dy));
+    // 用 _alignX 计算文本起始 x，与 WordRenderer 一致。
+    // 单行：直接用 _painter.width（layout 后的整体宽度）计算 x。
+    // 多行：按视觉行拆分绘制，每行独立对齐。
+    final bool isMultiLine = _painter.height >
+        fontSize * LyricLayout.lineHeight * 1.5;
+    if (!isMultiLine) {
+      // 单行：直接用整体对齐 x
+      final double x = _alignX(
+          alignment, offset.dx, _painter.width, viewportWidth);
+      _painter.paint(canvas, Offset(x, offset.dy));
+    } else {
+      // 多行：按行拆分绘制，每行独立对齐
+      _paintMultiLineAligned(canvas, offset, line, fontSize, alignment,
+          maxWidth, viewportWidth);
+    }
 
     // 辅助副行（翻译或罗马音）：仅当前行 + 开关开启 + 有内容时绘制
     // 根据 displayMode 选择显示 translation 还是 roma
@@ -238,14 +267,55 @@ class LineRenderer {
       _translationPainter.layout(
           maxWidth:
               maxWidth == double.infinity ? double.infinity : maxWidth);
-      // 翻译副行对齐跟随原文，按副行自身宽度计算 x
-      final double transX = _alignX(
-          alignment, offset.dx, _translationPainter.width, viewportWidth);
+      // 翻译副行对齐跟随原文，用 _alignX 计算起始 x
+      final double transX = _alignX(alignment, offset.dx,
+          _translationPainter.width, viewportWidth);
+      // 多行翻译副行需设置 textAlign 让每条视觉行独立对齐到 transX
+      _translationPainter.textAlign = _duetToTextAlign(alignment);
       _translationPainter.paint(canvas, Offset(transX, transY));
     }
   }
 
-  /// 根据对唱对齐方式计算文本起始 x 坐标。
+  /// 多行文本按行独立对齐绘制：按视觉行拆分文本，每行用对应 x 偏移。
+  void _paintMultiLineAligned(
+      Canvas canvas, Offset offset, LyricLine line, double fontSize,
+      DuetAlignment alignment, double maxWidth, double viewportWidth) {
+    final String text = line.text;
+    // 拆分视觉行（与 _computeLineAlignOffsets 一致）
+    final List<int> lineStarts = <int>[0];
+    int pos = 0;
+    while (pos < text.length) {
+      final boundary = _painter.getLineBoundary(TextPosition(offset: pos));
+      final lineEnd = boundary.end;
+      if (lineEnd <= pos) break;
+      pos = lineEnd;
+      if (pos < text.length) lineStarts.add(pos);
+    }
+    // 每行独立绘制
+    final double wrapLineHeight =
+        fontSize * LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor;
+    for (int i = 0; i < lineStarts.length; i++) {
+      final start = lineStarts[i];
+      final end = i + 1 < lineStarts.length ? lineStarts[i + 1] : text.length;
+      final lineText = text.substring(start, end);
+      _lineMeasurer.text = TextSpan(
+        text: lineText,
+        style: TextStyle(
+          color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, _currentAlpha),
+          fontSize: fontSize,
+          height: LyricLayout.lineHeight,
+          fontFamily: LyricLayout.fontFamily,
+        ),
+      );
+      _lineMeasurer.layout(maxWidth: double.infinity);
+      final double x = _alignX(
+          alignment, offset.dx, _lineMeasurer.width, viewportWidth);
+      final double y = offset.dy + i * wrapLineHeight;
+      _lineMeasurer.paint(canvas, Offset(x, y));
+    }
+  }
+
+  /// 根据对唱对齐方式计算文本起始 x 坐标（与 [WordRenderer._alignX] 一致）。
   /// [leftPadding] 为左侧 1em 边距（即 offset.dx），右侧对称留白。
   double _alignX(DuetAlignment alignment, double leftPadding,
       double textWidth, double viewportWidth) {
@@ -261,6 +331,21 @@ class LineRenderer {
     return (viewportWidth - textWidth) / 2;
   }
 
+  /// 对唱对齐方式 → TextAlign 映射（用于多行翻译副行内部对齐）。
+  /// left/defaultAlign → start（左对齐）
+  /// right → end（右对齐）
+  /// center → center（居中）
+  static TextAlign _duetToTextAlign(DuetAlignment alignment) {
+    switch (alignment) {
+      case DuetAlignment.center:
+        return TextAlign.center;
+      case DuetAlignment.right:
+        return TextAlign.end;
+      default:
+        return TextAlign.start;
+    }
+  }
+
   /// 重置状态：alpha 回到初始值（0.2），isActive=false。
   ///
   /// **v4 优化**：重置 alpha 缓存字段，下次 paintLine 会重新 set text + layout。
@@ -273,5 +358,6 @@ class LineRenderer {
     _lastSetMaxWidth = -1;
     _lastTextColorValue = -1;
     _boundLine = null;
+    _lastAlignment = DuetAlignment.defaultAlign;
   }
 }
