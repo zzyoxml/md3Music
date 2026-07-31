@@ -131,6 +131,7 @@ class DownloadsProvider extends ChangeNotifier {
   }
 
   /// 下载歌曲。返回实际使用的音质（可能因自动降级与请求的不同），失败返回 null。
+  /// 返回 'trial_blocked' 表示获取到的是试听片段（账号被风控），未执行下载。
   Future<String?> downloadSong(Song song, {String quality = '128'}) async {
     if (isDownloading(song.id)) return null;
 
@@ -147,6 +148,14 @@ class DownloadsProvider extends ChangeNotifier {
         albumAudioId: song.albumAudioId,
       );
       if (result != null && result.url.isNotEmpty) {
+        // 试听片段：账号被风控，禁止下载
+        if (result.isTrial) {
+          debugPrint(
+            '[DownloadsProvider] trial URL detected for ${song.id}, '
+            'account may be risk-controlled, skipping download',
+          );
+          return 'trial_blocked';
+        }
         downloadUrl = result.url;
         actualQuality = result.quality;
       }
@@ -175,6 +184,54 @@ class DownloadsProvider extends ChangeNotifier {
     final dir = await _resolveDownloadDir();
     _manager.download(task, dir, quality: actualQuality);
     return actualQuality;
+  }
+
+  /// 批量下载多首歌曲。逐首解析 URL 并启动下载，已下载/下载中的自动跳过。
+  /// 音质降级由 [getSongUrlWithFallback] 自动处理。
+  /// [onProgress] 回调 (completed, total, currentTitle, downgraded) 供 UI 更新进度。
+  Future<Map<String, int>> downloadMultipleSongs(
+    List<Song> songs, {
+    String quality = '128',
+    void Function(int completed, int total, String? currentTitle, int downgraded)?
+        onProgress,
+  }) async {
+    int success = 0;
+    int failed = 0;
+    int skipped = 0;
+    int downgraded = 0;
+    int blocked = 0;
+    final total = songs.length;
+
+    for (int i = 0; i < songs.length; i++) {
+      final song = songs[i];
+
+      if (isDownloaded(song.id) || isDownloading(song.id)) {
+        skipped++;
+        onProgress?.call(i + 1, total, null, downgraded);
+        continue;
+      }
+
+      onProgress?.call(i, total, song.title, downgraded);
+      final actual = await downloadSong(song, quality: quality);
+
+      if (actual == null) {
+        failed++;
+      } else if (actual == 'trial_blocked') {
+        blocked++;
+      } else {
+        success++;
+        if (actual != quality) downgraded++;
+      }
+      onProgress?.call(i + 1, total, null, downgraded);
+    }
+
+    return {
+      'success': success,
+      'failed': failed,
+      'skipped': skipped,
+      'downgraded': downgraded,
+      'blocked': blocked,
+    };
   }
 
   void cancelDownload(String songId) {

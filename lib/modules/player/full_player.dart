@@ -5,12 +5,14 @@ import 'package:provider/provider.dart';
 
 import '../../core/layout/responsive_layout.dart';
 import '../../core/services/desktop_lyric_service.dart';
+import '../../core/services/equalizer_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/utils/audio_scanner.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
+import '../settings/equalizer_settings_page.dart';
 import 'artist_photo_background.dart';
 import 'mv_player_page.dart';
 import '../../providers/device_provider.dart';
@@ -2033,7 +2035,16 @@ class _FullPlayerState extends State<FullPlayer>
           ),
         );
         final actual = await provider.downloadSong(song, quality: quality);
-        if (actual != null && actual != quality && context.mounted) {
+        if (actual == 'trial_blocked') {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('你的账号已被kugou风控,请等待kugou解除风控后再试'),
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
+        } else if (actual != null && actual != quality && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}'),
@@ -2068,6 +2079,30 @@ class _FullPlayerState extends State<FullPlayer>
                   onTap: () {
                     Navigator.pop(context);
                     _showLyricPreferencesSheet(context);
+                  },
+                ),
+                ListenableBuilder(
+                  listenable: EqualizerService.instance,
+                  builder: (context, _) {
+                    final eq = EqualizerService.instance;
+                    return ListTile(
+                      leading: Icon(Icons.graphic_eq,
+                          color: eq.enabled
+                              ? Theme.of(context).colorScheme.primary
+                              : null),
+                      title: const Text('均衡器'),
+                      subtitle: Text(
+                          eq.enabled ? '已开启 · ${eq.currentPreset}' : '未开启'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const EqualizerSettingsPage(),
+                          ),
+                        );
+                      },
+                    );
                   },
                 ),
                 ListTile(

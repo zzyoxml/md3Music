@@ -568,12 +568,14 @@ class KugouPlayUrl {
   final int fileSize;
   final int bitRate;
   final String quality;
+  final bool isTrial;
 
   const KugouPlayUrl({
     required this.url,
     this.fileSize = 0,
     this.bitRate = 0,
     required this.quality,
+    this.isTrial = false,
   });
 
   factory KugouPlayUrl.fromJson(Map<String, dynamic> json) {

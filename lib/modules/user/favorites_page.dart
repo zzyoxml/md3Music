@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/repositories/collected_playlist_store.dart';
 import '../../data/repositories/favorite_lists_cache.dart';
@@ -33,6 +34,10 @@ class _FavoritesPageState extends State<FavoritesPage>
   // 歌单
   List<KugouPlaylistBrief> _playlists = [];
   bool _isLoadingPlaylists = true;
+  int _playlistPage = 1;
+  bool _hasMorePlaylists = true;
+  bool _isLoadingMorePlaylists = false;
+  static const int _playlistPageSize = 30;
 
   // 专辑
   List<KugouPlaylistBrief> _albums = [];
@@ -57,6 +62,11 @@ class _FavoritesPageState extends State<FavoritesPage>
   bool _createdExpanded = true;
   bool _collectedExpanded = true;
 
+  // 歌单访问排序：歌单 ID → 最后访问时间戳（毫秒）
+  // 点击歌单后记录时间，列表按最近访问排序（最近访问的排最前）
+  Map<String, int> _playlistAccessOrder = {};
+  static const _accessOrderKey = 'playlist_access_order';
+
   // 管理模式（批量选择）
   bool _isManaging = false;
   final Set<int> _selectedIndices = {};
@@ -79,6 +89,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       // 先 await 缓存就位（避免 dio 失败先于 SharedPreferences 读到 cache，
       // 导致 banner 在 cache 显示后才被清掉，闪烁）。
       await _loadCachedData();
+      await _loadAccessOrder();
       if (!mounted) return;
       _loadAllData();
       context.read<PlaylistCollectionNotifier>().addListener(_onCollectionChanged);
@@ -141,6 +152,41 @@ class _FavoritesPageState extends State<FavoritesPage>
     _loadAlbums(noCache: true);
   }
 
+  /// 加载歌单访问排序记录
+  Future<void> _loadAccessOrder() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_accessOrderKey);
+      if (raw != null && raw.isNotEmpty) {
+        final parts = raw.split(',');
+        final map = <String, int>{};
+        for (final part in parts) {
+          final kv = part.split(':');
+          if (kv.length == 2) {
+            final ts = int.tryParse(kv[1]);
+            if (ts != null) map[kv[0]] = ts;
+          }
+        }
+        _playlistAccessOrder = map;
+      }
+    } catch (_) {}
+  }
+
+  /// 记录歌单访问时间戳并持久化
+  Future<void> _recordPlaylistAccess(KugouPlaylistBrief playlist) async {
+    final key = playlist.globalCollectionId ?? playlist.id;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _playlistAccessOrder[key] = now;
+    setState(() {});
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final parts = _playlistAccessOrder.entries
+          .map((e) => '${e.key}:${e.value}')
+          .join(',');
+      await prefs.setString(_accessOrderKey, parts);
+    } catch (_) {}
+  }
+
   Future<void> _loadAllData() async {
     await Future.wait([
       _loadPlaylists(),
@@ -163,21 +209,35 @@ class _FavoritesPageState extends State<FavoritesPage>
     return false;
   }
 
-  List<KugouPlaylistBrief> get _createdPlaylists =>
-      _playlists.where(_isCreated).toList();
+  int _getAccessTime(KugouPlaylistBrief p) =>
+      _playlistAccessOrder[p.globalCollectionId ?? p.id] ?? 0;
 
-  List<KugouPlaylistBrief> get _collectedPlaylists =>
-      _playlists.where((p) => !_isCreated(p)).toList();
+  List<KugouPlaylistBrief> get _createdPlaylists => _playlists
+      .where(_isCreated)
+      .toList()
+    ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+
+  List<KugouPlaylistBrief> get _collectedPlaylists => _playlists
+      .where((p) => !_isCreated(p))
+      .toList()
+    ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
 
   // ==================== 数据加载 ====================
 
   Future<void> _loadPlaylists({bool forceNoCache = false}) async {
     if (!mounted) return;
+    // 重置分页状态
+    _playlistPage = 1;
+    _hasMorePlaylists = true;
     setState(() => _isLoadingPlaylists = true);
 
     try {
       final api = KugouApiClient();
-      final result = await api.getUserPlaylist(pagesize: 50, noCache: forceNoCache);
+      final result = await api.getUserPlaylist(
+        page: 1,
+        pagesize: _playlistPageSize,
+        noCache: forceNoCache,
+      );
       if (!mounted) return;
 
       // KugouApiClient._get 在网络/服务异常时返回 null（吞了 DioException），
@@ -210,6 +270,8 @@ class _FavoritesPageState extends State<FavoritesPage>
             .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
             .toList();
         final now = DateTime.now();
+        // 判断是否还有更多：返回条数等于请求页大小则可能还有下一页
+        _hasMorePlaylists = list!.length >= _playlistPageSize;
         setState(() {
           _playlists = filtered;
           _isLoadingPlaylists = false;
@@ -221,6 +283,7 @@ class _FavoritesPageState extends State<FavoritesPage>
         return;
       }
       // API 返回 200 但 data 列表为空（合法空状态，非网络问题）
+      _hasMorePlaylists = false;
       setState(() {
         _isLoadingPlaylists = false;
       });
@@ -229,6 +292,64 @@ class _FavoritesPageState extends State<FavoritesPage>
         setState(() {
           _isLoadingPlaylists = false;
         });
+      }
+    }
+  }
+
+  /// 加载更多歌单（分页追加）
+  Future<void> _loadMorePlaylists() async {
+    if (!_hasMorePlaylists || _isLoadingMorePlaylists || !mounted) return;
+    setState(() => _isLoadingMorePlaylists = true);
+
+    try {
+      final api = KugouApiClient();
+      final nextPage = _playlistPage + 1;
+      final result = await api.getUserPlaylist(
+        page: nextPage,
+        pagesize: _playlistPageSize,
+      );
+      if (!mounted) return;
+
+      if (result == null) {
+        setState(() => _isLoadingMorePlaylists = false);
+        return;
+      }
+
+      final data = result['data'];
+      List<dynamic>? list;
+      if (data is List) {
+        list = data;
+      } else if (data is Map<String, dynamic>) {
+        list = data['info'] as List<dynamic>?;
+        list ??= data['list'] as List<dynamic>?;
+      }
+
+      if (list != null && list.isNotEmpty) {
+        final filtered = list!
+            .where((e) {
+              final json = e as Map<String, dynamic>;
+              final type = json['type'] as int? ?? 0;
+              final source = json['source'] as int? ?? 0;
+              if (type == 1 && source == 2) return false;
+              return true;
+            })
+            .map((e) => KugouPlaylistBrief.fromJson(e as Map<String, dynamic>))
+            .toList();
+        _playlistPage = nextPage;
+        _hasMorePlaylists = list!.length >= _playlistPageSize;
+        setState(() {
+          _playlists.addAll(filtered);
+          _isLoadingMorePlaylists = false;
+        });
+        // 更新本地缓存
+        FavoriteListsCache.savePlaylists(_playlists);
+      } else {
+        _hasMorePlaylists = false;
+        setState(() => _isLoadingMorePlaylists = false);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingMorePlaylists = false);
       }
     }
   }
@@ -576,27 +697,53 @@ class _FavoritesPageState extends State<FavoritesPage>
 
     return MD3ERefreshIndicator(
       onRefresh: () => _loadPlaylists(forceNoCache: true),
-      child: ListView(
-        controller: _scrollController,
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        children: [
-          if (_createdPlaylists.isNotEmpty)
-            _GroupSection(
-              title: '我创建的歌单',
-              expanded: _createdExpanded,
-              onToggle: () => setState(() => _createdExpanded = !_createdExpanded),
-              playlists: _createdPlaylists,
-              onBuildTile: (p) => _buildPlaylistTile(p, _playlists.indexOf(p)),
-            ),
-          if (_collectedPlaylists.isNotEmpty)
-            _GroupSection(
-              title: '我收藏的歌单',
-              expanded: _collectedExpanded,
-              onToggle: () => setState(() => _collectedExpanded = !_collectedExpanded),
-              playlists: _collectedPlaylists,
-              onBuildTile: (p) => _buildPlaylistTile(p, _playlists.indexOf(p)),
-            ),
-        ],
+      child: NotificationListener<ScrollNotification>(
+        onNotification: (notification) {
+          if (notification is ScrollEndNotification &&
+              notification.metrics.pixels >=
+                  notification.metrics.maxScrollExtent - 200) {
+            _loadMorePlaylists();
+          }
+          return false;
+        },
+        child: ListView(
+          controller: _scrollController,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          children: [
+            if (_createdPlaylists.isNotEmpty)
+              _buildGroupSection(
+                title: '我创建的歌单',
+                expanded: _createdExpanded,
+                onToggle: () => setState(() => _createdExpanded = !_createdExpanded),
+                playlists: _createdPlaylists,
+              ),
+            if (_collectedPlaylists.isNotEmpty)
+              _buildGroupSection(
+                title: '我收藏的歌单',
+                expanded: _collectedExpanded,
+                onToggle: () => setState(() => _collectedExpanded = !_collectedExpanded),
+                playlists: _collectedPlaylists,
+              ),
+            // 底部加载更多指示器
+            if (_isLoadingMorePlaylists)
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Center(child: MD3ELoadingIndicator()),
+              )
+            else if (!_hasMorePlaylists && _playlists.length > _playlistPageSize)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Center(
+                  child: Text(
+                    '没有更多了',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -618,7 +765,9 @@ class _FavoritesPageState extends State<FavoritesPage>
                 }
               });
             }
-          : () {
+          : () async {
+              await _recordPlaylistAccess(playlist);
+              if (!mounted) return;
               Navigator.push(
                 context,
                 MaterialPageRoute(

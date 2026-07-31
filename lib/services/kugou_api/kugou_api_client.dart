@@ -751,7 +751,14 @@ class KugouApiClient {
       if (freeJson != null) {
         final freeData = _extractData(freeJson['data'] ?? freeJson);
         if (freeData['url'] != null) {
-          return KugouPlayUrl.fromJson(freeData);
+          final trial = KugouPlayUrl.fromJson(freeData);
+          return KugouPlayUrl(
+            url: trial.url,
+            fileSize: trial.fileSize,
+            bitRate: trial.bitRate,
+            quality: trial.quality,
+            isTrial: true,
+          );
         }
       }
     } catch (e) {}
@@ -862,6 +869,7 @@ class KugouApiClient {
             fileSize: result.fileSize,
             bitRate: result.bitRate,
             quality: q,
+            isTrial: result.isTrial,
           );
         }
       } catch (_) {}
