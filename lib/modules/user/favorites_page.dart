@@ -581,77 +581,23 @@ class _FavoritesPageState extends State<FavoritesPage>
         padding: const EdgeInsets.symmetric(vertical: 8),
         children: [
           if (_createdPlaylists.isNotEmpty)
-            _buildGroupSection(
+            _GroupSection(
               title: '我创建的歌单',
               expanded: _createdExpanded,
               onToggle: () => setState(() => _createdExpanded = !_createdExpanded),
               playlists: _createdPlaylists,
+              onBuildTile: (p) => _buildPlaylistTile(p, _playlists.indexOf(p)),
             ),
           if (_collectedPlaylists.isNotEmpty)
-            _buildGroupSection(
+            _GroupSection(
               title: '我收藏的歌单',
               expanded: _collectedExpanded,
               onToggle: () => setState(() => _collectedExpanded = !_collectedExpanded),
               playlists: _collectedPlaylists,
+              onBuildTile: (p) => _buildPlaylistTile(p, _playlists.indexOf(p)),
             ),
         ],
       ),
-    );
-  }
-
-  Widget _buildGroupSection({
-    required String title,
-    required bool expanded,
-    required VoidCallback onToggle,
-    required List<KugouPlaylistBrief> playlists,
-  }) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        InkWell(
-          onTap: onToggle,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Icon(
-                  expanded ? Icons.expand_more : Icons.chevron_right,
-                  color: colorScheme.onSurfaceVariant,
-                  size: 20,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '${playlists.length}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        SizeTransition(
-          sizeFactor: CurvedAnimation(
-            parent: AlwaysStoppedAnimation(expanded ? 1.0 : 0.0),
-            curve: Curves.easeInOut,
-          ),
-          child: Column(
-            children: playlists.map((playlist) {
-              final index = _playlists.indexOf(playlist);
-              return _buildPlaylistTile(playlist, index);
-            }).toList(),
-          ),
-        ),
-      ],
     );
   }
 
@@ -1035,6 +981,123 @@ class _FavoritesPageState extends State<FavoritesPage>
           ],
         ),
       ),
+    );
+  }
+}
+
+/// 可折叠/展开的歌单分组，带有平滑过渡动画。
+///
+/// 使用 [AnimationController] + [SizeTransition] 实现高度渐变，
+/// [AnimatedRotation] 实现箭头图标旋转。
+class _GroupSection extends StatefulWidget {
+  final String title;
+  final bool expanded;
+  final VoidCallback onToggle;
+  final List<KugouPlaylistBrief> playlists;
+  final Widget Function(KugouPlaylistBrief) onBuildTile;
+
+  const _GroupSection({
+    required this.title,
+    required this.expanded,
+    required this.onToggle,
+    required this.playlists,
+    required this.onBuildTile,
+  });
+
+  @override
+  State<_GroupSection> createState() => _GroupSectionState();
+}
+
+class _GroupSectionState extends State<_GroupSection>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _sizeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+      value: widget.expanded ? 1.0 : 0.0,
+    );
+    _sizeAnimation = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeInOut,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant _GroupSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.expanded != oldWidget.expanded) {
+      if (widget.expanded) {
+        _controller.forward();
+      } else {
+        _controller.reverse();
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: widget.onToggle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                AnimatedRotation(
+                  turns: widget.expanded ? 0.25 : 0.0,
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                  child: Icon(
+                    Icons.chevron_right,
+                    color: colorScheme.onSurfaceVariant,
+                    size: 20,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  widget.title,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${widget.playlists.length}',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        ClipRect(
+          child: SizeTransition(
+            sizeFactor: _sizeAnimation,
+            axisAlignment: -1.0,
+            child: Column(
+              children: widget.playlists.map((playlist) {
+                return widget.onBuildTile(playlist);
+              }).toList(),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

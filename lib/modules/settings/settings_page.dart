@@ -18,6 +18,7 @@ import '../../core/services/folder_picker_service.dart';
 import '../../core/services/lyricon_provider_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/theme/motion_constants.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../onboarding/onboarding_page.dart';
 import '../../providers/kugou_provider.dart';
@@ -684,19 +685,13 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
-  /// 播放页样式 section：Apple Music 风格播放页开关及相关视觉特效。
-  /// 这些设置仅在使用 AM 风格播放页时生效，关闭 AM 后各特效开关自动禁用。
+  /// 播放页样式 section：播放器风格卡片选择 + 视觉特效开关。
   Widget _buildPlayerStyleSection(ColorScheme colorScheme) {
     return Column(
       children: [
-        SwitchListTile(
-          title: const Text('Apple Music 风格播放页'),
-          subtitle: const Text('使用模糊封面背景 逐字歌词（关闭则用原版 MD3 风格）'),
-          value: _useAmStylePlayer,
-          onChanged: (v) {
-            setState(() => _useAmStylePlayer = v);
-            context.read<ThemeProvider>().setUseAmStylePlayer(v);
-          },
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: _buildStyleCards(colorScheme),
         ),
         SwitchListTile(
           title: const Text('歌词双击跳转'),
@@ -1615,6 +1610,111 @@ class _SettingsPageState extends State<SettingsPage> {
       );
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────
+  // 播放器风格卡片选择
+  // ─────────────────────────────────────────────────────────────────────
+
+  Widget _buildStyleCards(ColorScheme colorScheme) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        _buildStyleCard(
+          colorScheme: colorScheme,
+          title: 'MD3Music',
+          subtitle: 'Material 3 风格',
+          isSelected: !_useAmStylePlayer,
+          onTap: () {
+            setState(() => _useAmStylePlayer = false);
+            context.read<ThemeProvider>().setUseAmStylePlayer(false);
+          },
+          preview: _SettingsMd3StylePreview(colorScheme: colorScheme),
+        ),
+        const SizedBox(width: 16),
+        _buildStyleCard(
+          colorScheme: colorScheme,
+          title: 'Apple Music',
+          subtitle: '模糊封面 + 逐字歌词',
+          isSelected: _useAmStylePlayer,
+          onTap: () {
+            setState(() => _useAmStylePlayer = true);
+            context.read<ThemeProvider>().setUseAmStylePlayer(true);
+          },
+          preview: _SettingsAmStylePreview(colorScheme: colorScheme),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStyleCard({
+    required ColorScheme colorScheme,
+    required String title,
+    required String subtitle,
+    required bool isSelected,
+    required VoidCallback onTap,
+    required Widget preview,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: M3ExpressiveMotion.defaultDuration,
+          curve: M3ExpressiveMotion.expressiveEasing,
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: colorScheme.surfaceContainerLow,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected
+                  ? colorScheme.primary
+                  : colorScheme.outlineVariant,
+              width: isSelected ? 2.5 : 1,
+            ),
+          ),
+          child: Column(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: SizedBox(
+                  height: 140,
+                  width: double.infinity,
+                  child: preview,
+                ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight:
+                      isSelected ? FontWeight.w600 : FontWeight.w500,
+                  color: isSelected
+                      ? colorScheme.primary
+                      : colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+              if (isSelected) ...[
+                const SizedBox(height: 6),
+                Icon(
+                  Icons.check_circle,
+                  size: 20,
+                  color: colorScheme.primary,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Tab 管理面板：支持拖拽排序 + 显示/隐藏开关。
@@ -1739,5 +1839,220 @@ class _TabManagementPanel extends StatelessWidget {
       default:
         return Icons.circle;
     }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// 播放器风格预览组件
+// ─────────────────────────────────────────────────────────────────────
+
+/// MD3Music 风格播放器预览：简洁的 Material 3 卡片布局。
+class _SettingsMd3StylePreview extends StatelessWidget {
+  final ColorScheme colorScheme;
+
+  const _SettingsMd3StylePreview({required this.colorScheme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: colorScheme.surface,
+      child: Column(
+        children: [
+          // 顶栏
+          Container(
+            height: 28,
+            color: colorScheme.surfaceContainer,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            alignment: Alignment.centerLeft,
+            child: Row(
+              children: [
+                Icon(Icons.keyboard_arrow_down,
+                    size: 14, color: colorScheme.onSurfaceVariant),
+                const Spacer(),
+                Icon(Icons.more_horiz,
+                    size: 12, color: colorScheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+          // 封面
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                children: [
+                  Expanded(
+                    flex: 3,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Center(
+                        child: Icon(
+                          Icons.music_note,
+                          size: 32,
+                          color: colorScheme.onPrimaryContainer,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Container(
+                    height: 5,
+                    width: 55,
+                    decoration: BoxDecoration(
+                      color: colorScheme.onSurface,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Container(
+                    height: 4,
+                    width: 36,
+                    decoration: BoxDecoration(
+                      color: colorScheme.onSurfaceVariant,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Container(
+                    height: 3,
+                    decoration: BoxDecoration(
+                      color: colorScheme.primary,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 5),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      Icon(Icons.skip_previous,
+                          size: 16, color: colorScheme.onSurface),
+                      Icon(Icons.play_arrow,
+                          size: 20, color: colorScheme.primary),
+                      Icon(Icons.skip_next,
+                          size: 16, color: colorScheme.onSurface),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Apple Music 风格播放器预览：模糊封面背景 + 逐字歌词。
+class _SettingsAmStylePreview extends StatelessWidget {
+  final ColorScheme colorScheme;
+
+  const _SettingsAmStylePreview({required this.colorScheme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            colorScheme.primary.withValues(alpha: 0.6),
+            colorScheme.surface,
+          ],
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                Icon(Icons.keyboard_arrow_down,
+                    size: 14, color: colorScheme.onSurface),
+                const Spacer(),
+                Icon(Icons.more_horiz,
+                    size: 12, color: colorScheme.onSurface),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildLyricBar(45, colorScheme.onSurface, 0.2),
+                  const SizedBox(height: 5),
+                  _buildLyricBar(70, colorScheme.primary, 1.0),
+                  const SizedBox(height: 5),
+                  _buildLyricBar(40, colorScheme.onSurface, 0.2),
+                  const SizedBox(height: 5),
+                  _buildLyricBar(30, colorScheme.onSurface, 0.1),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: colorScheme.primary.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Icon(
+                    Icons.music_note,
+                    size: 12,
+                    color: colorScheme.onPrimary,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        height: 4,
+                        width: 40,
+                        decoration: BoxDecoration(
+                          color: colorScheme.onSurface,
+                          borderRadius: BorderRadius.circular(3),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Container(
+                        height: 3,
+                        width: 26,
+                        decoration: BoxDecoration(
+                          color: colorScheme.onSurfaceVariant,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.play_arrow,
+                    size: 16, color: colorScheme.onSurface),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLyricBar(double width, Color color, double opacity) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        height: 6,
+        width: width,
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: opacity),
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ),
+    );
   }
 }
