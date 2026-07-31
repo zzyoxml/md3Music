@@ -20,6 +20,7 @@ import '../../providers/kugou_provider.dart';
 import '../../providers/local_favorites_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/downloads_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/apple_lyrics/apple_lyrics_view.dart';
@@ -657,6 +658,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       ),
       builder: (context, _, __) {
         final playerProvider = context.read<PlayerProvider>();
+        final lyricDoubleTap = context.watch<ThemeProvider>().lyricDoubleTapToJump;
         final currentSong = playerProvider.currentSong;
         final colorScheme = Theme.of(context).colorScheme;
 
@@ -681,7 +683,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             if (didPop || _isDismissing) return;
             _collapseByButton();
           },
-          child: _buildFullLayout(playerProvider, currentSong, colorScheme),
+          child: _buildFullLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
         );
       },
     );
@@ -693,6 +695,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     PlayerProvider playerProvider,
     dynamic currentSong,
     ColorScheme colorScheme,
+    bool lyricDoubleTap,
   ) {
     // extendBody: true 让内容延伸到系统导航栏后面，实现沉浸效果
     // 引用 kPlayerOverlayStyle 与 applyImmersiveForOrientation 共用同一 const 实例
@@ -720,11 +723,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             // 4. 主体内容（保留原有 compact/landscape/expanded 三套布局）
             ResponsiveLayout(
               compact: (_) =>
-                  _buildCompactLayout(playerProvider, currentSong, colorScheme),
+                  _buildCompactLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
               medium: (_) =>
-                  _buildLandscapeLayout(playerProvider, currentSong, colorScheme),
+                  _buildLandscapeLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
               expanded: (_) =>
-                  _buildExpandedLayout(playerProvider, currentSong, colorScheme),
+                  _buildExpandedLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
             ),
           ],
         ),
@@ -744,6 +747,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     PlayerProvider playerProvider,
     dynamic currentSong,
     ColorScheme colorScheme,
+    bool lyricDoubleTap,
   ) {
     // 竖屏 edgeToEdge 模式：底部需要额外 padding 避免被导航栏遮挡
     // 使用 viewPadding.bottom 和固定最小值 32 确保控件不被遮挡
@@ -802,6 +806,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               enableInterludeDots:
                                   !_isLocalLrcLyricWithoutWordTiming(
                                       currentSong),
+                              doubleTapToJump: lyricDoubleTap,
                               onSeek: (ms) => playerProvider
                                   .seek(Duration(milliseconds: ms)),
                             ),
@@ -835,6 +840,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     PlayerProvider playerProvider,
     dynamic currentSong,
     ColorScheme colorScheme,
+    bool lyricDoubleTap,
   ) {
     // 横屏/竖屏 edgeToEdge 模式：底部需要额外 padding 避免被导航栏遮挡
     final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 8;
@@ -995,6 +1001,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                         enableInterludeDots:
                                             !_isLocalLrcLyricWithoutWordTiming(
                                                 currentSong),
+                                        doubleTapToJump: lyricDoubleTap,
                                         onSeek: (ms) => playerProvider.seek(
                                           Duration(milliseconds: ms),
                                         ),
@@ -1039,6 +1046,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     PlayerProvider playerProvider,
     dynamic currentSong,
     ColorScheme colorScheme,
+    bool lyricDoubleTap,
   ) {
     // 横屏/竖屏 edgeToEdge 模式：底部需要额外 padding 避免被导航栏遮挡
     final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 8;
@@ -1197,6 +1205,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                         enableInterludeDots:
                                             !_isLocalLrcLyricWithoutWordTiming(
                                                 currentSong),
+                                        doubleTapToJump: lyricDoubleTap,
                                         onSeek: (ms) => playerProvider.seek(
                                           Duration(milliseconds: ms),
                                         ),

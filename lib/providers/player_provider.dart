@@ -81,7 +81,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   String get audioQualityLabel => _audioQuality.label;
 
   /// 当前歌曲的实际音质标签。
-  /// 本地歌曲优先使用 song.quality 推断的标签，在线歌曲使用全局音质偏好。
+  /// 本地歌曲优先使用 song.quality 推断的标签，在线歌曲始终使用全局音质偏好
+  /// （因为在线歌曲的实际播放音质由用户设置决定，而非歌曲元数据中的 quality 字段）。
   String get currentQualityLabel {
     final song = _currentSong;
     if (song != null && !song.isOnline && song.quality != null) {
@@ -98,6 +99,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           return song.quality!;
       }
     }
+    // 在线歌曲始终显示用户当前设置的全局音质偏好
     return _audioQuality.label;
   }
 

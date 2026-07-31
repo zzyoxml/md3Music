@@ -66,6 +66,9 @@ class AppleLyricsView extends StatefulWidget {
   /// 默认 true，保持原有视觉。
   final bool enableInterludeDots;
 
+  /// 是否启用双击跳转（开启后单击不跳转，双击才跳转播放位置）
+  final bool doubleTapToJump;
+
   const AppleLyricsView({
     super.key,
     required this.lines,
@@ -75,6 +78,7 @@ class AppleLyricsView extends StatefulWidget {
     this.enableScale = true,
     this.forceDarkBackground = false,
     this.enableInterludeDots = true,
+    this.doubleTapToJump = false,
   });
 
   /// 找到当前应高亮的行索引：最后一个 `startTime <= currentTimeMs` 的行。
@@ -830,7 +834,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 移动距离 < clickThresholdPx(10px) 视为点击，否则视为滚动
     final delta = (details.localPosition - downPos).distance;
     if (delta >= LyricLayout.clickThresholdPx) return;
-
+  
     // 计算点击 y 对应的行索引：用预计算的 lineTops（支持非均匀行高）
     // 每行的实际 top = lineTops[i] + _interludeOffsetBefore(i)，
     // 找第一个 (lineTops[i+1] + interludeOffset) + posY > clickY 的 i（即 clickY 落在第 i 行内）
@@ -847,7 +851,33 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       }
     }
     if (index < 0 && _lineTops.isNotEmpty) {
-      // 兜底：找最接近的行
+      // 兆底：找最接近的行
+      index = (_lineTops.length - 1).clamp(0, widget.lines.length - 1);
+    }
+    if (index >= 0 && index < widget.lines.length) {
+      widget.onSeek?.call(widget.lines[index].startTime);
+    }
+  }
+  
+  /// 双击跳转：使用 onDoubleTapDown 已存储的 _tapDownPosition 触发跳转。
+  void _triggerDoubleTapSeek() {
+    final downPos = _tapDownPosition;
+    if (downPos == null) return;
+    _tapDownPosition = null;
+  
+    final posY = _scrollController.posY;
+    final relativeY = downPos.dy - posY;
+    if (_lineTops.isEmpty) return;
+    int index = -1;
+    for (int i = 0; i < _lineTops.length; i++) {
+      final top = _lineTops[i] + _interludeOffsetBefore(i);
+      final height = _lineHeights.length > i ? _lineHeights[i] : 0;
+      if (relativeY >= top && relativeY < top + height) {
+        index = i;
+        break;
+      }
+    }
+    if (index < 0 && _lineTops.isNotEmpty) {
       index = (_lineTops.length - 1).clamp(0, widget.lines.length - 1);
     }
     if (index >= 0 && index < widget.lines.length) {
@@ -947,8 +977,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTapDown: _onTapDown,
-          onTapUp: _onTapUp,
+          onTapDown: widget.doubleTapToJump ? null : _onTapDown,
+          onTapUp: widget.doubleTapToJump ? null : _onTapUp,
+          onDoubleTapDown: widget.doubleTapToJump ? _onTapDown : null,
+          onDoubleTap: widget.doubleTapToJump ? _triggerDoubleTapSeek : null,
           onVerticalDragUpdate: _onVerticalDragUpdate,
           onVerticalDragEnd: _onVerticalDragEnd,
           child: ShaderMask(
