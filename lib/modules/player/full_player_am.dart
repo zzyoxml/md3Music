@@ -2277,7 +2277,16 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           ),
         );
         final actual = await provider.downloadSong(song, quality: quality);
-        if (actual != null && actual != quality && context.mounted) {
+        if (actual == 'trial_blocked') {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('你的账号已被kugou风控,请等待kugou解除风控后再试'),
+                duration: Duration(seconds: 4),
+              ),
+            );
+          }
+        } else if (actual != null && actual != quality && context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text('${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}'),

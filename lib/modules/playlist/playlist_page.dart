@@ -9,6 +9,7 @@ import '../../data/repositories/favorite_lists_cache.dart';
 import '../../data/repositories/stream_cache_repository.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../providers/downloads_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/stream_cache_manager.dart';
@@ -293,10 +294,198 @@ class _PlaylistPageState extends State<PlaylistPage> {
         _selectedSongIds.clear();
       } else {
         _selectedSongIds
-            ..clear()
-            ..addAll(_displaySongs.map((s) => s.id));
+          ..clear()
+          ..addAll(_displaySongs.map((s) => s.id));
       }
     });
+  }
+
+  // ==================== 批量下载 ====================
+
+  void _showBatchDownloadDialog() {
+    final api = KugouApiClient();
+    if (!api.isLoggedIn) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('请先登录'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final selectedSongs =
+        _songs.where((s) => _selectedSongIds.contains(s.id)).toList();
+    if (selectedSongs.isEmpty) return;
+
+    final qualityOptions = [
+      ('标准音质 (128kbps)', '128'),
+      ('高音质 (320kbps)', '320'),
+      ('无损音质 (FLAC)', 'flac'),
+      ('Hi-Res 无损', 'high'),
+    ];
+
+    showDialog(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Column(
+          children: [
+            const Text('批量下载'),
+            Text(
+              '已选 ${selectedSongs.length} 首歌曲',
+              style: Theme.of(ctx).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '部分歌曲不支持所选音质时将自动降级',
+              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          ],
+        ),
+        children: qualityOptions.map((opt) {
+          final (label, quality) = opt;
+          return SimpleDialogOption(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _startBatchDownload(selectedSongs, quality);
+            },
+            child: Row(
+              children: [
+                Icon(Icons.music_note,
+                    size: 20, color: Theme.of(ctx).colorScheme.primary),
+                const SizedBox(width: 12),
+                Text(label),
+              ],
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  void _startBatchDownload(List<Song> songs, String quality) async {
+    _exitMultiSelectMode();
+    if (!mounted) return;
+
+    final downloadsProvider = context.read<DownloadsProvider>();
+    final total = songs.length;
+    final progress = ValueNotifier<int>(0);
+    final currentTitle = ValueNotifier<String?>(null);
+    final downgraded = ValueNotifier<int>(0);
+    bool dialogActive = true;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AnimatedBuilder(
+        animation: Listenable.merge([progress, currentTitle, downgraded]),
+        builder: (ctx, _) => AlertDialog(
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              LinearProgressIndicator(
+                value: total > 0 ? progress.value / total : 0,
+              ),
+              const SizedBox(height: 16),
+              Text('正在处理 ${progress.value} / $total'),
+              if (currentTitle.value != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  currentTitle.value!,
+                  style: Theme.of(ctx).textTheme.bodySmall,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+              if (downgraded.value > 0) ...[
+                const SizedBox(height: 4),
+                Text(
+                  '已降级 ${downgraded.value} 首',
+                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      ),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                dialogActive = false;
+                Navigator.pop(ctx);
+              },
+              child: const Text('后台下载'),
+            ),
+          ],
+        ),
+      ),
+    ).then((_) => dialogActive = false);
+
+    final result = await downloadsProvider.downloadMultipleSongs(
+      songs,
+      quality: quality,
+      onProgress: (c, t, title, d) {
+        if (!dialogActive) return;
+        progress.value = c;
+        currentTitle.value = title;
+        downgraded.value = d;
+      },
+    );
+
+    if (dialogActive && mounted) {
+      Navigator.pop(context);
+    }
+
+    if (dialogActive && mounted) {
+      _showBatchDownloadResult(result);
+    }
+
+    progress.dispose();
+    currentTitle.dispose();
+    downgraded.dispose();
+  }
+
+  void _showBatchDownloadResult(Map<String, int> result) {
+    final success = result['success'] ?? 0;
+    final failed = result['failed'] ?? 0;
+    final skipped = result['skipped'] ?? 0;
+    final downgraded = result['downgraded'] ?? 0;
+    final blocked = result['blocked'] ?? 0;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('批量下载完成'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('已加入下载: $success 首'),
+            if (failed > 0)
+              Text('失败: $failed 首',
+                  style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
+            if (skipped > 0) Text('跳过（已下载）: $skipped 首'),
+            if (downgraded > 0) Text('音质自动降级: $downgraded 首'),
+            if (blocked > 0)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  '风控拦截: $blocked 首\n你的账号已被kugou风控,请等待kugou解除风控后再试',
+                  style: TextStyle(color: Theme.of(ctx).colorScheme.error),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _deleteSelectedSongs() async {
@@ -1313,9 +1502,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
                               song: song,
                               isSelectMode: _isMultiSelectMode,
                               isSelected: isSelected,
-                              onLongPress: widget.isUserCreated
-                                  ? () => _enterMultiSelectMode(song.id)
-                                  : null,
+                              onLongPress: () => _enterMultiSelectMode(song.id),
                               onSelectToggle: () => _toggleSongSelection(song.id),
                               onTap: () {
                                 context.read<PlayerProvider>().playOnlinePlaylist(
@@ -1531,12 +1718,21 @@ class _PlaylistPageState extends State<PlaylistPage> {
                 ),
                 IconButton(
                   icon: Icon(
-                    Icons.delete_outline,
-                    color: selectedCount > 0 ? colorScheme.error : null,
+                    Icons.download_outlined,
+                    color: selectedCount > 0 ? colorScheme.primary : null,
                   ),
-                  onPressed: selectedCount > 0 ? _deleteSelectedSongs : null,
-                  tooltip: '删除',
+                  onPressed: selectedCount > 0 ? _showBatchDownloadDialog : null,
+                  tooltip: '下载',
                 ),
+                if (widget.isUserCreated)
+                  IconButton(
+                    icon: Icon(
+                      Icons.delete_outline,
+                      color: selectedCount > 0 ? colorScheme.error : null,
+                    ),
+                    onPressed: selectedCount > 0 ? _deleteSelectedSongs : null,
+                    tooltip: '删除',
+                  ),
               ],
             ],
           ),
