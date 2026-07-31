@@ -8,12 +8,15 @@ class LyricsView extends StatefulWidget {
   final String lyrics;
   final Duration position;
   final ValueChanged<Duration> onSeek;
+  /// 是否启用双击跳转（开启后单击不跳转，双击才跳转）
+  final bool doubleTapToJump;
 
   const LyricsView({
     super.key,
     required this.lyrics,
     required this.position,
     required this.onSeek,
+    this.doubleTapToJump = false,
   });
 
   @override
@@ -351,7 +354,8 @@ class LyricsViewState extends State<LyricsView> {
           final line = _parsedLyrics[index];
 
           return GestureDetector(
-            onTap: () => _onLineTap(index),
+            onTap: widget.doubleTapToJump ? null : () => _onLineTap(index),
+            onDoubleTap: widget.doubleTapToJump ? () => _onLineTap(index) : null,
             child: Container(
               height: lineHeight,
               alignment: Alignment.center,

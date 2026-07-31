@@ -81,6 +81,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _ignoreAudioFocus = false;
   // 暂停淡入淡出开关
   bool _pauseFadeEnabled = false;
+  // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
+  bool _lyricDoubleTapToJump = false;
 
   @override
   void initState() {
@@ -158,6 +160,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final useDynamicColor = context.read<ThemeProvider>().useDynamicColor;
     // 从 ThemeProvider 同步「Apple Music 风格播放页」开关状态
     final useAmStylePlayer = context.read<ThemeProvider>().useAmStylePlayer;
+    final lyricDoubleTapToJump = context.read<ThemeProvider>().lyricDoubleTapToJump;
     final useArtistPhotoBackground = context.read<ThemeProvider>().useArtistPhotoBackground;
     final artistPhotoInterval = context.read<ThemeProvider>().artistPhotoInterval;
     final artistPhotoOpacity = context.read<ThemeProvider>().artistPhotoOpacity;
@@ -180,6 +183,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _apiServerController.text = apiServerUrl;
       _useDynamicColor = useDynamicColor;
       _useAmStylePlayer = useAmStylePlayer;
+      _lyricDoubleTapToJump = lyricDoubleTapToJump;
       _useArtistPhotoBackground = useArtistPhotoBackground;
       _artistPhotoInterval = artistPhotoInterval;
       _artistPhotoOpacity = artistPhotoOpacity;
@@ -692,6 +696,15 @@ class _SettingsPageState extends State<SettingsPage> {
           onChanged: (v) {
             setState(() => _useAmStylePlayer = v);
             context.read<ThemeProvider>().setUseAmStylePlayer(v);
+          },
+        ),
+        SwitchListTile(
+          title: const Text('歌词双击跳转'),
+          subtitle: const Text('开启后需双击歌词行才能跳转播放位置'),
+          value: _lyricDoubleTapToJump,
+          onChanged: (v) {
+            setState(() => _lyricDoubleTapToJump = v);
+            context.read<ThemeProvider>().setLyricDoubleTapToJump(v);
           },
         ),
         SwitchListTile(

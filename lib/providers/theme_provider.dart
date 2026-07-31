@@ -18,6 +18,7 @@ class ThemeProvider extends ChangeNotifier {
   static const String _artistPhotoBgKey = 'use_artist_photo_background';
   static const String _artistPhotoIntervalKey = 'artist_photo_interval';
   static const String _artistPhotoOpacityKey = 'artist_photo_opacity';
+  static const String _lyricDoubleTapToJumpKey = 'lyric_double_tap_to_jump';
 
   ThemeMode _themeMode = ThemeMode.system;
   bool _useDynamicColor = false;
@@ -35,6 +36,8 @@ class ThemeProvider extends ChangeNotifier {
   bool _useArtistPhotoBackground = false;
   int _artistPhotoInterval = 15;
   double _artistPhotoOpacity = 0.55;
+  // AM 风格播放器歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
+  bool _lyricDoubleTapToJump = false;
 
   ThemeMode get themeMode => _themeMode;
   bool get useDynamicColor => _useDynamicColor;
@@ -48,6 +51,7 @@ class ThemeProvider extends ChangeNotifier {
   bool get useArtistPhotoBackground => _useArtistPhotoBackground;
   int get artistPhotoInterval => _artistPhotoInterval;
   double get artistPhotoOpacity => _artistPhotoOpacity;
+  bool get lyricDoubleTapToJump => _lyricDoubleTapToJump;
 
   /// 当前生效的种子色优先级：
   /// 1. 启用系统主题色且成功取到 → 系统主色
@@ -83,6 +87,7 @@ class ThemeProvider extends ChangeNotifier {
     _loadUiScale();
     _loadFontSource();
     _loadArtistPhotoBackground();
+    _loadLyricDoubleTapToJump();
   }
 
   Future<void> _loadThemeMode() async {
@@ -185,6 +190,24 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_amStylePlayerKey, enabled);
+  }
+
+  /// 加载「歌词双击跳转」开关持久化值，默认关闭。
+  Future<void> _loadLyricDoubleTapToJump() async {
+    final prefs = await SharedPreferences.getInstance();
+    _lyricDoubleTapToJump = prefs.getBool(_lyricDoubleTapToJumpKey) ?? false;
+    notifyListeners();
+  }
+
+  /// 切换「歌词双击跳转」开关。
+  /// - 开启：需双击歌词行才能跳转播放位置
+  /// - 关闭：单击即可跳转（默认行为）
+  Future<void> setLyricDoubleTapToJump(bool enabled) async {
+    if (_lyricDoubleTapToJump == enabled) return;
+    _lyricDoubleTapToJump = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_lyricDoubleTapToJumpKey, enabled);
   }
 
   /// 加载「歌手写真背景轮播」开关 + 轮播间隔持久化值，默认关闭 / 15 秒。

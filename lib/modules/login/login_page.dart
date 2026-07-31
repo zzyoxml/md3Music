@@ -279,6 +279,7 @@ class _LoginPageState extends State<LoginPage> {
                 ),
               ),
               const SizedBox(height: 8),
+              _buildRiskWarningCard(colorScheme, textTheme),
             ],
           ),
         ),
@@ -497,5 +498,73 @@ class _LoginPageState extends State<LoginPage> {
     } else {
       setState(() => _statusText = kugou.error ?? '登录失败');
     }
+  }
+
+  /// 风控提示信息卡片
+  Widget _buildRiskWarningCard(ColorScheme colorScheme, TextTheme textTheme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      child: Card(
+        color: colorScheme.errorContainer.withValues(alpha: 0.3),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, size: 20, color: colorScheme.error),
+                  const SizedBox(width: 8),
+                  Text(
+                    '风控提示',
+                    style: textTheme.titleSmall?.copyWith(
+                      color: colorScheme.error,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '最近 KG 风控比较严重，如果出现以下问题那可能是触发风控了：',
+                style: textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '1. 播放音乐只能播放标准音质\n2. 播放音乐只能播放前一分钟，后续内容无声音\n3. 下载歌曲显示只有最低音质可以下载',
+                style: textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '可能的解决办法：',
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '1. 等待几个小时有时候能恢复\n2. 重登有概率能恢复，但不建议频繁操作',
+                style: textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '注意事项：',
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '• 不要频繁点击签到领取 VIP，及其容易风控\n• 登录账号必须已在酷狗注册过账号，否则无法登录\n• 如果一个手机号对应多个酷狗账号也无法登录，请换用扫码',
+                style: textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

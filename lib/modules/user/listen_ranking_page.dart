@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../../data/models/song.dart';
+import '../../data/repositories/history_repository.dart';
 import '../../providers/player_provider.dart';
-import '../../services/kugou_api/kugou_api_client.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
 
-/// 听歌历史排行页面
+/// 听歌排行页面（本地实现）
 ///
 /// 展示用户听歌历史排行，支持切换"最近一周"和"全部累计"。
+/// 数据来源：本地 HistoryRepository 的播放次数统计。
 class ListenRankingPage extends StatefulWidget {
   const ListenRankingPage({super.key});
 
@@ -19,9 +19,8 @@ class ListenRankingPage extends StatefulWidget {
 }
 
 class _ListenRankingPageState extends State<ListenRankingPage> {
-  List<Song> _songs = [];
+  List<RankedSong> _rankedSongs = [];
   bool _isLoading = true;
-  String? _error;
   int _currentType = 0; // 0=最近一周, 1=全部累计
 
   @override
@@ -31,74 +30,17 @@ class _ListenRankingPageState extends State<ListenRankingPage> {
   }
 
   Future<void> _loadRanking() async {
+    setState(() => _isLoading = true);
+
+    final ranked = await HistoryRepository().getRankedSongs(
+      recentDays: _currentType == 0 ? 7 : null,
+    );
+
+    if (!mounted) return;
     setState(() {
-      _isLoading = true;
-      _error = null;
+      _rankedSongs = ranked;
+      _isLoading = false;
     });
-
-    try {
-      final result = await KugouApiClient().getUserListenRanking(type: _currentType);
-      if (!mounted) return;
-
-      if (result == null) {
-        setState(() {
-          _error = '获取排行失败';
-          _isLoading = false;
-        });
-        return;
-      }
-
-      // 解析返回数据
-      final songs = _parseRankingData(result);
-      setState(() {
-        _songs = songs;
-        _isLoading = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = '获取排行失败: $e';
-        _isLoading = false;
-      });
-    }
-  }
-
-  List<Song> _parseRankingData(Map<String, dynamic> data) {
-    final songs = <Song>[];
-
-    // 尝试从 data.data.list 或 data.list 获取列表
-    final dataList = data['data'] as Map<String, dynamic>?;
-    final list = (dataList?['list'] ?? data['list']) as List<dynamic>?;
-
-    if (list == null) return songs;
-
-    for (final item in list) {
-      if (item is! Map<String, dynamic>) continue;
-
-      // 解析歌曲信息
-      final songName = item['songname'] as String? ?? item['name'] as String? ?? '';
-      final singerName = item['singername'] as String? ?? item['singer'] as String? ?? '未知艺术家';
-      final hash = item['hash'] as String? ?? '';
-      final albumAudioId = item['album_audio_id']?.toString() ?? item['mixsongid']?.toString();
-      final albumId = item['album_id']?.toString();
-      final albumName = item['album_name'] as String? ?? '';
-      final durationMs = item['duration'] as int? ?? item['timelen'] as int? ?? 0;
-
-      if (songName.isEmpty) continue;
-
-      songs.add(Song(
-        id: hash.isNotEmpty ? hash : (albumAudioId ?? songName),
-        title: songName,
-        artist: singerName,
-        album: albumName,
-        duration: Duration(milliseconds: durationMs * 1000),
-        albumAudioId: albumAudioId,
-        albumId: albumId,
-        isOnline: true,
-      ));
-    }
-
-    return songs;
   }
 
   void _switchType(int type) {
@@ -131,28 +73,54 @@ class _ListenRankingPageState extends State<ListenRankingPage> {
       ),
       body: _isLoading
           ? const Center(child: MD3ELoadingIndicator())
-          : _error != null
-              ? _buildError(cs)
-              : _songs.isEmpty
-                  ? _buildEmpty(cs)
-                  : Column(
-                      children: [
-                        Expanded(
-                          child: ListView.builder(
-                            itemCount: _songs.length,
-                            itemBuilder: (context, index) {
-                              return _buildRankingItem(context, index, cs);
-                            },
-                          ),
-                        ),
-                        const MiniPlayer(),
-                      ],
+          : _rankedSongs.isEmpty
+              ? _buildEmpty(cs)
+              : Column(
+                  children: [
+                    _buildHeader(cs),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: _rankedSongs.length,
+                        itemBuilder: (context, index) {
+                          return _buildRankingItem(context, index, cs);
+                        },
+                      ),
                     ),
+                    const MiniPlayer(),
+                  ],
+                ),
+    );
+  }
+
+  Widget _buildHeader(ColorScheme cs) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Text(
+            '共 ${_rankedSongs.length} 首',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+              color: cs.onSurfaceVariant,
+            ),
+          ),
+          const Spacer(),
+          if (_rankedSongs.isNotEmpty)
+            TextButton.icon(
+              onPressed: () {
+                final songs = _rankedSongs.map((r) => r.song).toList();
+                context.read<PlayerProvider>().playOnlinePlaylist(songs, 0);
+              },
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('播放全部'),
+            ),
+        ],
+      ),
     );
   }
 
   Widget _buildRankingItem(BuildContext context, int index, ColorScheme cs) {
-    final song = _songs[index];
+    final ranked = _rankedSongs[index];
+    final song = ranked.song;
     final rank = index + 1;
 
     // 前三名使用特殊颜色
@@ -163,7 +131,8 @@ class _ListenRankingPageState extends State<ListenRankingPage> {
 
     return InkWell(
       onTap: () {
-        context.read<PlayerProvider>().playOnlinePlaylist(_songs, index);
+        final songs = _rankedSongs.map((r) => r.song).toList();
+        context.read<PlayerProvider>().playOnlinePlaylist(songs, index);
       },
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -187,34 +156,24 @@ class _ListenRankingPageState extends State<ListenRankingPage> {
               child: SongListItem(
                 song: song,
                 onTap: () {
-                  context.read<PlayerProvider>().playOnlinePlaylist(_songs, index);
+                  final songs = _rankedSongs.map((r) => r.song).toList();
+                  context.read<PlayerProvider>().playOnlinePlaylist(songs, index);
                 },
                 onMoreTap: () {},
               ),
             ),
+            // 播放次数
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Text(
+                '${ranked.playCount}次',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+                ),
+              ),
+            ),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildError(ColorScheme cs) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.error_outline, size: 64, color: cs.error.withValues(alpha: 0.6)),
-          const SizedBox(height: 12),
-          Text(
-            _error ?? '未知错误',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: cs.error),
-          ),
-          const SizedBox(height: 16),
-          FilledButton.tonal(
-            onPressed: _loadRanking,
-            child: const Text('重试'),
-          ),
-        ],
       ),
     );
   }
@@ -231,7 +190,7 @@ class _ListenRankingPageState extends State<ListenRankingPage> {
           ),
           const SizedBox(height: 12),
           Text(
-            '暂无听歌记录',
+            _currentType == 0 ? '最近一周暂无听歌记录' : '暂无听歌记录',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
               color: cs.onSurfaceVariant,
             ),
