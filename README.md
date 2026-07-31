@@ -442,14 +442,6 @@ node index.js
 
 ---
 
-## ⭐ Star History
-
-<div align="center">
-
-<a href="https://star-history.com/#zzyoxml/md3Music&Date">
-  <img src="img/star-history.svg" alt="Star History Chart" width="600" />
-</a>
-
 </div>
 
 ---
