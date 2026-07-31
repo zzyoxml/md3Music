@@ -25,6 +25,7 @@ import 'dart:math';
 
 import 'package:flutter/widgets.dart';
 
+import '../layout/duet_layout.dart';
 import '../layout/lyric_layout.dart';
 import '../layout/lyric_preferences.dart';
 import '../models/lyric_line.dart';
@@ -75,6 +76,13 @@ class LineRenderer {
   /// 上次 set text 时的文字颜色值。
   /// 主题切换时 textColorValue 变化，需强制重建 TextSpan。
   int _lastTextColorValue = -1;
+
+  /// 当前绑定的 LyricLine 引用。
+  ///
+  /// 用于检测 line 切换（如 useDuetLayout 切换后 _cleanedLines 重建为新对象），
+  /// 触发强制 set text + layout，避免 _painter 缓存旧文本（带「男：」前缀）
+  /// 导致 _painter.width 错误、alignment 计算偏移。
+  LyricLine? _boundLine;
 
   // ============== 状态查询 ==============
 
@@ -168,11 +176,17 @@ class LineRenderer {
   ///   （layout 结果与 alpha 无关，复用上次的 layout 结果直接 paint）
   void paintLine(
       Canvas canvas, Offset offset, LyricLine line, double fontSize,
-      {double maxWidth = double.infinity}) {
+      {double maxWidth = double.infinity,
+      DuetAlignment alignment = DuetAlignment.defaultAlign,
+      double viewportWidth = 0}) {
     if (line.text.isEmpty) return;
     // v4 优化：alpha 变化 < 0.001 且 maxWidth 未变且颜色未变时跳过 set text + layout
+    // 新增：line 引用变化时强制 set text + layout，避免 useDuetLayout 切换后
+    // _painter 缓存旧文本（带「男：」前缀）导致 alignment 计算用错误宽度
     final bool colorChanged = LyricLayout.textColorValue != _lastTextColorValue;
-    if ((_currentAlpha - _lastSetAlpha).abs() > 0.001 ||
+    final bool lineChanged = !identical(_boundLine, line);
+    if (lineChanged ||
+        (_currentAlpha - _lastSetAlpha).abs() > 0.001 ||
         maxWidth != _lastSetMaxWidth ||
         colorChanged) {
       _painter.text = TextSpan(
@@ -191,8 +205,11 @@ class LineRenderer {
       _lastSetAlpha = _currentAlpha;
       _lastSetMaxWidth = maxWidth;
       _lastTextColorValue = LyricLayout.textColorValue;
+      _boundLine = line;
     }
-    _painter.paint(canvas, offset);
+    // 对唱对齐：按最长行宽度计算 x（_painter.width 返回 bounding box 宽度）
+    final double mainX = _alignX(alignment, offset.dx, _painter.width, viewportWidth);
+    _painter.paint(canvas, Offset(mainX, offset.dy));
 
     // 辅助副行（翻译或罗马音）：仅当前行 + 开关开启 + 有内容时绘制
     // 根据 displayMode 选择显示 translation 还是 roma
@@ -221,8 +238,27 @@ class LineRenderer {
       _translationPainter.layout(
           maxWidth:
               maxWidth == double.infinity ? double.infinity : maxWidth);
-      _translationPainter.paint(canvas, Offset(offset.dx, transY));
+      // 翻译副行对齐跟随原文，按副行自身宽度计算 x
+      final double transX = _alignX(
+          alignment, offset.dx, _translationPainter.width, viewportWidth);
+      _translationPainter.paint(canvas, Offset(transX, transY));
     }
+  }
+
+  /// 根据对唱对齐方式计算文本起始 x 坐标。
+  /// [leftPadding] 为左侧 1em 边距（即 offset.dx），右侧对称留白。
+  double _alignX(DuetAlignment alignment, double leftPadding,
+      double textWidth, double viewportWidth) {
+    if (viewportWidth <= 0 ||
+        alignment == DuetAlignment.defaultAlign ||
+        alignment == DuetAlignment.left) {
+      return leftPadding;
+    }
+    if (alignment == DuetAlignment.right) {
+      return viewportWidth - leftPadding - textWidth;
+    }
+    // center
+    return (viewportWidth - textWidth) / 2;
   }
 
   /// 重置状态：alpha 回到初始值（0.2），isActive=false。
@@ -236,5 +272,6 @@ class LineRenderer {
     _lastSetAlpha = -1;
     _lastSetMaxWidth = -1;
     _lastTextColorValue = -1;
+    _boundLine = null;
   }
 }

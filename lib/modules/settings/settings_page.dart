@@ -64,6 +64,7 @@ class _SettingsPageState extends State<SettingsPage> {
   double _artistPhotoOpacity = 0.55;
   bool _useGlowEffect = true;
   bool _useFlowingBackground = true;
+  bool _useDuetLayout = false;
   String _appVersion = '';
   // Lyricon 词幕推送相关状态
   bool _lyriconEnabled = false;
@@ -191,6 +192,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
       _useGlowEffect = LyricPreferences.instance.useGlowEffect;
       _useFlowingBackground = LyricPreferences.instance.useFlowingBackground;
+      _useDuetLayout = LyricPreferences.instance.useDuetLayout;
       _downloadDir = downloadDir;
       _downloadWordLevelLyrics = downloadWordLevelLyrics;
       _uiScale = uiScale;
@@ -778,6 +780,17 @@ class _SettingsPageState extends State<SettingsPage> {
               ? (v) {
                   setState(() => _useFlowingBackground = v);
                   LyricPreferences.instance.setUseFlowingBackground(v);
+                }
+              : null,
+        ),
+        SwitchListTile(
+          title: const Text('男女对唱歌词优化'),
+          subtitle: const Text('剔除「男/女/合」标记，男左女右、合唱居中'),
+          value: _useDuetLayout,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  setState(() => _useDuetLayout = v);
+                  LyricPreferences.instance.setUseDuetLayout(v);
                 }
               : null,
         ),
