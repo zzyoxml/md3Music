@@ -442,6 +442,16 @@ node index.js
 
 ---
 
+## ⭐ Star History
+
+<div align="center">
+
+[![Star History Chart](https://api.star-history.com/svg?repos=zzyoxml/md3Music&type=Date)](https://star-history.com/#zzyoxml/md3Music&Date)
+
+</div>
+
+---
+
 <div align="center">
 
 **Made with ❤️ by zzyoxml and Little-White3110**
