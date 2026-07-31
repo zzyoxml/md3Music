@@ -75,6 +75,8 @@ class _FullPlayerState extends State<FullPlayer>
   int _currentTabLength = 3;
   // 手机横屏模式：保留封面Tab，但隐藏左侧歌曲信息
   bool _isPhoneLandscape = false;
+  // 写真背景是否实际有图片可显示：写真无图时不隐藏左侧封面，避免封面消失
+  bool _photoBgHasImages = false;
   // 拖动进度条前的播放状态，用于拖动结束后恢复
   bool _wasPlayingBeforeDrag = false;
 
@@ -632,7 +634,14 @@ class _FullPlayerState extends State<FullPlayer>
         children: [
           // 歌手写真背景轮播（开关开启 + 在线歌曲时显示）
           if (usePhotoBg && currentSong!.isOnline)
-            ArtistPhotoBackground(hash: currentSong.id),
+            ArtistPhotoBackground(
+              hash: currentSong.id,
+              onHasImages: (hasImages) {
+                if (_photoBgHasImages != hasImages) {
+                  setState(() => _photoBgHasImages = hasImages);
+                }
+              },
+            ),
           ResponsiveLayout(
             compact: (_) =>
                 _buildCompactLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
@@ -727,10 +736,11 @@ class _FullPlayerState extends State<FullPlayer>
     final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 8;
     // 横屏 + 写真背景开启时，写真已铺满全屏作为背景，隐藏左侧封面避免视觉重复。
     // 关闭写真背景或 Zen 模式时恢复显示封面。
+    // 写真实际无图时（_photoBgHasImages=false）也恢复显示封面，避免封面消失。
     final usePhotoBg = context.watch<ThemeProvider>().useArtistPhotoBackground;
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
     final hideArtworkForPhotoBg =
-        isLandscape && usePhotoBg && currentSong.isOnline && !_zenMode;
+        isLandscape && usePhotoBg && _photoBgHasImages && currentSong.isOnline && !_zenMode;
 
     return SafeArea(
       bottom: false,
@@ -904,10 +914,11 @@ class _FullPlayerState extends State<FullPlayer>
     final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 8;
     // 横屏 + 写真背景开启时，写真已铺满全屏作为背景，隐藏左侧封面避免视觉重复。
     // 关闭写真背景或 Zen 模式时恢复显示封面。
+    // 写真实际无图时（_photoBgHasImages=false）也恢复显示封面，避免封面消失。
     final usePhotoBg = context.watch<ThemeProvider>().useArtistPhotoBackground;
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
     final hideArtworkForPhotoBg =
-        isLandscape && usePhotoBg && currentSong.isOnline && !_zenMode;
+        isLandscape && usePhotoBg && _photoBgHasImages && currentSong.isOnline && !_zenMode;
 
     return SafeArea(
       bottom: false,
