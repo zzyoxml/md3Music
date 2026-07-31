@@ -210,14 +210,13 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
       }
 
-      // 设置循环模式
+      // just_audio 的 LoopMode 始终设 off：项目通过 setUrl 加载单一 AudioSource，
+      // LoopMode.one/all 在单 source 下会自动循环且不触发 completed 事件，
+      // 导致应用层 _handlePlaybackCompleted 无法接管切歌。循环逻辑完全由
+      // 应用层 _loopMode + _handlePlaybackCompleted 控制。
       if (_audioService != null) {
-        await _audioService.setLoopMode(_loopMode == AppLoopMode.one
-            ? just_audio.LoopMode.one
-            : _loopMode == AppLoopMode.all
-                ? just_audio.LoopMode.all
-                : just_audio.LoopMode.off);
-        await _audioService.setShuffleModeEnabled(_shuffleEnabled);
+        await _audioService.setLoopMode(just_audio.LoopMode.off);
+        await _audioService.setShuffleModeEnabled(false);
       }
 
       // 构建播放源并 seek 到保存的位置（不自动播放，等用户手动触发）
@@ -1589,12 +1588,26 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         _loopMode = AppLoopMode.off;
         break;
     }
+    // just_audio 的 LoopMode 始终保持 off：应用层通过 _handlePlaybackCompleted
+    // 完全控制循环行为（one 从头重播、all 列表循环、off 播完即停）。
+    // 若设成 one/all，单 source 下 just_audio 会自动循环且不触发 completed，
+    // 导致 _handlePlaybackCompleted 不被调用，表现为单曲循环。
+    if (_audioService != null) {
+      await _audioService.setLoopMode(just_audio.LoopMode.off);
+    }
     _saveState();
     notifyListeners();
   }
 
   Future<void> toggleShuffle() async {
     _shuffleEnabled = !_shuffleEnabled;
+    // just_audio 的 shuffleMode 始终保持 false：应用层通过打乱 _playlist
+    // （Dart List）控制播放顺序，不依赖 just_audio 的 shuffle。若开启
+    // just_audio shuffle，多 source 场景下其内部 advancing 顺序与应用层
+    // _currentIndex/_currentSong 不一致。
+    if (_audioService != null) {
+      await _audioService.setShuffleModeEnabled(false);
+    }
     if (_shuffleEnabled) {
       final currentSong = _currentSong;
       final remaining = _playlist
