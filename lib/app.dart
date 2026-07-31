@@ -16,6 +16,7 @@ import 'main.dart'
         pendingShortcutType,
         shortcutTabRequest;
 import 'modules/discover/discover_page.dart';
+import 'modules/charts/charts_page.dart';
 import 'modules/user/user_center_page.dart';
 import 'modules/user/favorites_page.dart';
 
@@ -346,6 +347,13 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return const FavoritesPage();
       case 'fm':
         return const PersonalFmPage();
+      case 'search':
+        // Tab 模式：隐藏页面自带 MiniPlayer，由 _MainLayout 统一提供全局 MiniPlayer
+        return const SearchPage(showMiniPlayer: false);
+      case 'charts':
+        return const ChartsPage();
+      case 'recognition':
+        return const SongRecognitionPage();
       case 'user':
         return const UserCenterPage();
       default:
@@ -378,6 +386,24 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDestination(
           icon: const Icon(Icons.radio_outlined),
           selectedIcon: const Icon(Icons.radio),
+          label: tab.label,
+        );
+      case 'search':
+        return NavigationDestination(
+          icon: const Icon(Icons.search_outlined),
+          selectedIcon: const Icon(Icons.search),
+          label: tab.label,
+        );
+      case 'charts':
+        return NavigationDestination(
+          icon: const Icon(Icons.leaderboard_outlined),
+          selectedIcon: const Icon(Icons.leaderboard),
+          label: tab.label,
+        );
+      case 'recognition':
+        return NavigationDestination(
+          icon: const Icon(Icons.mic_none_outlined),
+          selectedIcon: const Icon(Icons.mic),
           label: tab.label,
         );
       case 'user':
@@ -421,6 +447,24 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           selectedIcon: const Icon(Icons.radio),
           label: Text(tab.label),
         );
+      case 'search':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.search_outlined),
+          selectedIcon: const Icon(Icons.search),
+          label: Text(tab.label),
+        );
+      case 'charts':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.leaderboard_outlined),
+          selectedIcon: const Icon(Icons.leaderboard),
+          label: Text(tab.label),
+        );
+      case 'recognition':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.mic_none_outlined),
+          selectedIcon: const Icon(Icons.mic),
+          label: Text(tab.label),
+        );
       case 'user':
         return NavigationRailDestination(
           icon: const Icon(Icons.person_outlined),
@@ -460,6 +504,24 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDrawerDestination(
           icon: const Icon(Icons.radio_outlined),
           selectedIcon: const Icon(Icons.radio),
+          label: Text(tab.label),
+        );
+      case 'search':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.search_outlined),
+          selectedIcon: const Icon(Icons.search),
+          label: Text(tab.label),
+        );
+      case 'charts':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.leaderboard_outlined),
+          selectedIcon: const Icon(Icons.leaderboard),
+          label: Text(tab.label),
+        );
+      case 'recognition':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.mic_none_outlined),
+          selectedIcon: const Icon(Icons.mic),
           label: Text(tab.label),
         );
       case 'user':

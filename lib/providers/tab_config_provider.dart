@@ -42,6 +42,16 @@ const List<TabItem> kDefaultTabs = [
   TabItem(id: 'user', label: '我的', isRemovable: false),
 ];
 
+/// 可选 Tab（默认隐藏，需在设置页手动开启）。
+const List<TabItem> kOptionalTabs = [
+  TabItem(id: 'search', label: '搜索'),
+  TabItem(id: 'charts', label: '排行榜'),
+  TabItem(id: 'recognition', label: '听歌识曲'),
+];
+
+/// 所有可用 Tab（默认显示 + 可选）。
+final List<TabItem> kAllAvailableTabs = [...kDefaultTabs, ...kOptionalTabs];
+
 /// 管理主页底部导航 Tab 的显示/隐藏和排序。
 ///
 /// 持久化到 SharedPreferences，通过 [SettingsRepository] 读写。
@@ -52,10 +62,10 @@ class TabConfigProvider extends ChangeNotifier {
   List<TabItem> _visibleTabs = List.from(kDefaultTabs);
 
   /// 所有 tab 的完整排序（含隐藏项），用于设置页展示。
-  List<TabItem> _allTabs = List.from(kDefaultTabs);
+  List<TabItem> _allTabs = List.from(kAllAvailableTabs);
 
-  /// 隐藏的 tab id 集合。
-  Set<String> _hiddenTabs = {};
+  /// 隐藏的 tab id 集合。可选 Tab 默认隐藏。
+  Set<String> _hiddenTabs = {for (final t in kOptionalTabs) t.id};
 
   List<TabItem> get visibleTabs => _visibleTabs;
   List<TabItem> get allTabs => _allTabs;
@@ -75,22 +85,30 @@ class TabConfigProvider extends ChangeNotifier {
         // 按持久化顺序重排
         final ordered = <TabItem>[];
         for (final id in order) {
-          final tab = kDefaultTabs.where((t) => t.id == id).firstOrNull;
+          final tab = kAllAvailableTabs.where((t) => t.id == id).firstOrNull;
           if (tab != null) ordered.add(tab);
         }
         // 补充新增的 tab（版本更新可能新增 tab）
-        for (final tab in kDefaultTabs) {
+        // 新增的 tab 默认隐藏，避免老用户升级后突然多出 Tab
+        for (final tab in kAllAvailableTabs) {
           if (!ordered.any((t) => t.id == tab.id)) {
             ordered.add(tab);
+            _hiddenTabs.add(tab.id);
           }
         }
         _allTabs = ordered;
       } else {
-        _allTabs = List.from(kDefaultTabs);
+        // 新用户：使用全部可用 Tab，可选 Tab 默认隐藏
+        _allTabs = List.from(kAllAvailableTabs);
+        for (final tab in kOptionalTabs) {
+          _hiddenTabs.add(tab.id);
+        }
       }
 
       _rebuildVisible();
       notifyListeners();
+      // 持久化更新后的 hidden，确保新 Tab 的默认隐藏状态被保存
+      await _repo.setHiddenTabs(_hiddenTabs);
     } catch (_) {}
   }
 
@@ -140,12 +158,12 @@ class TabConfigProvider extends ChangeNotifier {
 
   /// 重置为默认配置。
   Future<void> resetToDefault() async {
-    _allTabs = List.from(kDefaultTabs);
-    _hiddenTabs = {};
+    _allTabs = List.from(kAllAvailableTabs);
+    _hiddenTabs = {for (final t in kOptionalTabs) t.id};
     _rebuildVisible();
     notifyListeners();
-    await _repo.setTabOrder(kDefaultTabs.map((t) => t.id).toList());
-    await _repo.setHiddenTabs({});
+    await _repo.setTabOrder(kAllAvailableTabs.map((t) => t.id).toList());
+    await _repo.setHiddenTabs(_hiddenTabs);
   }
 
   /// 根据 tab id 获取其在 visibleTabs 中的索引。

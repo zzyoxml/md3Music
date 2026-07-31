@@ -761,7 +761,7 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
         SwitchListTile(
           title: const Text('歌词辉光效果'),
-          subtitle: const Text('持续时间较长的字触发发光缩放效果，高功耗'),
+          subtitle: const Text('持续时间较长的字触发发光缩放效果'),
           value: _useGlowEffect,
           onChanged: _useAmStylePlayer
               ? (v) {
@@ -1834,6 +1834,12 @@ class _TabManagementPanel extends StatelessWidget {
         return Icons.favorite;
       case 'fm':
         return Icons.radio;
+      case 'search':
+        return Icons.search;
+      case 'charts':
+        return Icons.leaderboard;
+      case 'recognition':
+        return Icons.mic;
       case 'user':
         return Icons.person;
       default:
