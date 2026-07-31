@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/repositories/collected_playlist_store.dart';
 import '../../data/repositories/favorite_lists_cache.dart';
@@ -61,6 +62,11 @@ class _FavoritesPageState extends State<FavoritesPage>
   bool _createdExpanded = true;
   bool _collectedExpanded = true;
 
+  // 歌单访问排序：歌单 ID → 最后访问时间戳（毫秒）
+  // 点击歌单后记录时间，列表按最近访问排序（最近访问的排最前）
+  Map<String, int> _playlistAccessOrder = {};
+  static const _accessOrderKey = 'playlist_access_order';
+
   // 管理模式（批量选择）
   bool _isManaging = false;
   final Set<int> _selectedIndices = {};
@@ -83,6 +89,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       // 先 await 缓存就位（避免 dio 失败先于 SharedPreferences 读到 cache，
       // 导致 banner 在 cache 显示后才被清掉，闪烁）。
       await _loadCachedData();
+      await _loadAccessOrder();
       if (!mounted) return;
       _loadAllData();
       context.read<PlaylistCollectionNotifier>().addListener(_onCollectionChanged);
@@ -145,6 +152,41 @@ class _FavoritesPageState extends State<FavoritesPage>
     _loadAlbums(noCache: true);
   }
 
+  /// 加载歌单访问排序记录
+  Future<void> _loadAccessOrder() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_accessOrderKey);
+      if (raw != null && raw.isNotEmpty) {
+        final parts = raw.split(',');
+        final map = <String, int>{};
+        for (final part in parts) {
+          final kv = part.split(':');
+          if (kv.length == 2) {
+            final ts = int.tryParse(kv[1]);
+            if (ts != null) map[kv[0]] = ts;
+          }
+        }
+        _playlistAccessOrder = map;
+      }
+    } catch (_) {}
+  }
+
+  /// 记录歌单访问时间戳并持久化
+  Future<void> _recordPlaylistAccess(KugouPlaylistBrief playlist) async {
+    final key = playlist.globalCollectionId ?? playlist.id;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _playlistAccessOrder[key] = now;
+    setState(() {});
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final parts = _playlistAccessOrder.entries
+          .map((e) => '${e.key}:${e.value}')
+          .join(',');
+      await prefs.setString(_accessOrderKey, parts);
+    } catch (_) {}
+  }
+
   Future<void> _loadAllData() async {
     await Future.wait([
       _loadPlaylists(),
@@ -167,11 +209,18 @@ class _FavoritesPageState extends State<FavoritesPage>
     return false;
   }
 
-  List<KugouPlaylistBrief> get _createdPlaylists =>
-      _playlists.where(_isCreated).toList();
+  int _getAccessTime(KugouPlaylistBrief p) =>
+      _playlistAccessOrder[p.globalCollectionId ?? p.id] ?? 0;
 
-  List<KugouPlaylistBrief> get _collectedPlaylists =>
-      _playlists.where((p) => !_isCreated(p)).toList();
+  List<KugouPlaylistBrief> get _createdPlaylists => _playlists
+      .where(_isCreated)
+      .toList()
+    ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+
+  List<KugouPlaylistBrief> get _collectedPlaylists => _playlists
+      .where((p) => !_isCreated(p))
+      .toList()
+    ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
 
   // ==================== 数据加载 ====================
 
@@ -772,7 +821,9 @@ class _FavoritesPageState extends State<FavoritesPage>
                 }
               });
             }
-          : () {
+          : () async {
+              await _recordPlaylistAccess(playlist);
+              if (!mounted) return;
               Navigator.push(
                 context,
                 MaterialPageRoute(
