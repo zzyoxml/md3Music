@@ -929,7 +929,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
       if (isLoggedIn && fetchListid != null && fetchListid.isNotEmpty) {
         // 已登录 + 有 listid：用 /playlist/track/all/new 拉（仅支持用户创建/收藏的歌单）
         const int pageSize = 200;
-        const int maxPages = 10;
+        const int maxSongs = 9999;
+        // 向上取整，保证能拉到 maxSongs 首（200*50=10000 ≥ 9999）
+        const int maxPages = (maxSongs + pageSize - 1) ~/ pageSize;
         for (int page = 1; page <= maxPages; page++) {
           final r = await api.getPlaylistSongsByListid(
             listid: fetchListid,
@@ -942,6 +944,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
           apiSucceeded = true;
           final batch = r.songs.map((s) => s.toSong()).toList();
           all.addAll(batch);
+          if (all.length >= maxSongs) {
+            all = all.sublist(0, maxSongs);
+            break;
+          }
           if (batch.length < pageSize) break;
         }
         // listid 接口拉不到歌曲时，回退到用原始歌单的 global_collection_id 拉取

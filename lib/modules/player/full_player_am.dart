@@ -7,12 +7,14 @@ import 'package:provider/provider.dart';
 
 import '../../core/layout/responsive_layout.dart';
 import '../../core/services/desktop_lyric_service.dart';
+import '../../core/services/equalizer_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/utils/audio_scanner.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
+import '../settings/equalizer_settings_page.dart';
 import 'mv_player_page.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/favorites_provider.dart';
@@ -2351,6 +2353,30 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   onTap: () {
                     Navigator.pop(context);
                     _showLyricPreferencesSheet(context);
+                  },
+                ),
+                ListenableBuilder(
+                  listenable: EqualizerService.instance,
+                  builder: (context, _) {
+                    final eq = EqualizerService.instance;
+                    return ListTile(
+                      leading: Icon(Icons.graphic_eq,
+                          color: eq.enabled
+                              ? Theme.of(context).colorScheme.primary
+                              : null),
+                      title: const Text('均衡器'),
+                      subtitle: Text(
+                          eq.enabled ? '已开启 · ${eq.currentPreset}' : '未开启'),
+                      onTap: () {
+                        Navigator.pop(context);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const EqualizerSettingsPage(),
+                          ),
+                        );
+                      },
+                    );
                   },
                 ),
                 ListTile(

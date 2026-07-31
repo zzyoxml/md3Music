@@ -83,7 +83,9 @@ class FavoritesProvider extends ChangeNotifier {
       final listid = playlist.listId;
       if (listid.isNotEmpty) {
         const int pageSize = 200;
-        const int maxPages = 10;
+        const int maxSongs = 9999;
+        // 向上取整，保证能拉到 maxSongs 首（200*50=10000 ≥ 9999）
+        const int maxPages = (maxSongs + pageSize - 1) ~/ pageSize;
         for (int page = 1; page <= maxPages; page++) {
           final r = await api.getPlaylistSongsByListid(
             listid: listid,
@@ -94,6 +96,7 @@ class FavoritesProvider extends ChangeNotifier {
           for (final s in r.songs) {
             _favoriteIds.add(s.hash);
           }
+          if (_favoriteIds.length >= maxSongs) break;
           if (r.songs.length < pageSize) break;
         }
         notifyListeners();
