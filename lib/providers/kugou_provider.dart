@@ -1012,6 +1012,11 @@ class KugouProvider extends ChangeNotifier {
       final receiveDay =
           '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
+      // 当天已签到则跳过，避免重复 API 调用触发风控
+      if (_localSignedDays.contains(receiveDay)) {
+        return;
+      }
+
       try {
         final autoClaim = await _apiClient.claimDayVip(receiveDay);
         final autoOk =
@@ -1065,6 +1070,11 @@ class KugouProvider extends ChangeNotifier {
       final receiveDay =
           '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
       print('[SIGN_IN] receiveDay: $receiveDay');
+
+      // 当天已签到成功则不再请求 API，避免重复调用触发风控
+      if (_localSignedDays.contains(receiveDay)) {
+        return (true, '今天已签到，无需重复签到');
+      }
 
       // 1. 领取 VIP
       final claim = await _apiClient.claimDayVip(receiveDay);
