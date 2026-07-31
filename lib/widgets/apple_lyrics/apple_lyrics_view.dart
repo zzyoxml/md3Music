@@ -1094,7 +1094,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       _cachedBlurLevels = levels;
 
       // 异步渲染变化行的模糊图片
-      _updateLineBlurCache(levels, mainLineHeight);
+      _updateLineBlurCache(levels);
     }
 
     // 从缓存绘制模糊层
@@ -1158,7 +1158,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   }
 
   /// 异步更新模糊缓存：为变化的行渲染模糊图片。
-  void _updateLineBlurCache(Map<int, int> levels, double mainLineHeight) {
+  void _updateLineBlurCache(Map<int, int> levels) {
     for (final entry in levels.entries) {
       final int lineIndex = entry.key;
       final int blurLevel = entry.value;
@@ -1168,7 +1168,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         continue;
       }
 
-      _renderLineBlur(lineIndex, blurLevel, mainLineHeight).then((image) {
+      _renderLineBlur(lineIndex, blurLevel).then((image) {
         if (image != null) {
           _lineBlurImages[lineIndex]?.$1.dispose();
           _lineBlurImages[lineIndex] = (image, blurLevel);
@@ -1189,7 +1189,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 异步渲染单行模糊图片。
   ///
   /// 渲染歌词文字到 Picture，应用 ImageFilter.blur，转为 ui.Image 缓存。
-  Future<ui.Image?> _renderLineBlur(int lineIndex, int blurLevel, double mainLineHeight) async {
+  Future<ui.Image?> _renderLineBlur(int lineIndex, int blurLevel) async {
     try {
       if (_viewportWidth <= 0) return null;
 
@@ -1200,11 +1200,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       //   - renderHeight 太小 → 绘制时图片被拉伸（上下比例太长）
       final double sigma = blurLevel.toDouble().clamp(0.5, 5.0);
       final double fontSize = LyricLayout.fontSize(context);
-      final double lineHeight = (lineIndex < _lineHeights.length)
-          ? _lineHeights[lineIndex]
-          : mainLineHeight;
       final double padding = sigma * 3;
-      final double renderHeight = lineHeight + padding * 2;
 
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
@@ -1223,6 +1219,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         ),
       );
       textPainter.layout(maxWidth: _viewportWidth - fontSize * 2);
+
+      // 使用 TextPainter 布局后的实际文本高度，而非 _lineHeights 中的值。
+      // _lineHeights 对换行行使用 wrapLineHeightFactor=0.8 压缩行距（显示紧凑），
+      // 但 TextPainter 用完整 lineHeight 渲染，两者不匹配会导致底部文字被裁断。
+      final double actualTextHeight = textPainter.height;
+      final double renderHeight = actualTextHeight + padding * 2;
 
       // 对画布应用模糊
       final blurPaint = Paint()
