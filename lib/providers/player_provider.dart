@@ -1035,6 +1035,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<bool> _resolveAndPlayCurrentSong({Duration? seekTo, bool play = true}) async {
     if (_currentSong == null) return false;
 
+    // 切歌时先清除上一首的缓存封面路径，避免新歌曲通知栏/MediaSession 残留旧封面。
+    // 仅在缓存命中时重新设置；未命中时保持 null，_updateNotification 会回退到 song.artworkUri。
+    _cachedArtworkPath = null;
+
     if (_currentSong!.isOnline) {
       // 边听边存：检查本地缓存（无论 URL 是否已预取都先查缓存）
       final song = _currentSong!;
@@ -1059,7 +1063,6 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           _fetchClimaxData();
           return true;
         }
-        _cachedArtworkPath = null;
       }
 
       // 缓存未命中：需要 URL 来播放
@@ -1214,7 +1217,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<void> next() async {
+  Future<void> next({bool autoPlay = true}) async {
     if (_playlist.isEmpty) return;
     _resetAbnormalRetry();
 
@@ -1225,7 +1228,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     if (_loopMode == AppLoopMode.one) {
       await seek(Duration.zero);
-      await _audioService?.play();
+      if (autoPlay) await _audioService?.play();
       return;
     }
 
@@ -1244,14 +1247,18 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _updateNotification();
     _saveState();
 
-    final ok = await _resolveAndPlayCurrentSong();
+    final ok = await _resolveAndPlayCurrentSong(play: autoPlay);
     if (!ok) {
       _resolveError = '无法获取播放链接';
     }
+    // 切歌后刷新通知栏：_resolveAndPlayCurrentSong 可能更新了 _cachedArtworkPath，
+    // 投屏场景下 play=false 不会触发 playingStream 回调刷新通知，
+    // 需要在此显式刷新，避免 MediaSession 封面停留在上一首。
+    _updateNotification();
     notifyListeners();
   }
 
-  Future<void> previous() async {
+  Future<void> previous({bool autoPlay = true}) async {
     if (_playlist.isEmpty) return;
     _resetAbnormalRetry();
 
@@ -1276,7 +1283,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _position = Duration.zero;
       _recordHistory(_currentSong!);
 
-      if (await _resolveAndPlayCurrentSong()) {
+      if (await _resolveAndPlayCurrentSong(play: autoPlay)) {
+        // 切歌后刷新通知栏封面（投屏场景下 play=false 不会触发 playingStream 回调）
+        _updateNotification();
         _saveState();
         return;
       }
