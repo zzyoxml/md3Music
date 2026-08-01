@@ -7,7 +7,9 @@ import '../../core/services/wakelock_service.dart';
 import '../../data/models/mv_models.dart';
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
+import '../../providers/dlna_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
+import 'dlna_cast_sheet.dart';
 
 /// MV 播放页：展示歌曲 MV 视频，支持清晰度切换。
 ///
@@ -36,6 +38,9 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
   int _currentQualityIndex = 0;
   bool _isSwitching = false;
 
+  /// 当前播放的 MV 视频 URL，用于投屏。
+  String? _currentVideoUrl;
+
   /// 进入页面前背景音频是否正在播放，用于退出时决定是否恢复。
   bool _wasPlayingBefore = false;
 
@@ -51,12 +56,19 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
     if (_wasPlayingBefore) {
       player.pause();
     }
+    // 监听投屏状态：投屏 MV 时暂停本地视频，停止投屏时恢复
+    final dlna = context.read<DlnaProvider>();
+    dlna.addListener(_onDlnaStateChanged);
     _loadMv();
   }
 
   @override
   void dispose() {
     _disposed = true;
+    // 移除投屏状态监听
+    try {
+      context.read<DlnaProvider>().removeListener(_onDlnaStateChanged);
+    } catch (_) {}
     WakelockService.instance.setVideoPlaying(false);
     _chewieController?.dispose();
     _controller?.dispose();
@@ -71,6 +83,22 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
       }
     }
     super.dispose();
+  }
+
+  /// 投屏状态变化回调：投屏时暂停本地视频，停止投屏时恢复。
+  void _onDlnaStateChanged() {
+    final dlna = context.read<DlnaProvider>();
+    if (!mounted || _disposed) return;
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    if (dlna.isCasting && controller.value.isPlaying) {
+      // 投屏开始 → 暂停本地视频
+      controller.pause();
+    } else if (!dlna.isCasting && !controller.value.isPlaying) {
+      // 停止投屏 → 恢复本地视频播放
+      controller.play();
+    }
   }
 
   /// 视频控制器状态变化回调：同步播放状态到屏幕常亮服务。
@@ -139,6 +167,7 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
   }
 
   Future<void> _initVideoController(String url, {required bool autoPlay}) async {
+    _currentVideoUrl = url;
     try {
       final controller = VideoPlayerController.networkUrl(Uri.parse(url));
       await controller.initialize();
@@ -406,6 +435,7 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
             child: ListView(
               children: [
                 _buildQualityBar(colorScheme, textTheme),
+                _buildCastButton(colorScheme, textTheme),
                 const Divider(height: 1),
                 _buildInfoSection(colorScheme, textTheme),
               ],
@@ -420,9 +450,42 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
       children: [
         AspectRatio(aspectRatio: 16 / 9, child: videoPlayer),
         _buildQualityBar(colorScheme, textTheme),
+        _buildCastButton(colorScheme, textTheme),
         const Divider(height: 1),
         _buildInfoSection(colorScheme, textTheme),
       ],
+    );
+  }
+
+  /// MV 投屏按钮：点击弹出设备选择 BottomSheet。
+  Widget _buildCastButton(ColorScheme colorScheme, TextTheme textTheme) {
+    return ListenableBuilder(
+      listenable: context.read<DlnaProvider>(),
+      builder: (context, _) {
+        final dlna = context.read<DlnaProvider>();
+        final isCasting = dlna.isCasting;
+        return ListTile(
+          leading: Icon(
+            isCasting ? Icons.cast_connected : Icons.cast,
+            color: isCasting ? colorScheme.primary : null,
+          ),
+          title: Text(isCasting ? '正在投屏：${dlna.deviceName ?? ''}' : '投屏到电视'),
+          onTap: () {
+            if (isCasting) {
+              dlna.stop();
+            } else if (_currentVideoUrl != null) {
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                builder: (_) => DlnaCastSheet(
+                  mvUrl: _currentVideoUrl,
+                  mvTitle: widget.song.displayName,
+                ),
+              );
+            }
+          },
+        );
+      },
     );
   }
 

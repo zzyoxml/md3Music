@@ -58,6 +58,7 @@ native-libs.zip
 .trae/
 .workbuddy/
 .vscode/
+.qoder/
 .mimocode/plans/1783171865901-quick-cactus.md
 .mimocode/.cron-lock
 debug-apk/
