@@ -334,37 +334,68 @@ class KugouProvider extends ChangeNotifier {
     try {
       // 只加载第一页，后续由搜索页按需加载更多
       if (type == 'album') {
-        final albums = await _apiClient.searchAlbums(keywords, page: 1, pagesize: 20);
+        final albums = await _apiClient.searchAlbums(
+          keywords,
+          page: 1,
+          pagesize: 20,
+        );
         if (albums != null) {
-          _searchResults = KugouSearchResult(albums: albums, total: albums.length);
+          _searchResults = KugouSearchResult(
+            albums: albums,
+            total: albums.length,
+          );
         } else {
           _error = '搜索失败';
           _searchResults = KugouSearchResult(albums: const [], total: 0);
         }
       } else if (type == 'special') {
-        final playlists = await _apiClient.searchPlaylists(keywords, page: 1, pagesize: 20);
+        final playlists = await _apiClient.searchPlaylists(
+          keywords,
+          page: 1,
+          pagesize: 20,
+        );
         if (playlists != null) {
-          _searchResults = KugouSearchResult(playlists: playlists, total: playlists.length);
+          _searchResults = KugouSearchResult(
+            playlists: playlists,
+            total: playlists.length,
+          );
         } else {
           _error = '搜索失败';
           _searchResults = KugouSearchResult(playlists: const [], total: 0);
         }
       } else if (type == 'artist') {
-        final artists = await _apiClient.searchArtists(keywords, page: 1, pagesize: 30);
+        final artists = await _apiClient.searchArtists(
+          keywords,
+          page: 1,
+          pagesize: 30,
+        );
         if (artists != null && artists.isNotEmpty) {
           final keyword = keywords.toLowerCase();
           // 只保留名字包含搜索关键词的歌手，按名字去重
           final seen = <String>{};
           final unique = artists
-              .where((a) => a.name.isNotEmpty && a.name.toLowerCase().contains(keyword) && seen.add(a.name))
+              .where(
+                (a) =>
+                    a.name.isNotEmpty &&
+                    a.name.toLowerCase().contains(keyword) &&
+                    seen.add(a.name),
+              )
               .toList();
-          _searchResults = KugouSearchResult(artists: unique, total: unique.length);
+          _searchResults = KugouSearchResult(
+            artists: unique,
+            total: unique.length,
+          );
         } else {
           _error = '搜索失败';
           _searchResults = KugouSearchResult(artists: const [], total: 0);
         }
       } else {
-        final result = await _apiClient.search(keywords, type: type, page: 1, pagesize: 30);
+        final result = await _apiClient.search(
+          keywords,
+          type: type,
+          page: 1,
+          pagesize: 30,
+        );
         if (result != null) {
           _searchResults = result;
         } else {
@@ -396,22 +427,36 @@ class KugouProvider extends ChangeNotifier {
         final current = _searchResultsByType[type];
         final currentCount = current?.albums.length ?? 0;
         final nextPage = (currentCount ~/ 20) + 1;
-        final albums = await _apiClient.searchAlbums(_lastSearchKeyword!, page: nextPage, pagesize: 20);
+        final albums = await _apiClient.searchAlbums(
+          _lastSearchKeyword!,
+          page: nextPage,
+          pagesize: 20,
+        );
         if (albums != null && albums.isNotEmpty) {
           final existing = current?.albums ?? [];
           final merged = [...existing, ...albums];
-          _searchResults = KugouSearchResult(albums: merged, total: merged.length);
+          _searchResults = KugouSearchResult(
+            albums: merged,
+            total: merged.length,
+          );
           _searchResultsByType[type] = _searchResults!;
         }
       } else if (type == 'special') {
         final current = _searchResultsByType[type];
         final currentCount = current?.playlists.length ?? 0;
         final nextPage = (currentCount ~/ 20) + 1;
-        final playlists = await _apiClient.searchPlaylists(_lastSearchKeyword!, page: nextPage, pagesize: 20);
+        final playlists = await _apiClient.searchPlaylists(
+          _lastSearchKeyword!,
+          page: nextPage,
+          pagesize: 20,
+        );
         if (playlists != null && playlists.isNotEmpty) {
           final existing = current?.playlists ?? [];
           final merged = [...existing, ...playlists];
-          _searchResults = KugouSearchResult(playlists: merged, total: merged.length);
+          _searchResults = KugouSearchResult(
+            playlists: merged,
+            total: merged.length,
+          );
           _searchResultsByType[type] = _searchResults!;
         }
       } else if (type == 'artist') {
@@ -421,11 +466,19 @@ class KugouProvider extends ChangeNotifier {
         final current = _searchResultsByType[type];
         final currentCount = current?.songs.length ?? 0;
         final nextPage = (currentCount ~/ 30) + 1;
-        final result = await _apiClient.search(_lastSearchKeyword!, type: type, page: nextPage, pagesize: 30);
+        final result = await _apiClient.search(
+          _lastSearchKeyword!,
+          type: type,
+          page: nextPage,
+          pagesize: 30,
+        );
         if (result != null && result.songs.isNotEmpty) {
           final existing = current?.songs ?? [];
           final merged = [...existing, ...result.songs];
-          _searchResults = KugouSearchResult(songs: merged, total: merged.length);
+          _searchResults = KugouSearchResult(
+            songs: merged,
+            total: merged.length,
+          );
           _searchResultsByType[type] = _searchResults!;
         }
       }
@@ -517,8 +570,9 @@ class KugouProvider extends ChangeNotifier {
     final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
     if (cacheEnabled) {
       await StreamCacheManager.instance.ensureInitialized();
-      final cachedLyric =
-          await StreamCacheManager.instance.getCachedLyric(hash);
+      final cachedLyric = await StreamCacheManager.instance.getCachedLyric(
+        hash,
+      );
       if (cachedLyric != null) {
         // 缓存命中，直接返回
         _lyric = cachedLyric;
@@ -983,6 +1037,19 @@ class KugouProvider extends ChangeNotifier {
     }
   }
 
+  /// 识别后端 "已升级 / 已领取概念版" 类提示，避免误报为失败
+  bool _containsUpgradeDoneHint(String msg) {
+    return msg.contains('已升级') ||
+        msg.contains('已领取') ||
+        msg.contains('已签到') ||
+        msg.contains('升级过') ||
+        msg.contains('已领取过') ||
+        msg.contains('已是') ||
+        msg.toLowerCase().contains('already');
+  }
+
+  /// 自动签到（含概念版双签到）。
+  /// 登录后自动调用，若今天已签到则跳过。
   Future<void> autoReceiveVipIfNeeded() async {
     if (!_isLoggedIn) return;
 
@@ -1012,20 +1079,32 @@ class KugouProvider extends ChangeNotifier {
       final receiveDay =
           '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
-      // 当天已签到则跳过，避免重复 API 调用触发风控
-      if (_localSignedDays.contains(receiveDay)) {
+      // 1. 领取畅听VIP
+      try {
+        final autoClaim = await _apiClient.claimDayVip(receiveDay);
+        final claimOk =
+            autoClaim != null &&
+            (autoClaim['status'] == 1 || autoClaim['error_code'] == 0);
+        // 131001 = 今日已领取，也视为成功
+        final alreadyClaimed = autoClaim?['error_code'] == 131001;
+        if (!claimOk && !alreadyClaimed) return;
+      } catch (_) {
         return;
       }
 
+      // 2. 升级概念版VIP
       try {
-        final autoClaim = await _apiClient.claimDayVip(receiveDay);
-        final autoOk =
-            autoClaim != null &&
-            (autoClaim['status'] == 1 || autoClaim['error_code'] == 0);
-        if (autoOk) {
-          await _markSignedToday();
+        final upgrade = await _apiClient.upgradeDayVip();
+        if (upgrade != null &&
+            (upgrade['status'] == 1 ||
+                upgrade['error_code'] == 0 ||
+                upgrade['error_code'] == 20030 ||
+                upgrade['error_code'] == 131001)) {
+          _todayUpgradedToConcept = true;
         }
       } catch (_) {}
+
+      await _markSignedToday();
 
       try {
         await _fetchUserInfo();
@@ -1040,8 +1119,30 @@ class KugouProvider extends ChangeNotifier {
   bool _manualSignInRunning = false;
   bool get manualSignInRunning => _manualSignInRunning;
 
+  /// 今天是否已成功签到并升级概念版（用于 UI 显示"概念版会员"徽章）。
+  /// 概念版双签到第二步（upgradeDayVip）成功后置 true，
+  /// 跨天/重启后由 `_localSignedDays` 重新判定（见 `isTodayYouthVip`）。
+  bool _todayUpgradedToConcept = false;
+  bool get isTodayYouthVip {
+    if (_todayUpgradedToConcept) return true;
+    // 跨重启兜底：只要今天在本地已签列表里，就认为概念版已激活
+    final now = DateTime.now();
+    final key =
+        '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+    return _localSignedDays.contains(key);
+  }
+
   /// 手动签到/领取: 不依赖 autoReceive 开关，强制调 claim + upgrade
   /// 返回 (success, message)
+  ///
+  /// 全面对齐 EchoMusic (hoowhoami/EchoMusic) 的双签到实现：
+  ///   1. claimDayVip(day)   → POST /youth/day/vip          (领取畅听VIP)
+  ///   2. upgradeDayVip()    → POST /youth/day/vip/upgrade  (升级为概念版SVIP)
+  ///
+  /// 重要：只有当两次 API 都明确返回成功（status=1 或 error_code=0）时，
+  /// 才认为真正签到成功并返回 "概念版会员"；否则如实报错给用户。
+  /// 之前的实现把 upgrade 失败静默吞掉，导致软件显示 "签到成功（概念版会员）"
+  /// 但官方仍只显示 "畅听VIP+1天"。
   Future<(bool, String)> manualSignIn() async {
     if (_manualSignInRunning) return (false, '请求进行中');
     if (!_isLoggedIn) return (false, '请先登录');
@@ -1071,16 +1172,84 @@ class KugouProvider extends ChangeNotifier {
           '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
       print('[SIGN_IN] receiveDay: $receiveDay');
 
-      // 当天已签到成功则不再请求 API，避免重复调用触发风控
+      // 手动签到：今天已签到则跳过，不再发送请求到服务器
       if (_localSignedDays.contains(receiveDay)) {
         return (true, '今天已签到，无需重复签到');
       }
 
-      // 1. 领取 VIP
+      // 1. 领取畅听VIP（基础签到）
+      //    与 EchoMusic 一致：必传 receive_day，否则后端可能判定为无效签到。
       final claim = await _apiClient.claimDayVip(receiveDay);
       print('[SIGN_IN] claim 完整响应: $claim');
 
-      // 2. 刷新用户信息和打卡记录（原项目架构：领取后刷新，无需再调 upgrade）
+      if (claim == null) {
+        return (false, '签到请求无响应，请稍后重试');
+      }
+
+      final claimStatus = claim['status'];
+      final claimErrorCode = claim['error_code'];
+      final claimErrorMsg =
+          claim['error_msg']?.toString() ?? claim['msg']?.toString() ?? '';
+
+      // status=1 成功，或 error_code=0 也视为成功
+      final claimOk = (claimStatus == 1 || claimErrorCode == 0);
+      // 131001 = 今日已领取畅听VIP（之前已签过），不阻断 upgrade
+      final claimAlreadyDone = (claimErrorCode == 131001);
+      if (!claimOk && !claimAlreadyDone) {
+        // 第一步领取就失败（非"已领取"），直接返回，不继续 upgrade
+        if (claimErrorMsg.isNotEmpty) {
+          return (false, _ensureChineseOrFallback(claimErrorMsg));
+        }
+        return (false, _mapYouthVipError(claimErrorCode, claimStatus));
+      }
+
+      // 2. 升级为概念版（完整）会员 —— 概念版双签到第二步
+      //    关键：必须严格判断 upgrade 响应，**不能**静默吞失败。
+      //    之前静默吞掉导致软件显示 "概念版会员" 但官方仍只显示 "畅听VIP+1天"。
+      Map<String, dynamic>? upgrade;
+      try {
+        upgrade = await _apiClient.upgradeDayVip();
+        print('[SIGN_IN] upgrade 响应: $upgrade');
+      } catch (e) {
+        print('[SIGN_IN] upgrade 异常: $e');
+        // 网络层异常：不标记成功，等下统一走升级失败分支
+      }
+
+      // 解析 upgrade 结果
+      int? upgradeStatus;
+      int? upgradeErrorCode;
+      String? upgradeMsg;
+      if (upgrade != null) {
+        upgradeStatus = upgrade['status'] as int?;
+        upgradeErrorCode = upgrade['error_code'] as int?;
+        upgradeMsg =
+            upgrade['error_msg']?.toString() ??
+            upgrade['msg']?.toString() ??
+            '';
+      }
+
+      // 某些后端实现：upgrade 接口会返回 "已升级过" / "今日已升级" 等，
+      // 这种属于正常状态（之前已经成功升级），应视为本次签到仍成功。
+      // 这里通过 error_code 文案识别（20030 = 已升级过概念版）。
+      final upgradeAlreadyDone =
+          upgradeErrorCode == 20030 ||
+          upgradeErrorCode == 131001 ||
+          (upgradeMsg != null && _containsUpgradeDoneHint(upgradeMsg));
+      final upgradeOk =
+          upgrade != null &&
+          (upgradeStatus == 1 || upgradeErrorCode == 0 || upgradeAlreadyDone);
+
+      if (!upgradeOk) {
+        // 升级失败：给用户如实提示，**不要**标记成功
+        // 注意此时第一步已成功（用户已领到畅听VIP），文案要明确说明：
+        // "已领取畅听VIP，但升级概念版失败：xxxx"
+        final tail = upgradeMsg != null && upgradeMsg.isNotEmpty
+            ? _ensureChineseOrFallback(upgradeMsg)
+            : _mapYouthVipError(upgradeErrorCode, upgradeStatus);
+        return (false, '畅听VIP已领取，但升级概念版失败：$tail');
+      }
+
+      // 两步都成功 —— 标记今天已签并刷新信息
       try {
         await _fetchUserInfo();
       } catch (e) {
@@ -1092,49 +1261,80 @@ class KugouProvider extends ChangeNotifier {
         print('[SIGN_IN] 刷新打卡记录异常: $e');
       }
 
-      // 判定结果：兼容酷狗多种返回格式
-      if (claim == null) {
-        return (false, '签到请求无响应，请勿重复签到');
-      }
-
-      final status = claim['status'];
-      final errorCode = claim['error_code'];
-      final errorMsg =
-          claim['error_msg']?.toString() ?? claim['msg']?.toString() ?? '';
-
-      // status=1 成功，或 error_code=0 也视为成功
-      final claimOk = (status == 1 || errorCode == 0);
-
-      if (claimOk) {
-        await _markSignedToday();
-        return (true, '签到成功');
-      } else if (errorMsg.isNotEmpty) {
-        return (false, errorMsg);
-      } else {
-        // 打印完整响应用于排查
-        final mapped = _mapYouthVipError(errorCode, status);
-        return (false, mapped);
-      }
+      await _markSignedToday();
+      _todayUpgradedToConcept = true;
+      return (true, '签到成功（概念版会员）');
     } catch (e) {
       print('[SIGN_IN] 异常: $e');
-      return (false, '网络异常: $e');
+      return (false, _friendlyNetworkError(e));
     } finally {
       _manualSignInRunning = false;
       notifyListeners();
     }
   }
 
+  /// 优先返回中文 errorMsg；如果不含中文则用错误码映射兜底
+  String _ensureChineseOrFallback(String errorMsg) {
+    if (_containsChinese(errorMsg)) {
+      // 服务端中文提示，原样返回
+      return errorMsg;
+    }
+    // 英文消息视为不可友好展示，统一用通用兜底
+    return '签到失败，请稍后重试';
+  }
+
+  /// 将网络层 / 系统异常翻译为友好中文提示
+  String _friendlyNetworkError(Object e) {
+    final raw = e.toString();
+    // 常见网络异常关键字识别
+    if (raw.contains('SocketException') ||
+        raw.contains('Connection refused') ||
+        raw.contains('Failed host lookup') ||
+        raw.contains('Network is unreachable') ||
+        raw.contains('No address associated with hostname')) {
+      return '网络连接失败，请检查网络后重试';
+    }
+    if (raw.contains('TimeoutException') || raw.contains('timeout')) {
+      return '网络请求超时，请稍后重试';
+    }
+    if (raw.contains('HandshakeException') ||
+        raw.contains('CertificateException') ||
+        raw.contains('CERTIFICATE')) {
+      return '安全证书校验失败，请检查网络环境';
+    }
+    if (raw.contains('FormatException')) {
+      return '服务器返回数据格式异常，请稍后重试';
+    }
+    if (raw.contains('HttpException') || raw.contains('status code')) {
+      return '服务器异常，请稍后重试';
+    }
+    // 兜底：保持中文，避免用户看到英文
+    return '签到失败，请稍后重试';
+  }
+
+  /// 判断字符串是否包含中文字符；用于过滤 API 返回的英文错误
+  bool _containsChinese(String s) {
+    return RegExp(r'[\u4e00-\u9fa5]').hasMatch(s);
+  }
+
   /// 将酷狗 youth vip 相关错误码映射成可读中文提示
   String _mapYouthVipError(int? errorCode, dynamic status) {
     const map = <int, String>{
       20006: '签名错误，请重新登录后重试',
-      20010: '参数错误（receive_day 格式或 source_id 不对）',
-      20028: '酷狗拒绝领取：账号可能不符合青年VIP资格，或该功能已停用',
+      20010: '参数错误（领取日期格式有误）',
+      20018: '登录已过期，请重新登录',
+      20028: '酷狗拒绝领取：账号可能不符合资格，或该功能已停用',
+      20030: '已升级过概念版，无需重复领取',
+      20033: '今日已签到，无需重复领取',
+      20034: '领取失败：领取次数已达上限',
+      // 131001 系列多为账号风控/黑号限制（用户反馈），给一条明确的中文提示
+      131001: '今日已签到，无需重复领取',
     };
     if (errorCode != null && map.containsKey(errorCode)) {
       return map[errorCode]!;
     }
-    return '签到失败(状态:$status 错误码:$errorCode)';
+    // 兜底：纯中文 + 服务端原始码（方便排查但用户友好）
+    return '签到失败，请稍后重试（错误码：${errorCode ?? '未知'}）';
   }
 
   Future<void> getRankSongs({
@@ -1421,7 +1621,16 @@ class KugouProvider extends ChangeNotifier {
         _vipMonthRecord = r;
         final data = r['data'];
         final list = data?['list'] ?? data?['record_list'] ?? r['list'];
-        print('[VIP_RECORD] 解析到 ${list is List ? list.length : 0} 条记录');
+        if (list is List) {
+          print('[VIP_RECORD] 解析到 ${list.length} 条记录');
+          for (final item in list) {
+            if (item is Map<String, dynamic>) {
+              print(
+                '[VIP_RECORD] 记录: day=${item['day']} vip_type=${item['vip_type']} receive_vip=${item['receive_vip']} keys=${item.keys.toList()}',
+              );
+            }
+          }
+        }
         notifyListeners();
       }
     } catch (e) {

@@ -34,11 +34,10 @@ class _LibraryPageState extends State<LibraryPage>
       // 页面加载后立即取消搜索框焦点，防止输入法自动弹出
       _searchFocusNode.unfocus();
       final provider = context.read<LibraryProvider>();
+      // 1. 先恢复上次扫描结果（缓存），让用户立即看到歌曲列表
+      provider.loadSavedSongs();
+      // 2. 加载已配置的扫描目录
       provider.loadScanFolders();
-      // 如果没有歌曲数据且不在扫描中，自动扫描
-      if (!provider.hasMusic && !provider.isScanning) {
-        provider.loadLocalMusic();
-      }
     });
   }
 
@@ -82,7 +81,9 @@ class _LibraryPageState extends State<LibraryPage>
                     // 搜索栏
                     Padding(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 4),
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
                       child: TextField(
                         controller: _searchController,
                         focusNode: _searchFocusNode,
@@ -104,7 +105,9 @@ class _LibraryPageState extends State<LibraryPage>
                               : null,
                           isDense: true,
                           contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(28),
                             borderSide: BorderSide.none,
@@ -128,8 +131,15 @@ class _LibraryPageState extends State<LibraryPage>
                         Tab(text: '文件夹'),
                         Tab(text: '收藏'),
                       ],
+                      // 5 个 Tab 内容较窄，关闭滚动并居中分布到整行，
+                      // 缩窄每个 Tab 内部 padding 让"收藏"也能完整显示。
                       isScrollable: false,
                       tabAlignment: TabAlignment.center,
+                      padding: EdgeInsets.zero,
+                      labelPadding: const EdgeInsets.symmetric(horizontal: 6),
+                      labelStyle: textTheme.titleSmall,
+                      unselectedLabelStyle: textTheme.titleSmall,
+                      dividerColor: Colors.transparent,
                     ),
                   ],
                 ),
@@ -139,17 +149,17 @@ class _LibraryPageState extends State<LibraryPage>
       body: isScanning && !hasMusic
           ? _buildScanningState(colorScheme)
           : !hasMusic
-              ? _buildEmptyState(colorScheme)
-              : TabBarView(
-                  controller: _tabController,
-                  children: [
-                    SongsPage(songs: libraryProvider.songs),
-                    AlbumsPage(albums: libraryProvider.albums),
-                    ArtistsPage(artists: libraryProvider.artists),
-                    FoldersPage(folders: libraryProvider.folders),
-                    const _LocalFavoritesTab(),
-                  ],
-                ),
+          ? _buildEmptyState(colorScheme)
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                SongsPage(songs: libraryProvider.songs),
+                AlbumsPage(albums: libraryProvider.albums),
+                ArtistsPage(artists: libraryProvider.artists),
+                FoldersPage(folders: libraryProvider.folders),
+                const _LocalFavoritesTab(),
+              ],
+            ),
       floatingActionButton: _buildScanFAB(context, colorScheme),
     );
   }
@@ -157,7 +167,7 @@ class _LibraryPageState extends State<LibraryPage>
   Widget _buildScanFAB(BuildContext context, ColorScheme colorScheme) {
     return FloatingActionButton(
       onPressed: () => _showScanMenu(context),
-      child: const Icon(Icons.refresh),
+      child: const Icon(Icons.add),
     );
   }
 
@@ -175,8 +185,8 @@ class _LibraryPageState extends State<LibraryPage>
                 child: Text(
                   '扫描本地音乐',
                   style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               ListTile(
@@ -241,8 +251,8 @@ class _LibraryPageState extends State<LibraryPage>
                         Text(
                           '排除文件夹',
                           style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                         TextButton(
                           onPressed: () => Navigator.pop(ctx),
@@ -254,8 +264,8 @@ class _LibraryPageState extends State<LibraryPage>
                     Text(
                       '排除的文件夹及其子目录不会被扫描',
                       style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                            color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                          ),
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 12),
                     if (excludedFolders.isEmpty)
@@ -273,11 +283,22 @@ class _LibraryPageState extends State<LibraryPage>
                           itemCount: excludedFolders.length,
                           itemBuilder: (context, index) {
                             final folder = excludedFolders[index];
-                            final name = folder.split('/').where((p) => p.isNotEmpty).last;
+                            final name = folder
+                                .split('/')
+                                .where((p) => p.isNotEmpty)
+                                .last;
                             return ListTile(
                               leading: const Icon(Icons.folder_off_outlined),
-                              title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                              subtitle: Text(folder, maxLines: 1, overflow: TextOverflow.ellipsis),
+                              title: Text(
+                                name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              subtitle: Text(
+                                folder,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                               trailing: IconButton(
                                 icon: const Icon(Icons.remove_circle_outline),
                                 onPressed: () {
@@ -300,7 +321,9 @@ class _LibraryPageState extends State<LibraryPage>
                             setModalState(() {});
                             if (context.mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('已添加排除文件夹，重新扫描后生效')),
+                                const SnackBar(
+                                  content: Text('已添加排除文件夹，重新扫描后生效'),
+                                ),
                               );
                             }
                           }
@@ -330,8 +353,8 @@ class _LibraryPageState extends State<LibraryPage>
           Text(
             '正在扫描本地音乐...',
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
         ],
       ),
@@ -352,15 +375,15 @@ class _LibraryPageState extends State<LibraryPage>
           Text(
             '还没有本地音乐',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant,
-                ),
+              color: colorScheme.onSurfaceVariant,
+            ),
           ),
           const SizedBox(height: 8),
           Text(
             '点击扫描按钮添加本地音乐',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                ),
+              color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+            ),
           ),
           const SizedBox(height: 24),
           FilledButton.tonal(
@@ -397,11 +420,13 @@ class _LocalFavoritesTab extends StatelessWidget {
     final filtered = query.isEmpty
         ? allFavorites
         : allFavorites
-            .where((s) =>
-                s.title.toLowerCase().contains(query) ||
-                s.artist.toLowerCase().contains(query) ||
-                s.album.toLowerCase().contains(query))
-            .toList();
+              .where(
+                (s) =>
+                    s.title.toLowerCase().contains(query) ||
+                    s.artist.toLowerCase().contains(query) ||
+                    s.album.toLowerCase().contains(query),
+              )
+              .toList();
 
     if (allFavorites.isEmpty) {
       return Center(
@@ -411,27 +436,25 @@ class _LocalFavoritesTab extends StatelessWidget {
             Icon(
               Icons.favorite_border,
               size: 64,
-              color: Theme.of(context)
-                  .colorScheme
-                  .onSurfaceVariant
-                  .withValues(alpha: 0.5),
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
             ),
             const SizedBox(height: 16),
             Text(
               '还没有本地收藏',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               '在曲目列表中点击心形图标即可收藏',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurfaceVariant
-                        .withValues(alpha: 0.7),
-                  ),
+                color: Theme.of(
+                  context,
+                ).colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+              ),
             ),
           ],
         ),
@@ -443,8 +466,8 @@ class _LocalFavoritesTab extends StatelessWidget {
         child: Text(
           '没有匹配的收藏',
           style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
       );
     }

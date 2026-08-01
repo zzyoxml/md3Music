@@ -89,12 +89,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   int _currentTabLength = 3;
   // 手机横屏模式：保留封面Tab，但隐藏左侧歌曲信息
   bool _isPhoneLandscape = false;
-  // 拖动进度条前的播放状态，用于拖动结束后恢复
-  bool _wasPlayingBeforeDrag = false;
 
   // === 拖拽收起手势：已移除（与 MD 风格统一：无把手单行布局，关闭通过返回按钮） ===
   /// 防止 PopScope 回调与 dismiss() 重复触发。
   bool _isDismissing = false;
+
   /// 上次的物理尺寸，用于 didChangeMetrics 方向变化防抖。
   /// 避免 immersiveSticky 下用户触摸边缘唤醒系统栏等 insets 抖动
   /// 引发无效的 applyImmersiveForOrientation 调用导致系统栏闪烁。
@@ -201,7 +200,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final song = player.currentSong;
     if (song != null && song.id != _lastSongId) {
       // 封面 + 背景淡入淡出
-      if (_previousArtworkUrl != null && _previousArtworkUrl != song.artworkUri) {
+      if (_previousArtworkUrl != null &&
+          _previousArtworkUrl != song.artworkUri) {
         final newUrl = song.artworkUri;
         _artworkFadeController
           ..reset()
@@ -216,7 +216,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       final playlist = player.playlist;
       final idx = player.currentIndex;
       if (idx > 0) _preloadArtwork(playlist[idx - 1].artworkUri);
-      if (idx < playlist.length - 1) _preloadArtwork(playlist[idx + 1].artworkUri);
+      if (idx < playlist.length - 1)
+        _preloadArtwork(playlist[idx + 1].artworkUri);
     }
   }
 
@@ -382,7 +383,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
         if (mounted) {
           final lyric = kugouProvider.lyric;
-          lyricText = lyric?.displayKrcLyric ??
+          lyricText =
+              lyric?.displayKrcLyric ??
               lyric?.displayLrcLyric ??
               lyric?.displayLyric ??
               '';
@@ -394,7 +396,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       if (mounted) {
         setState(() {
           _isLoadingLyrics = false;
-          _hasTranslation = translationText != null && translationText.isNotEmpty;
+          _hasTranslation =
+              translationText != null && translationText.isNotEmpty;
           _hasRoma = romaText != null && romaText.isNotEmpty;
           _parsedLyrics = LyricParserChain.parse(
             lyricText,
@@ -488,7 +491,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   }
 
   /// 模糊背景淡入淡出（无 alpha 渐变；渐变移到 AppleLyricsView 歌词界面边界）
-  Widget _buildCrossfadeBlurredBackground(String? artworkUrl, {String? fallbackFilePath}) {
+  Widget _buildCrossfadeBlurredBackground(
+    String? artworkUrl, {
+    String? fallbackFilePath,
+  }) {
     return AnimatedBuilder(
       animation: _artworkFadeAnimation,
       builder: (context, _) {
@@ -675,9 +681,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(
-        child: MD3ELoadingIndicator(color: Colors.white),
-      ),
+      builder: (_) =>
+          const Center(child: MD3ELoadingIndicator(color: Colors.white)),
     );
     try {
       final api = KugouApiClient();
@@ -685,9 +690,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       if (!mounted) return;
       Navigator.of(context).pop(); // 关闭 loading
       if (result == null || result.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('未找到歌手「$name」')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('未找到歌手「$name」')));
         return;
       }
       final artist = result.first;
@@ -695,9 +700,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     } catch (e) {
       if (!mounted) return;
       Navigator.of(context).pop(); // 关闭 loading
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('搜索歌手失败：$e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('搜索歌手失败：$e')));
     }
   }
 
@@ -747,7 +752,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   Widget build(BuildContext context) {
     // v4 优化：父级 build 只在切歌（currentSong.id 变化）或播放/暂停（isPlaying）时执行。
     // position 更新（200ms）通过 AppleLyricsView 与进度条自身的 Selector 注入，不触发父级重建。
-    return Selector<PlayerProvider, ({String? songId, bool isPlaying, AudioQuality audioQuality})>(
+    return Selector<
+      PlayerProvider,
+      ({String? songId, bool isPlaying, AudioQuality audioQuality})
+    >(
       selector: (_, p) => (
         songId: p.currentSong?.id,
         isPlaying: p.isPlaying,
@@ -755,7 +763,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       ),
       builder: (context, _, __) {
         final playerProvider = context.read<PlayerProvider>();
-        final lyricDoubleTap = context.watch<ThemeProvider>().lyricDoubleTapToJump;
+        final lyricDoubleTap = context
+            .watch<ThemeProvider>()
+            .lyricDoubleTapToJump;
         final currentSong = playerProvider.currentSong;
         final colorScheme = Theme.of(context).colorScheme;
 
@@ -784,7 +794,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             }
             _collapseByButton();
           },
-          child: _buildFullLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
+          child: _buildFullLayout(
+            playerProvider,
+            currentSong,
+            colorScheme,
+            lyricDoubleTap,
+          ),
         );
       },
     );
@@ -823,12 +838,24 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             _buildDarkOverlay(),
             // 4. 主体内容（保留原有 compact/landscape/expanded 三套布局）
             ResponsiveLayout(
-              compact: (_) =>
-                  _buildCompactLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
-              medium: (_) =>
-                  _buildLandscapeLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
-              expanded: (_) =>
-                  _buildExpandedLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
+              compact: (_) => _buildCompactLayout(
+                playerProvider,
+                currentSong,
+                colorScheme,
+                lyricDoubleTap,
+              ),
+              medium: (_) => _buildLandscapeLayout(
+                playerProvider,
+                currentSong,
+                colorScheme,
+                lyricDoubleTap,
+              ),
+              expanded: (_) => _buildExpandedLayout(
+                playerProvider,
+                currentSong,
+                colorScheme,
+                lyricDoubleTap,
+              ),
             ),
           ],
         ),
@@ -871,19 +898,20 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   behavior: HitTestBehavior.opaque,
                   // Selector 让 _buildArtworkView 仅在 currentSong / isPlaying 变化时重建，
                   // 不再每 200ms 因 position 变化重建（封面 AnimatedScale 是隐式动画，需要 isPlaying 触发）
-                  child: Selector<PlayerProvider,
-                      ({String? songId, bool isPlaying})>(
-                    selector: (_, p) => (
-                      songId: p.currentSong?.id,
-                      isPlaying: p.isPlaying,
-                    ),
-                    builder: (context, _, __) => _buildArtworkView(
-                      playerProvider,
-                      currentSong,
-                      colorScheme,
-                      isExpanded: true,
-                    ),
-                  ),
+                  child:
+                      Selector<
+                        PlayerProvider,
+                        ({String? songId, bool isPlaying})
+                      >(
+                        selector: (_, p) =>
+                            (songId: p.currentSong?.id, isPlaying: p.isPlaying),
+                        builder: (context, _, __) => _buildArtworkView(
+                          playerProvider,
+                          currentSong,
+                          colorScheme,
+                          isExpanded: true,
+                        ),
+                      ),
                 ),
                 GestureDetector(
                   onTap: () => _tabController.animateTo(0),
@@ -898,22 +926,23 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           )
                         // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
                         : Selector<PlayerProvider, int>(
-                            selector: (_, p) =>
-                                p.position.inMilliseconds,
+                            selector: (_, p) => p.position.inMilliseconds,
                             builder: (context, positionMs, _) =>
                                 AppleLyricsView(
-                              lines: _parsedLyrics,
-                              currentTimeMs: positionMs,
-                              isPlaying: playerProvider.isPlaying,
-                              forceDarkBackground: true,
-                              // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                              enableInterludeDots:
-                                  !_isLocalLrcLyricWithoutWordTiming(
-                                      currentSong),
-                              doubleTapToJump: lyricDoubleTap,
-                              onSeek: (ms) => playerProvider
-                                  .seek(Duration(milliseconds: ms)),
-                            ),
+                                  lines: _parsedLyrics,
+                                  currentTimeMs: positionMs,
+                                  isPlaying: playerProvider.isPlaying,
+                                  forceDarkBackground: true,
+                                  // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+                                  enableInterludeDots:
+                                      !_isLocalLrcLyricWithoutWordTiming(
+                                        currentSong,
+                                      ),
+                                  doubleTapToJump: lyricDoubleTap,
+                                  onSeek: (ms) => playerProvider.seek(
+                                    Duration(milliseconds: ms),
+                                  ),
+                                ),
                           ),
                   ),
                 ),
@@ -933,9 +962,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           _ZenFade(
             animation: _zenAnimation,
             child: Padding(
-              padding: EdgeInsets.only(
-                bottom: _zenMode ? 16 : bottomPadding,
-              ),
+              padding: EdgeInsets.only(bottom: _zenMode ? 16 : bottomPadding),
               child: _buildControls(playerProvider, colorScheme),
             ),
           ),
@@ -970,21 +997,27 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 Expanded(
                   flex: 4,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         // 横屏时封面为正方形，需同时受可用宽度与高度约束：
                         // 减去 56 顶栏补偿后的可用高度，避免高度不足时正方形上下被裁切
                         final availableHeight = constraints.maxHeight - 56;
-                        final size = (constraints.maxWidth < availableHeight
-                                ? constraints.maxWidth
-                                : availableHeight)
-                            .clamp(120.0, 300.0);
+                        final size =
+                            (constraints.maxWidth < availableHeight
+                                    ? constraints.maxWidth
+                                    : availableHeight)
+                                .clamp(120.0, 300.0);
                         return Stack(
                           children: [
                             // 封面居中：补偿顶栏高度，使封面在整个屏幕垂直方向居中
                             Padding(
-                              padding: EdgeInsets.only(bottom: _zenMode ? 0.0 : 56.0),
+                              padding: EdgeInsets.only(
+                                bottom: _zenMode ? 0.0 : 56.0,
+                              ),
                               child: Center(
                                 child: SizedBox(
                                   width: size,
@@ -1043,7 +1076,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 child: Column(
                                   children: [
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.displayName,
                                         maxLines: 1,
@@ -1057,7 +1091,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                     ),
                                     const SizedBox(height: 2),
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.artist,
                                         maxLines: 1,
@@ -1070,7 +1105,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                       ),
                                     ),
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.album,
                                         maxLines: 1,
@@ -1106,7 +1142,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               selector: (_, p) => p.currentSong?.id,
                               builder: (context, songId, __) {
                                 final song = playerProvider.currentSong;
-                                if (song == null) return const SizedBox.shrink();
+                                if (song == null)
+                                  return const SizedBox.shrink();
                                 return _buildSongInfo(
                                   playerProvider,
                                   song,
@@ -1117,8 +1154,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                             _isLoadingLyrics
                                 // AM 风格：歌词 loading 改为白色，与深色背景协调
                                 ? const Center(
-                                    child:
-                                        MD3ELoadingIndicator(color: Colors.white),
+                                    child: MD3ELoadingIndicator(
+                                      color: Colors.white,
+                                    ),
                                   )
                                 : RepaintBoundary(
                                     // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
@@ -1127,19 +1165,20 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                           p.position.inMilliseconds,
                                       builder: (context, positionMs, _) =>
                                           AppleLyricsView(
-                                        lines: _parsedLyrics,
-                                        currentTimeMs: positionMs,
-                                        isPlaying: playerProvider.isPlaying,
-                                        forceDarkBackground: true,
-                                        // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                                        enableInterludeDots:
-                                            !_isLocalLrcLyricWithoutWordTiming(
-                                                currentSong),
-                                        doubleTapToJump: lyricDoubleTap,
-                                        onSeek: (ms) => playerProvider.seek(
-                                          Duration(milliseconds: ms),
-                                        ),
-                                      ),
+                                            lines: _parsedLyrics,
+                                            currentTimeMs: positionMs,
+                                            isPlaying: playerProvider.isPlaying,
+                                            forceDarkBackground: true,
+                                            // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+                                            enableInterludeDots:
+                                                !_isLocalLrcLyricWithoutWordTiming(
+                                                  currentSong,
+                                                ),
+                                            doubleTapToJump: lyricDoubleTap,
+                                            onSeek: (ms) => playerProvider.seek(
+                                              Duration(milliseconds: ms),
+                                            ),
+                                          ),
                                     ),
                                   ),
                             // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
@@ -1205,15 +1244,23 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 Expanded(
                   flex: 4,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        final maxSize = (constraints.maxWidth - 32).clamp(0.0, 380.0);
+                        final maxSize = (constraints.maxWidth - 32).clamp(
+                          0.0,
+                          380.0,
+                        );
                         return Stack(
                           children: [
                             // 封面居中：补偿顶栏高度，使封面在整个屏幕垂直方向居中
                             Padding(
-                              padding: EdgeInsets.only(bottom: _zenMode ? 0.0 : 56.0),
+                              padding: EdgeInsets.only(
+                                bottom: _zenMode ? 0.0 : 56.0,
+                              ),
                               child: Center(
                                 child: ConstrainedBox(
                                   constraints: BoxConstraints(
@@ -1277,7 +1324,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 child: Column(
                                   children: [
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.displayName,
                                         maxLines: 1,
@@ -1291,7 +1339,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                     ),
                                     const SizedBox(height: 2),
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.artist,
                                         maxLines: 1,
@@ -1304,7 +1353,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                       ),
                                     ),
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.album,
                                         maxLines: 1,
@@ -1340,7 +1390,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               selector: (_, p) => p.currentSong?.id,
                               builder: (context, songId, __) {
                                 final song = playerProvider.currentSong;
-                                if (song == null) return const SizedBox.shrink();
+                                if (song == null)
+                                  return const SizedBox.shrink();
                                 return _buildSongInfo(
                                   playerProvider,
                                   song,
@@ -1351,8 +1402,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                             _isLoadingLyrics
                                 // AM 风格：歌词 loading 改为白色，与深色背景协调
                                 ? const Center(
-                                    child:
-                                        MD3ELoadingIndicator(color: Colors.white),
+                                    child: MD3ELoadingIndicator(
+                                      color: Colors.white,
+                                    ),
                                   )
                                 : RepaintBoundary(
                                     // v4 优化：用 Selector 注入 position，避免父级每 200ms 重建
@@ -1361,19 +1413,20 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                           p.position.inMilliseconds,
                                       builder: (context, positionMs, _) =>
                                           AppleLyricsView(
-                                        lines: _parsedLyrics,
-                                        currentTimeMs: positionMs,
-                                        isPlaying: playerProvider.isPlaying,
-                                        forceDarkBackground: true,
-                                        // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                                        enableInterludeDots:
-                                            !_isLocalLrcLyricWithoutWordTiming(
-                                                currentSong),
-                                        doubleTapToJump: lyricDoubleTap,
-                                        onSeek: (ms) => playerProvider.seek(
-                                          Duration(milliseconds: ms),
-                                        ),
-                                      ),
+                                            lines: _parsedLyrics,
+                                            currentTimeMs: positionMs,
+                                            isPlaying: playerProvider.isPlaying,
+                                            forceDarkBackground: true,
+                                            // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+                                            enableInterludeDots:
+                                                !_isLocalLrcLyricWithoutWordTiming(
+                                                  currentSong,
+                                                ),
+                                            doubleTapToJump: lyricDoubleTap,
+                                            onSeek: (ms) => playerProvider.seek(
+                                              Duration(milliseconds: ms),
+                                            ),
+                                          ),
                                     ),
                                   ),
                             // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
@@ -1396,7 +1449,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           padding: EdgeInsets.only(
                             bottom: _zenMode ? 8 : bottomPadding,
                           ),
-                          child: _buildControls(playerProvider, colorScheme, isExpanded: true),
+                          child: _buildControls(
+                            playerProvider,
+                            colorScheme,
+                            isExpanded: true,
+                          ),
                         ),
                       ),
                     ],
@@ -1418,10 +1475,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(
-              Icons.keyboard_arrow_down,
-              color: Colors.white,
-            ),
+            icon: const Icon(Icons.keyboard_arrow_down, color: Colors.white),
             onPressed: _collapseByButton,
           ),
           const Spacer(),
@@ -1471,11 +1525,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.music_note,
-                size: 14,
-                color: Colors.white,
-              ),
+              const Icon(Icons.music_note, size: 14, color: Colors.white),
               const SizedBox(width: 4),
               Text(
                 // 本地歌曲显示基于码率推断的音质标签
@@ -1697,12 +1747,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         children: [
           // v4 优化：进度条用 Selector 注入 position + duration，
           // 避免父级每 200ms position 更新触发 _buildControls 整体重建。
-          Selector<PlayerProvider,
-              ({Duration position, Duration? duration})>(
-            selector: (_, p) => (
-              position: p.position,
-              duration: p.duration,
-            ),
+          Selector<PlayerProvider, ({Duration position, Duration? duration})>(
+            selector: (_, p) => (position: p.position, duration: p.duration),
             builder: (context, state, _) => _buildProgressBar(
               playerProvider,
               state.position,
@@ -1713,8 +1759,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           SizedBox(height: verticalSpacing),
           // Selector 让主控制按钮仅在 isPlaying / loopMode / shuffle 变化时重建
           // 不再每 200ms 因 position 变化重建
-          Selector<PlayerProvider,
-              ({bool isPlaying, AppLoopMode loopMode, bool shuffleEnabled})>(
+          Selector<
+            PlayerProvider,
+            ({bool isPlaying, AppLoopMode loopMode, bool shuffleEnabled})
+          >(
             selector: (_, p) => (
               isPlaying: p.isPlaying,
               loopMode: p.loopMode,
@@ -1731,8 +1779,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           ),
           SizedBox(height: verticalSpacing),
           // Selector 让副控制按钮在 currentSong / speed / 音质标签变化时重建
-          Selector<PlayerProvider,
-              ({String? songId, double speed, String currentQualityLabel})>(
+          Selector<
+            PlayerProvider,
+            ({String? songId, double speed, String currentQualityLabel})
+          >(
             selector: (_, p) => (
               songId: p.currentSong?.id,
               speed: p.speed,
@@ -1757,7 +1807,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   ) {
     // Apple Music 风格：深色背景下进度条与时间标签用白色
     final song = playerProvider.currentSong;
-    final hasClimax = song?.climaxStart != null &&
+    final hasClimax =
+        song?.climaxStart != null &&
         song?.climaxEnd != null &&
         duration.inMilliseconds > 0;
 
@@ -1776,31 +1827,23 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         Expanded(
           child: hasClimax
               ? _buildSliderWithClimaxMarker(
-                  playerProvider, position, duration, song!)
+                  playerProvider,
+                  position,
+                  duration,
+                  song!,
+                )
               : Slider(
                   value: duration.inMilliseconds > 0
                       ? (position.inMilliseconds / duration.inMilliseconds)
-                          .clamp(0.0, 1.0)
+                            .clamp(0.0, 1.0)
                       : 0.0,
                   activeColor: Colors.white,
                   inactiveColor: Colors.white24,
-                  onChangeStart: (_) {
-                    _wasPlayingBeforeDrag = playerProvider.isPlaying;
-                    if (playerProvider.isPlaying) {
-                      playerProvider.pause();
-                    }
-                  },
                   onChanged: (value) {
                     final newPosition = Duration(
-                      milliseconds:
-                          (duration.inMilliseconds * value).round(),
+                      milliseconds: (duration.inMilliseconds * value).round(),
                     );
                     playerProvider.seek(newPosition);
-                  },
-                  onChangeEnd: (_) {
-                    if (_wasPlayingBeforeDrag) {
-                      playerProvider.resume();
-                    }
                   },
                 ),
         ),
@@ -1848,22 +1891,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   : 0.0,
               activeColor: Colors.white,
               inactiveColor: Colors.white24,
-              onChangeStart: (_) {
-                _wasPlayingBeforeDrag = playerProvider.isPlaying;
-                if (playerProvider.isPlaying) {
-                  playerProvider.pause();
-                }
-              },
               onChanged: (value) {
                 final newPosition = Duration(
                   milliseconds: (totalMs * value).round(),
                 );
                 playerProvider.seek(newPosition);
-              },
-              onChangeEnd: (_) {
-                if (_wasPlayingBeforeDrag) {
-                  playerProvider.resume();
-                }
               },
             ),
             // 高潮区域高亮条：与进度条轨道同高、垂直居中对齐
@@ -1908,13 +1940,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       children: [
         IconButton(
           icon: Icon(
-            shuffleEnabled
-                ? Icons.shuffle
-                : Icons.shuffle_outlined,
+            shuffleEnabled ? Icons.shuffle : Icons.shuffle_outlined,
             // 深色背景下：启用时纯白，未启用时半透明白
-            color: shuffleEnabled
-                ? Colors.white
-                : Colors.white70,
+            color: shuffleEnabled ? Colors.white : Colors.white70,
           ),
           onPressed: () => playerProvider.toggleShuffle(),
         ),
@@ -1951,9 +1979,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         IconButton(
           icon: Icon(
             _getLoopModeIcon(loopMode),
-            color: loopMode != AppLoopMode.off
-                ? Colors.white
-                : Colors.white70,
+            color: loopMode != AppLoopMode.off ? Colors.white : Colors.white70,
           ),
           onPressed: () => playerProvider.toggleLoopMode(),
         ),
@@ -1969,7 +1995,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final song = playerProvider.currentSong;
     // 根据歌曲来源（本地/在线）选择对应的收藏 Provider
     final isOnline = song is Song && song.isOnline;
-    final isFavorited = song != null &&
+    final isFavorited =
+        song != null &&
         (isOnline
             ? context.watch<FavoritesProvider>().isFavorite(song.id)
             : context.watch<LocalFavoritesProvider>().isFavorite(song.id));
@@ -1980,196 +2007,196 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     return ListenableBuilder(
       listenable: LyricPreferences.instance,
       builder: (context, _) => Material(
-      color: Colors.white.withValues(alpha: 0.15),
-      shape: const StadiumBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: 48,
-        child: Row(
-          children: [
-            // 1. 倍速指示（纯文字）
-            Expanded(
-              child: InkWell(
-                onTap: () => _showSpeedDialog(playerProvider),
-                child: Center(
-                  child: Text(
-                    '${playerProvider.speed}x',
-                    style: textTheme.labelLarge?.copyWith(
+        color: Colors.white.withValues(alpha: 0.15),
+        shape: const StadiumBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: SizedBox(
+          height: 48,
+          child: Row(
+            children: [
+              // 1. 倍速指示（纯文字）
+              Expanded(
+                child: InkWell(
+                  onTap: () => _showSpeedDialog(playerProvider),
+                  child: Center(
+                    child: Text(
+                      '${playerProvider.speed}x',
+                      style: textTheme.labelLarge?.copyWith(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              // 2. 播放列表 — 弹出播放队列
+              Expanded(
+                child: InkWell(
+                  onTap: () => _showPlaylist(playerProvider),
+                  onLongPress: _enterZenMode,
+                  child: Center(
+                    child: Icon(
+                      Icons.queue_music,
+                      size: 22,
                       color: Colors.white,
-                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
               ),
-            ),
-            // 2. 播放列表 — 弹出播放队列
-            Expanded(
-              child: InkWell(
-                onTap: () => _showPlaylist(playerProvider),
-                onLongPress: _enterZenMode,
-                child: Center(
-                  child: Icon(
-                    Icons.queue_music,
-                    size: 22,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-            // 3. 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
-            Expanded(
-              child: InkWell(
-                onTap: () {
-                  if (_tabController.index != 0) {
-                    _tabController.animateTo(0);
-                  }
-                },
-                onLongPress: song != null && isOnline
-                    ? () => _downloadSong(song)
-                    : null,
-                child: Center(
-                  child: Icon(
-                    Icons.album,
-                    size: 22,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-            // 4. 歌词 — 短按跳转到歌词 tab，长按开关桌面歌词
-            Expanded(
-              child: InkWell(
-                onTap: () {
-                  if (_tabController.index != 1) {
-                    _tabController.animateTo(1);
-                  }
-                },
-                onLongPress: () async {
-                  await DesktopLyricService.instance.toggle();
-                  if (mounted) {
-                    // 同步通知栏"桌面歌词"按钮状态
-                    final player = context.read<PlayerProvider>();
-                    final curSong = player.currentSong;
-                    // 收藏状态需实时查询，避免暂停时显示为未收藏
-                    bool isFavorited = false;
-                    if (curSong != null) {
-                      try {
-                        isFavorited = context
-                            .read<FavoritesProvider>()
-                            .isFavorite(curSong.id);
-                      } catch (_) {}
+              // 3. 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    if (_tabController.index != 0) {
+                      _tabController.animateTo(0);
                     }
-                    await MediaNotificationService.updateNotification(
-                      // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
-                      title: curSong?.displayName ?? '',
-                      artist: curSong?.artist ?? '',
-                      artUrl: curSong?.artworkUri,
-                      isPlaying: player.isPlaying,
-                      position: player.position,
-                      duration: player.duration ?? Duration.zero,
-                      desktopLyricEnabled:
-                          DesktopLyricService.instance.enabled,
-                      isFavorited: isFavorited,
-                    );
-                  }
-                },
-                child: Center(
-                  child: Icon(
-                    // 桌面歌词开启时用实心 icon + 纯白，与 mini_player 一致
-                    DesktopLyricService.instance.enabled
-                        ? Icons.lyrics
-                        : Icons.lyrics_outlined,
-                    size: 22,
-                    color: Colors.white,
+                  },
+                  onLongPress: song != null && isOnline
+                      ? () => _downloadSong(song)
+                      : null,
+                  child: Center(
+                    child: Icon(Icons.album, size: 22, color: Colors.white),
                   ),
                 ),
               ),
-            ),
-            // 5. 评论 — 跳转到评论 tab
-            Expanded(
-              child: InkWell(
-                onTap: () {
-                  if (_tabController.index != 2) {
-                    _tabController.animateTo(2);
-                  }
-                },
-                child: Center(
-                  child: Icon(
-                    Icons.comment_outlined,
-                    size: 22,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-            // 6. 收藏
-            Expanded(
-              child: InkWell(
-                onTap: song != null
-                    ? () {
-                        // 本地歌曲走 LocalFavoritesProvider，在线走 FavoritesProvider
-                        if (isOnline) {
-                          context.read<FavoritesProvider>().toggleFavorite(song);
-                        } else {
-                          context.read<LocalFavoritesProvider>().toggleFavorite(song.id);
-                        }
+              // 4. 歌词 — 短按跳转到歌词 tab，长按开关桌面歌词
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    if (_tabController.index != 1) {
+                      _tabController.animateTo(1);
+                    }
+                  },
+                  onLongPress: () async {
+                    await DesktopLyricService.instance.toggle();
+                    if (mounted) {
+                      // 同步通知栏"桌面歌词"按钮状态
+                      final player = context.read<PlayerProvider>();
+                      final curSong = player.currentSong;
+                      // 收藏状态需实时查询，避免暂停时显示为未收藏
+                      bool isFavorited = false;
+                      if (curSong != null) {
+                        try {
+                          isFavorited = context
+                              .read<FavoritesProvider>()
+                              .isFavorite(curSong.id);
+                        } catch (_) {}
                       }
-                    : null,
-                child: Center(
-                  child: Icon(
-                    isFavorited ? Icons.favorite : Icons.favorite_border,
-                    size: 22,
-                    // 收藏激活时用红色强调（与 MD 风格一致）
-                    color: isFavorited ? Colors.redAccent : Colors.white,
-                  ),
-                ),
-              ),
-            ),
-            // 7. 翻译/罗马音开关 — 短按 toggle 副行显示，长按切换模式
-            Expanded(
-              child: InkWell(
-                onTap: () {
-                  LyricPreferences.instance.setShowTranslation(
-                    !LyricPreferences.instance.showTranslation,
-                  );
-                },
-                onLongPress: () {
-                  // 仅当歌曲同时有翻译和罗马音时才切换模式
-                  if (!_hasTranslation || !_hasRoma) return;
-                  final next =
-                      LyricPreferences.instance.displayMode ==
-                              LyricDisplayMode.translation
-                          ? LyricDisplayMode.roma
-                          : LyricDisplayMode.translation;
-                  LyricPreferences.instance.setDisplayMode(next);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(next == LyricDisplayMode.roma
-                          ? '已切换到罗马音'
-                          : '已切换到翻译'),
-                      duration: const Duration(milliseconds: 800),
+                      await MediaNotificationService.updateNotification(
+                        // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
+                        title: curSong?.displayName ?? '',
+                        artist: curSong?.artist ?? '',
+                        artUrl: curSong?.artworkUri,
+                        isPlaying: player.isPlaying,
+                        position: player.position,
+                        duration: player.duration ?? Duration.zero,
+                        desktopLyricEnabled:
+                            DesktopLyricService.instance.enabled,
+                        isFavorited: isFavorited,
+                      );
+                    }
+                  },
+                  child: Center(
+                    child: Icon(
+                      // 桌面歌词开启时用实心 icon + 纯白，与 mini_player 一致
+                      DesktopLyricService.instance.enabled
+                          ? Icons.lyrics
+                          : Icons.lyrics_outlined,
+                      size: 22,
+                      color: Colors.white,
                     ),
-                  );
-                },
-                child: Center(
-                  child: Icon(
-                    // 罗马音模式用 Icons.abc 区分，翻译模式用 Icons.translate
-                    LyricPreferences.instance.displayMode ==
-                            LyricDisplayMode.roma
-                        ? Icons.abc
-                        : Icons.translate,
-                    size: 22,
-                    // 开启时纯白，关闭时 50% 白（视觉上与其它按钮激活态一致）
-                    color: LyricPreferences.instance.showTranslation
-                        ? Colors.white
-                        : Colors.white.withValues(alpha: 0.5),
                   ),
                 ),
               ),
-            ),
-          ],
+              // 5. 评论 — 跳转到评论 tab
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    if (_tabController.index != 2) {
+                      _tabController.animateTo(2);
+                    }
+                  },
+                  child: Center(
+                    child: Icon(
+                      Icons.comment_outlined,
+                      size: 22,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              // 6. 收藏
+              Expanded(
+                child: InkWell(
+                  onTap: song != null
+                      ? () {
+                          // 本地歌曲走 LocalFavoritesProvider，在线走 FavoritesProvider
+                          if (isOnline) {
+                            context.read<FavoritesProvider>().toggleFavorite(
+                              song,
+                            );
+                          } else {
+                            context
+                                .read<LocalFavoritesProvider>()
+                                .toggleFavorite(song.id);
+                          }
+                        }
+                      : null,
+                  child: Center(
+                    child: Icon(
+                      isFavorited ? Icons.favorite : Icons.favorite_border,
+                      size: 22,
+                      // 收藏激活时用红色强调（与 MD 风格一致）
+                      color: isFavorited ? Colors.redAccent : Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              // 7. 翻译/罗马音开关 — 短按 toggle 副行显示，长按切换模式
+              Expanded(
+                child: InkWell(
+                  onTap: () {
+                    LyricPreferences.instance.setShowTranslation(
+                      !LyricPreferences.instance.showTranslation,
+                    );
+                  },
+                  onLongPress: () {
+                    // 仅当歌曲同时有翻译和罗马音时才切换模式
+                    if (!_hasTranslation || !_hasRoma) return;
+                    final next =
+                        LyricPreferences.instance.displayMode ==
+                            LyricDisplayMode.translation
+                        ? LyricDisplayMode.roma
+                        : LyricDisplayMode.translation;
+                    LyricPreferences.instance.setDisplayMode(next);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          next == LyricDisplayMode.roma ? '已切换到罗马音' : '已切换到翻译',
+                        ),
+                        duration: const Duration(milliseconds: 800),
+                      ),
+                    );
+                  },
+                  child: Center(
+                    child: Icon(
+                      // 罗马音模式用 Icons.abc 区分，翻译模式用 Icons.translate
+                      LyricPreferences.instance.displayMode ==
+                              LyricDisplayMode.roma
+                          ? Icons.abc
+                          : Icons.translate,
+                      size: 22,
+                      // 开启时纯白，关闭时 50% 白（视觉上与其它按钮激活态一致）
+                      color: LyricPreferences.instance.showTranslation
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -2244,7 +2271,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 320),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 20,
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -2256,10 +2286,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                       const SizedBox(height: 8),
                       Text(
                         '${speeds[currentIndex]}x',
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
                       ),
                       const SizedBox(height: 16),
                       // 横条滑块
@@ -2283,12 +2314,17 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           final isSelected = s == speeds[currentIndex];
                           return Text(
                             s == 1.0 ? '1x' : '${s}x',
-                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: isSelected
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.onSurfaceVariant,
-                              fontWeight: isSelected ? FontWeight.bold : null,
-                            ),
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: isSelected
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : null,
+                                ),
                           );
                         }).toList(),
                       ),
@@ -2413,10 +2449,38 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             const SizedBox(height: 16),
             Text('选择音质', style: Theme.of(ctx).textTheme.titleSmall),
             const SizedBox(height: 8),
-            _buildDownloadQualityOption(ctx, '标准音质 (128kbps)', '128', song, downloadsProvider, enabled: available.contains('128')),
-            _buildDownloadQualityOption(ctx, '高音质 (320kbps)', '320', song, downloadsProvider, enabled: available.contains('320')),
-            _buildDownloadQualityOption(ctx, '无损音质 (FLAC)', 'flac', song, downloadsProvider, enabled: available.contains('flac')),
-            _buildDownloadQualityOption(ctx, 'Hi-Res 无损', 'high', song, downloadsProvider, enabled: available.contains('high')),
+            _buildDownloadQualityOption(
+              ctx,
+              '标准音质 (128kbps)',
+              '128',
+              song,
+              downloadsProvider,
+              enabled: available.contains('128'),
+            ),
+            _buildDownloadQualityOption(
+              ctx,
+              '高音质 (320kbps)',
+              '320',
+              song,
+              downloadsProvider,
+              enabled: available.contains('320'),
+            ),
+            _buildDownloadQualityOption(
+              ctx,
+              '无损音质 (FLAC)',
+              'flac',
+              song,
+              downloadsProvider,
+              enabled: available.contains('flac'),
+            ),
+            _buildDownloadQualityOption(
+              ctx,
+              'Hi-Res 无损',
+              'high',
+              song,
+              downloadsProvider,
+              enabled: available.contains('high'),
+            ),
           ],
         ),
         actions: [
@@ -2453,38 +2517,50 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       ),
       trailing: enabled
           ? null
-          : Text('需要VIP', style: TextStyle(
-              fontSize: 11,
-              color: Theme.of(context).disabledColor,
-            )),
-      onTap: enabled ? () async {
-        Navigator.pop(context);
-        final displayName = song.displayName ?? song.title;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('开始下载: $displayName'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-        final actual = await provider.downloadSong(song, quality: quality);
-        if (actual == 'trial_blocked') {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('你的账号已被kugou风控,请等待kugou解除风控后再试'),
-                duration: Duration(seconds: 4),
+          : Text(
+              '需要VIP',
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).disabledColor,
               ),
-            );
-          }
-        } else if (actual != null && actual != quality && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}'),
-              duration: const Duration(seconds: 3),
             ),
-          );
-        }
-      } : null,
+      onTap: enabled
+          ? () async {
+              Navigator.pop(context);
+              final displayName = song.displayName ?? song.title;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('开始下载: $displayName'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+              final actual = await provider.downloadSong(
+                song,
+                quality: quality,
+              );
+              if (actual == 'trial_blocked') {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('你的账号已被kugou风控,请等待kugou解除风控后再试'),
+                      duration: Duration(seconds: 4),
+                    ),
+                  );
+                }
+              } else if (actual != null &&
+                  actual != quality &&
+                  context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}',
+                    ),
+                    duration: const Duration(seconds: 3),
+                  ),
+                );
+              }
+            }
+          : null,
     );
   }
 
@@ -2538,13 +2614,16 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   builder: (context, _) {
                     final eq = EqualizerService.instance;
                     return ListTile(
-                      leading: Icon(Icons.graphic_eq,
-                          color: eq.enabled
-                              ? Theme.of(context).colorScheme.primary
-                              : null),
+                      leading: Icon(
+                        Icons.graphic_eq,
+                        color: eq.enabled
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
                       title: const Text('均衡器'),
                       subtitle: Text(
-                          eq.enabled ? '已开启 · ${eq.currentPreset}' : '未开启'),
+                        eq.enabled ? '已开启 · ${eq.currentPreset}' : '未开启',
+                      ),
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(

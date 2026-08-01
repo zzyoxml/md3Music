@@ -13,6 +13,7 @@ import 'core/services/lyricon_provider_service.dart';
 import 'core/services/media_notification_service.dart';
 import 'core/services/wakelock_service.dart';
 import 'data/repositories/settings_repository.dart';
+import 'modules/onboarding/user_agreement_page.dart';
 import 'modules/recognition/song_recognition_page.dart';
 import 'modules/search/search_page.dart';
 import 'services/nodejs_server.dart';
@@ -98,10 +99,18 @@ Future<void> main() async {
     needsOnboarding = !(prefs.getBool('onboarding_completed') ?? false);
   } catch (_) {}
 
+  // 检测是否需要展示用户协议（首次启动）
+  final needsUserAgreement = !(await isUserAgreementAccepted());
+
   // 初始化均衡器服务（恢复偏好设置，监听播放状态自动绑定）
   await EqualizerService.instance.init();
 
-  runApp(MyApp(showOnboarding: needsOnboarding));
+  runApp(
+    MyApp(
+      showOnboarding: needsOnboarding,
+      showUserAgreement: needsUserAgreement,
+    ),
+  );
 }
 
 /// 根据 shortcut 类型路由到对应页面。

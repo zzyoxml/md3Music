@@ -10,7 +10,6 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../core/services/audio_service.dart';
 import '../../core/services/custom_font_loader.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/equalizer_service.dart';
@@ -22,6 +21,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/theme/motion_constants.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../onboarding/onboarding_page.dart';
+import '../onboarding/user_agreement_page.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/tab_config_provider.dart';
 import '../../providers/theme_provider.dart';
@@ -80,8 +80,6 @@ class _SettingsPageState extends State<SettingsPage> {
   // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
   bool _downloadWordLevelLyrics = true;
   double _uiScale = 1.0;
-  // 忽略音频焦点开关（允许多声音同时播放）
-  bool _ignoreAudioFocus = false;
   // 暂停淡入淡出开关
   bool _pauseFadeEnabled = false;
   // 播放时保持屏幕常亮开关
@@ -165,9 +163,15 @@ class _SettingsPageState extends State<SettingsPage> {
     final useDynamicColor = context.read<ThemeProvider>().useDynamicColor;
     // 从 ThemeProvider 同步「Apple Music 风格播放页」开关状态
     final useAmStylePlayer = context.read<ThemeProvider>().useAmStylePlayer;
-    final lyricDoubleTapToJump = context.read<ThemeProvider>().lyricDoubleTapToJump;
-    final useArtistPhotoBackground = context.read<ThemeProvider>().useArtistPhotoBackground;
-    final artistPhotoInterval = context.read<ThemeProvider>().artistPhotoInterval;
+    final lyricDoubleTapToJump = context
+        .read<ThemeProvider>()
+        .lyricDoubleTapToJump;
+    final useArtistPhotoBackground = context
+        .read<ThemeProvider>()
+        .useArtistPhotoBackground;
+    final artistPhotoInterval = context
+        .read<ThemeProvider>()
+        .artistPhotoInterval;
     final artistPhotoOpacity = context.read<ThemeProvider>().artistPhotoOpacity;
     // 读取自定义下载目录
     final downloadDir = await _settingsRepository.getDownloadDir();
@@ -178,7 +182,6 @@ class _SettingsPageState extends State<SettingsPage> {
         .getBluetoothLyricEnabled();
     final downloadWordLevelLyrics = await _settingsRepository
         .getDownloadWordLevelLyrics();
-    final ignoreAudioFocus = await _settingsRepository.getIgnoreAudioFocus();
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
     final keepScreenOn = await _settingsRepository.getKeepScreenOn();
 
@@ -201,7 +204,6 @@ class _SettingsPageState extends State<SettingsPage> {
       _downloadWordLevelLyrics = downloadWordLevelLyrics;
       _uiScale = uiScale;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
-      _ignoreAudioFocus = ignoreAudioFocus;
       _pauseFadeEnabled = pauseFadeEnabled;
       _keepScreenOn = keepScreenOn;
     });
@@ -727,10 +729,7 @@ class _SettingsPageState extends State<SettingsPage> {
             trailing: DropdownButton<int>(
               value: _artistPhotoInterval,
               items: [5, 10, 15, 20, 30, 45, 60]
-                  .map((s) => DropdownMenuItem(
-                        value: s,
-                        child: Text('$s 秒'),
-                      ))
+                  .map((s) => DropdownMenuItem(value: s, child: Text('$s 秒')))
                   .toList(),
               onChanged: (v) {
                 if (v == null) return;
@@ -967,14 +966,14 @@ class _SettingsPageState extends State<SettingsPage> {
           builder: (context, _) {
             final eq = EqualizerService.instance;
             return ListTile(
-              leading: Icon(Icons.graphic_eq,
-                  color: eq.enabled
-                      ? Theme.of(context).colorScheme.primary
-                      : null),
+              leading: Icon(
+                Icons.graphic_eq,
+                color: eq.enabled
+                    ? Theme.of(context).colorScheme.primary
+                    : null,
+              ),
               title: const Text('均衡器'),
-              subtitle: Text(eq.enabled
-                  ? '已开启 · ${eq.currentPreset}'
-                  : '未开启'),
+              subtitle: Text(eq.enabled ? '已开启 · ${eq.currentPreset}' : '未开启'),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => Navigator.push(
                 context,
@@ -994,19 +993,6 @@ class _SettingsPageState extends State<SettingsPage> {
               _autoReceiveVip = value;
             });
             _settingsRepository.setAutoReceiveVip(value);
-          },
-        ),
-        SwitchListTile(
-          title: const Text('忽略音频焦点'),
-          subtitle: const Text('允许多声音同时播放，不被其他应用打断（拔耳机也不暂停）'),
-          value: _ignoreAudioFocus,
-          onChanged: (value) {
-            setState(() {
-              _ignoreAudioFocus = value;
-            });
-            _settingsRepository.setIgnoreAudioFocus(value);
-            // 实时同步到 AudioService 单例
-            AudioService().ignoreAudioFocus = value;
           },
         ),
         SwitchListTile(
@@ -1472,6 +1458,30 @@ class _SettingsPageState extends State<SettingsPage> {
           },
         ),
         ListTile(
+          title: const Text('用户协议'),
+          subtitle: const Text('查看用户协议全文'),
+          leading: const Icon(Icons.handshake_outlined),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => UserAgreementPage(
+                  isFirstLaunch: false,
+                  isReview: true,
+                  onAgreed: () => Navigator.of(context).pop(),
+                ),
+              ),
+            );
+          },
+        ),
+        ListTile(
+          title: const Text('免责声明'),
+          subtitle: const Text('查看本软件免责声明'),
+          leading: const Icon(Icons.gavel_outlined),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => UserAgreementPage.showDisclaimerDialog(context),
+        ),
+        ListTile(
           title: const Text('应用版本'),
           subtitle: Text(_appVersion.isEmpty ? kBuildAppVersion : _appVersion),
           leading: const Icon(Icons.info_outline),
@@ -1716,8 +1726,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 title,
                 style: TextStyle(
                   fontSize: 14,
-                  fontWeight:
-                      isSelected ? FontWeight.w600 : FontWeight.w500,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
                   color: isSelected
                       ? colorScheme.primary
                       : colorScheme.onSurface,
@@ -1733,11 +1742,7 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               if (isSelected) ...[
                 const SizedBox(height: 6),
-                Icon(
-                  Icons.check_circle,
-                  size: 20,
-                  color: colorScheme.primary,
-                ),
+                Icon(Icons.check_circle, size: 20, color: colorScheme.primary),
               ],
             ],
           ),
@@ -1787,8 +1792,8 @@ class _TabManagementPanel extends StatelessWidget {
               child: Text(
                 '拖拽排序、开关显示/隐藏（“我的”不可隐藏）',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
             const SizedBox(height: 8),
@@ -1813,9 +1818,7 @@ class _TabManagementPanel extends StatelessWidget {
                     title: Text(
                       tab.label,
                       style: TextStyle(
-                        color: isHidden
-                            ? colorScheme.onSurfaceVariant
-                            : null,
+                        color: isHidden ? colorScheme.onSurfaceVariant : null,
                       ),
                     ),
                     subtitle: !tab.isRemovable
@@ -1902,11 +1905,17 @@ class _SettingsMd3StylePreview extends StatelessWidget {
             alignment: Alignment.centerLeft,
             child: Row(
               children: [
-                Icon(Icons.keyboard_arrow_down,
-                    size: 14, color: colorScheme.onSurfaceVariant),
+                Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 14,
+                  color: colorScheme.onSurfaceVariant,
+                ),
                 const Spacer(),
-                Icon(Icons.more_horiz,
-                    size: 12, color: colorScheme.onSurfaceVariant),
+                Icon(
+                  Icons.more_horiz,
+                  size: 12,
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ],
             ),
           ),
@@ -1962,12 +1971,21 @@ class _SettingsMd3StylePreview extends StatelessWidget {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
-                      Icon(Icons.skip_previous,
-                          size: 16, color: colorScheme.onSurface),
-                      Icon(Icons.play_arrow,
-                          size: 20, color: colorScheme.primary),
-                      Icon(Icons.skip_next,
-                          size: 16, color: colorScheme.onSurface),
+                      Icon(
+                        Icons.skip_previous,
+                        size: 16,
+                        color: colorScheme.onSurface,
+                      ),
+                      Icon(
+                        Icons.play_arrow,
+                        size: 20,
+                        color: colorScheme.primary,
+                      ),
+                      Icon(
+                        Icons.skip_next,
+                        size: 16,
+                        color: colorScheme.onSurface,
+                      ),
                     ],
                   ),
                 ],
@@ -2005,11 +2023,13 @@ class _SettingsAmStylePreview extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.keyboard_arrow_down,
-                    size: 14, color: colorScheme.onSurface),
+                Icon(
+                  Icons.keyboard_arrow_down,
+                  size: 14,
+                  color: colorScheme.onSurface,
+                ),
                 const Spacer(),
-                Icon(Icons.more_horiz,
-                    size: 12, color: colorScheme.onSurface),
+                Icon(Icons.more_horiz, size: 12, color: colorScheme.onSurface),
               ],
             ),
             const SizedBox(height: 6),
@@ -2068,8 +2088,7 @@ class _SettingsAmStylePreview extends StatelessWidget {
                     ],
                   ),
                 ),
-                Icon(Icons.play_arrow,
-                    size: 16, color: colorScheme.onSurface),
+                Icon(Icons.play_arrow, size: 16, color: colorScheme.onSurface),
               ],
             ),
           ],

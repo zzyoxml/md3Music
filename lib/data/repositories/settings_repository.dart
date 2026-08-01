@@ -308,20 +308,6 @@ class SettingsRepository {
     await prefs.setDouble(_keyUiScale, scale);
   }
 
-  // ===== 忽略音频焦点 =====
-  static const String _keyIgnoreAudioFocus = 'settings_ignore_audio_focus';
-
-  /// 是否忽略音频焦点（允许多声音同时播放），默认 false。
-  Future<bool> getIgnoreAudioFocus() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyIgnoreAudioFocus) ?? false;
-  }
-
-  Future<void> setIgnoreAudioFocus(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyIgnoreAudioFocus, value);
-  }
-
   // ===== 暂停淡入淡出 =====
   static const String _keyPauseFadeEnabled = 'settings_pause_fade_enabled';
 

@@ -2713,26 +2713,21 @@ class KugouApiClient {
     return await _get(KugouEndpoints.youthUnionVip);
   }
 
+  /// 领取每日畅听会员（基础签到）
+  ///
+  /// 保持 POST 方式（与云服务器兼容性最好）。
+  /// 传 receive_day 作为 body，云服务器 module 会读取 params.body.receive_day。
   Future<Map<String, dynamic>?> claimDayVip(String receiveDay) async {
-    // 还原到最初项目的签到架构：优先调用 /youth/day/vip（需传 receive_day）。
-    // 若该接口已被酷狗停用（error_code 20028 等拒领码）或请求失败，
-    // 自动回退到可用的 /youth/vip，保证手动/自动签到仍能完成。
-    final primary = await _post(
+    return await _post(
       KugouEndpoints.youthDayVip,
       data: {'receive_day': receiveDay},
     );
-    final errCode = primary?['error_code'] as int?;
-    final isRefusedOrFailed = primary == null || errCode == 20028;
-    if (!isRefusedOrFailed) {
-      return primary; // 成功 / 今日已签到 等正常响应，直接返回
-    }
-    try {
-      final fallback = await _post(KugouEndpoints.youthVip, data: {});
-      if (fallback != null) return fallback;
-    } catch (_) {}
-    return primary; // 回退也失败，返回原始响应供上层提示
   }
 
+  /// 升级每日概念会员（概念版双签到第二步）
+  ///
+  /// 保持 POST 方式。云服务器 app.use 接受所有方法，
+  /// module 代码与 EchoMusic 后端（MakcRe/KuGouMusicApi）完全一致。
   Future<Map<String, dynamic>?> upgradeDayVip() async {
     return await _post(KugouEndpoints.youthDayVipUpgrade);
   }

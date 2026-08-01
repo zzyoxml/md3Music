@@ -10,7 +10,9 @@ class AudioService {
   AudioService._internal();
 
   final AudioPlayer _player = AudioPlayer();
-  final ConcatenatingAudioSource _playlistSource = ConcatenatingAudioSource(children: []);
+  final ConcatenatingAudioSource _playlistSource = ConcatenatingAudioSource(
+    children: [],
+  );
 
   AudioPlayer get player => _player;
 
@@ -37,9 +39,6 @@ class AudioService {
   /// Web 端无 Android 音频会话 ID。
   int? get androidAudioSessionId => null;
 
-  /// 是否忽略音频焦点（Web 端无实际效果，保持接口一致）。
-  bool ignoreAudioFocus = false;
-
   Future<void> init() async {
     await _player.setLoopMode(LoopMode.off);
   }
@@ -65,7 +64,10 @@ class AudioService {
     await _player.setUrl(blobUrl);
   }
 
-  Future<void> setPlaylist(List<UriAudioSource> sources, {int startIndex = 0}) async {
+  Future<void> setPlaylist(
+    List<UriAudioSource> sources, {
+    int startIndex = 0,
+  }) async {
     _playlistSource.clear();
     if (sources.isNotEmpty) {
       final List<AudioSource> blobSources = [];
@@ -73,17 +75,17 @@ class AudioService {
         try {
           final originalUrl = source.uri.toString();
           final blobUrl = await _fetchAudioBlob(originalUrl);
-          blobSources.add(AudioSource.uri(
-            Uri.parse(blobUrl),
-            tag: source.tag,
-          ));
+          blobSources.add(AudioSource.uri(Uri.parse(blobUrl), tag: source.tag));
         } catch (e) {
-                    blobSources.add(source);
+          blobSources.add(source);
         }
       }
       _playlistSource.addAll(blobSources);
     }
-    final safeStartIndex = startIndex.clamp(0, sources.isEmpty ? 0 : sources.length - 1);
+    final safeStartIndex = startIndex.clamp(
+      0,
+      sources.isEmpty ? 0 : sources.length - 1,
+    );
     await _player.setAudioSource(
       _playlistSource,
       initialIndex: safeStartIndex,
@@ -93,10 +95,9 @@ class AudioService {
 
   Future<void> addAudioSource(UriAudioSource source) async {
     final blobUrl = await _fetchAudioBlob(source.uri.toString());
-    await _playlistSource.add(AudioSource.uri(
-      Uri.parse(blobUrl),
-      tag: source.tag,
-    ));
+    await _playlistSource.add(
+      AudioSource.uri(Uri.parse(blobUrl), tag: source.tag),
+    );
   }
 
   Future<void> addAllAudioSources(List<UriAudioSource> sources) async {
@@ -104,12 +105,9 @@ class AudioService {
     for (final source in sources) {
       try {
         final blobUrl = await _fetchAudioBlob(source.uri.toString());
-        blobSources.add(AudioSource.uri(
-          Uri.parse(blobUrl),
-          tag: source.tag,
-        ));
+        blobSources.add(AudioSource.uri(Uri.parse(blobUrl), tag: source.tag));
       } catch (e) {
-                blobSources.add(source);
+        blobSources.add(source);
       }
     }
     await _playlistSource.addAll(blobSources);
@@ -118,10 +116,10 @@ class AudioService {
   /// 在指定位置插入音频源，不打断当前播放。
   Future<void> insertAudioSourceAt(int index, UriAudioSource source) async {
     final blobUrl = await _fetchAudioBlob(source.uri.toString());
-    await _playlistSource.insert(index, AudioSource.uri(
-      Uri.parse(blobUrl),
-      tag: source.tag,
-    ));
+    await _playlistSource.insert(
+      index,
+      AudioSource.uri(Uri.parse(blobUrl), tag: source.tag),
+    );
   }
 
   Future<void> setSpeed(double speed) async {
@@ -163,7 +161,7 @@ class AudioService {
       final blobUrl = html.Url.createObjectUrlFromBlob(blob);
       return blobUrl;
     } catch (e) {
-            return url;
+      return url;
     }
   }
 }

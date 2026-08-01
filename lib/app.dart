@@ -29,6 +29,7 @@ import 'modules/settings/settings_page.dart';
 import 'modules/library/library_page.dart';
 import 'modules/login/login_page.dart';
 import 'modules/onboarding/onboarding_page.dart';
+import 'modules/onboarding/user_agreement_page.dart';
 import 'modules/personal_fm/personal_fm_page.dart';
 import 'modules/recognition/song_recognition_page.dart';
 import 'providers/downloads_provider.dart';
@@ -106,8 +107,13 @@ class _UpFadeMainRoute<T> extends MaterialPageRoute<T> {
 
 class MyApp extends StatelessWidget {
   final bool showOnboarding;
+  final bool showUserAgreement;
 
-  const MyApp({super.key, this.showOnboarding = false});
+  const MyApp({
+    super.key,
+    this.showOnboarding = false,
+    this.showUserAgreement = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -129,15 +135,19 @@ class MyApp extends StatelessWidget {
         // DLNA 投屏
         ChangeNotifierProvider(create: (_) => DlnaProvider()),
       ],
-      child: _AppView(showOnboarding: showOnboarding),
+      child: _AppView(
+        showOnboarding: showOnboarding,
+        showUserAgreement: showUserAgreement,
+      ),
     );
   }
 }
 
 class _AppView extends StatefulWidget {
   final bool showOnboarding;
+  final bool showUserAgreement;
 
-  const _AppView({this.showOnboarding = false});
+  const _AppView({this.showOnboarding = false, this.showUserAgreement = false});
 
   @override
   State<_AppView> createState() => _AppViewState();
@@ -221,7 +231,10 @@ class _AppViewState extends State<_AppView> {
         );
       },
       navigatorKey: appNavigatorKey,
-      initialRoute: widget.showOnboarding ? '/onboarding' : '/',
+      // 优先级：未同意协议 → 协议页；否则未完成新手引导 → 引导页；否则主页
+      initialRoute: widget.showUserAgreement
+          ? '/user_agreement'
+          : (widget.showOnboarding ? '/onboarding' : '/'),
       routes: {
         // '/' 不在 routes 注册，改在 onGenerateRoute 用 _UpFadeMainRoute 创建，
         // 以便 push FullPlayer 时主页面向上淡出（仅 FullPlayer 生效）
@@ -237,6 +250,25 @@ class _AppViewState extends State<_AppView> {
         if (settings.name == '/onboarding') {
           return PageRouteBuilder(
             pageBuilder: (_, _, _) => const OnboardingPage(),
+            transitionsBuilder: (_, animation, _, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+            transitionDuration: M3ExpressiveMotion.emphasisDuration,
+          );
+        }
+        if (settings.name == '/user_agreement') {
+          // 协议页：首次启动时点击"下一步" → 推送新手引导；已同意过则跳过引导直达主页
+          return PageRouteBuilder(
+            pageBuilder: (_, _, _) => UserAgreementPage(
+              isFirstLaunch: true,
+              onAgreed: () {
+                // 用 pushReplacement 替换协议页，next 路由由 isFirstLaunch 决定
+                // 避免新协议栈里残留协议页（用户按返回能跳过）
+                appNavigatorKey.currentState?.pushReplacementNamed(
+                  widget.showOnboarding ? '/onboarding' : '/',
+                );
+              },
+            ),
             transitionsBuilder: (_, animation, _, child) {
               return FadeTransition(opacity: animation, child: child);
             },
@@ -618,19 +650,20 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final tabConfig = context.watch<TabConfigProvider>();
     final visibleTabs = tabConfig.visibleTabs;
-  
+
     // 安全守卫：如果当前选中索引超出可见 tab 范围，重置到最后一个
     if (_selectedIndex >= visibleTabs.length) {
       _selectedIndex = visibleTabs.length - 1;
       if (_selectedIndex < 0) _selectedIndex = 0;
     }
-  
+
     // 动态生成导航目标
     final destinations = visibleTabs.map(_buildDestination).toList();
     final railDestinations = visibleTabs.map(_buildRailDestination).toList();
-    final drawerDestinations =
-        visibleTabs.map(_buildDrawerDestination).toList();
-  
+    final drawerDestinations = visibleTabs
+        .map(_buildDrawerDestination)
+        .toList();
+
     // 一级页面返回拦截：
     // 1) PopScope 拦截系统返回手势 / 物理返回键，canPop=false → 触发 onPopInvoked
     // 2) 弹“退出 App”确认对话框
@@ -673,8 +706,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     final goingRight = _selectedIndex > _previousSelectedIndex;
 
     // 安全守卫
-    final safeIndex =
-        _selectedIndex.clamp(0, visibleTabs.length - 1);
+    final safeIndex = _selectedIndex.clamp(0, visibleTabs.length - 1);
     final currentTab = visibleTabs[safeIndex];
 
     return Column(
