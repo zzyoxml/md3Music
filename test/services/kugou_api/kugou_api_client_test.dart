@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:md3music/services/kugou_api/kugou_api_client.dart';
 import 'package:md3music/services/kugou_api/kugou_models.dart';
@@ -134,6 +136,59 @@ void main() {
       expect(lyric!.content, '');
       expect(lyric.decodedContent, isNull);
       expect(lyric.decodedKrcContent, isNull);
+    });
+
+    test('韩语歌 KRC 含翻译+汉字拟声词+拉丁罗马音 3 条目时正确分离', () {
+      // 模拟韩语歌 KRC 明文：含 [language:<base64>] 元数据
+      // base64 解码后 content 数组有 3 个 entry：
+      // - 单元素翻译（含汉字）
+      // - 多元素汉字拟声词（含 CJK，旧逻辑会误判为翻译并抢占 translation）
+      // - 多元素拉丁罗马音（纯 ASCII，每元素一个词如 xeng）
+      final langJson = jsonEncode({
+        'content': [
+          {
+            'language': 0,
+            'lyricContent': [
+              ['翻译行1'],
+              ['翻译行2'],
+            ],
+          },
+          {
+            'language': 1,
+            'lyricContent': [
+              ['啊', '哦'],
+              ['嗯', '啊'],
+            ],
+          },
+          {
+            'language': 1,
+            'lyricContent': [
+              ['xeng', 'xeng'],
+              ['xeng', 'xeng'],
+            ],
+          },
+        ],
+      });
+      final b64 = base64Encode(utf8.encode(langJson));
+      // KRC 明文：歌词行带时间戳（韩文原文）+ [language:] 元数据
+      final krcText = '[1000,2000]<0,1000,0>행1\n'
+          '[3000,2000]<0,1000,0>행2\n'
+          '[language:$b64]';
+      final krcJson = <String, dynamic>{
+        'content': 'BASE64_KRC_RAW',
+        'decodeContent': krcText,
+      };
+
+      final lyric = KugouApiClient.mergeLyricResponses(null, krcJson);
+
+      expect(lyric, isNotNull);
+      // 翻译应是单元素条目（"翻译行1"/"翻译行2"），而非汉字拟声词
+      expect(lyric!.translatedContent, contains('翻译行1'));
+      expect(lyric.translatedContent, contains('翻译行2'));
+      expect(lyric.translatedContent, isNot(contains('啊')));
+      // roma 应是第一个多元素条目（汉字拟声词），按 ??= 语义保留首个
+      expect(lyric.romaContent, contains('啊'));
+      expect(lyric.romaContent, contains('哦'));
     });
   });
 }

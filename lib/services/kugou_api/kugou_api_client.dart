@@ -1262,41 +1262,26 @@ class KugouApiClient {
         return result.isEmpty ? null : result;
       }
 
-      /// 判断字符串是否包含中日韩字符（用于区分翻译和罗马音）
-      bool hasCjk(String s) {
-        // CJK 统一表意文字 + 日文假名 + 韩文音节
-        final cjkRegex = RegExp(r'[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]');
-        return cjkRegex.hasMatch(s);
-      }
-
-      /// 把所有 language 条目的 lyricContent 拼成纯文本，用于内容特征判断
-      String entryFullText(Map<String, dynamic> entry) {
-        final lc = entry['lyricContent'] as List;
-        final sb = StringBuffer();
-        for (final line in lc) {
-          if (line is List) {
-            sb.write(line.map((e) => e.toString()).join(' '));
-            sb.write(' ');
-          }
-        }
-        return sb.toString();
-      }
-
-      // 收集所有条目，按内容特征分类：
-      // - 含 CJK 字符 → 翻译（中文/日文/韩文翻译）
-      // - 纯 ASCII 拉丁 → 罗马音
-      // 不依赖 language 字段（酷狗数据标注不规范，日语歌可能把罗马音也标成 language=0）
+      // 收集所有条目，按数组结构分类：
+      // - 单元素数组（整行）→ 翻译
+      // - 多元素数组（按字/词拆分）→ 罗马音/拟声词
+      // 不依赖字符特征：汉字拟声词也含 CJK，与真正翻译混淆；
+      // 而数组结构（单元素 vs 多元素）与酷狗数据标注一致（见方法上方注释），
+      // 且天然兼容"汉字拟声词 + 拉丁罗马音"混杂情况（两者都是多元素数组，归入 roma），
+      // 与每个元素是汉字还是拉丁词无关
       Map<String, dynamic>? translationEntry;
       Map<String, dynamic>? romaEntry;
       for (final e in contentList) {
         final entry = e as Map<String, dynamic>;
-        final text = entryFullText(entry);
-        if (hasCjk(text)) {
-          // 含 CJK 字符，归为翻译
-          translationEntry ??= entry;
-        } else if (text.trim().isNotEmpty) {
-          // 非空且不含 CJK，归为罗马音
+        final lc = entry['lyricContent'] as List;
+        // 任一行是多元素数组 → 按字/词拆分风格 → 拟声词/罗马音
+        final isSyllableStyle =
+            lc.any((line) => line is List && line.length > 1);
+        if (isSyllableStyle) {
           romaEntry ??= entry;
+        } else if (lc.any((line) => line is List && line.isNotEmpty)) {
+          // 单元素数组（整行翻译），且非全空条目
+          translationEntry ??= entry;
         }
       }
 
