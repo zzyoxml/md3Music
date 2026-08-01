@@ -11,6 +11,7 @@ import 'core/services/desktop_lyric_service.dart';
 import 'core/services/equalizer_service.dart';
 import 'core/services/lyricon_provider_service.dart';
 import 'core/services/media_notification_service.dart';
+import 'core/services/wakelock_service.dart';
 import 'data/repositories/settings_repository.dart';
 import 'modules/recognition/song_recognition_page.dart';
 import 'modules/search/search_page.dart';
@@ -50,6 +51,10 @@ Future<void> main() async {
     final settings = SettingsRepository();
     final btLyricEnabled = await settings.getBluetoothLyricEnabled();
     await DesktopLyricService.instance.setBluetoothLyricEnabled(btLyricEnabled);
+  } catch (_) {}
+  // 恢复屏幕常亮开关状态，供 PlayerProvider/MV 页播放时读取
+  try {
+    await WakelockService.instance.init();
   } catch (_) {}
   // 注册 Lyricon 反向回调（连接状态变更 → UI 刷新）
   // initialize 内部仅 setMethodCallHandler，同步完成，无需 await
