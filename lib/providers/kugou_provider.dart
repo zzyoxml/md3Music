@@ -48,10 +48,7 @@ class KugouProvider extends ChangeNotifier {
       if (_apiClient.isLoggedIn) {
         _isLoggedIn = true;
         await _fetchUserInfo();
-        // 注：原先的 autoReceiveVipIfNeeded 已被注释（避免静默吞升级失败）。
-        // 概念版双签到全部交给用户手动触发（见 manualSignIn），
-        // 同时遵循"不自动签到以防风控"的原则。
-        // await autoReceiveVipIfNeeded();
+        await autoReceiveVipIfNeeded();
       }
     } catch (_) {}
   }
@@ -1051,10 +1048,8 @@ class KugouProvider extends ChangeNotifier {
         msg.toLowerCase().contains('already');
   }
 
-  /// 【已废弃】autoReceiveVipIfNeeded —— 旧版静默吞升级失败的逻辑
-  /// 已不再调用（参见 manualSignIn 的新实现）。保留此段仅为兼容旧逻辑路径，
-  /// 实际行为已切换到 manualSignIn。注释掉防止误用。
-  /*
+  /// 自动签到（含概念版双签到）。
+  /// 登录后自动调用，若今天已签到则跳过。
   Future<void> autoReceiveVipIfNeeded() async {
     if (!_isLoggedIn) return;
 
@@ -1084,19 +1079,32 @@ class KugouProvider extends ChangeNotifier {
       final receiveDay =
           '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
 
-      if (_localSignedDays.contains(receiveDay)) {
+      // 1. 领取畅听VIP
+      try {
+        final autoClaim = await _apiClient.claimDayVip(receiveDay);
+        final claimOk =
+            autoClaim != null &&
+            (autoClaim['status'] == 1 || autoClaim['error_code'] == 0);
+        // 131001 = 今日已领取，也视为成功
+        final alreadyClaimed = autoClaim?['error_code'] == 131001;
+        if (!claimOk && !alreadyClaimed) return;
+      } catch (_) {
         return;
       }
 
+      // 2. 升级概念版VIP
       try {
-        final autoClaim = await _apiClient.claimDayVip(receiveDay);
-        final autoOk =
-            autoClaim != null &&
-            (autoClaim['status'] == 1 || autoClaim['error_code'] == 0);
-        if (autoOk) {
-          await _markSignedToday();
+        final upgrade = await _apiClient.upgradeDayVip();
+        if (upgrade != null &&
+            (upgrade['status'] == 1 ||
+                upgrade['error_code'] == 0 ||
+                upgrade['error_code'] == 20030 ||
+                upgrade['error_code'] == 131001)) {
+          _todayUpgradedToConcept = true;
         }
       } catch (_) {}
+
+      await _markSignedToday();
 
       try {
         await _fetchUserInfo();
@@ -1107,7 +1115,6 @@ class KugouProvider extends ChangeNotifier {
       } catch (_) {}
     } catch (_) {}
   }
-  */
 
   bool _manualSignInRunning = false;
   bool get manualSignInRunning => _manualSignInRunning;
@@ -1165,12 +1172,10 @@ class KugouProvider extends ChangeNotifier {
           '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
       print('[SIGN_IN] receiveDay: $receiveDay');
 
-      // 【用户反馈】"提示签到了不让签到" —— 暂时注释掉这个前置拦截，
-      // 让用户每次点击都能真实打到后端，由后端 error_code 来判定。
-      // 后续观察用户反馈决定是否恢复"当天已签到则跳过"逻辑。
-      // if (_localSignedDays.contains(receiveDay)) {
-      //   return (true, '今天已签到，无需重复签到');
-      // }
+      // 手动签到：今天已签到则跳过，不再发送请求到服务器
+      if (_localSignedDays.contains(receiveDay)) {
+        return (true, '今天已签到，无需重复签到');
+      }
 
       // 1. 领取畅听VIP（基础签到）
       //    与 EchoMusic 一致：必传 receive_day，否则后端可能判定为无效签到。
@@ -1616,7 +1621,16 @@ class KugouProvider extends ChangeNotifier {
         _vipMonthRecord = r;
         final data = r['data'];
         final list = data?['list'] ?? data?['record_list'] ?? r['list'];
-        print('[VIP_RECORD] 解析到 ${list is List ? list.length : 0} 条记录');
+        if (list is List) {
+          print('[VIP_RECORD] 解析到 ${list.length} 条记录');
+          for (final item in list) {
+            if (item is Map<String, dynamic>) {
+              print(
+                '[VIP_RECORD] 记录: day=${item['day']} vip_type=${item['vip_type']} receive_vip=${item['receive_vip']} keys=${item.keys.toList()}',
+              );
+            }
+          }
+        }
         notifyListeners();
       }
     } catch (e) {

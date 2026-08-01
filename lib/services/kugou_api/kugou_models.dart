@@ -201,7 +201,9 @@ class KugouAlbumBrief {
             json['author_name'],
       ),
       globalCollectionId: _strNull(json['global_collection_id'] ?? json['gid']),
-      numericId: _strNull(json['albumid'] ?? json['album_id'] ?? json['AlbumID']),
+      numericId: _strNull(
+        json['albumid'] ?? json['album_id'] ?? json['AlbumID'],
+      ),
     );
   }
 
@@ -228,7 +230,7 @@ class KugouPlaylistBrief {
   final String? listCreateUserid;
   final String? listCreateListid;
   final String? listCreateGid;
-  final int type;  // 0=自己创建, 1=收藏/订阅他人
+  final int type; // 0=自己创建, 1=收藏/订阅他人
   final int source; // 0=普通歌单, 2=收藏的专辑等
   final String? description;
 
@@ -273,14 +275,20 @@ class KugouPlaylistBrief {
         json['songcount'] ?? json['song_count'] ?? json['count'] ?? 0,
       ),
       globalCollectionId: _strNull(json['global_collection_id'] ?? json['gid']),
-      numericId: _strNull(json['specialid'] ?? json['albumid'] ?? json['album_id']),
+      numericId: _strNull(
+        json['specialid'] ?? json['albumid'] ?? json['album_id'],
+      ),
       listId: listid,
       listCreateUserid: _strNull(json['list_create_userid']),
       listCreateListid: _strNull(json['list_create_listid']) ?? listid,
-      listCreateGid: _strNull(json['list_create_gid'] ?? json['list_create_gid']),
+      listCreateGid: _strNull(
+        json['list_create_gid'] ?? json['list_create_gid'],
+      ),
       type: _parseInt(json['type'] ?? 0),
       source: _parseInt(json['source'] ?? 0),
-      description: _strNull(json['intro'] ?? json['description'] ?? json['desc']),
+      description: _strNull(
+        json['intro'] ?? json['description'] ?? json['desc'],
+      ),
     );
   }
 
@@ -344,9 +352,7 @@ class KugouSongDetail {
   });
 
   /// 创建副本并覆盖指定字段（用于补全 albumName 等缺失字段）
-  KugouSongDetail copyWith({
-    String? albumName,
-  }) {
+  KugouSongDetail copyWith({String? albumName}) {
     return KugouSongDetail(
       hash: hash,
       albumId: albumId,
@@ -426,7 +432,7 @@ class KugouSongDetail {
       ),
       artistId: _strNull(
         artistIdFromSingerInfo ??
-        json['SingerId'] ??
+            json['SingerId'] ??
             json['singerid'] ??
             json['SingerID'] ??
             json['AuthorID'] ??
@@ -784,11 +790,23 @@ class KugouComment {
     return KugouComment(
       id: _str(json['commentid'] ?? json['id'] ?? ''),
       username: _str(
-        json['user_name'] ?? json['username'] ?? json['nickname'] ?? user?['name'] ?? user?['nickname'] ?? '',
+        json['user_name'] ??
+            json['username'] ??
+            json['nickname'] ??
+            user?['name'] ??
+            user?['nickname'] ??
+            '',
       ),
-      avatar: fixAvatar(_strNull(
-        json['user_pic'] ?? json['user_img'] ?? json['avatar'] ?? user?['avatar'] ?? user?['pic'] ?? user?['img'],
-      )),
+      avatar: fixAvatar(
+        _strNull(
+          json['user_pic'] ??
+              json['user_img'] ??
+              json['avatar'] ??
+              user?['avatar'] ??
+              user?['pic'] ??
+              user?['img'],
+        ),
+      ),
       content: _str(json['content'] ?? json['comment_text'] ?? ''),
       time: _parseInt(json['createtime'] ?? json['time'] ?? 0),
       likes: _parseInt(json['like_count'] ?? json['likes'] ?? 0),
@@ -801,6 +819,7 @@ class KugouLyric {
   final String? decodedContent;
   final String? decodedKrcContent;
   final String? translatedContent;
+
   /// 罗马音/音译 LRC 明文（酷狗 KRC [language:] 中 language=1 条目）。
   /// 与 [translatedContent] 分离，独立通路传递到渲染层。
   final String? romaContent;
@@ -854,6 +873,7 @@ class KugouArtistDetail {
   final int songCount;
   final int albumCount;
   final bool isFollowed;
+
   /// 接口是否返回了关注状态字段（用于区分"未关注"和"接口没返回"）
   final bool hasFollowStatus;
 
@@ -869,7 +889,8 @@ class KugouArtistDetail {
   });
 
   factory KugouArtistDetail.fromJson(Map<String, dynamic> json) {
-    final hasFollow = json['is_follow'] != null ||
+    final hasFollow =
+        json['is_follow'] != null ||
         json['isfollow'] != null ||
         json['followed'] != null;
     return KugouArtistDetail(
@@ -900,7 +921,8 @@ class KugouArtistDetail {
       ),
       songCount: _parseInt(json['songcount'] ?? json['song_count'] ?? 0),
       albumCount: _parseInt(json['albumcount'] ?? json['album_count'] ?? 0),
-      isFollowed: json['is_follow'] == 1 ||
+      isFollowed:
+          json['is_follow'] == 1 ||
           json['isfollow'] == 1 ||
           json['followed'] == 1,
       hasFollowStatus: hasFollow,
@@ -1017,9 +1039,7 @@ class KugouAlbumDetail {
       publishDate: _strNull(
         json['publishtime'] ?? json['publish_date'] ?? json['PublishDate'],
       ),
-      globalCollectionId: _strNull(
-        json['global_collection_id'] ?? json['gid'],
-      ),
+      globalCollectionId: _strNull(json['global_collection_id'] ?? json['gid']),
       artistId: _strNull(
         (() {
           final authors = json['authors'];
@@ -1124,7 +1144,9 @@ class KugouPlaylistSongs {
       songs: list
           .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
           .toList(),
-      total: _parseInt(data['total'] ?? data['total_count'] ?? data['count'] ?? 0),
+      total: _parseInt(
+        data['total'] ?? data['total_count'] ?? data['count'] ?? 0,
+      ),
     );
   }
 }
@@ -1133,11 +1155,13 @@ String _str(dynamic v) => v?.toString() ?? '';
 
 String _cleanName(dynamic v) {
   final raw = v?.toString() ?? '';
-  return raw.replaceAll(RegExp(r'<[^>]*>'), '')
-            .replaceAll('&lt;', '<')
-            .replaceAll('&gt;', '>')
-            .replaceAll('&#\d+;', '');
+  return raw
+      .replaceAll(RegExp(r'<[^>]*>'), '')
+      .replaceAll('&lt;', '<')
+      .replaceAll('&gt;', '>')
+      .replaceAll('&#\d+;', '');
 }
+
 String? _strNull(dynamic v) => v?.toString();
 int _parseInt(dynamic v) {
   if (v == null) return 0;
@@ -1277,11 +1301,19 @@ class KugouUserVipDetail {
   final bool isVip;
   final String? expireTime;
 
+  /// 概念版VIP到期时间（优先显示）
+  final String? conceptExpireTime;
+
+  /// 原始 busi_vip 列表，用于 UI 细分展示
+  final List<Map<String, dynamic>> busiVipList;
+
   const KugouUserVipDetail({
     this.nickname,
     this.vipLevel,
     this.isVip = false,
     this.expireTime,
+    this.conceptExpireTime,
+    this.busiVipList = const [],
   });
 
   factory KugouUserVipDetail.fromJson(Map<String, dynamic> json) {
@@ -1291,21 +1323,38 @@ class KugouUserVipDetail {
     final busiList = data['busi_vip'];
     bool isVip = data['is_vip'] == 1;
     String? expireTime;
+    String? conceptExpireTime;
+    final List<Map<String, dynamic>> rawBusiList = [];
+
     if (busiList is List) {
       DateTime? latest;
       for (final b in busiList) {
-        if (b is Map<String, dynamic> && b['is_vip'] == 1) {
-          isVip = true;
-          final t = b['vip_end_time']?.toString();
-          if (t != null && t.isNotEmpty) {
-            final dt = DateTime.tryParse(t.replaceFirst(' ', 'T'));
-            if (dt != null && (latest == null || dt.isAfter(latest))) {
-              latest = dt;
+        if (b is Map<String, dynamic>) {
+          rawBusiList.add(b);
+          if (b['is_vip'] == 1) {
+            isVip = true;
+            final t = b['vip_end_time']?.toString();
+            if (t != null && t.isNotEmpty) {
+              final dt = DateTime.tryParse(t.replaceFirst(' ', 'T'));
+              if (dt != null) {
+                // 取所有 VIP 中最晚到期时间作为通用 expireTime
+                if (latest == null || dt.isAfter(latest)) {
+                  latest = dt;
+                }
+                // 概念版VIP: product_type 为 "svip"
+                final pt = b['product_type']?.toString() ?? '';
+                final isConcept = pt == 'svip';
+                print('[VIP_DEBUG] product_type=$pt isConcept=$isConcept end_time=$t');
+                if (isConcept) {
+                  conceptExpireTime =
+                      '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+                }
+              }
             }
           }
         }
       }
-      if (latest != null) {
+      if (latest != null && expireTime == null) {
         expireTime =
             '${latest.year.toString().padLeft(4, '0')}-${latest.month.toString().padLeft(2, '0')}-${latest.day.toString().padLeft(2, '0')}';
       }
@@ -1316,6 +1365,8 @@ class KugouUserVipDetail {
       vipLevel: _parseInt(data['vip_level'] ?? data['vip_type']),
       isVip: isVip,
       expireTime: expireTime,
+      conceptExpireTime: conceptExpireTime,
+      busiVipList: rawBusiList,
     );
   }
 }

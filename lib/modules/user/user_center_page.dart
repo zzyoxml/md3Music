@@ -271,14 +271,16 @@ class _UserCenterPageState extends State<UserCenterPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      isVip ? 'VIP会员' : '开通VIP会员',
+                      isVip
+                          ? (kugou.isTodayYouthVip ? '概念版VIP会员' : 'VIP会员')
+                          : '开通VIP会员',
                       style: tt.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     Text(
                       isVip
-                          ? '有效期至: ${vip?.expireTime ?? '永久'}'
+                          ? '概念版VIP 有效期至: ${vip?.conceptExpireTime ?? vip?.expireTime ?? '永久'}'
                           : '畅享无损音质、个性皮肤等',
                       style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                     ),
@@ -376,6 +378,9 @@ class _UserCenterPageState extends State<UserCenterPage> {
       if (list is List) {
         for (final item in list) {
           if (item is Map<String, dynamic>) {
+            // 只显示概念版(svip)签到记录，过滤畅听(tvip)
+            final vipType = item['vip_type']?.toString() ?? '';
+            if (vipType != 'svip') continue;
             final dm = _parseReceivedYearMonthDay(item);
             if (dm != null && dm.year == curYear && dm.month == curMonth) {
               receivedDays.add(dm.day);
