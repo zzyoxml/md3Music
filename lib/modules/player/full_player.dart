@@ -79,8 +79,6 @@ class _FullPlayerState extends State<FullPlayer>
   bool _isPhoneLandscape = false;
   // 写真背景是否实际有图片可显示：写真无图时不隐藏左侧封面，避免封面消失
   bool _photoBgHasImages = false;
-  // 拖动进度条前的播放状态，用于拖动结束后恢复
-  bool _wasPlayingBeforeDrag = false;
 
   /// 防止 PopScope 回调与 dismiss() 重复触发。
   bool _isDismissing = false;
@@ -242,9 +240,9 @@ class _FullPlayerState extends State<FullPlayer>
       if (!mounted) return;
       Navigator.of(context).pop(); // 关闭 loading
       if (result == null || result.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('未找到歌手「$name」')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('未找到歌手「$name」')));
         return;
       }
       final artist = result.first;
@@ -252,9 +250,9 @@ class _FullPlayerState extends State<FullPlayer>
     } catch (e) {
       if (!mounted) return;
       Navigator.of(context).pop(); // 关闭 loading
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('搜索歌手失败：$e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('搜索歌手失败：$e')));
     }
   }
 
@@ -365,8 +363,7 @@ class _FullPlayerState extends State<FullPlayer>
       _tabController = TabController(
         length: newTabLength,
         vsync: this,
-        initialIndex:
-            isFirstEnterPad ? 0 : currentIndex,
+        initialIndex: isFirstEnterPad ? 0 : currentIndex,
       );
       _isPadMode = shouldBePadMode;
       _isPhoneLandscape = shouldBePhoneLandscape;
@@ -409,7 +406,8 @@ class _FullPlayerState extends State<FullPlayer>
     final song = player.currentSong;
     if (song != null && song.id != _lastSongId) {
       // 封面淡入淡出：song 已经是新歌，_previousArtworkUrl 是上一首的封面
-      if (_previousArtworkUrl != null && _previousArtworkUrl != song.artworkUri) {
+      if (_previousArtworkUrl != null &&
+          _previousArtworkUrl != song.artworkUri) {
         final newUrl = song.artworkUri;
         _artworkFadeController
           ..reset()
@@ -425,7 +423,8 @@ class _FullPlayerState extends State<FullPlayer>
       final playlist = player.playlist;
       final idx = player.currentIndex;
       if (idx > 0) _preloadArtwork(playlist[idx - 1].artworkUri);
-      if (idx < playlist.length - 1) _preloadArtwork(playlist[idx + 1].artworkUri);
+      if (idx < playlist.length - 1)
+        _preloadArtwork(playlist[idx + 1].artworkUri);
     }
   }
 
@@ -512,7 +511,8 @@ class _FullPlayerState extends State<FullPlayer>
         await kugouProvider.getLyric(lyricHash, songName: searchName);
         if (mounted) {
           final lyric = kugouProvider.lyric;
-          lyricText = lyric?.displayKrcLyric ??
+          lyricText =
+              lyric?.displayKrcLyric ??
               lyric?.displayLrcLyric ??
               lyric?.displayLyric ??
               '';
@@ -586,7 +586,11 @@ class _FullPlayerState extends State<FullPlayer>
     return Container(
       color: colorScheme.surfaceContainerHighest,
       child: Center(
-        child: Icon(Icons.music_note, size: iconSize, color: colorScheme.onSurfaceVariant),
+        child: Icon(
+          Icons.music_note,
+          size: iconSize,
+          color: colorScheme.onSurfaceVariant,
+        ),
       ),
     );
   }
@@ -620,42 +624,54 @@ class _FullPlayerState extends State<FullPlayer>
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: kPlayerOverlayStyle,
       child: PopScope(
-      canPop: false,
-      onPopInvokedWithResult: (didPop, _) {
-        if (didPop || _isDismissing) return;
-        if (_zenMode) {
-          _exitZenMode();
-          return;
-        }
-        _collapseByButton();
-      },
-      child: Scaffold(
-      backgroundColor: colorScheme.surface,
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // 歌手写真背景轮播（开关开启 + 在线歌曲时显示）
-          if (usePhotoBg && currentSong!.isOnline)
-            ArtistPhotoBackground(
-              hash: currentSong.id,
-              onHasImages: (hasImages) {
-                if (_photoBgHasImages != hasImages) {
-                  setState(() => _photoBgHasImages = hasImages);
-                }
-              },
-            ),
-          ResponsiveLayout(
-            compact: (_) =>
-                _buildCompactLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
-            medium: (_) =>
-                _buildLandscapeLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
-            expanded: (_) =>
-                _buildExpandedLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
+        canPop: false,
+        onPopInvokedWithResult: (didPop, _) {
+          if (didPop || _isDismissing) return;
+          if (_zenMode) {
+            _exitZenMode();
+            return;
+          }
+          _collapseByButton();
+        },
+        child: Scaffold(
+          backgroundColor: colorScheme.surface,
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              // 歌手写真背景轮播（开关开启 + 在线歌曲时显示）
+              if (usePhotoBg && currentSong!.isOnline)
+                ArtistPhotoBackground(
+                  hash: currentSong.id,
+                  onHasImages: (hasImages) {
+                    if (_photoBgHasImages != hasImages) {
+                      setState(() => _photoBgHasImages = hasImages);
+                    }
+                  },
+                ),
+              ResponsiveLayout(
+                compact: (_) => _buildCompactLayout(
+                  playerProvider,
+                  currentSong,
+                  colorScheme,
+                  lyricDoubleTap,
+                ),
+                medium: (_) => _buildLandscapeLayout(
+                  playerProvider,
+                  currentSong,
+                  colorScheme,
+                  lyricDoubleTap,
+                ),
+                expanded: (_) => _buildExpandedLayout(
+                  playerProvider,
+                  currentSong,
+                  colorScheme,
+                  lyricDoubleTap,
+                ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
-    ),
-    ),
     ); // AnnotatedRegion
   }
 
@@ -715,9 +731,7 @@ class _FullPlayerState extends State<FullPlayer>
           _ZenFade(
             animation: _zenAnimation,
             child: Padding(
-              padding: EdgeInsets.only(
-                bottom: _zenMode ? 16 : bottomPadding,
-              ),
+              padding: EdgeInsets.only(bottom: _zenMode ? 16 : bottomPadding),
               child: _buildControls(playerProvider, colorScheme),
             ),
           ),
@@ -740,9 +754,14 @@ class _FullPlayerState extends State<FullPlayer>
     // 关闭写真背景或 Zen 模式时恢复显示封面。
     // 写真实际无图时（_photoBgHasImages=false）也恢复显示封面，避免封面消失。
     final usePhotoBg = context.watch<ThemeProvider>().useArtistPhotoBackground;
-    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
     final hideArtworkForPhotoBg =
-        isLandscape && usePhotoBg && _photoBgHasImages && currentSong.isOnline && !_zenMode;
+        isLandscape &&
+        usePhotoBg &&
+        _photoBgHasImages &&
+        currentSong.isOnline &&
+        !_zenMode;
 
     return SafeArea(
       bottom: false,
@@ -760,16 +779,20 @@ class _FullPlayerState extends State<FullPlayer>
                 Expanded(
                   flex: 4,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
                         // 横屏时封面为正方形，需同时受可用宽度与高度约束：
                         // 减去 56 顶栏补偿后的可用高度，避免高度不足时正方形上下被裁切
                         final availableHeight = constraints.maxHeight - 56;
-                        final size = (constraints.maxWidth < availableHeight
-                                ? constraints.maxWidth
-                                : availableHeight)
-                            .clamp(120.0, 300.0);
+                        final size =
+                            (constraints.maxWidth < availableHeight
+                                    ? constraints.maxWidth
+                                    : availableHeight)
+                                .clamp(120.0, 300.0);
                         return Stack(
                           children: [
                             // 封面：横屏 + 写真背景开启时隐藏（避免与背景写真重复）
@@ -777,14 +800,20 @@ class _FullPlayerState extends State<FullPlayer>
                               // 封面居中：补偿顶栏高度（IconButton 48 + Padding 4×2 = 56），
                               // 使封面在整个屏幕垂直方向居中，而非画布（去除顶栏后的空间）居中
                               Padding(
-                                padding: EdgeInsets.only(bottom: _zenMode ? 0.0 : 56.0),
+                                padding: EdgeInsets.only(
+                                  bottom: _zenMode ? 0.0 : 56.0,
+                                ),
                                 child: Center(
                                   child: SizedBox(
                                     width: size,
                                     height: size,
                                     child: AnimatedScale(
-                                      scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                                      duration: const Duration(milliseconds: 500),
+                                      scale: playerProvider.isPlaying
+                                          ? 1.0
+                                          : 0.85,
+                                      duration: const Duration(
+                                        milliseconds: 500,
+                                      ),
                                       curve: Curves.easeOutBack,
                                       child: ClipRRect(
                                         borderRadius: BorderRadius.circular(16),
@@ -792,7 +821,8 @@ class _FullPlayerState extends State<FullPlayer>
                                           currentSong.artworkUri,
                                           colorScheme,
                                           iconSize: 48,
-                                          fallbackFilePath: currentSong.localPath,
+                                          fallbackFilePath:
+                                              currentSong.localPath,
                                         ),
                                       ),
                                     ),
@@ -808,37 +838,51 @@ class _FullPlayerState extends State<FullPlayer>
                                 child: Column(
                                   children: [
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.displayName,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context).textTheme.titleMedium,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleMedium,
                                         textAlign: TextAlign.center,
                                       ),
                                     ),
                                     const SizedBox(height: 2),
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.artist,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          color: colorScheme.onSurfaceVariant,
-                                        ),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color:
+                                                  colorScheme.onSurfaceVariant,
+                                            ),
                                         textAlign: TextAlign.center,
                                       ),
                                     ),
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.album,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                                        ),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: colorScheme
+                                                  .onSurfaceVariant
+                                                  .withValues(alpha: 0.7),
+                                            ),
                                         textAlign: TextAlign.center,
                                       ),
                                     ),
@@ -866,7 +910,11 @@ class _FullPlayerState extends State<FullPlayer>
                               GestureDetector(
                                 onTap: () => _tabController.animateTo(1),
                                 behavior: HitTestBehavior.opaque,
-                                child: _buildSongInfo(playerProvider, currentSong, colorScheme),
+                                child: _buildSongInfo(
+                                  playerProvider,
+                                  currentSong,
+                                  colorScheme,
+                                ),
                               ),
                             _isLoadingLyrics
                                 ? const Center(child: MD3ELoadingIndicator())
@@ -892,7 +940,11 @@ class _FullPlayerState extends State<FullPlayer>
                           padding: EdgeInsets.only(
                             bottom: _zenMode ? 8 : bottomPadding,
                           ),
-                          child: _buildControls(playerProvider, colorScheme, isExpanded: true),
+                          child: _buildControls(
+                            playerProvider,
+                            colorScheme,
+                            isExpanded: true,
+                          ),
                         ),
                       ),
                     ],
@@ -918,9 +970,14 @@ class _FullPlayerState extends State<FullPlayer>
     // 关闭写真背景或 Zen 模式时恢复显示封面。
     // 写真实际无图时（_photoBgHasImages=false）也恢复显示封面，避免封面消失。
     final usePhotoBg = context.watch<ThemeProvider>().useArtistPhotoBackground;
-    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+    final isLandscape =
+        MediaQuery.of(context).orientation == Orientation.landscape;
     final hideArtworkForPhotoBg =
-        isLandscape && usePhotoBg && _photoBgHasImages && currentSong.isOnline && !_zenMode;
+        isLandscape &&
+        usePhotoBg &&
+        _photoBgHasImages &&
+        currentSong.isOnline &&
+        !_zenMode;
 
     return SafeArea(
       bottom: false,
@@ -937,17 +994,25 @@ class _FullPlayerState extends State<FullPlayer>
                 Expanded(
                   flex: 4,
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        final maxSize = (constraints.maxWidth - 32).clamp(0.0, 380.0);
+                        final maxSize = (constraints.maxWidth - 32).clamp(
+                          0.0,
+                          380.0,
+                        );
                         return Stack(
                           children: [
                             // 封面：横屏 + 写真背景开启时隐藏（避免与背景写真重复）
                             if (!hideArtworkForPhotoBg)
                               // 封面居中：补偿顶栏高度，使封面在整个屏幕垂直方向居中
                               Padding(
-                                padding: EdgeInsets.only(bottom: _zenMode ? 0.0 : 56.0),
+                                padding: EdgeInsets.only(
+                                  bottom: _zenMode ? 0.0 : 56.0,
+                                ),
                                 child: Center(
                                   child: ConstrainedBox(
                                     constraints: BoxConstraints(
@@ -957,16 +1022,23 @@ class _FullPlayerState extends State<FullPlayer>
                                     child: AspectRatio(
                                       aspectRatio: 1,
                                       child: AnimatedScale(
-                                        scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                                        duration: const Duration(milliseconds: 500),
+                                        scale: playerProvider.isPlaying
+                                            ? 1.0
+                                            : 0.85,
+                                        duration: const Duration(
+                                          milliseconds: 500,
+                                        ),
                                         curve: Curves.easeOutBack,
                                         child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(16),
+                                          borderRadius: BorderRadius.circular(
+                                            16,
+                                          ),
                                           child: _buildCrossfadeArtwork(
                                             currentSong.artworkUri,
                                             colorScheme,
                                             iconSize: 48,
-                                            fallbackFilePath: currentSong.localPath,
+                                            fallbackFilePath:
+                                                currentSong.localPath,
                                           ),
                                         ),
                                       ),
@@ -983,37 +1055,51 @@ class _FullPlayerState extends State<FullPlayer>
                                 child: Column(
                                   children: [
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.displayName,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context).textTheme.titleMedium,
+                                        style: Theme.of(
+                                          context,
+                                        ).textTheme.titleMedium,
                                         textAlign: TextAlign.center,
                                       ),
                                     ),
                                     const SizedBox(height: 2),
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.artist,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          color: colorScheme.onSurfaceVariant,
-                                        ),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color:
+                                                  colorScheme.onSurfaceVariant,
+                                            ),
                                         textAlign: TextAlign.center,
                                       ),
                                     ),
                                     GestureDetector(
-                                      onTap: () => _navigateToAlbum(currentSong as Song),
+                                      onTap: () =>
+                                          _navigateToAlbum(currentSong as Song),
                                       child: Text(
                                         currentSong.album,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                          color: colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
-                                        ),
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .bodySmall
+                                            ?.copyWith(
+                                              color: colorScheme
+                                                  .onSurfaceVariant
+                                                  .withValues(alpha: 0.7),
+                                            ),
                                         textAlign: TextAlign.center,
                                       ),
                                     ),
@@ -1035,7 +1121,11 @@ class _FullPlayerState extends State<FullPlayer>
                           controller: _tabController,
                           children: [
                             if (!_isPadMode || _isPhoneLandscape)
-                              _buildSongInfo(playerProvider, currentSong, colorScheme),
+                              _buildSongInfo(
+                                playerProvider,
+                                currentSong,
+                                colorScheme,
+                              ),
                             _isLoadingLyrics
                                 ? const Center(child: MD3ELoadingIndicator())
                                 : LyricsView(
@@ -1060,7 +1150,11 @@ class _FullPlayerState extends State<FullPlayer>
                           padding: EdgeInsets.only(
                             bottom: _zenMode ? 8 : bottomPadding,
                           ),
-                          child: _buildControls(playerProvider, colorScheme, isExpanded: true),
+                          child: _buildControls(
+                            playerProvider,
+                            colorScheme,
+                            isExpanded: true,
+                          ),
                         ),
                       ),
                     ],
@@ -1204,7 +1298,9 @@ class _FullPlayerState extends State<FullPlayer>
                       duration: const Duration(milliseconds: 500),
                       curve: Curves.easeOutBack,
                       child: _buildCrossfadeArtworkWrapper(
-                        currentSong, colorScheme, iconSize: iconSize,
+                        currentSong,
+                        colorScheme,
+                        iconSize: iconSize,
                       ),
                     ),
                   ),
@@ -1221,7 +1317,9 @@ class _FullPlayerState extends State<FullPlayer>
                   duration: const Duration(milliseconds: 500),
                   curve: Curves.easeOutBack,
                   child: _buildCrossfadeArtworkWrapper(
-                    currentSong, colorScheme, iconSize: iconSize,
+                    currentSong,
+                    colorScheme,
+                    iconSize: iconSize,
                   ),
                 ),
               ),
@@ -1364,11 +1462,7 @@ class _FullPlayerState extends State<FullPlayer>
             isExpanded: isExpanded,
           ),
           SizedBox(height: verticalSpacing),
-          _buildActionBar(
-            playerProvider,
-            colorScheme,
-            isExpanded: isExpanded,
-          ),
+          _buildActionBar(playerProvider, colorScheme, isExpanded: isExpanded),
         ],
       ),
     );
@@ -1381,7 +1475,8 @@ class _FullPlayerState extends State<FullPlayer>
     ColorScheme colorScheme,
   ) {
     final song = playerProvider.currentSong;
-    final hasClimax = song?.climaxStart != null &&
+    final hasClimax =
+        song?.climaxStart != null &&
         song?.climaxEnd != null &&
         duration.inMilliseconds > 0;
 
@@ -1398,29 +1493,22 @@ class _FullPlayerState extends State<FullPlayer>
         Expanded(
           child: hasClimax
               ? _buildSliderWithClimaxMarker(
-                  playerProvider, position, duration, colorScheme, song!)
+                  playerProvider,
+                  position,
+                  duration,
+                  colorScheme,
+                  song!,
+                )
               : Slider(
                   value: duration.inMilliseconds > 0
                       ? (position.inMilliseconds / duration.inMilliseconds)
-                          .clamp(0.0, 1.0)
+                            .clamp(0.0, 1.0)
                       : 0.0,
-                  onChangeStart: (_) {
-                    _wasPlayingBeforeDrag = playerProvider.isPlaying;
-                    if (playerProvider.isPlaying) {
-                      playerProvider.pause();
-                    }
-                  },
                   onChanged: (value) {
                     final newPosition = Duration(
-                      milliseconds:
-                          (duration.inMilliseconds * value).round(),
+                      milliseconds: (duration.inMilliseconds * value).round(),
                     );
                     playerProvider.seek(newPosition);
-                  },
-                  onChangeEnd: (_) {
-                    if (_wasPlayingBeforeDrag) {
-                      playerProvider.resume();
-                    }
                   },
                 ),
         ),
@@ -1470,22 +1558,11 @@ class _FullPlayerState extends State<FullPlayer>
               value: totalMs > 0
                   ? (position.inMilliseconds / totalMs).clamp(0.0, 1.0)
                   : 0.0,
-              onChangeStart: (_) {
-                _wasPlayingBeforeDrag = playerProvider.isPlaying;
-                if (playerProvider.isPlaying) {
-                  playerProvider.pause();
-                }
-              },
               onChanged: (value) {
                 final newPosition = Duration(
                   milliseconds: (totalMs * value).round(),
                 );
                 playerProvider.seek(newPosition);
-              },
-              onChangeEnd: (_) {
-                if (_wasPlayingBeforeDrag) {
-                  playerProvider.resume();
-                }
               },
             ),
             // 高潮区域高亮条：与进度条轨道同高、垂直居中对齐
@@ -1579,7 +1656,8 @@ class _FullPlayerState extends State<FullPlayer>
     final song = playerProvider.currentSong;
     // 根据歌曲来源（本地/在线）选择对应的收藏 Provider
     final isOnline = song is Song && song.isOnline;
-    final isFavorited = song != null &&
+    final isFavorited =
+        song != null &&
         (isOnline
             ? context.watch<FavoritesProvider>().isFavorite(song.id)
             : context.watch<LocalFavoritesProvider>().isFavorite(song.id));
@@ -1673,8 +1751,7 @@ class _FullPlayerState extends State<FullPlayer>
                       isPlaying: player.isPlaying,
                       position: player.position,
                       duration: player.duration ?? Duration.zero,
-                      desktopLyricEnabled:
-                          DesktopLyricService.instance.enabled,
+                      desktopLyricEnabled: DesktopLyricService.instance.enabled,
                       isFavorited: isFavorited,
                     );
                   }
@@ -1717,9 +1794,13 @@ class _FullPlayerState extends State<FullPlayer>
                     ? () {
                         // 本地歌曲走 LocalFavoritesProvider，在线走 FavoritesProvider
                         if (isOnline) {
-                          context.read<FavoritesProvider>().toggleFavorite(song);
+                          context.read<FavoritesProvider>().toggleFavorite(
+                            song,
+                          );
                         } else {
-                          context.read<LocalFavoritesProvider>().toggleFavorite(song.id);
+                          context.read<LocalFavoritesProvider>().toggleFavorite(
+                            song.id,
+                          );
                         }
                       }
                     : null,
@@ -1811,7 +1892,10 @@ class _FullPlayerState extends State<FullPlayer>
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 320),
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 20,
+                  ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -1823,10 +1907,11 @@ class _FullPlayerState extends State<FullPlayer>
                       const SizedBox(height: 8),
                       Text(
                         '${speeds[currentIndex]}x',
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
-                          fontWeight: FontWeight.bold,
-                        ),
+                        style: Theme.of(context).textTheme.headlineMedium
+                            ?.copyWith(
+                              color: Theme.of(context).colorScheme.primary,
+                              fontWeight: FontWeight.bold,
+                            ),
                       ),
                       const SizedBox(height: 16),
                       // 横条滑块
@@ -1850,12 +1935,17 @@ class _FullPlayerState extends State<FullPlayer>
                           final isSelected = s == speeds[currentIndex];
                           return Text(
                             s == 1.0 ? '1x' : '${s}x',
-                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: isSelected
-                                  ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.onSurfaceVariant,
-                              fontWeight: isSelected ? FontWeight.bold : null,
-                            ),
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: isSelected
+                                      ? Theme.of(context).colorScheme.primary
+                                      : Theme.of(
+                                          context,
+                                        ).colorScheme.onSurfaceVariant,
+                                  fontWeight: isSelected
+                                      ? FontWeight.bold
+                                      : null,
+                                ),
                           );
                         }).toList(),
                       ),
@@ -1981,10 +2071,38 @@ class _FullPlayerState extends State<FullPlayer>
             const SizedBox(height: 16),
             Text('选择音质', style: Theme.of(ctx).textTheme.titleSmall),
             const SizedBox(height: 8),
-            _buildDownloadQualityOption(ctx, '标准音质 (128kbps)', '128', song, downloadsProvider, enabled: available.contains('128')),
-            _buildDownloadQualityOption(ctx, '高音质 (320kbps)', '320', song, downloadsProvider, enabled: available.contains('320')),
-            _buildDownloadQualityOption(ctx, '无损音质 (FLAC)', 'flac', song, downloadsProvider, enabled: available.contains('flac')),
-            _buildDownloadQualityOption(ctx, 'Hi-Res 无损', 'high', song, downloadsProvider, enabled: available.contains('high')),
+            _buildDownloadQualityOption(
+              ctx,
+              '标准音质 (128kbps)',
+              '128',
+              song,
+              downloadsProvider,
+              enabled: available.contains('128'),
+            ),
+            _buildDownloadQualityOption(
+              ctx,
+              '高音质 (320kbps)',
+              '320',
+              song,
+              downloadsProvider,
+              enabled: available.contains('320'),
+            ),
+            _buildDownloadQualityOption(
+              ctx,
+              '无损音质 (FLAC)',
+              'flac',
+              song,
+              downloadsProvider,
+              enabled: available.contains('flac'),
+            ),
+            _buildDownloadQualityOption(
+              ctx,
+              'Hi-Res 无损',
+              'high',
+              song,
+              downloadsProvider,
+              enabled: available.contains('high'),
+            ),
           ],
         ),
         actions: [
@@ -2021,38 +2139,50 @@ class _FullPlayerState extends State<FullPlayer>
       ),
       trailing: enabled
           ? null
-          : Text('需要VIP', style: TextStyle(
-              fontSize: 11,
-              color: Theme.of(context).disabledColor,
-            )),
-      onTap: enabled ? () async {
-        Navigator.pop(context);
-        final displayName = song.displayName ?? song.title;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('开始下载: $displayName'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-        final actual = await provider.downloadSong(song, quality: quality);
-        if (actual == 'trial_blocked') {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('你的账号已被kugou风控,请等待kugou解除风控后再试'),
-                duration: Duration(seconds: 4),
+          : Text(
+              '需要VIP',
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).disabledColor,
               ),
-            );
-          }
-        } else if (actual != null && actual != quality && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}'),
-              duration: const Duration(seconds: 3),
             ),
-          );
-        }
-      } : null,
+      onTap: enabled
+          ? () async {
+              Navigator.pop(context);
+              final displayName = song.displayName ?? song.title;
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('开始下载: $displayName'),
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+              final actual = await provider.downloadSong(
+                song,
+                quality: quality,
+              );
+              if (actual == 'trial_blocked') {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('你的账号已被kugou风控,请等待kugou解除风控后再试'),
+                      duration: Duration(seconds: 4),
+                    ),
+                  );
+                }
+              } else if (actual != null &&
+                  actual != quality &&
+                  context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      '${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}',
+                    ),
+                    duration: const Duration(seconds: 3),
+                  ),
+                );
+              }
+            }
+          : null,
     );
   }
 
@@ -2086,13 +2216,16 @@ class _FullPlayerState extends State<FullPlayer>
                   builder: (context, _) {
                     final eq = EqualizerService.instance;
                     return ListTile(
-                      leading: Icon(Icons.graphic_eq,
-                          color: eq.enabled
-                              ? Theme.of(context).colorScheme.primary
-                              : null),
+                      leading: Icon(
+                        Icons.graphic_eq,
+                        color: eq.enabled
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
                       title: const Text('均衡器'),
                       subtitle: Text(
-                          eq.enabled ? '已开启 · ${eq.currentPreset}' : '未开启'),
+                        eq.enabled ? '已开启 · ${eq.currentPreset}' : '未开启',
+                      ),
                       onTap: () {
                         Navigator.pop(context);
                         Navigator.push(
@@ -2152,7 +2285,9 @@ class _FullPlayerState extends State<FullPlayer>
                   title: const Text('歌手写真背景'),
                   value: context.read<ThemeProvider>().useArtistPhotoBackground,
                   onChanged: (v) {
-                    context.read<ThemeProvider>().setUseArtistPhotoBackground(v);
+                    context.read<ThemeProvider>().setUseArtistPhotoBackground(
+                      v,
+                    );
                     Navigator.pop(context);
                   },
                 ),
@@ -2368,9 +2503,8 @@ class _FullPlayerState extends State<FullPlayer>
       context: context,
       // 透明 barrier：横屏时点击左半边不关闭对话框（仍可操作播放器）
       barrierColor: Colors.transparent,
-      builder: (dialogContext) => const PlayerPlaylistDialog(
-        useDisplayName: true,
-      ),
+      builder: (dialogContext) =>
+          const PlayerPlaylistDialog(useDisplayName: true),
     );
   }
 }
