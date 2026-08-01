@@ -11,6 +11,7 @@ import '../core/services/desktop_lyric_service.dart';
 import '../core/services/home_widget_service.dart';
 import '../core/services/lyricon_provider_service.dart';
 import '../core/services/media_notification_service.dart';
+import '../core/services/wakelock_service.dart';
 import '../core/services/media_store_service.dart';
 import '../data/models/song.dart';
 import '../core/utils/audio_scanner.dart';
@@ -280,6 +281,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       _playingSubscription = _audioService.playingStream.listen((isPlaying) {
         _isPlaying = isPlaying;
+        WakelockService.instance.setSongPlaying(isPlaying);
         _updateNotification();
         notifyListeners();
         // 播放/暂停切换时立即推 Lyricon，避免等下一个 positionStream tick

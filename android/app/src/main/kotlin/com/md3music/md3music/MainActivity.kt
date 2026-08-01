@@ -8,6 +8,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.support.v4.media.session.MediaSessionCompat
+import android.view.WindowManager
 import android.support.v4.media.session.PlaybackStateCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -488,6 +489,26 @@ class MainActivity : FlutterActivity() {
                     MusicWidgetProvider.updateAllWidgets(
                         this, title, artist, isPlaying, position, duration
                     )
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // 注册屏幕常亮 MethodChannel：Dart 端 WakelockService 调用，开关 FLAG_KEEP_SCREEN_ON
+        val wakelockChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "com.md3music.md3music/wakelock"
+        )
+        wakelockChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setKeepScreenOn" -> {
+                    val on = call.argument<Boolean>("on") ?: false
+                    if (on) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
                     result.success(true)
                 }
                 else -> result.notImplemented()

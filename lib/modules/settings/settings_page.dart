@@ -17,6 +17,7 @@ import '../../core/services/equalizer_service.dart';
 import '../../core/services/folder_picker_service.dart';
 import '../../core/services/lyricon_provider_service.dart';
 import '../../core/services/media_notification_service.dart';
+import '../../core/services/wakelock_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/motion_constants.dart';
 import '../../data/repositories/settings_repository.dart';
@@ -83,6 +84,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _ignoreAudioFocus = false;
   // 暂停淡入淡出开关
   bool _pauseFadeEnabled = false;
+  // 播放时保持屏幕常亮开关
+  bool _keepScreenOn = false;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
 
@@ -177,6 +180,7 @@ class _SettingsPageState extends State<SettingsPage> {
         .getDownloadWordLevelLyrics();
     final ignoreAudioFocus = await _settingsRepository.getIgnoreAudioFocus();
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
+    final keepScreenOn = await _settingsRepository.getKeepScreenOn();
 
     setState(() {
       _themeMode = themeMode;
@@ -199,6 +203,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
       _ignoreAudioFocus = ignoreAudioFocus;
       _pauseFadeEnabled = pauseFadeEnabled;
+      _keepScreenOn = keepScreenOn;
     });
   }
 
@@ -1013,6 +1018,18 @@ class _SettingsPageState extends State<SettingsPage> {
               _pauseFadeEnabled = value;
             });
             _settingsRepository.setPauseFadeEnabled(value);
+          },
+        ),
+        SwitchListTile(
+          title: const Text('播放时保持屏幕常亮'),
+          subtitle: const Text('播放歌曲或 MV 时屏幕不会自动息屏'),
+          value: _keepScreenOn,
+          onChanged: (value) {
+            setState(() {
+              _keepScreenOn = value;
+            });
+            _settingsRepository.setKeepScreenOn(value);
+            WakelockService.instance.setSettingEnabled(value);
           },
         ),
       ],

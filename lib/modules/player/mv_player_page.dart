@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../core/services/wakelock_service.dart';
 import '../../data/models/mv_models.dart';
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
@@ -56,6 +57,7 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
   @override
   void dispose() {
     _disposed = true;
+    WakelockService.instance.setVideoPlaying(false);
     _chewieController?.dispose();
     _controller?.dispose();
     // 恢复背景音频（仅当进入前正在播放）
@@ -69,6 +71,11 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
       }
     }
     super.dispose();
+  }
+
+  /// 视频控制器状态变化回调：同步播放状态到屏幕常亮服务。
+  void _onVideoStateChanged() {
+    WakelockService.instance.setVideoPlaying(_controller?.value.isPlaying ?? false);
   }
 
   Future<void> _loadMv() async {
@@ -151,6 +158,8 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
         _chewieController = chewieController;
         _loadState = _MvLoadState.ready;
       });
+      controller.addListener(_onVideoStateChanged);
+      _onVideoStateChanged();
     } catch (e) {
       if (_disposed) return;
       setState(() {
@@ -187,6 +196,7 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
     }
 
     // 释放旧控制器
+    _controller?.removeListener(_onVideoStateChanged);
     _chewieController?.dispose();
     await _controller?.dispose();
     _chewieController = null;
@@ -220,6 +230,8 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
         _currentQualityIndex = newIndex;
         _isSwitching = false;
       });
+      controller.addListener(_onVideoStateChanged);
+      _onVideoStateChanged();
     } catch (e) {
       if (_disposed) return;
       setState(() => _isSwitching = false);

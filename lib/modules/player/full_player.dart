@@ -777,7 +777,7 @@ class _FullPlayerState extends State<FullPlayer>
                               // 封面居中：补偿顶栏高度（IconButton 48 + Padding 4×2 = 56），
                               // 使封面在整个屏幕垂直方向居中，而非画布（去除顶栏后的空间）居中
                               Padding(
-                                padding: const EdgeInsets.only(bottom: 56),
+                                padding: EdgeInsets.only(bottom: _zenMode ? 0.0 : 56.0),
                                 child: Center(
                                   child: SizedBox(
                                     width: size,
@@ -947,7 +947,7 @@ class _FullPlayerState extends State<FullPlayer>
                             if (!hideArtworkForPhotoBg)
                               // 封面居中：补偿顶栏高度，使封面在整个屏幕垂直方向居中
                               Padding(
-                                padding: const EdgeInsets.only(bottom: 56),
+                                padding: EdgeInsets.only(bottom: _zenMode ? 0.0 : 56.0),
                                 child: Center(
                                   child: ConstrainedBox(
                                     constraints: BoxConstraints(

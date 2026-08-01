@@ -336,6 +336,20 @@ class SettingsRepository {
     await prefs.setBool(_keyPauseFadeEnabled, value);
   }
 
+  // ===== 播放时保持屏幕常亮 =====
+  static const String _keyKeepScreenOn = 'settings_keep_screen_on';
+
+  /// 播放歌曲/MV 时是否保持屏幕常亮，默认 false。
+  Future<bool> getKeepScreenOn() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyKeepScreenOn) ?? false;
+  }
+
+  Future<void> setKeepScreenOn(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyKeepScreenOn, value);
+  }
+
   // ===== 主页 Tab 配置 =====
   static const String _keyTabOrder = 'settings_tab_order';
   static const String _keyHiddenTabs = 'settings_hidden_tabs';
