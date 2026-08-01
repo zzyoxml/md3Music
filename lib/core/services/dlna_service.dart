@@ -63,16 +63,19 @@ class DlnaService {
 
   /// 投屏：设置媒体 URL 并播放。
   /// [mediaType] 决定 DLNA 的 MIME 类型（音频/视频）。
+  /// [overrideType] 可选，本地文件按扩展名映射的具体 PlayType；
+  ///   传 null 时按 [mediaType] 兜底用 mpeg/mp4（保持向后兼容）。
   Future<bool> cast(
     String url, {
     String? title,
     required DlnaMediaType mediaType,
+    PlayType? overrideType,
   }) async {
     final device = _connectedDevice;
     if (device == null) return false;
 
     // 显式声明为 PlayType，避免 switch 推断为 Object
-    final PlayType playType = switch (mediaType) {
+    final PlayType playType = overrideType ?? switch (mediaType) {
       DlnaMediaType.audio => AudioMime.mpeg,
       DlnaMediaType.video => VideoMime.mp4,
     };

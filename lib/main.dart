@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app.dart';
 import 'core/services/desktop_lyric_service.dart';
 import 'core/services/equalizer_service.dart';
+import 'core/services/local_http_server.dart';
 import 'core/services/lyricon_provider_service.dart';
 import 'core/services/media_notification_service.dart';
 import 'core/services/wakelock_service.dart';
@@ -75,6 +76,13 @@ Future<void> main() async {
       await NodeJsServer.start();
     } catch (e) {
       print('Node.js server start error: $e');
+    }
+    // 启动本地 HTTP 服务器，供 DLNA 投屏本地音乐
+    // 失败不阻塞启动流程，投屏时若未启动会提示用户重启 App
+    try {
+      await LocalHttpServer.instance.start();
+    } catch (e) {
+      print('Local HTTP server start error: $e');
     }
   }
 

@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:dlna_dart/xmlParser.dart' show AudioMime, PlayType;
 import 'package:flutter/widgets.dart';
 import 'package:provider/provider.dart';
 
 import '../core/services/dlna_service.dart';
+import '../core/services/local_http_server.dart';
+import '../core/services/media_store_service.dart';
 import '../data/models/song.dart';
 import 'player_provider.dart';
 import '../services/kugou_api/kugou_api_client.dart';
@@ -128,44 +131,75 @@ class DlnaProvider extends ChangeNotifier {
     }
   }
 
-  /// 投屏歌曲：获取在线播放 URL → cast → 暂停本地播放。
+  /// 投屏歌曲：在线歌曲走酷狗 URL，本地歌曲走 LocalHttpServer 暴露的 HTTP URL。
   /// [preserveWasPlaying] 为 true 时不覆盖 _wasPlayingBefore（切歌场景）。
   Future<void> castSong(BuildContext context, Song song,
       {bool preserveWasPlaying = false}) async {
-    if (!song.isOnline) {
-      _state = DlnaCastState.error;
-      _errorMessage = '本地歌曲不支持投屏';
-      notifyListeners();
-      return;
-    }
-
     _state = DlnaCastState.connecting;
     _castTitle = song.displayName;
     _castMediaType = DlnaMediaType.audio;
     notifyListeners();
 
     try {
-      // 获取新鲜的播放 URL
-      final apiClient = KugouApiClient();
       final playerProvider = context.read<PlayerProvider>();
-      final result = await apiClient.getSongUrlWithFallback(
-        song.id,
-        quality: playerProvider.audioQuality.value,
-        albumId: song.albumId,
-        albumAudioId: song.albumAudioId,
-      );
+      String url;
+      PlayType? overrideType;
 
-      if (result == null || result.url.isEmpty) {
-        _state = DlnaCastState.error;
-        _errorMessage = '无法获取播放地址';
-        notifyListeners();
-        return;
+      if (song.isOnline) {
+        // ── 在线歌曲：通过酷狗 API 获取新鲜播放 URL ──
+        final apiClient = KugouApiClient();
+        final result = await apiClient.getSongUrlWithFallback(
+          song.id,
+          quality: playerProvider.audioQuality.value,
+          albumId: song.albumId,
+          albumAudioId: song.albumAudioId,
+        );
+        if (result == null || result.url.isEmpty) {
+          _state = DlnaCastState.error;
+          _errorMessage = '无法获取播放地址';
+          notifyListeners();
+          return;
+        }
+        url = result.url;
+      } else {
+        // ── 本地歌曲：通过 LocalHttpServer 暴露到局域网 ──
+        final rawPath = song.localPath;
+        if (rawPath == null || rawPath.isEmpty) {
+          _state = DlnaCastState.error;
+          _errorMessage = '本地歌曲无文件路径';
+          notifyListeners();
+          return;
+        }
+        // content:// URI 走 MediaStoreService 重新解析为真实路径
+        String filePath = rawPath;
+        if (filePath.startsWith('content://')) {
+          final resolved = await MediaStoreService.resolveLocalPath(filePath);
+          if (resolved == null || resolved.isEmpty) {
+            _state = DlnaCastState.error;
+            _errorMessage = '无法解析本地文件路径';
+            notifyListeners();
+            return;
+          }
+          filePath = resolved;
+        }
+        final httpUrl = LocalHttpServer.instance.getUrlForPath(filePath);
+        if (httpUrl == null) {
+          _state = DlnaCastState.error;
+          _errorMessage = LocalHttpServer.instance.isRunning
+              ? '请确保手机已连接 WiFi'
+              : '本地服务器未启动，请重启 App';
+          notifyListeners();
+          return;
+        }
+        url = httpUrl;
+        overrideType = _audioPlayTypeForPath(filePath);
       }
 
       final success = await _service.cast(
-        result.url,
+        url,
         title: song.displayName,
         mediaType: DlnaMediaType.audio,
+        overrideType: overrideType,
       );
 
       if (success) {
@@ -190,6 +224,21 @@ class DlnaProvider extends ChangeNotifier {
       _errorMessage = '投屏出错：$e';
       notifyListeners();
     }
+  }
+
+  /// 本地文件按扩展名映射到 dlna_dart 的 AudioMime。
+  /// 仅常见格式有专用枚举；未识别格式返回 null，由 cast() 兜底用 AudioMime.mpeg。
+  static PlayType? _audioPlayTypeForPath(String path) {
+    final lower = path.toLowerCase();
+    if (lower.endsWith('.mp3')) return AudioMime.mp3;
+    if (lower.endsWith('.flac')) return AudioMime.xFlac;
+    if (lower.endsWith('.wav')) return AudioMime.wav;
+    if (lower.endsWith('.m4a') || lower.endsWith('.aac')) {
+      return AudioMime.mp4;
+    }
+    if (lower.endsWith('.ape')) return AudioMime.xApe;
+    if (lower.endsWith('.wma')) return AudioMime.wma;
+    return null; // ogg/opus 等无对应枚举，由 cast() 兜底用 mpeg
   }
 
   /// 投屏 MV：使用已解析的 MV URL。
