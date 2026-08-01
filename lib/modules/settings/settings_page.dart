@@ -21,6 +21,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/theme/motion_constants.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../onboarding/onboarding_page.dart';
+import '../onboarding/user_agreement_page.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/tab_config_provider.dart';
 import '../../providers/theme_provider.dart';
@@ -1455,6 +1456,30 @@ class _SettingsPageState extends State<SettingsPage> {
               MaterialPageRoute(builder: (_) => OnboardingPage(isReview: true)),
             );
           },
+        ),
+        ListTile(
+          title: const Text('用户协议'),
+          subtitle: const Text('查看用户协议全文'),
+          leading: const Icon(Icons.handshake_outlined),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => UserAgreementPage(
+                  isFirstLaunch: false,
+                  isReview: true,
+                  onAgreed: () => Navigator.of(context).pop(),
+                ),
+              ),
+            );
+          },
+        ),
+        ListTile(
+          title: const Text('免责声明'),
+          subtitle: const Text('查看本软件免责声明'),
+          leading: const Icon(Icons.gavel_outlined),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => UserAgreementPage.showDisclaimerDialog(context),
         ),
         ListTile(
           title: const Text('应用版本'),

@@ -29,6 +29,7 @@ import 'modules/settings/settings_page.dart';
 import 'modules/library/library_page.dart';
 import 'modules/login/login_page.dart';
 import 'modules/onboarding/onboarding_page.dart';
+import 'modules/onboarding/user_agreement_page.dart';
 import 'modules/personal_fm/personal_fm_page.dart';
 import 'modules/recognition/song_recognition_page.dart';
 import 'providers/downloads_provider.dart';
@@ -104,8 +105,13 @@ class _UpFadeMainRoute<T> extends MaterialPageRoute<T> {
 
 class MyApp extends StatelessWidget {
   final bool showOnboarding;
+  final bool showUserAgreement;
 
-  const MyApp({super.key, this.showOnboarding = false});
+  const MyApp({
+    super.key,
+    this.showOnboarding = false,
+    this.showUserAgreement = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -125,15 +131,19 @@ class MyApp extends StatelessWidget {
         // 主页 Tab 配置（显示/隐藏、排序）
         ChangeNotifierProvider(create: (_) => TabConfigProvider()),
       ],
-      child: _AppView(showOnboarding: showOnboarding),
+      child: _AppView(
+        showOnboarding: showOnboarding,
+        showUserAgreement: showUserAgreement,
+      ),
     );
   }
 }
 
 class _AppView extends StatefulWidget {
   final bool showOnboarding;
+  final bool showUserAgreement;
 
-  const _AppView({this.showOnboarding = false});
+  const _AppView({this.showOnboarding = false, this.showUserAgreement = false});
 
   @override
   State<_AppView> createState() => _AppViewState();
@@ -210,7 +220,10 @@ class _AppViewState extends State<_AppView> {
         );
       },
       navigatorKey: appNavigatorKey,
-      initialRoute: widget.showOnboarding ? '/onboarding' : '/',
+      // 优先级：未同意协议 → 协议页；否则未完成新手引导 → 引导页；否则主页
+      initialRoute: widget.showUserAgreement
+          ? '/user_agreement'
+          : (widget.showOnboarding ? '/onboarding' : '/'),
       routes: {
         // '/' 不在 routes 注册，改在 onGenerateRoute 用 _UpFadeMainRoute 创建，
         // 以便 push FullPlayer 时主页面向上淡出（仅 FullPlayer 生效）
@@ -226,6 +239,25 @@ class _AppViewState extends State<_AppView> {
         if (settings.name == '/onboarding') {
           return PageRouteBuilder(
             pageBuilder: (_, _, _) => const OnboardingPage(),
+            transitionsBuilder: (_, animation, _, child) {
+              return FadeTransition(opacity: animation, child: child);
+            },
+            transitionDuration: M3ExpressiveMotion.emphasisDuration,
+          );
+        }
+        if (settings.name == '/user_agreement') {
+          // 协议页：首次启动时点击"下一步" → 推送新手引导；已同意过则跳过引导直达主页
+          return PageRouteBuilder(
+            pageBuilder: (_, _, _) => UserAgreementPage(
+              isFirstLaunch: true,
+              onAgreed: () {
+                // 用 pushReplacement 替换协议页，next 路由由 isFirstLaunch 决定
+                // 避免新协议栈里残留协议页（用户按返回能跳过）
+                appNavigatorKey.currentState?.pushReplacementNamed(
+                  widget.showOnboarding ? '/onboarding' : '/',
+                );
+              },
+            ),
             transitionsBuilder: (_, animation, _, child) {
               return FadeTransition(opacity: animation, child: child);
             },
