@@ -33,6 +33,7 @@ import 'modules/onboarding/user_agreement_page.dart';
 import 'modules/personal_fm/personal_fm_page.dart';
 import 'modules/recognition/song_recognition_page.dart';
 import 'providers/downloads_provider.dart';
+import 'providers/dlna_provider.dart';
 import 'providers/favorites_provider.dart';
 import 'providers/kugou_provider.dart';
 import 'providers/library_provider.dart';
@@ -45,6 +46,7 @@ import 'providers/grid_columns_provider.dart';
 import 'providers/tab_config_provider.dart';
 import 'providers/theme_provider.dart';
 import 'services/nodejs_server.dart';
+import 'widgets/dlna_casting_overlay.dart';
 
 /// 主页（`/`）专用的 [MaterialPageRoute] 子类。
 ///
@@ -130,6 +132,8 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => PlaylistCollectionNotifier()),
         // 主页 Tab 配置（显示/隐藏、排序）
         ChangeNotifierProvider(create: (_) => TabConfigProvider()),
+        // DLNA 投屏
+        ChangeNotifierProvider(create: (_) => DlnaProvider()),
       ],
       child: _AppView(
         showOnboarding: showOnboarding,
@@ -216,7 +220,14 @@ class _AppViewState extends State<_AppView> {
           data: MediaQuery.of(
             context,
           ).copyWith(textScaler: TextScaler.linear(scale)),
-          child: _SystemUiUpdater(child: child!),
+          child: _SystemUiUpdater(
+            child: Stack(
+              children: [
+                child!,
+                const DlnaCastingOverlay(),
+              ],
+            ),
+          ),
         );
       },
       navigatorKey: appNavigatorKey,
