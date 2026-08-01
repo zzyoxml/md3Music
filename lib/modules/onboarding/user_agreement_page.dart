@@ -32,7 +32,7 @@ class UserAgreementPage extends StatefulWidget {
   State<UserAgreementPage> createState() => _UserAgreementPageState();
 
   /// 弹出免责声明全文（Markdown 原文）。在 GitHub 仓库中访问
-  /// `https://github.com/zzyoxml/md3Music/blob/main/DISCLAIMER.md` 可看完整版。
+  /// `https://github.com/zzyoxml/md3Music/blob/arch-local-first/DISCLAIMER.md` 可看完整版。
   static Future<void> showDisclaimerDialog(BuildContext context) {
     return showDialog<void>(
       context: context,
@@ -50,7 +50,7 @@ class UserAgreementPage extends StatefulWidget {
             '软件仅充当"浏览器"角色，在用户本地展示公开数据。\n\n'
             '四、本应用从未收集任何用户隐私数据，所有操作产生的数据都保留在用户本地。\n\n'
             '五、该软件仅供交流学习，严禁用于商业用途，请于下载后的 24 小时内卸载。\n\n'
-            '完整版请访问：\nhttps://github.com/zzyoxml/md3Music/blob/main/DISCLAIMER.md',
+            '完整版请访问：\nhttps://github.com/zzyoxml/md3Music/blob/arch-local-first/DISCLAIMER.md',
           ),
         ),
         actions: [
@@ -60,7 +60,7 @@ class UserAgreementPage extends StatefulWidget {
               Clipboard.setData(
                 const ClipboardData(
                   text:
-                      'https://github.com/zzyoxml/md3Music/blob/main/DISCLAIMER.md',
+                      'https://github.com/zzyoxml/md3Music/blob/arch-local-first/DISCLAIMER.md',
                 ),
               );
             },
