@@ -1003,9 +1003,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
         // 避免断网重进歌单时被空响应覆盖掉本地缓存的歌曲
         if (all.isNotEmpty || _songs.isEmpty) {
           _songs = all.where((song) {
-            final validTitle = song.title.isNotEmpty && song.title != '-';
-            final validDuration = song.duration.inMilliseconds > 0;
-            return validTitle && validDuration;
+            // 只过滤标题为空的歌曲；保留时长未知（duration=0）的歌曲，
+            // 部分无版权/信息不全的歌曲（如 "白菊 -shiragiku-"）可能缺少时长字段。
+            return song.title.isNotEmpty && song.title != '-';
           }).toList();
         }
         _invalidateDisplaySongs();

@@ -543,20 +543,31 @@ class KugouSongDetail {
   Song toSong() {
     // 清理 title：API 的 filename/songname 常返回 "歌手 - 歌曲名" 格式，
     // 去掉前缀，只保留纯歌曲名（subtitle 已单独显示歌手和专辑）。
-    // 用正则兼容 "歌手A/歌手B - 歌曲名"、"歌手A、歌手B - 歌曲名" 等多种分隔符。
+    // 只用 " - "（空格-破折号-空格）作为分隔符，避免误剥含有连字符的歌名
+    // （如 "白菊 -shiragiku-"）。与 EchoMusic processSongTitle 实现一致。
     var cleanTitle = songName;
-    final separatorPattern = RegExp(r'^.+\s*[-–—]\s*');
-    final match = separatorPattern.firstMatch(cleanTitle);
-    if (match != null) {
-      final afterSep = cleanTitle.substring(match.end);
-      if (afterSep.trim().isNotEmpty) {
-        cleanTitle = afterSep;
+    // 歌手名兜底：当 API 未返回歌手字段时，从 "歌手 - 歌曲名" 格式的
+    // 文件名中提取歌手。与 EchoMusic song.ts 实现一致。
+    var resolvedArtist = artistName;
+    if ((resolvedArtist == null || resolvedArtist.isEmpty) &&
+        songName.contains(' - ')) {
+      resolvedArtist = songName.split(' - ')[0];
+    }
+    if (cleanTitle.contains(' - ')) {
+      final parts = cleanTitle.split(' - ');
+      if (parts.length > 1) {
+        final rest = parts.sublist(1).join(' - ');
+        if (rest.trim().isNotEmpty) {
+          cleanTitle = rest;
+        }
       }
     }
     return Song(
       id: hash,
       title: cleanTitle,
-      artist: artistName ?? '',
+      artist: (resolvedArtist != null && resolvedArtist.isNotEmpty)
+          ? resolvedArtist
+          : '未知歌手',
       album: albumName ?? '',
       duration: Duration(seconds: duration),
       isOnline: true,
