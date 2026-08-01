@@ -188,6 +188,23 @@ class _DlnaCastingOverlayState extends State<DlnaCastingOverlay> {
         _expanded = true;
         _floatingPosition = Offset(initialLeft, initialTop);
       });
+      // 浮动态宽度自适应，首次展开时 _actualWidth 还是 icon 宽度，
+      // 用 _maxExpandedWidth 估算的 left 会导致悬浮窗偏离右边（跳到中间）。
+      // 下一帧测量实际渲染宽度后，修正 left 使右/左边缘对齐屏幕边缘。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_expanded || _isDragging) return;
+        final actualWidth = _actualWidth;
+        if (actualWidth <= _iconSize) return; // 宽度尚未更新，跳过
+        final correctedLeft = _attachedRight
+            ? (screenWidth - actualWidth).clamp(0.0, double.infinity)
+            : 0.0;
+        final curPos = _floatingPosition;
+        if (curPos != null) {
+          setState(() {
+            _floatingPosition = Offset(correctedLeft, curPos.dy);
+          });
+        }
+      });
     }
   }
 
