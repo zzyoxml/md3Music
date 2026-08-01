@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -32,6 +34,7 @@ import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_transport_row.dart';
 import '../../widgets/player_artwork_image.dart';
 import '../../widgets/player_playlist_dialog.dart';
+import 'dlna_cast_sheet.dart';
 import 'full_player_route.dart';
 
 /// 预加载封面图片到磁盘缓存，防止切换时白屏
@@ -94,6 +97,10 @@ class _FullPlayerState extends State<FullPlayer>
   bool _zenMode = false;
   late final AnimationController _zenController;
   late final Animation<double> _zenAnimation;
+
+  // ── Zen 长按专辑图片退出 ──
+  Timer? _zenLongPressTimer;
+  bool _zenLongPressActive = false;
 
   void _collapseByButton() {
     final route = ModalRoute.of(context);
@@ -442,6 +449,7 @@ class _FullPlayerState extends State<FullPlayer>
 
   @override
   void dispose() {
+    _zenLongPressTimer?.cancel();
     try {
       context.read<PlayerProvider>().removeListener(_onPlayerSongChanged);
     } catch (_) {}
@@ -469,6 +477,59 @@ class _FullPlayerState extends State<FullPlayer>
     setState(() => _zenMode = false);
     _zenController.reverse();
     applyImmersiveForOrientation();
+  }
+
+  /// Zen 模式下长按专辑图片 2000ms 退出，期间显示文字提示。
+  /// 通过 Listener 的 onPointerDown/Up 直接监听指针事件，
+  /// 精确实现 2000ms 长按（不依赖系统 500ms 长按识别延迟），
+  /// 同时不影响 TabBarView 水平滑动手势。
+  void _onArtworkLongPressStart() {
+    if (!_zenMode) return;
+    _zenLongPressActive = true;
+    setState(() {}); // 触发文字提示显示
+    _zenLongPressTimer = Timer(const Duration(milliseconds: 2000), () {
+      if (_zenLongPressActive && _zenMode) {
+        _zenLongPressActive = false;
+        _exitZenMode();
+      }
+    });
+  }
+
+  void _onArtworkLongPressEnd() {
+    _zenLongPressTimer?.cancel();
+    _zenLongPressTimer = null;
+    if (_zenLongPressActive) {
+      _zenLongPressActive = false;
+      setState(() {}); // 隐藏文字提示
+    }
+  }
+
+  /// Zen 模式长按退出提示层：覆盖在封面上，半透明黑色背景 + 文字提示。
+  /// 仅在长按激活时显示，IgnorePointer 避免拦截指针事件。
+  Widget _buildZenLongPressHint() {
+    if (!_zenLongPressActive) return const SizedBox.shrink();
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            color: Colors.black.withValues(alpha: 0.6),
+            alignment: Alignment.center,
+            child: const Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.exit_to_app, color: Colors.white, size: 32),
+                SizedBox(height: 8),
+                Text(
+                  '继续长按退出 Zen 模式',
+                  style: TextStyle(color: Colors.white, fontSize: 14),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _fetchLyrics(dynamic song) async {
@@ -782,18 +843,37 @@ class _FullPlayerState extends State<FullPlayer>
                                   child: SizedBox(
                                     width: size,
                                     height: size,
-                                    child: AnimatedScale(
-                                      scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                                      duration: const Duration(milliseconds: 500),
-                                      curve: Curves.easeOutBack,
-                                      child: ClipRRect(
-                                        borderRadius: BorderRadius.circular(16),
-                                        child: _buildCrossfadeArtwork(
-                                          currentSong.artworkUri,
-                                          colorScheme,
-                                          iconSize: 48,
-                                          fallbackFilePath: currentSong.localPath,
-                                        ),
+                                    // Listener 包裹封面：Zen 模式下监听长按手势
+                                    child: Listener(
+                                      onPointerDown: (_) =>
+                                          _onArtworkLongPressStart(),
+                                      onPointerUp: (_) =>
+                                          _onArtworkLongPressEnd(),
+                                      onPointerCancel: (_) =>
+                                          _onArtworkLongPressEnd(),
+                                      child: Stack(
+                                        children: [
+                                          AnimatedScale(
+                                            scale: playerProvider.isPlaying
+                                                ? 1.0
+                                                : 0.85,
+                                            duration: const Duration(
+                                                milliseconds: 500),
+                                            curve: Curves.easeOutBack,
+                                            child: ClipRRect(
+                                              borderRadius:
+                                                  BorderRadius.circular(16),
+                                              child: _buildCrossfadeArtwork(
+                                                currentSong.artworkUri,
+                                                colorScheme,
+                                                iconSize: 48,
+                                                fallbackFilePath:
+                                                    currentSong.localPath,
+                                              ),
+                                            ),
+                                          ),
+                                          _buildZenLongPressHint(),
+                                        ],
                                       ),
                                     ),
                                   ),
@@ -956,18 +1036,37 @@ class _FullPlayerState extends State<FullPlayer>
                                     ),
                                     child: AspectRatio(
                                       aspectRatio: 1,
-                                      child: AnimatedScale(
-                                        scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                                        duration: const Duration(milliseconds: 500),
-                                        curve: Curves.easeOutBack,
-                                        child: ClipRRect(
-                                          borderRadius: BorderRadius.circular(16),
-                                          child: _buildCrossfadeArtwork(
-                                            currentSong.artworkUri,
-                                            colorScheme,
-                                            iconSize: 48,
-                                            fallbackFilePath: currentSong.localPath,
-                                          ),
+                                      // Listener 包裹封面：Zen 模式下监听长按手势
+                                      child: Listener(
+                                        onPointerDown: (_) =>
+                                            _onArtworkLongPressStart(),
+                                        onPointerUp: (_) =>
+                                            _onArtworkLongPressEnd(),
+                                        onPointerCancel: (_) =>
+                                            _onArtworkLongPressEnd(),
+                                        child: Stack(
+                                          children: [
+                                            AnimatedScale(
+                                              scale: playerProvider.isPlaying
+                                                  ? 1.0
+                                                  : 0.85,
+                                              duration: const Duration(
+                                                  milliseconds: 500),
+                                              curve: Curves.easeOutBack,
+                                              child: ClipRRect(
+                                                borderRadius:
+                                                    BorderRadius.circular(16),
+                                                child: _buildCrossfadeArtwork(
+                                                  currentSong.artworkUri,
+                                                  colorScheme,
+                                                  iconSize: 48,
+                                                  fallbackFilePath:
+                                                      currentSong.localPath,
+                                                ),
+                                              ),
+                                            ),
+                                            _buildZenLongPressHint(),
+                                          ],
                                         ),
                                       ),
                                     ),
@@ -1192,21 +1291,32 @@ class _FullPlayerState extends State<FullPlayer>
             LayoutBuilder(
               builder: (context, constraints) {
                 final maxSize = (constraints.maxWidth - 32).clamp(0.0, 380.0);
-                return ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: maxSize,
-                    maxHeight: maxSize,
-                  ),
-                  child: AspectRatio(
-                    aspectRatio: 1,
-                    child: AnimatedScale(
-                      scale: playerProvider.isPlaying ? 1.0 : 0.85,
-                      duration: const Duration(milliseconds: 500),
-                      curve: Curves.easeOutBack,
-                      child: _buildCrossfadeArtworkWrapper(
-                        currentSong, colorScheme, iconSize: iconSize,
+                // Listener 包裹封面：Zen 模式下监听长按手势，精确 2000ms 退出
+                return Listener(
+                  onPointerDown: (_) => _onArtworkLongPressStart(),
+                  onPointerUp: (_) => _onArtworkLongPressEnd(),
+                  onPointerCancel: (_) => _onArtworkLongPressEnd(),
+                  child: Stack(
+                    children: [
+                      ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: maxSize,
+                          maxHeight: maxSize,
+                        ),
+                        child: AspectRatio(
+                          aspectRatio: 1,
+                          child: AnimatedScale(
+                            scale: playerProvider.isPlaying ? 1.0 : 0.85,
+                            duration: const Duration(milliseconds: 500),
+                            curve: Curves.easeOutBack,
+                            child: _buildCrossfadeArtworkWrapper(
+                              currentSong, colorScheme, iconSize: iconSize,
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      _buildZenLongPressHint(),
+                    ],
                   ),
                 );
               },
@@ -2106,6 +2216,14 @@ class _FullPlayerState extends State<FullPlayer>
                   },
                 ),
                 ListTile(
+                  leading: const Icon(Icons.cast),
+                  title: const Text('投屏'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showDlnaCastSheet(context);
+                  },
+                ),
+                ListTile(
                   leading: const Icon(Icons.album),
                   title: Text(
                     albumTitle,
@@ -2161,6 +2279,15 @@ class _FullPlayerState extends State<FullPlayer>
           ),
         );
       },
+    );
+  }
+
+  /// 弹出 DLNA 投屏二级菜单（设备选择 + 传输控制）。
+  void _showDlnaCastSheet(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => const DlnaCastSheet(),
     );
   }
 

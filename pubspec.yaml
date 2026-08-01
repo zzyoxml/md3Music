@@ -37,6 +37,7 @@ dependencies:
   audio_metadata_reader: ^1.4.1
   video_player: ^2.9.2
   chewie: ^1.8.5
+  dlna_dart: ^0.1.0
 
 dev_dependencies:
   flutter_test:
