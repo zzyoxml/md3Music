@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum ScreenType {
-  compact,
-  medium,
-  expanded,
-}
+enum ScreenType { compact, medium, expanded }
 
 const double _compactBreakpoint = 600;
 const double _mediumBreakpoint = 900;
@@ -104,6 +100,7 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
       body: widget.compactBody ?? widget.body,
       floatingActionButton: widget.floatingActionButton,
       bottomNavigationBar: NavigationBar(
+        height: 56,
         selectedIndex: widget.selectedIndex,
         onDestinationSelected: widget.onDestinationSelected,
         destinations: widget.destinations,
@@ -130,9 +127,7 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
             width: 1,
             color: Theme.of(context).colorScheme.outlineVariant,
           ),
-          Expanded(
-            child: widget.mediumBody ?? widget.body,
-          ),
+          Expanded(child: widget.mediumBody ?? widget.body),
         ],
       ),
     );
