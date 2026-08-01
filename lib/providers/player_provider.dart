@@ -58,6 +58,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   String? _cachedArtworkPath;
   AudioQuality _audioQuality = AudioQuality.standard;
 
+  // —— 睡眠定时（到点自动暂停） ——
+  // 用 wall clock（DateTime.now()）计算剩余时间，避免 Timer 漂移；
+  // App 被杀后失效（无后台服务），符合"不持久化"决策。
+  DateTime? _sleepTimerEndTime;
+  Timer? _sleepTimerTicker;
+
   // —— 在线歌曲异常结束重试限制 ——
   // 当在线歌曲播放不足 80% 就触发 completed 时（URL 过期 / 流中断），
   // 最多重试 _maxAbnormalRetries 次；超过后跳过该歌曲，避免死循环。
@@ -80,6 +86,17 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   String? get resolveError => _resolveError;
   AudioQuality get audioQuality => _audioQuality;
   String get audioQualityLabel => _audioQuality.label;
+
+  /// 睡眠定时剩余时间（null = 未启用）。
+  Duration? get sleepTimerRemaining {
+    final end = _sleepTimerEndTime;
+    if (end == null) return null;
+    final left = end.difference(DateTime.now());
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  /// 是否启用了睡眠定时。
+  bool get isSleepTimerActive => _sleepTimerEndTime != null;
 
   /// 当前歌曲的实际音质标签。
   /// 本地歌曲优先使用 song.quality 推断的标签，在线歌曲始终使用全局音质偏好
@@ -1673,6 +1690,36 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _applyQualityToCurrent();
   }
 
+  /// 设置 / 取消睡眠定时。
+  /// [duration] 为 null 表示取消；非 null 表示 duration 后自动暂停播放。
+  void setSleepTimer(Duration? duration) {
+    _sleepTimerTicker?.cancel();
+    _sleepTimerTicker = null;
+    if (duration == null) {
+      _sleepTimerEndTime = null;
+      notifyListeners();
+      return;
+    }
+    _sleepTimerEndTime = DateTime.now().add(duration);
+    _sleepTimerTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      final end = _sleepTimerEndTime;
+      if (end == null) return;
+      final left = end.difference(DateTime.now());
+      if (left <= Duration.zero) {
+        // 到点：暂停 + 清理
+        _sleepTimerTicker?.cancel();
+        _sleepTimerTicker = null;
+        _sleepTimerEndTime = null;
+        _audioService?.pause();
+        notifyListeners();
+      } else {
+        // 每秒刷新剩余时间，让 UI 药丸走字
+        notifyListeners();
+      }
+    });
+    notifyListeners();
+  }
+
   Future<void> _applyQualityToCurrent() async {
     final song = _currentSong;
     if (song == null || !song.isOnline) return;
@@ -2009,6 +2056,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _playerStateSubscription?.cancel();
     _sequenceStateSubscription?.cancel();
     _speedSubscription?.cancel();
+    _sleepTimerTicker?.cancel();
+    _sleepTimerTicker = null;
     super.dispose();
   }
 }
