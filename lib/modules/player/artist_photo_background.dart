@@ -18,7 +18,15 @@ import '../../services/kugou_api/kugou_endpoints.dart';
 class ArtistPhotoBackground extends StatefulWidget {
   final String hash;
 
-  const ArtistPhotoBackground({super.key, required this.hash});
+  /// 写真图片可用性回调：true 表示当前有图片可显示，false 表示加载中或无图。
+  /// 上层据此决定是否隐藏左侧专辑封面，避免写真无图时封面一起消失。
+  final ValueChanged<bool>? onHasImages;
+
+  const ArtistPhotoBackground({
+    super.key,
+    required this.hash,
+    this.onHasImages,
+  });
 
   @override
   State<ArtistPhotoBackground> createState() => _ArtistPhotoBackgroundState();
@@ -50,6 +58,8 @@ class _ArtistPhotoBackgroundState extends State<ArtistPhotoBackground> {
       _imageUrls = [];
       _currentIndex = 0;
     });
+    // 加载开始：通知上层当前无可用图片
+    widget.onHasImages?.call(false);
     _stopTimer();
 
     if (widget.hash.isEmpty) {
@@ -101,6 +111,8 @@ class _ArtistPhotoBackgroundState extends State<ArtistPhotoBackground> {
       _imageUrls = urls;
       _loading = false;
     });
+    // 加载完成：通知上层是否实际有图片可显示
+    widget.onHasImages?.call(urls.isNotEmpty);
     if (urls.length > 1) _startTimer();
   }
 

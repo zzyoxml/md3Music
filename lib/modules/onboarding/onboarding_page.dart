@@ -310,6 +310,14 @@ class _OnboardingPageState extends State<OnboardingPage>
         color: colorScheme.tertiary,
         onColor: colorScheme.onTertiary,
       ),
+      _HiddenOp(
+        icon: Icons.queue_music,
+        gesture: '长按',
+        target: '播放列表图标',
+        action: '进入歌词沉浸模式',
+        color: colorScheme.secondary,
+        onColor: colorScheme.onSecondary,
+      ),
     ];
 
     Widget listWidget = FadeTransition(

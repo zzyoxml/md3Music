@@ -16,6 +16,7 @@ import 'dart:ui';
 
 import 'package:flutter/widgets.dart';
 
+import '../layout/duet_layout.dart';
 import '../layout/lyric_layout.dart';
 import '../layout/lyric_preferences.dart';
 import '../models/lyric_line.dart';
@@ -328,7 +329,9 @@ class WordRenderer {
   ///   不会出现"下一个 word 覆盖 painter.text 导致 _lastSetAlphas[i] 错乱"的 bug。
   void paintLine(
       Canvas canvas, Offset offset, LyricLine line, double fontSize,
-      {double maxWidth = double.infinity}) {
+      {double maxWidth = double.infinity,
+      DuetAlignment alignment = DuetAlignment.defaultAlign,
+      double viewportWidth = 0}) {
     _ensureBound(line, fontSize);
 
     // 主题切换时 textColorValue 变化，清空 alpha 缓存强制重建所有 word TextSpan
@@ -338,11 +341,19 @@ class WordRenderer {
     }
 
     if (line.words.isEmpty) {
-      _paintSolidFallback(canvas, offset, line, fontSize, maxWidth: maxWidth);
+      _paintSolidFallback(canvas, offset, line, fontSize,
+          maxWidth: maxWidth, alignment: alignment, viewportWidth: viewportWidth);
       return;
     }
 
-    double dx = 0; // 相对 offset.dx 的水平偏移
+    // 对唱对齐：预扫描每视觉行的 word 宽度，换行时重算 baseX
+    // _visualLineWidths[i] = 第 i 条视觉行的 word 累计宽度
+    final List<double> visualLineWidths = _computeVisualLineWidths(maxWidth);
+    int visualLineIndex = 0;
+    double baseX = _alignX(alignment, offset.dx,
+        visualLineWidths.isNotEmpty ? visualLineWidths[0] : 0, viewportWidth);
+
+    double dx = 0; // 相对 baseX 的水平偏移
     double currentY = offset.dy; // 当前视觉行的 y 坐标
     final double dark = dynamicDarkAlpha;
     // 换行内部行高 = 主行高 × 0.8（与 LyricLayout.measureLineHeight 一致）
@@ -364,9 +375,15 @@ class WordRenderer {
       if (dx + width > maxWidth && dx > 0) {
         dx = 0;
         currentY += wrapLineHeight;
+        // 换行后重算对齐 baseX
+        visualLineIndex++;
+        if (visualLineIndex < visualLineWidths.length) {
+          baseX = _alignX(alignment, offset.dx,
+              visualLineWidths[visualLineIndex], viewportWidth);
+        }
       }
 
-      final double wordX = offset.dx + dx;
+      final double wordX = baseX + dx;
       final double wordY = currentY + yOffset;
       final Offset wordPos = Offset(wordX, wordY);
 
@@ -453,7 +470,64 @@ class WordRenderer {
       _translationPainter.layout(
           maxWidth:
               maxWidth == double.infinity ? double.infinity : maxWidth);
-      _translationPainter.paint(canvas, Offset(offset.dx, transY));
+      // 翻译副行对齐跟随原文，按副行自身宽度计算 x
+      final double transX = _alignX(alignment, offset.dx,
+          _translationPainter.width, viewportWidth);
+      // 多行翻译副行需设置 textAlign 让每条视觉行独立对齐到 transX
+      // 单行时 textAlign 不影响，_alignX 已计算正确 x
+      _translationPainter.textAlign = _duetToTextAlign(alignment);
+      _translationPainter.paint(canvas, Offset(transX, transY));
+    }
+  }
+
+  /// 按换行逻辑预扫描，计算每条视觉行的 word 累计宽度。
+  /// 与 paintLine 循环中的换行判断一致：dx + width > maxWidth 且 dx > 0 时换行。
+  List<double> _computeVisualLineWidths(double maxWidth) {
+    final List<double> widths = <double>[];
+    double dx = 0;
+    double lineW = 0;
+    for (int i = 0; i < _wordWidths.length; i++) {
+      final w = _wordWidths[i];
+      if (dx + w > maxWidth && dx > 0) {
+        widths.add(lineW);
+        dx = 0;
+        lineW = 0;
+      }
+      dx += w;
+      lineW += w;
+    }
+    if (lineW > 0) widths.add(lineW);
+    return widths;
+  }
+
+  /// 根据对唱对齐方式计算文本起始 x 坐标。
+  /// [leftPadding] 为左侧 1em 边距（即 offset.dx），右侧对称留白。
+  double _alignX(DuetAlignment alignment, double leftPadding,
+      double textWidth, double viewportWidth) {
+    if (viewportWidth <= 0 ||
+        alignment == DuetAlignment.defaultAlign ||
+        alignment == DuetAlignment.left) {
+      return leftPadding;
+    }
+    if (alignment == DuetAlignment.right) {
+      return viewportWidth - leftPadding - textWidth;
+    }
+    // center
+    return (viewportWidth - textWidth) / 2;
+  }
+
+  /// 对唱对齐方式 → TextAlign 映射（用于多行翻译副行内部对齐）。
+  /// left/defaultAlign → start（左对齐）
+  /// right → end（右对齐）
+  /// center → center（居中）
+  static TextAlign _duetToTextAlign(DuetAlignment alignment) {
+    switch (alignment) {
+      case DuetAlignment.center:
+        return TextAlign.center;
+      case DuetAlignment.right:
+        return TextAlign.end;
+      default:
+        return TextAlign.start;
     }
   }
 
@@ -463,7 +537,9 @@ class WordRenderer {
   /// 用临时 TextPainter 实例（仅在 fallback 路径，频率低不缓存）。
   void _paintSolidFallback(
       Canvas canvas, Offset offset, LyricLine line, double fontSize,
-      {double maxWidth = double.infinity}) {
+      {double maxWidth = double.infinity,
+      DuetAlignment alignment = DuetAlignment.defaultAlign,
+      double viewportWidth = 0}) {
     if (line.text.isEmpty) return;
     final double alpha = dynamicDarkAlpha;
     final painter = TextPainter(textDirection: TextDirection.ltr);
@@ -479,7 +555,8 @@ class WordRenderer {
     );
     painter.layout(
         maxWidth: maxWidth == double.infinity ? double.infinity : maxWidth);
-    painter.paint(canvas, offset);
+    final double x = _alignX(alignment, offset.dx, painter.width, viewportWidth);
+    painter.paint(canvas, Offset(x, offset.dy));
     painter.dispose();
   }
 

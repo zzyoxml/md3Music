@@ -19,7 +19,12 @@ import '../playlist/playlist_page.dart';
 import '../player/mini_player.dart';
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key});
+  /// 是否在页面底部显示 MiniPlayer。
+  /// 作为独立路由打开时为 true（页面自带 MiniPlayer）；
+  /// 作为主页 Tab 显示时为 false（由 _MainLayout 统一提供全局 MiniPlayer，避免重复）。
+  final bool showMiniPlayer;
+
+  const SearchPage({super.key, this.showMiniPlayer = true});
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -227,7 +232,7 @@ class _SearchPageState extends State<SearchPage>
                   : _buildEmptyState(),
             ),
           ),
-          const MiniPlayer(),
+          if (widget.showMiniPlayer) const MiniPlayer(),
         ],
       ),
     );

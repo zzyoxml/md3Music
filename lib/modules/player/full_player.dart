@@ -77,6 +77,8 @@ class _FullPlayerState extends State<FullPlayer>
   int _currentTabLength = 3;
   // 手机横屏模式：保留封面Tab，但隐藏左侧歌曲信息
   bool _isPhoneLandscape = false;
+  // 写真背景是否实际有图片可显示：写真无图时不隐藏左侧封面，避免封面消失
+  bool _photoBgHasImages = false;
   // 拖动进度条前的播放状态，用于拖动结束后恢复
   bool _wasPlayingBeforeDrag = false;
 
@@ -87,6 +89,11 @@ class _FullPlayerState extends State<FullPlayer>
   /// 避免 immersiveSticky 下用户触摸边缘唤醒系统栏等 insets 抖动
   /// 引发无效的 applyImmersiveForOrientation 调用导致系统栏闪烁。
   Size? _lastPhysicalSize;
+
+  // ── Zen Mode：长按播放列表按钮进入沉浸模式 ──
+  bool _zenMode = false;
+  late final AnimationController _zenController;
+  late final Animation<double> _zenAnimation;
 
   void _collapseByButton() {
     final route = ModalRoute.of(context);
@@ -312,7 +319,15 @@ class _FullPlayerState extends State<FullPlayer>
       curve: Curves.easeInOut,
     );
     _artworkFadeController.value = 1.0;
-    // 进入播放器时根据当前方向应用沉浸模式
+    _zenController = AnimationController(
+      duration: const Duration(milliseconds: 400),
+      vsync: this,
+    );
+    _zenAnimation = CurvedAnimation(
+      parent: _zenController,
+      curve: Curves.easeInOut,
+    );
+    // 进入播放器时会根据当前方向应用沉浸模式
     applyImmersiveForOrientation();
     // 记录初始物理尺寸，避免首次 didChangeMetrics 因 _lastPhysicalSize==null 误判方向变化
     _lastPhysicalSize =
@@ -380,7 +395,11 @@ class _FullPlayerState extends State<FullPlayer>
       // 引发无效的 applyImmersiveForOrientation 调用导致系统栏闪烁
       if (_lastPhysicalSize == current) return;
       _lastPhysicalSize = current;
-      applyImmersiveForOrientation();
+      if (_zenMode) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      } else {
+        applyImmersiveForOrientation();
+      }
     });
   }
 
@@ -429,10 +448,27 @@ class _FullPlayerState extends State<FullPlayer>
     DesktopLyricService.instance.removeListener(_onDesktopLyricChanged);
     WidgetsBinding.instance.removeObserver(this);
     _artworkFadeController.dispose();
+    _zenController.dispose();
     _tabController.dispose();
     // 退出播放器时立即恢复系统栏，确保从横屏沉浸模式正确退出
     restoreSystemUi();
     super.dispose();
+  }
+
+  /// 进入 Zen 沉浸模式：隐藏顶栏、控件、系统栏，拓宽歌词/封面视图。
+  void _enterZenMode() {
+    if (_zenMode) return;
+    setState(() => _zenMode = true);
+    _zenController.forward();
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+  }
+
+  /// 退出 Zen 沉浸模式：恢复所有 UI 元素和系统栏。
+  void _exitZenMode() {
+    if (!_zenMode) return;
+    setState(() => _zenMode = false);
+    _zenController.reverse();
+    applyImmersiveForOrientation();
   }
 
   Future<void> _fetchLyrics(dynamic song) async {
@@ -587,6 +623,10 @@ class _FullPlayerState extends State<FullPlayer>
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop || _isDismissing) return;
+        if (_zenMode) {
+          _exitZenMode();
+          return;
+        }
         _collapseByButton();
       },
       child: Scaffold(
@@ -596,7 +636,14 @@ class _FullPlayerState extends State<FullPlayer>
         children: [
           // 歌手写真背景轮播（开关开启 + 在线歌曲时显示）
           if (usePhotoBg && currentSong!.isOnline)
-            ArtistPhotoBackground(hash: currentSong.id),
+            ArtistPhotoBackground(
+              hash: currentSong.id,
+              onHasImages: (hasImages) {
+                if (_photoBgHasImages != hasImages) {
+                  setState(() => _photoBgHasImages = hasImages);
+                }
+              },
+            ),
           ResponsiveLayout(
             compact: (_) =>
                 _buildCompactLayout(playerProvider, currentSong, colorScheme, lyricDoubleTap),
@@ -626,7 +673,10 @@ class _FullPlayerState extends State<FullPlayer>
       bottom: false,
       child: Column(
         children: [
-          _buildTopBar(playerProvider),
+          _ZenFade(
+            animation: _zenAnimation,
+            child: _buildTopBar(playerProvider),
+          ),
           Expanded(
             child: TabBarView(
               controller: _tabController,
@@ -662,9 +712,14 @@ class _FullPlayerState extends State<FullPlayer>
               ],
             ),
           ),
-          Padding(
-            padding: EdgeInsets.only(bottom: bottomPadding),
-            child: _buildControls(playerProvider, colorScheme),
+          _ZenFade(
+            animation: _zenAnimation,
+            child: Padding(
+              padding: EdgeInsets.only(
+                bottom: _zenMode ? 16 : bottomPadding,
+              ),
+              child: _buildControls(playerProvider, colorScheme),
+            ),
           ),
         ],
       ),
@@ -682,18 +737,22 @@ class _FullPlayerState extends State<FullPlayer>
     // 横屏/竖屏 edgeToEdge 模式：底部需要额外 padding 避免被导航栏遮挡
     final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 8;
     // 横屏 + 写真背景开启时，写真已铺满全屏作为背景，隐藏左侧封面避免视觉重复。
-    // 关闭写真背景时恢复显示封面。
+    // 关闭写真背景或 Zen 模式时恢复显示封面。
+    // 写真实际无图时（_photoBgHasImages=false）也恢复显示封面，避免封面消失。
     final usePhotoBg = context.watch<ThemeProvider>().useArtistPhotoBackground;
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
     final hideArtworkForPhotoBg =
-        isLandscape && usePhotoBg && currentSong.isOnline;
+        isLandscape && usePhotoBg && _photoBgHasImages && currentSong.isOnline && !_zenMode;
 
     return SafeArea(
       bottom: false,
       child: Column(
         children: [
           // 顶部栏放在最外层，占据整行：返回按钮真正在屏幕最左上角
-          _buildTopBar(playerProvider),
+          _ZenFade(
+            animation: _zenAnimation,
+            child: _buildTopBar(playerProvider),
+          ),
           Expanded(
             child: Row(
               children: [
@@ -827,9 +886,14 @@ class _FullPlayerState extends State<FullPlayer>
                         ),
                       ),
                       // 控制区：底部 padding 包含导航栏高度
-                      Padding(
-                        padding: EdgeInsets.only(bottom: bottomPadding),
-                        child: _buildControls(playerProvider, colorScheme, isExpanded: true),
+                      _ZenFade(
+                        animation: _zenAnimation,
+                        child: Padding(
+                          padding: EdgeInsets.only(
+                            bottom: _zenMode ? 8 : bottomPadding,
+                          ),
+                          child: _buildControls(playerProvider, colorScheme, isExpanded: true),
+                        ),
                       ),
                     ],
                   ),
@@ -851,18 +915,22 @@ class _FullPlayerState extends State<FullPlayer>
     // 横屏/竖屏 edgeToEdge 模式：底部需要额外 padding 避免被导航栏遮挡
     final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 8;
     // 横屏 + 写真背景开启时，写真已铺满全屏作为背景，隐藏左侧封面避免视觉重复。
-    // 关闭写真背景时恢复显示封面。
+    // 关闭写真背景或 Zen 模式时恢复显示封面。
+    // 写真实际无图时（_photoBgHasImages=false）也恢复显示封面，避免封面消失。
     final usePhotoBg = context.watch<ThemeProvider>().useArtistPhotoBackground;
     final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
     final hideArtworkForPhotoBg =
-        isLandscape && usePhotoBg && currentSong.isOnline;
+        isLandscape && usePhotoBg && _photoBgHasImages && currentSong.isOnline && !_zenMode;
 
     return SafeArea(
       bottom: false,
       child: Column(
         children: [
           // 顶部栏放在最外层，占据整行：返回按钮真正在屏幕最左上角
-          _buildTopBar(playerProvider),
+          _ZenFade(
+            animation: _zenAnimation,
+            child: _buildTopBar(playerProvider),
+          ),
           Expanded(
             child: Row(
               children: [
@@ -986,9 +1054,14 @@ class _FullPlayerState extends State<FullPlayer>
                         ),
                       ),
                       // 底部 padding 包含导航栏高度
-                      Padding(
-                        padding: EdgeInsets.only(bottom: bottomPadding),
-                        child: _buildControls(playerProvider, colorScheme, isExpanded: true),
+                      _ZenFade(
+                        animation: _zenAnimation,
+                        child: Padding(
+                          padding: EdgeInsets.only(
+                            bottom: _zenMode ? 8 : bottomPadding,
+                          ),
+                          child: _buildControls(playerProvider, colorScheme, isExpanded: true),
+                        ),
                       ),
                     ],
                   ),
@@ -1539,6 +1612,7 @@ class _FullPlayerState extends State<FullPlayer>
             Expanded(
               child: InkWell(
                 onTap: () => _showPlaylist(playerProvider),
+                onLongPress: _enterZenMode,
                 child: Center(
                   child: Icon(
                     Icons.queue_music,
@@ -2297,6 +2371,47 @@ class _FullPlayerState extends State<FullPlayer>
       builder: (dialogContext) => const PlayerPlaylistDialog(
         useDisplayName: true,
       ),
+    );
+  }
+}
+
+/// Zen 模式淡出/折叠组件。
+///
+/// 当 [_zenAnimation] 为 0（正常模式）时完全显示子组件；
+/// 为 1（Zen 模式）时淡出并折叠高度为 0，释放垂直空间给歌词/封面视图。
+class _ZenFade extends StatefulWidget {
+  final Animation<double> animation;
+  final Widget child;
+
+  const _ZenFade({required this.animation, required this.child});
+
+  @override
+  State<_ZenFade> createState() => _ZenFadeState();
+}
+
+class _ZenFadeState extends State<_ZenFade> {
+  late final Animation<double> _reverse;
+
+  @override
+  void initState() {
+    super.initState();
+    _reverse = Tween<double>(begin: 1.0, end: 0.0).animate(widget.animation);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _reverse,
+      builder: (context, _) {
+        return SizeTransition(
+          sizeFactor: _reverse,
+          alignment: Alignment.topCenter,
+          child: Opacity(
+            opacity: _reverse.value.clamp(0.0, 1.0),
+            child: widget.child,
+          ),
+        );
+      },
     );
   }
 }

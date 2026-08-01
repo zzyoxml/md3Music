@@ -83,6 +83,7 @@ class LyricPreferences extends ChangeNotifier {
   static const String _keyCustomFontPath = 'lyric_custom_font_path';
   static const String _keyShowTranslation = 'lyric_show_translation';
   static const String _keyDisplayMode = 'lyric_display_mode';
+  static const String _keyUseDuetLayout = 'lyric_use_duet_layout';
 
   // ============== 当前值 ==============
 
@@ -91,6 +92,7 @@ class LyricPreferences extends ChangeNotifier {
   bool _useGaussianBlur = true;
   bool _useGlowEffect = true;
   bool _useFlowingBackground = true;
+  bool _useDuetLayout = false;
   bool _showTranslation = true;
   LyricDisplayMode _displayMode = LyricDisplayMode.translation;
   LyricFontSource _fontSource = LyricFontSource.system;
@@ -104,6 +106,7 @@ class LyricPreferences extends ChangeNotifier {
   bool get useGaussianBlur => _useGaussianBlur;
   bool get useGlowEffect => _useGlowEffect;
   bool get useFlowingBackground => _useFlowingBackground;
+  bool get useDuetLayout => _useDuetLayout;
   bool get showTranslation => _showTranslation;
   LyricDisplayMode get displayMode => _displayMode;
   LyricFontSource get fontSource => _fontSource;
@@ -144,6 +147,7 @@ class LyricPreferences extends ChangeNotifier {
     _useGaussianBlur = prefs.getBool(_keyUseGaussianBlur) ?? true;
     _useGlowEffect = prefs.getBool(_keyUseGlowEffect) ?? true;
     _useFlowingBackground = prefs.getBool(_keyUseFlowingBackground) ?? true;
+    _useDuetLayout = prefs.getBool(_keyUseDuetLayout) ?? false;
     _showTranslation = prefs.getBool(_keyShowTranslation) ?? true;
     _displayMode = _displayModeFromName(prefs.getString(_keyDisplayMode));
     _fontSource = _fontSourceFromName(prefs.getString(_keyFontSource));
@@ -201,6 +205,15 @@ class LyricPreferences extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyUseFlowingBackground, enabled);
+  }
+
+  /// 设置男女对唱歌词优化开关并持久化。
+  Future<void> setUseDuetLayout(bool enabled) async {
+    if (_useDuetLayout == enabled) return;
+    _useDuetLayout = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyUseDuetLayout, enabled);
   }
 
   /// 设置歌词翻译副行显示开关并持久化。
@@ -305,6 +318,7 @@ class LyricPreferences extends ChangeNotifier {
     _useGaussianBlur = true;
     _useGlowEffect = true;
     _useFlowingBackground = true;
+    _useDuetLayout = false;
     _showTranslation = true;
     _displayMode = LyricDisplayMode.translation;
     _fontSource = LyricFontSource.system;
@@ -317,6 +331,7 @@ class LyricPreferences extends ChangeNotifier {
     await prefs.setBool(_keyUseGaussianBlur, _useGaussianBlur);
     await prefs.setBool(_keyUseGlowEffect, _useGlowEffect);
     await prefs.setBool(_keyUseFlowingBackground, _useFlowingBackground);
+    await prefs.setBool(_keyUseDuetLayout, _useDuetLayout);
     await prefs.setBool(_keyShowTranslation, _showTranslation);
     await prefs.setString(_keyDisplayMode, _displayMode.name);
     await prefs.remove(_keyFontSource);
