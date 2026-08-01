@@ -158,7 +158,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
   Widget _buildUserAvatar(KugouProvider kugou, ColorScheme cs) {
     final avatarUrl = kugou.userInfo?.avatar;
     final userId = kugou.userid ?? 'default';
-    
+
     if (avatarUrl == null || avatarUrl.isEmpty) {
       return CircleAvatar(
         radius: 32,
@@ -166,11 +166,14 @@ class _UserCenterPageState extends State<UserCenterPage> {
         child: Icon(Icons.person, size: 32, color: cs.onPrimaryContainer),
       );
     }
-    
+
     // 修复：使用更安全的缓存键，避免 userId 为 null 导致的问题
-    final safeUserId = userId.toString().replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    final safeUserId = userId.toString().replaceAll(
+      RegExp(r'[^a-zA-Z0-9]'),
+      '_',
+    );
     final cacheKey = 'avatar_$safeUserId';
-    
+
     return CircleAvatar(
       radius: 32,
       backgroundColor: cs.primary.withValues(alpha: 0.2),
@@ -181,16 +184,10 @@ class _UserCenterPageState extends State<UserCenterPage> {
           width: 64,
           height: 64,
           fit: BoxFit.cover,
-          placeholder: (context, url) => Icon(
-            Icons.person,
-            size: 32,
-            color: cs.onPrimaryContainer,
-          ),
-          errorWidget: (context, url, error) => Icon(
-            Icons.person,
-            size: 32,
-            color: cs.onPrimaryContainer,
-          ),
+          placeholder: (context, url) =>
+              Icon(Icons.person, size: 32, color: cs.onPrimaryContainer),
+          errorWidget: (context, url, error) =>
+              Icon(Icons.person, size: 32, color: cs.onPrimaryContainer),
         ),
       ),
     );
@@ -265,9 +262,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                   isVip
                       ? Icons.workspace_premium
                       : Icons.workspace_premium_outlined,
-                  color: isVip
-                      ? cs.onSecondaryContainer
-                      : cs.onSurfaceVariant,
+                  color: isVip ? cs.onSecondaryContainer : cs.onSurfaceVariant,
                 ),
               ),
               const SizedBox(width: 12),
@@ -285,9 +280,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                       isVip
                           ? '有效期至: ${vip?.expireTime ?? '永久'}'
                           : '畅享无损音质、个性皮肤等',
-                      style: tt.bodySmall?.copyWith(
-                        color: cs.onSurfaceVariant,
-                      ),
+                      style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                     ),
                   ],
                 ),
@@ -357,9 +350,9 @@ class _UserCenterPageState extends State<UserCenterPage> {
           const SizedBox(height: 6),
           Text(
             label,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: cs.onSurfaceVariant,
-            ),
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(color: cs.onSurfaceVariant),
           ),
         ],
       ),
@@ -487,6 +480,11 @@ class _UserCenterPageState extends State<UserCenterPage> {
             color: cs.onSurfaceVariant,
             onPressed: () {},
           ),
+          // 概念版会员徽章 —— 今天签到后显示
+          if (kugou.isTodayYouthVip) ...[
+            const SizedBox(width: 4),
+            _buildConceptVipBadge(cs, tt),
+          ],
           const SizedBox(width: 4),
           Flexible(
             child: FilledButton.tonalIcon(
@@ -508,6 +506,37 @@ class _UserCenterPageState extends State<UserCenterPage> {
                     )
                   : const Icon(Icons.check_circle_outline, size: 16),
               label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 概念版会员徽章 —— 显示在签到按钮左侧，仅今天已签时显示
+  Widget _buildConceptVipBadge(ColorScheme cs, TextTheme tt) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        // 金/紫色调 —— Material 3 expressive：primary + tertiary 渐变近似
+        gradient: LinearGradient(
+          colors: [
+            cs.primary.withValues(alpha: 0.85),
+            cs.tertiary.withValues(alpha: 0.85),
+          ],
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.workspace_premium, size: 12, color: cs.onPrimary),
+          const SizedBox(width: 3),
+          Text(
+            '概念版',
+            style: tt.labelSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: cs.onPrimary,
             ),
           ),
         ],
@@ -604,9 +633,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
               children: [
                 Text(
                   '本月已打卡',
-                  style: tt.labelMedium?.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
+                  style: tt.labelMedium?.copyWith(color: cs.onSurfaceVariant),
                 ),
                 const SizedBox(height: 2),
                 Row(
@@ -680,20 +707,19 @@ class _UserCenterPageState extends State<UserCenterPage> {
     void addCell(Widget w) {
       cells.add(w);
       if (cells.length == 7) {
-        rows.add(Padding(
-          padding: const EdgeInsets.only(bottom: 6),
-          child: Row(children: cells),
-        ));
+        rows.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(children: cells),
+          ),
+        );
         cells = [];
       }
     }
 
     Widget buildEmptyCell() {
       return Expanded(
-        child: AspectRatio(
-          aspectRatio: 1,
-          child: const SizedBox(),
-        ),
+        child: AspectRatio(aspectRatio: 1, child: const SizedBox()),
       );
     }
 
@@ -742,10 +768,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: cs.secondary,
-                            border: Border.all(
-                              color: cs.surface,
-                              width: 1.5,
-                            ),
+                            border: Border.all(color: cs.surface, width: 1.5),
                           ),
                           child: Icon(
                             Icons.check,
@@ -766,7 +789,9 @@ class _UserCenterPageState extends State<UserCenterPage> {
                             : (isToday
                                   ? cs.primary
                                   : (isFuture
-                                        ? cs.onSurfaceVariant.withValues(alpha: 0.35)
+                                        ? cs.onSurfaceVariant.withValues(
+                                            alpha: 0.35,
+                                          )
                                         : cs.onSurface)),
                       ),
                     ),
