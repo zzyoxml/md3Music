@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 import '../models/album.dart';
 import '../models/artist.dart';
@@ -19,6 +20,11 @@ import '../../core/utils/audio_scanner.dart';
 class LocalMusicRepository {
   static const String _foldersKey = 'local_music_scan_folders';
   static const String _excludedFoldersKey = 'local_music_excluded_folders';
+
+  /// 持久化已扫描的歌曲列表（JSON 编码）。
+  /// 用于 App 重启后立即显示上次扫描结果，避免每次启动都重扫。
+  static const String _cachedSongsKey = 'local_music_cached_songs';
+  static const String _cachedAtKey = 'local_music_cached_at';
 
   /// 获取用户保存的自定义扫描文件夹列表。
   Future<List<String>> getSavedFolders() async {
@@ -46,6 +52,52 @@ class LocalMusicRepository {
     final folders = await getSavedFolders();
     folders.remove(folder);
     await saveFolders(folders);
+  }
+
+  /// 持久化已扫描的歌曲列表到 SharedPreferences（JSON 数组）。
+  ///
+  /// 用于 App 退出后再次启动时立即显示上次扫描结果，
+  /// 不再强制要求用户每次启动都重新扫描。
+  Future<void> saveSongs(List<Song> songs) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonList = songs.map((s) => s.toJson()).toList();
+      await prefs.setString(_cachedSongsKey, jsonEncode(jsonList));
+      await prefs.setInt(_cachedAtKey, DateTime.now().millisecondsSinceEpoch);
+      debugPrint('[LocalMusicRepository] 已缓存 ${songs.length} 首歌曲');
+    } catch (e) {
+      debugPrint('[LocalMusicRepository] 缓存歌曲失败: $e');
+    }
+  }
+
+  /// 读取上次持久化的歌曲列表。
+  ///
+  /// 返回的列表仅作"快速显示上次结果"用，文件可能在系统升级/卸载后
+  /// 已不存在；UI 层不感知（播放器在播放时再校验）。
+  Future<List<Song>> getSavedSongs() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_cachedSongsKey);
+      if (raw == null || raw.isEmpty) return [];
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list.map((e) => Song.fromJson(e as Map<String, dynamic>)).toList();
+    } catch (e) {
+      debugPrint('[LocalMusicRepository] 读取缓存歌曲失败: $e');
+      return [];
+    }
+  }
+
+  /// 上次缓存的时间戳（毫秒），无则返回 null。
+  Future<int?> getCachedAt() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_cachedAtKey);
+  }
+
+  /// 清除缓存的歌曲（用户主动重置本地音乐时使用）。
+  Future<void> clearSavedSongs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_cachedSongsKey);
+    await prefs.remove(_cachedAtKey);
   }
 
   /// 获取用户排除的文件夹列表。
@@ -133,7 +185,9 @@ class LocalMusicRepository {
     // 1. MediaStore 主源：Android 11+ 沙箱模式兼容
     try {
       final mediaStoreFiles = await MediaStoreService.queryAudioFiles();
-      debugPrint('[LocalMusicRepository] MediaStore 返回 ${mediaStoreFiles.length} 个文件');
+      debugPrint(
+        '[LocalMusicRepository] MediaStore 返回 ${mediaStoreFiles.length} 个文件',
+      );
       for (final data in mediaStoreFiles) {
         var filePath = data['filePath'] as String?;
         if (filePath == null || !seenPaths.add(filePath)) continue;
@@ -165,19 +219,21 @@ class LocalMusicRepository {
         // 对 content:// 需要 Image.network + httpHeader）
         final albumArtUri = data['albumArtUri'] as String?;
         final bitrate = data['bitrate'] as int?;
-        songs.add(Song(
-          id: 'local_$filePath',
-          title: (data['title'] as String?) ?? '未知标题',
-          artist: (data['artist'] as String?) ?? '未知艺术家',
-          album: (data['album'] as String?) ?? '未知专辑',
-          duration: Duration(milliseconds: (data['durationMs'] as int?) ?? 0),
-          localPath: filePath,
-          // 优先用 MediaStore 的 albumArtUri（content://media/...），
-          // 为空时用 local://<filePath> 标识内嵌封面，UI 层据此懒加载
-          artworkUri: albumArtUri ?? 'local://$filePath',
-          isOnline: false,
-          quality: _inferQuality(bitrate, filePath),
-        ));
+        songs.add(
+          Song(
+            id: 'local_$filePath',
+            title: (data['title'] as String?) ?? '未知标题',
+            artist: (data['artist'] as String?) ?? '未知艺术家',
+            album: (data['album'] as String?) ?? '未知专辑',
+            duration: Duration(milliseconds: (data['durationMs'] as int?) ?? 0),
+            localPath: filePath,
+            // 优先用 MediaStore 的 albumArtUri（content://media/...），
+            // 为空时用 local://<filePath> 标识内嵌封面，UI 层据此懒加载
+            artworkUri: albumArtUri ?? 'local://$filePath',
+            isOnline: false,
+            quality: _inferQuality(bitrate, filePath),
+          ),
+        );
       }
     } catch (e) {
       debugPrint('[LocalMusicRepository] MediaStore 扫描失败: $e');
@@ -192,31 +248,33 @@ class LocalMusicRepository {
     }
 
     final filePaths = collectAudioFiles(scanDirs, excludedDirs: excluded);
-    debugPrint(
-        '[LocalMusicRepository] 文件系统扫描到 ${filePaths.length} 个文件');
+    debugPrint('[LocalMusicRepository] 文件系统扫描到 ${filePaths.length} 个文件');
 
     if (filePaths.isNotEmpty) {
       // 过滤掉已经通过 MediaStore 添加的文件（去重）
-      final newPaths =
-          filePaths.where((p) => !seenPaths.contains(p)).toList();
+      final newPaths = filePaths.where((p) => !seenPaths.contains(p)).toList();
       if (newPaths.isNotEmpty) {
         final results = await compute(scanAudioFilesInIsolate, newPaths);
         for (final data in results) {
           final filePath = data['filePath'] as String;
           if (!seenPaths.add(filePath)) continue;
           final bitrate = data['bitrate'] as int?;
-          songs.add(Song(
-            id: 'local_$filePath',
-            title: data['title'] as String,
-            artist: data['artist'] as String,
-            album: data['album'] as String,
-            duration: Duration(milliseconds: (data['durationMs'] as int) ?? 0),
-            localPath: filePath,
-            // 用 local:// 前缀标识内嵌封面，UI 层通过 LocalArtworkCache 懒加载
-            artworkUri: 'local://$filePath',
-            isOnline: false,
-            quality: _inferQuality(bitrate, filePath),
-          ));
+          songs.add(
+            Song(
+              id: 'local_$filePath',
+              title: data['title'] as String,
+              artist: data['artist'] as String,
+              album: data['album'] as String,
+              duration: Duration(
+                milliseconds: (data['durationMs'] as int) ?? 0,
+              ),
+              localPath: filePath,
+              // 用 local:// 前缀标识内嵌封面，UI 层通过 LocalArtworkCache 懒加载
+              artworkUri: 'local://$filePath',
+              isOnline: false,
+              quality: _inferQuality(bitrate, filePath),
+            ),
+          );
         }
       }
     }
@@ -244,8 +302,7 @@ class LocalMusicRepository {
             ? 'local://${firstSong.localPath}'
             : null,
       );
-    }).toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+    }).toList()..sort((a, b) => a.name.compareTo(b.name));
   }
 
   /// 从 Song 列表构建 Artist 列表（按 artist 字段分组）。
@@ -268,8 +325,7 @@ class LocalMusicRepository {
             ? 'local://${firstSong.localPath}'
             : null,
       );
-    }).toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+    }).toList()..sort((a, b) => a.name.compareTo(b.name));
   }
 
   /// 从 Song 列表构建 MusicFolder 列表（按文件所在目录分组）。
@@ -288,7 +344,6 @@ class LocalMusicRepository {
         name: parts.isNotEmpty ? parts.last : entry.key,
         songIds: entry.value.map((s) => s.id).toList(),
       );
-    }).toList()
-      ..sort((a, b) => a.name.compareTo(b.name));
+    }).toList()..sort((a, b) => a.name.compareTo(b.name));
   }
 }

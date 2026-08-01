@@ -56,18 +56,26 @@ class LibraryProvider extends ChangeNotifier {
   List<Song> _filterSongs(List<Song> songs) {
     if (_searchQuery.isEmpty) return songs;
     final q = _searchQuery.toLowerCase();
-    return songs.where((s) =>
-        s.title.toLowerCase().contains(q) ||
-        s.artist.toLowerCase().contains(q) ||
-        s.album.toLowerCase().contains(q)).toList();
+    return songs
+        .where(
+          (s) =>
+              s.title.toLowerCase().contains(q) ||
+              s.artist.toLowerCase().contains(q) ||
+              s.album.toLowerCase().contains(q),
+        )
+        .toList();
   }
 
   List<Album> _filterAlbums(List<Album> albums) {
     if (_searchQuery.isEmpty) return albums;
     final q = _searchQuery.toLowerCase();
-    return albums.where((a) =>
-        a.name.toLowerCase().contains(q) ||
-        a.artist.toLowerCase().contains(q)).toList();
+    return albums
+        .where(
+          (a) =>
+              a.name.toLowerCase().contains(q) ||
+              a.artist.toLowerCase().contains(q),
+        )
+        .toList();
   }
 
   List<Artist> _filterArtists(List<Artist> artists) {
@@ -81,6 +89,23 @@ class LibraryProvider extends ChangeNotifier {
     _scanFolders = await _repository.getSavedFolders();
     _excludedFolders = await _repository.getExcludedFolders();
     notifyListeners();
+  }
+
+  /// 加载上次持久化的歌曲列表（用于 App 重启后立即显示）。
+  ///
+  /// 不会自动触发扫描；只有在用户没有缓存且有扫描文件夹时才提示。
+  /// 同时加载已保存的扫描目录，保持状态一致。
+  Future<void> loadSavedSongs() async {
+    final cached = await _repository.getSavedSongs();
+    if (cached.isEmpty) return;
+    _songs = cached;
+    _albums = _repository.buildAlbums(cached);
+    _artists = _repository.buildArtists(cached);
+    _folders = _repository.buildFolders(cached);
+    _scanFolders = await _repository.getSavedFolders();
+    _excludedFolders = await _repository.getExcludedFolders();
+    notifyListeners();
+    _log('[LibraryProvider] 已恢复 ${cached.length} 首缓存歌曲');
   }
 
   /// 扫描本地音乐（使用默认目录 + 用户选择的目录，排除用户指定的文件夹）。
@@ -125,6 +150,9 @@ class LibraryProvider extends ChangeNotifier {
       _albums = _repository.buildAlbums(songs);
       _artists = _repository.buildArtists(songs);
       _folders = _repository.buildFolders(songs);
+
+      // 持久化本次扫描结果，下次启动直接恢复
+      await _repository.saveSongs(songs);
 
       _isScanning = false;
       notifyListeners();

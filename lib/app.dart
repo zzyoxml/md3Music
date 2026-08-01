@@ -545,19 +545,20 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   Widget build(BuildContext context) {
     final tabConfig = context.watch<TabConfigProvider>();
     final visibleTabs = tabConfig.visibleTabs;
-  
+
     // 安全守卫：如果当前选中索引超出可见 tab 范围，重置到最后一个
     if (_selectedIndex >= visibleTabs.length) {
       _selectedIndex = visibleTabs.length - 1;
       if (_selectedIndex < 0) _selectedIndex = 0;
     }
-  
+
     // 动态生成导航目标
     final destinations = visibleTabs.map(_buildDestination).toList();
     final railDestinations = visibleTabs.map(_buildRailDestination).toList();
-    final drawerDestinations =
-        visibleTabs.map(_buildDrawerDestination).toList();
-  
+    final drawerDestinations = visibleTabs
+        .map(_buildDrawerDestination)
+        .toList();
+
     // 一级页面返回拦截：
     // 1) PopScope 拦截系统返回手势 / 物理返回键，canPop=false → 触发 onPopInvoked
     // 2) 弹“退出 App”确认对话框
@@ -600,8 +601,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     final goingRight = _selectedIndex > _previousSelectedIndex;
 
     // 安全守卫
-    final safeIndex =
-        _selectedIndex.clamp(0, visibleTabs.length - 1);
+    final safeIndex = _selectedIndex.clamp(0, visibleTabs.length - 1);
     final currentTab = visibleTabs[safeIndex];
 
     return Column(

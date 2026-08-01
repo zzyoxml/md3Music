@@ -1353,6 +1353,19 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// 更新播放列表中指定歌曲的字段（用于 NAS 按需下载后回写 localPath）。
+  /// 不重建 audio_service 队列，避免打断当前播放。
+  void updateSongInPlaylist(Song updatedSong) {
+    final idx = _playlist.indexWhere((s) => s.id == updatedSong.id);
+    if (idx < 0) return;
+    _playlist[idx] = updatedSong;
+    // 如果更新的是当前歌曲，同步更新 _currentSong
+    if (idx == _currentIndex) {
+      _currentSong = updatedSong;
+    }
+    notifyListeners();
+  }
+
   /// 在当前播放歌曲之后插入歌曲（"下一首播放"功能）。
   ///
   /// - 不在播放列表中的歌曲：新增并插入到当前歌曲之后，同步 audio_service 队列。
