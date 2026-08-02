@@ -88,10 +88,20 @@ class AppleLyricsView extends StatefulWidget {
   @visibleForTesting
   static int findCurrentLineIndex(List<LyricLine> lines, int currentTimeMs) {
     if (lines.isEmpty) return -1;
-    for (int i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].startTime <= currentTimeMs) return i;
+    // 性能优化：二分查找替代线性遍历，O(log N) 替代 O(N)
+    // lines 按 startTime 升序排列，找最后一个 startTime <= currentTimeMs 的行
+    int lo = 0, hi = lines.length;
+    while (lo < hi) {
+      final mid = (lo + hi) ~/ 2;
+      if (lines[mid].startTime <= currentTimeMs) {
+        lo = mid + 1;
+      } else {
+        hi = mid;
+      }
     }
-    return 0;
+    // lo - 1 是最后一个 startTime <= currentTimeMs 的行索引
+    // lo == 0 表示所有 startTime > currentTimeMs，返回 0（时间早于第一行）
+    return lo > 0 ? lo - 1 : 0;
   }
 
   @override
@@ -173,6 +183,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 上次处理对唱时的 useDuetLayout 值。
   bool _cachedUseDuetLayout = false;
 
+  /// 缓存的 hasTimestamps 结果（避免每帧 O(N) 遍历所有 lines）。
+  /// 在 _recomputeDuetIfNeeded 中随 lines 引用变化时更新。
+  bool _cachedHasTimestamps = false;
+
   /// 重算对唱预处理结果（若 lines 引用或开关变化）。
   void _recomputeDuetIfNeeded() {
     final useDuet = LyricPreferences.instance.useDuetLayout;
@@ -183,6 +197,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     }
     _cachedUseDuetLayout = useDuet;
     _cachedDuetLinesRef = widget.lines;
+    // 缓存 hasTimestamps 结果，避免每帧 O(N) 遍历
+    _cachedHasTimestamps = widget.lines.any((l) => l.startTime > 0);
     final result = DuetLayout.process(widget.lines, useDuet);
     _cleanedLines = result.cleanedLines;
     _duetAlignments = result.alignments;
@@ -585,8 +601,17 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final int len = widget.lines.length;
     if (_reusedPerLineOffsets.length != len) {
       _reusedPerLineOffsets = List<double>.filled(len, 0.0);
+    } else if (_currentLineIndex > 0) {
+      // 性能优化：上方行无 spring（永远 0），清零当前行上方的残留值
+      // 当前行下方由后续循环覆盖，无需清零
+      for (int i = 0; i < _currentLineIndex && i < len; i++) {
+        _reusedPerLineOffsets[i] = 0.0;
+      }
     }
-    for (int i = 0; i < len; i++) {
+    // 性能优化：_perLineSprings 只为当前行下方的行设置 spring（见 _onTick 行切换逻辑），
+    // 上方行永远返回 0。跳过上方行减少无意义遍历（200+ 行 → 仅遍历当前行到末尾）。
+    final int startI = math.max(0, _currentLineIndex);
+    for (int i = startI; i < len; i++) {
       _reusedPerLineOffsets[i] = _perLineSprings[i]?.position ?? 0.0;
     }
     _perLineOffsetsGeneration++;
@@ -603,7 +628,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
     // 1. 找当前行
     // 纯文本歌词（无时间轴）不高亮、不滚动、不模糊，直接平铺显示
-    final hasTimestamps = widget.lines.any((l) => l.startTime > 0);
+    // 性能优化：缓存 hasTimestamps 结果，避免每帧 O(N) 遍历所有 lines
+    final bool hasTimestamps = _cachedHasTimestamps;
     _currentLineIndex = hasTimestamps
         ? AppleLyricsView.findCurrentLineIndex(widget.lines, widget.currentTimeMs)
         : -1;
@@ -730,14 +756,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _previousLineIndex = _currentLineIndex;
 
     // 推进每行偏移弹簧
-    for (final entry in Map.of(_perLineSprings).entries) {
-      final i = entry.key;
-      final spring = entry.value;
-      if (i < _currentLineIndex || i >= widget.lines.length) {
-        // 上方或超出范围：直接归零
-        spring.setPosition(0, 0);
-        continue;
-      }
+    // 性能优化：只遍历当前行到末尾，跳过上方行（上方行永远 0，无需 setPosition）。
+    // 之前遍历所有 _perLineSprings（含上方 100+ 行），每帧 100+ 次无意义 setPosition(0,0)。
+    final int springStartI = math.max(0, _currentLineIndex);
+    for (int i = springStartI; i < widget.lines.length; i++) {
+      final spring = _perLineSprings[i];
+      if (spring == null) continue;
       final delayStart = _delayStartTimes[i];
       if (delayStart != null) {
         final elapsedMs = (_lastElapsed.inMicroseconds / 1000.0) - delayStart;
@@ -1575,7 +1599,27 @@ class _LyricsPainter extends CustomPainter {
     // 行水平起始位置：左留 1em 边距（对应 LyricLayout.linePadding 的 horizontal）
     final double startX = fontSize * 1.0;
 
-    for (int i = 0; i < lines.length; i++) {
+    // === 性能优化：二分查找定位首行可见索引 ===
+    // 之前从 i=0 遍历所有 lines（200+ 行），只靠 y 范围 continue/break 跳过。
+    // 现在用二分查找快速定位第一个可能可见的行，跳过前方所有不可见行。
+    // lineTops 是预排序的（递增），适合二分查找。
+    int startI = 0;
+    if (lineTops.isNotEmpty && lines.isNotEmpty) {
+      int lo = 0, hi = lines.length;
+      while (lo < hi) {
+        final mid = (lo + hi) ~/ 2;
+        final double yMid = _topOf(mid) + posY;
+        if (yMid + _heightOf(mid) < -LyricLayout.overscanPx) {
+          lo = mid + 1;
+        } else {
+          hi = mid;
+        }
+      }
+      // 向前多看 2 行，处理间奏占位偏移导致的 y 变化
+      startI = math.max(0, lo - 2);
+    }
+
+    for (int i = startI; i < lines.length; i++) {
       final line = lines[i];
       final double lineHeight = _heightOf(i);
       // 行顶部 y 坐标 = lineTops[i] + 该行上方间奏占位偏移 + posY（文字层不再使用 perLine 弹簧偏移）

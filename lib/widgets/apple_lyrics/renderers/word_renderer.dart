@@ -115,6 +115,10 @@ class WordRenderer {
   final TextPainter _translationPainter =
       TextPainter(textDirection: TextDirection.ltr);
 
+  /// 渐变路径复用的 Paint 实例（避免每帧新建，减少 GC）。
+  /// 渐变路径稳态下每帧只改 shader，0 次 layout。
+  final Paint _gradientPaint = Paint();
+
   // ============== 渐变遮罩状态 ==============
 
   /// 当前正在演唱的 word 索引（-1 表示还未开始）。
@@ -516,13 +520,27 @@ class WordRenderer {
       }
 
       // === 渲染文字 ===
-      // 性能优化：左右 alpha 几乎一致时用均匀绘制（量化缓存，跳过 layout）。
-      // 只有过渡区内的 1-3 个 word 需要渐变 shader。
-      if ((leftAlpha - rightAlpha).abs() < 0.01) {
-        // 均匀绘制：alpha 量化到 5% 步长，只有量化值变化时才 set text + layout
+      // 性能优化（核心）：左右 alpha 几乎一致时用均匀绘制（量化缓存，跳过 layout）。
+      // 过渡区内的 word 走渐变路径，用 saveLayer + BlendMode.modulate 应用渐变。
+      //
+      // **layout 复用原理**：
+      // - 渐变路径保持 painter.text 为 plain white（color=white, alpha=1.0）
+      // - TextSpan.== 比较时 plain white 的 color/fontSize/fontFamily 不变 → 不触发 relayout
+      // - 渐变通过 saveLayer + drawRect(modulate) 事后应用，不影响 layout
+      // - 稳态下 0 次 layout/帧（仅路径切换时 1 次 layout）
+      //
+      // **BlendMode.modulate 公式**：result = src × dst（逐分量含 alpha）
+      // - dst = 白色文字（color=white, alpha=文字形状）
+      // - src = 渐变（color=white, alpha=leftAlpha→rightAlpha）
+      // - result.color = white × white = white
+      // - result.alpha = 渐变alpha × 文字形状 ✓
+      final bool isUniform = (leftAlpha - rightAlpha).abs() < 0.01;
+      if (isUniform) {
+        // === 均匀路径 ===
         final double uniformAlpha = (leftAlpha + rightAlpha) * 0.5;
         final int alphaStep = (uniformAlpha * 20).round();
         if (_lastSetAlphas[i] != alphaStep) {
+          // 量化值变化或从渐变路径切换过来：重新 set text + layout
           painter.text = TextSpan(
             text: word.text,
             style: TextStyle(
@@ -536,30 +554,25 @@ class WordRenderer {
           _lastSetAlphas[i] = alphaStep;
         }
       } else {
-        // 渐变 shader：过渡区内的 word，字内从 leftAlpha 渐变到 rightAlpha
-        // 关键优化：完全避免 saveLayer，shader 直接应用到文字像素
-        final gradPaint = Paint()
-          ..shader = LinearGradient(
-            colors: [
-              Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, leftAlpha),
-              Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, rightAlpha),
-            ],
-            stops: const <double>[0.0, 1.0],
-          ).createShader(Rect.fromLTWH(wordX, wordY, width, fontSize * lineHeight));
-        painter.text = TextSpan(
-          text: word.text,
-          style: TextStyle(
-            foreground: gradPaint,
-            fontSize: fontSize,
-            height: lineHeight,
-            fontFamily: LyricLayout.fontFamily,
-          ),
-        );
-        painter.layout();
-        _lastSetAlphas[i] = -1; // 标记渐变模式，强制下次均匀绘制时重建
+        // === 渐变路径（saveLayer + modulate，复用 layout）===
+        // 确保 painter 处于 plain white 状态（只在切换时 set text + layout）
+        if (_lastSetAlphas[i] != -1) {
+          painter.text = TextSpan(
+            text: word.text,
+            style: TextStyle(
+              color: const Color.fromRGBO(255, 255, 255, 1.0), // plain white
+              fontSize: fontSize,
+              height: lineHeight,
+              fontFamily: LyricLayout.fontFamily,
+            ),
+          );
+          painter.layout();
+          _lastSetAlphas[i] = -1; // 标记 plain white 已缓存
+        }
       }
 
       // === 辉光层 + 正常文字层绘制 ===
+      // 辉光逻辑为公共路径，均匀和渐变共用
       if (needEmphasis && emState.glowLevel > 0) {
         final double blurSigma = emState.shadowBlurEm * fontSize * 0.8;
         if (blurSigma > 0) {
@@ -577,7 +590,27 @@ class WordRenderer {
           canvas.restore();
         }
       }
-      painter.paint(canvas, wordPos);
+
+      if (isUniform) {
+        // 均匀路径：直接 paint（text 的 color 已是目标 alpha）
+        painter.paint(canvas, wordPos);
+      } else {
+        // 渐变路径：saveLayer + paint(plain white) + drawRect(modulate) 应用渐变
+        final Rect wordRect = Rect.fromLTWH(wordX, wordY, width, fontSize * lineHeight);
+        canvas.saveLayer(wordRect, Paint());
+        painter.paint(canvas, wordPos); // dst = 白色文字（layout 已缓存，不重算）
+        // 复用 _gradientPaint 实例，只改 shader 和 blendMode
+        _gradientPaint.shader = LinearGradient(
+          colors: [
+            Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, leftAlpha),
+            Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, rightAlpha),
+          ],
+          stops: const <double>[0.0, 1.0],
+        ).createShader(wordRect);
+        _gradientPaint.blendMode = BlendMode.modulate;
+        canvas.drawRect(wordRect, _gradientPaint); // src = 渐变
+        canvas.restore();
+      }
 
       if (needEmphasis) {
         canvas.restore();
