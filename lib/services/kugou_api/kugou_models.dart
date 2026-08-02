@@ -750,17 +750,51 @@ class KugouPlaylist {
 
 class KugouCommentList {
   final List<KugouComment> comments;
+  final List<KugouComment> hotComments;
   final int total;
 
-  const KugouCommentList({this.comments = const [], this.total = 0});
+  const KugouCommentList({
+    this.comments = const [],
+    this.hotComments = const [],
+    this.total = 0,
+  });
 
   factory KugouCommentList.fromJson(Map<String, dynamic> json) {
     final data = json['data'] as Map<String, dynamic>? ?? json;
     final list = data['list'] ?? data['comments'] ?? [];
+
+    // 热门评论：weight_list / hot_list
+    final hotCandidate = data['weight_list'] ?? data['hot_list'];
+    final hotList = (hotCandidate is Map && hotCandidate['list'] is List)
+        ? hotCandidate['list'] as List<dynamic>
+        : (hotCandidate is List ? hotCandidate : <dynamic>[]);
+    // 歌手评论：star_cmts / star_comment
+    final starCandidate = data['star_cmts'] ?? data['star_comment'];
+    final starList = (starCandidate is Map && starCandidate['list'] is List)
+        ? starCandidate['list'] as List<dynamic>
+        : (starCandidate is List ? starCandidate : <dynamic>[]);
+
+    // 合并：歌手评论 + 热门评论（去重，避免 star_cmts 同时出现在两个列表中）
+    final hot = <KugouComment>[];
+    final seenIds = <String>{};
+    for (final e in starList) {
+      if (e is Map<String, dynamic>) {
+        final c = KugouComment.fromJson(e, isStar: true);
+        if (seenIds.add(c.id)) hot.add(c);
+      }
+    }
+    for (final e in hotList) {
+      if (e is Map<String, dynamic>) {
+        final c = KugouComment.fromJson(e, isHot: true);
+        if (seenIds.add(c.id)) hot.add(c);
+      }
+    }
+
     return KugouCommentList(
       comments: (list as List<dynamic>)
           .map((e) => KugouComment.fromJson(e as Map<String, dynamic>))
           .toList(),
+      hotComments: hot,
       total: _parseInt(
         data['total'] ?? data['count'] ?? data['comment_count'] ?? 0,
       ),
@@ -775,6 +809,15 @@ class KugouComment {
   final String content;
   final int time;
   final int likes;
+  final int replyCount;
+  final bool isHot;
+  final bool isStar;
+
+  /// 楼层评论所需字段
+  final String? specialId;
+  final String? tid;
+  final String? code;
+  final String? mixSongId;
 
   const KugouComment({
     required this.id,
@@ -783,9 +826,17 @@ class KugouComment {
     required this.content,
     this.time = 0,
     this.likes = 0,
+    this.replyCount = 0,
+    this.isHot = false,
+    this.isStar = false,
+    this.specialId,
+    this.tid,
+    this.code,
+    this.mixSongId,
   });
 
-  factory KugouComment.fromJson(Map<String, dynamic> json) {
+  factory KugouComment.fromJson(Map<String, dynamic> json,
+      {bool isHot = false, bool isStar = false}) {
     // 修复头像 URL：http → https，避免 Android 明文 HTTP 请求被拒
     String? fixAvatar(String? url) {
       if (url == null || url.isEmpty) return null;
@@ -797,6 +848,16 @@ class KugouComment {
 
     // 支持嵌套的 user 对象（部分接口返回 { user: { avatar, name, ... } }）
     final user = json['user'] as Map<String, dynamic>?;
+    final likeRecord = json['like'] is Map<String, dynamic>
+        ? json['like'] as Map<String, dynamic>
+        : null;
+
+    // 热门/歌手标记：优先从 json 读取，否则使用参数传入的值
+    bool parseBool(dynamic v) {
+      if (v is bool) return v;
+      if (v is num) return v == 1;
+      return false;
+    }
 
     return KugouComment(
       id: _str(json['commentid'] ?? json['id'] ?? ''),
@@ -806,7 +867,7 @@ class KugouComment {
             json['nickname'] ??
             user?['name'] ??
             user?['nickname'] ??
-            '',
+            '匿名用户',
       ),
       avatar: fixAvatar(
         _strNull(
@@ -819,8 +880,31 @@ class KugouComment {
         ),
       ),
       content: _str(json['content'] ?? json['comment_text'] ?? ''),
-      time: _parseInt(json['createtime'] ?? json['time'] ?? 0),
-      likes: _parseInt(json['like_count'] ?? json['likes'] ?? 0),
+      time: _parseInt(json['createtime'] ?? json['addtime'] ?? json['time'] ?? 0),
+      likes: _parseInt(
+        likeRecord?['count'] ??
+            json['like_count'] ??
+            json['likes'] ??
+            json['like_num'] ??
+            json['reply_like_count'] ??
+            0,
+      ),
+      replyCount: _parseInt(
+        json['reply_num'] ?? json['reply_count'] ?? 0,
+      ),
+      isHot: parseBool(json['is_hot'] ?? json['isHot'] ?? isHot),
+      isStar: parseBool(json['is_star'] ?? json['isStar'] ?? isStar),
+      specialId: _strNull(
+        json['special_child_id'] ??
+            json['special_id'] ??
+            json['specialId'] ??
+            json['childrenid'],
+      ),
+      tid: _strNull(json['tid'] ?? json['id'] ?? json['comment_id']),
+      code: _strNull(json['code']),
+      mixSongId: _strNull(
+        json['mixsongid'] ?? json['audio_id'] ?? json['album_audio_id'],
+      ),
     );
   }
 }

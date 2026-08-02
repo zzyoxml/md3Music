@@ -1384,13 +1384,36 @@ class KugouApiClient {
     }
   }
 
-  Future<KugouCommentList?> getFloorComments(
-    String commentId, {
+  /// 获取楼层评论（楼中楼回复）
+  ///
+  /// [specialId] 歌曲对应的 special_id（从评论数据中获取）
+  /// [tid] 评论 ID
+  /// [mixSongId] 歌曲 ID
+  /// [code] 评论 code（部分接口返回）
+  Future<KugouCommentList?> getFloorComments({
+    required String specialId,
+    required String tid,
+    String? mixSongId,
+    String? code,
     int page = 1,
+    int pagesize = 30,
   }) async {
+    if (specialId.isEmpty || tid.isEmpty) return null;
+    final params = <String, dynamic>{
+      'special_id': specialId,
+      'tid': tid,
+      'page': page,
+      'pagesize': pagesize,
+    };
+    if (mixSongId != null && mixSongId.isNotEmpty) {
+      params['mixsongid'] = mixSongId;
+    }
+    if (code != null && code.isNotEmpty) {
+      params['code'] = code;
+    }
     final json = await _get(
       KugouEndpoints.commentFloor,
-      queryParameters: {'commentid': commentId, 'page': page},
+      queryParameters: params,
     );
     if (json == null) return null;
     try {

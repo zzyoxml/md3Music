@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../data/models/song.dart';
+import '../modules/player/comments_view.dart';
 import '../modules/player/mv_player_page.dart';
 import '../providers/downloads_provider.dart';
 import '../providers/favorites_provider.dart';
@@ -84,6 +85,14 @@ class SongListItem extends StatelessWidget {
                     behavior: SnackBarBehavior.floating,
                   ),
                 );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.comment_outlined),
+              title: const Text('看评论'),
+              onTap: () {
+                Navigator.pop(ctx);
+                showSongCommentsSheet(context, song);
               },
             ),
           ],

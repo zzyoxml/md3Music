@@ -1809,42 +1809,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           TextButton(
             onPressed: () {
               Navigator.pop(dialogCtx);
-              showModalBottomSheet(
-                context: ctx,
-                isScrollControlled: true,
-                useSafeArea: true,
-                shape: const RoundedRectangleBorder(
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-                ),
-                builder: (sheetCtx) => SizedBox(
-                  height: MediaQuery.of(sheetCtx).size.height * 0.75,
-                  child: Column(
-                    children: [
-                      Container(
-                        width: 32,
-                        height: 4,
-                        margin: const EdgeInsets.only(top: 12, bottom: 12),
-                        decoration: BoxDecoration(
-                          color: Theme.of(sheetCtx).colorScheme.outline,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text('评论',
-                          style: Theme.of(sheetCtx).textTheme.titleMedium),
-                      ),
-                      Expanded(
-                        child: CommentsView(
-                          songHash: song.id,
-                          albumAudioId: song.albumAudioId,
-                          artworkUri: song.artworkUri,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
+              showSongCommentsSheet(ctx, song);
             },
             child: const Text('看评论'),
           ),
