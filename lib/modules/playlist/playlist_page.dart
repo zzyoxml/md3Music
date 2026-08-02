@@ -1473,23 +1473,24 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                   label: const Text('随机播放'),
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              // 红心收藏按钮：始终显示，支持收藏/取消收藏
-                              IconButton.filledTonal(
-                                onPressed: widget.isInMyFavorites
-                                    ? _uncollectPlaylist
-                                    : (_isCollected
-                                        ? _uncollectPlaylist
-                                        : _collectPlaylist),
-                                icon: Icon(
-                                  widget.isInMyFavorites || _isCollected
-                                      ? Icons.favorite
-                                      : Icons.favorite_border,
-                                  color: widget.isInMyFavorites || _isCollected
-                                      ? colorScheme.error
-                                      : null,
+                              // 红心收藏按钮：搜索/发现页需要收藏功能，保留显示；
+                              // 「我收藏」和「我创建的歌单」可通过长按删除，隐藏红心。
+                              if (!widget.isInMyFavorites && !widget.isUserCreated) ...[
+                                const SizedBox(width: 12),
+                                IconButton.filledTonal(
+                                  onPressed: _isCollected
+                                      ? _uncollectPlaylist
+                                      : _collectPlaylist,
+                                  icon: Icon(
+                                    _isCollected
+                                        ? Icons.favorite
+                                        : Icons.favorite_border,
+                                    color: _isCollected
+                                        ? colorScheme.error
+                                        : null,
+                                  ),
                                 ),
-                              ),
+                              ],
                             ],
                           ),
                         ),
