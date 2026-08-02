@@ -53,6 +53,16 @@ const List<AudioQuality> _audioQualities = [
   AudioQuality.hires,
 ];
 
+/// 定时关闭预定义档位（分钟）。
+const List<Duration> _sleepTimerPresets = [
+  Duration(minutes: 5),
+  Duration(minutes: 10),
+  Duration(minutes: 15),
+  Duration(minutes: 30),
+  Duration(minutes: 60),
+  Duration(minutes: 90),
+];
+
 class FullPlayer extends StatefulWidget {
   const FullPlayer({super.key});
 
@@ -1268,6 +1278,16 @@ class _FullPlayerState extends State<FullPlayer>
           const Spacer(),
           // MD3E v2: 顶部栏右侧 FLAC 质量徽章，点击复用 _showQualityDialog
           _buildQualityPill(playerProvider),
+          // 睡眠药丸：用 ListenableBuilder 独立监听，确保每秒走字
+          ListenableBuilder(
+            listenable: playerProvider,
+            builder: (context, _) {
+              if (!playerProvider.isSleepTimerActive) {
+                return const SizedBox.shrink();
+              }
+              return _buildSleepTimerPill(playerProvider);
+            },
+          ),
           if (playerProvider.currentSong?.isOnline == true)
             IconButton(
               icon: const Icon(Icons.music_video_outlined),
@@ -2282,7 +2302,7 @@ class _FullPlayerState extends State<FullPlayer>
     );
   }
 
-  void _showMoreMenu(BuildContext context) {
+  void _showMoreMenu(BuildContext rootContext) {
     final song = context.read<PlayerProvider>().currentSong;
     if (song == null) return;
 
@@ -2291,9 +2311,9 @@ class _FullPlayerState extends State<FullPlayer>
     final artistTitle = song.artist.isEmpty ? '查看歌手' : '查看歌手：${song.artist}';
 
     showModalBottomSheet(
-      context: context,
+      context: rootContext,
       isScrollControlled: true,
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: SingleChildScrollView(
             child: Column(
@@ -2303,8 +2323,8 @@ class _FullPlayerState extends State<FullPlayer>
                   leading: const Icon(Icons.lyrics),
                   title: const Text('歌词显示设置'),
                   onTap: () {
-                    Navigator.pop(context);
-                    _showLyricPreferencesSheet(context);
+                    Navigator.pop(sheetContext);
+                    _showLyricPreferencesSheet(rootContext);
                   },
                 ),
                 ListenableBuilder(
@@ -2323,9 +2343,9 @@ class _FullPlayerState extends State<FullPlayer>
                         eq.enabled ? '已开启 · ${eq.currentPreset}' : '未开启',
                       ),
                       onTap: () {
-                        Navigator.pop(context);
+                        Navigator.pop(sheetContext);
                         Navigator.push(
-                          context,
+                          rootContext,
                           MaterialPageRoute(
                             builder: (_) => const EqualizerSettingsPage(),
                           ),
@@ -2334,12 +2354,32 @@ class _FullPlayerState extends State<FullPlayer>
                     );
                   },
                 ),
+                ListenableBuilder(
+                  listenable: context.read<PlayerProvider>(),
+                  builder: (context, _) {
+                    final player = context.read<PlayerProvider>();
+                    final remaining = player.sleepTimerRemaining;
+                    return ListTile(
+                      leading: const Icon(Icons.timer_outlined),
+                      title: const Text('定时关闭'),
+                      subtitle: Text(
+                        remaining == null
+                            ? '未设置'
+                            : '还剩 ${_formatSleepTime(remaining)}',
+                      ),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _showSleepTimerSheet(rootContext, player);
+                      },
+                    );
+                  },
+                ),
                 ListTile(
                   leading: const Icon(Icons.cast),
                   title: const Text('投屏'),
                   onTap: () {
-                    Navigator.pop(context);
-                    _showDlnaCastSheet(context);
+                    Navigator.pop(sheetContext);
+                    _showDlnaCastSheet(rootContext);
                   },
                 ),
                 ListTile(
@@ -2350,7 +2390,7 @@ class _FullPlayerState extends State<FullPlayer>
                     overflow: TextOverflow.ellipsis,
                   ),
                   onTap: () {
-                    Navigator.pop(context);
+                    Navigator.pop(sheetContext);
                     _navigateToAlbum(song);
                   },
                 ),
@@ -2362,7 +2402,7 @@ class _FullPlayerState extends State<FullPlayer>
                     overflow: TextOverflow.ellipsis,
                   ),
                   onTap: () {
-                    Navigator.pop(context);
+                    Navigator.pop(sheetContext);
                     _navigateToArtist(song);
                   },
                 ),
@@ -2370,18 +2410,18 @@ class _FullPlayerState extends State<FullPlayer>
                   leading: const Icon(Icons.playlist_add),
                   title: const Text('添加到歌单'),
                   onTap: () {
-                    Navigator.pop(context);
-                    _showAddToPlaylistDialog(context, song);
+                    Navigator.pop(sheetContext);
+                    _showAddToPlaylistDialog(rootContext, song);
                   },
                 ),
                 ListTile(
                   leading: const Icon(Icons.share),
                   title: const Text('分享'),
                   onTap: () {
-                    Navigator.pop(context);
+                    Navigator.pop(sheetContext);
                     // TODO: 实现分享功能
                     ScaffoldMessenger.of(
-                      context,
+                      rootContext,
                     ).showSnackBar(const SnackBar(content: Text('分享功能开发中')));
                   },
                 ),
@@ -2392,7 +2432,7 @@ class _FullPlayerState extends State<FullPlayer>
                     context.read<ThemeProvider>().setUseArtistPhotoBackground(
                       v,
                     );
-                    Navigator.pop(context);
+                    Navigator.pop(sheetContext);
                   },
                 ),
               ],
@@ -2401,6 +2441,200 @@ class _FullPlayerState extends State<FullPlayer>
         );
       },
     );
+  }
+
+  /// MD3E v2 睡眠定时药丸 — 复用 _buildQualityPill 样式。
+  Widget _buildSleepTimerPill(PlayerProvider playerProvider) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    final remaining = playerProvider.sleepTimerRemaining ?? Duration.zero;
+    return Material(
+      color: colorScheme.primaryContainer,
+      shape: const StadiumBorder(),
+      child: InkWell(
+        onTap: () => _showSleepTimerSheet(context, playerProvider),
+        customBorder: const StadiumBorder(),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.timer_outlined,
+                size: 14,
+                color: colorScheme.onPrimaryContainer,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                _formatSleepTime(remaining),
+                style: textTheme.labelMedium?.copyWith(
+                  color: colorScheme.onPrimaryContainer,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// MD3E v2 定时关闭选择面板。
+  void _showSleepTimerSheet(BuildContext rootContext, PlayerProvider player) {
+    showModalBottomSheet(
+      context: rootContext,
+      isScrollControlled: true,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  '定时关闭',
+                  style: Theme.of(rootContext).textTheme.titleMedium,
+                ),
+              ),
+              ..._sleepTimerPresets.map((d) {
+                final r = player.sleepTimerRemaining;
+                final active = r != null &&
+                    (r.inSeconds - d.inSeconds).abs() < 2;
+                return ListTile(
+                  leading: Icon(active
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked),
+                  title: Text('${d.inMinutes} 分钟'),
+                  onTap: () {
+                    player.setSleepTimer(d);
+                    Navigator.pop(sheetCtx);
+                    ScaffoldMessenger.of(rootContext).showSnackBar(
+                      SnackBar(
+                        content: Text('将在 ${d.inMinutes} 分钟后自动暂停'),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                );
+              }),
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('自定义…'),
+                onTap: () {
+                  Navigator.pop(sheetCtx);
+                  _showCustomSleepTimerDialog(rootContext, player);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.cancel_outlined),
+                title: const Text('关闭定时'),
+                onTap: () {
+                  player.setSleepTimer(null);
+                  Navigator.pop(sheetCtx);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// MD3E v2 自定义分钟数对话框。
+  void _showCustomSleepTimerDialog(
+    BuildContext rootContext,
+    PlayerProvider player,
+  ) {
+    final controller = TextEditingController();
+    showDialog(
+      context: rootContext,
+      builder: (dialogCtx) => Dialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(28),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 24,
+              vertical: 20,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.timer_outlined, size: 32),
+                const SizedBox(height: 8),
+                const Text(
+                  '自定义定时关闭',
+                  style: TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: controller,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: '分钟',
+                    hintText: '1-240',
+                    border: OutlineInputBorder(),
+                  ),
+                  autofocus: true,
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton(
+                      onPressed: () {
+                        controller.dispose();
+                        Navigator.pop(dialogCtx);
+                      },
+                      child: const Text('取消'),
+                    ),
+                    FilledButton(
+                      onPressed: () {
+                        final n = int.tryParse(controller.text);
+                        controller.dispose();
+                        if (n == null || n < 1 || n > 240) {
+                          ScaffoldMessenger.of(rootContext).showSnackBar(
+                            const SnackBar(
+                              content: Text('请输入 1-240 之间的整数'),
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                          return;
+                        }
+                        final d = Duration(minutes: n);
+                        player.setSleepTimer(d);
+                        Navigator.pop(dialogCtx);
+                        ScaffoldMessenger.of(rootContext).showSnackBar(
+                          SnackBar(
+                            content: Text('将在 $n 分钟后自动暂停'),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      },
+                      child: const Text('确定'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// MD3E v2 睡眠定时剩余时间格式：>=1h 显示 `XhYYm`，否则 `mm:ss`。
+  String _formatSleepTime(Duration d) {
+    if (d.inHours >= 1) {
+      final h = d.inHours;
+      final m = d.inMinutes.remainder(60);
+      return '${h}h${m.toString().padLeft(2, '0')}m';
+    }
+    final m = d.inMinutes;
+    final s = d.inSeconds.remainder(60);
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
   }
 
   /// 弹出 DLNA 投屏二级菜单（设备选择 + 传输控制）。
