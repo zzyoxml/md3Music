@@ -1021,6 +1021,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _saveState();
   }
 
+  /// 拖动进度条时直接暂停（无淡入淡出），避免拖动期间音量渐变影响体验。
+  Future<void> pauseForSeek() async {
+    _fadeToken++;
+    await _audioService?.pause();
+  }
+
   Future<void> resume() async {
     final fadeEnabled = await SettingsRepository().getPauseFadeEnabled();
     if (fadeEnabled && _audioService != null) {

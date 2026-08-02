@@ -118,6 +118,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   Timer? _zenLongPressTimer;
   bool _zenLongPressActive = false;
 
+  // 进度条拖动状态：记录拖动前是否正在播放，拖动结束后恢复
+  bool _wasPlayingBeforeDrag = false;
+
   @override
   void initState() {
     super.initState();
@@ -1859,11 +1862,26 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                       : 0.0,
                   activeColor: Colors.white,
                   inactiveColor: Colors.white24,
+                  onChangeStart: (value) {
+                    _wasPlayingBeforeDrag = playerProvider.isPlaying;
+                    if (_wasPlayingBeforeDrag) {
+                      playerProvider.pauseForSeek();
+                    }
+                  },
                   onChanged: (value) {
                     final newPosition = Duration(
                       milliseconds: (duration.inMilliseconds * value).round(),
                     );
                     playerProvider.seek(newPosition);
+                  },
+                  onChangeEnd: (value) async {
+                    final newPosition = Duration(
+                      milliseconds: (duration.inMilliseconds * value).round(),
+                    );
+                    await playerProvider.seek(newPosition);
+                    if (_wasPlayingBeforeDrag) {
+                      playerProvider.resume();
+                    }
                   },
                 ),
         ),
@@ -1911,11 +1929,26 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   : 0.0,
               activeColor: Colors.white,
               inactiveColor: Colors.white24,
+              onChangeStart: (value) {
+                _wasPlayingBeforeDrag = playerProvider.isPlaying;
+                if (_wasPlayingBeforeDrag) {
+                  playerProvider.pauseForSeek();
+                }
+              },
               onChanged: (value) {
                 final newPosition = Duration(
                   milliseconds: (totalMs * value).round(),
                 );
                 playerProvider.seek(newPosition);
+              },
+              onChangeEnd: (value) async {
+                final newPosition = Duration(
+                  milliseconds: (totalMs * value).round(),
+                );
+                await playerProvider.seek(newPosition);
+                if (_wasPlayingBeforeDrag) {
+                  playerProvider.resume();
+                }
               },
             ),
             // 高潮区域高亮条：与进度条轨道同高、垂直居中对齐
