@@ -244,6 +244,13 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 减少 GC 压力 + 让 generation counter 准确反映内容变化。
   List<double> _reusedPerLineOffsets = const <double>[];
 
+  /// 持久化 painter 实例。
+  /// 通过 _repaintNotifier 驱动重绘，避免每帧 setState + build 的 widget tree 开销。
+  _LyricsPainter? _painter;
+
+  /// painter 的重绘信号源。fireRepaint() 触发 CustomPaint 重绘。
+  final _RepaintNotifier _repaintNotifier = _RepaintNotifier();
+
   /// 当前激活的间奏在 _interludeAfterIndices 中的索引（-1 表示无激活）。
   ///
   /// 严格 AMLL 逻辑：只有 currentTime 真正进入间奏时段
@@ -540,6 +547,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   void dispose() {
     _ticker.dispose();
     _scrollController.dispose();
+    _repaintNotifier.dispose();
     for (final entry in _lineBlurImages.values) {
       entry.$1.dispose();
     }
@@ -800,7 +808,26 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       _lastRepaintScale = currentScale;
       _lastRepaintBlurFade = _blurFade;
       _lastRepaintInterludeProgress = _interludeExpandProgress;
-      setState(() {});
+      // 性能优化：用持久化 painter + notifyListeners 替代 setState，
+      // 避免每帧触发 build() 重建整个 widget tree（LayoutBuilder/GestureDetector/ShaderMask）。
+      // Gaussian 模糊需要重建 widget（Positioned/Opacity 层），仍用 setState。
+      final useGaussian = LyricPreferences.instance.useGaussianBlur;
+      if (_painter != null && !useGaussian) {
+        _painter!.updatePerFrame(
+          currentLineIndex: _currentLineIndex,
+          posY: currentPosY,
+          currentTimeMs: widget.currentTimeMs,
+          blurFade: _blurFade,
+          interludeExpandProgress: _interludeExpandProgress,
+          activeInterludeIdx: _activeInterludeIdx,
+          lastActiveAnchorIdx: _lastActiveAnchorIdx,
+          perLineOffsets: _buildPerLineOffsets(),
+          perLineOffsetsGeneration: _perLineOffsetsGeneration,
+        );
+        _repaintNotifier.fireRepaint();
+      } else {
+        setState(() {});
+      }
     }
     // 无视觉变化：跳过 setState，节省 build + shouldRepaint 开销
   }
@@ -979,43 +1006,85 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         // 根据偏好选择高斯模糊或 alpha 渐变淡出
         final useGaussian = LyricPreferences.instance.useGaussianBlur;
 
+        // 创建或复用持久化 painter
+        // 性能优化：painter 字段在 _onTick 中通过 updatePerFrame + notifyListeners 更新，
+        // 避免每帧 setState + build 重建 widget tree。
+        // build() 只在 widget 重建时运行，设置布局相关字段。
+        if (_painter == null) {
+          _painter = _LyricsPainter(
+            repaint: _repaintNotifier,
+            lines: _cleanedLines,
+            duetAlignments: _duetAlignments,
+            currentLineIndex: _currentLineIndex,
+            posY: _scrollController.posY,
+            fontSize: fontSize,
+            mainLineHeight: mainLineHeight,
+            lineHeights: _lineHeights,
+            lineTops: _lineTops,
+            viewportHeight: constraints.maxHeight,
+            viewportWidth: constraints.maxWidth,
+            maxLineWidth: maxLineWidth,
+            currentTimeMs: widget.currentTimeMs,
+            enableScale: widget.enableScale,
+            wordRenderers: _wordRenderers,
+            lineRenderers: _lineRenderers,
+            scaleController: _scaleController,
+            emphasizeEffect: _emphasizeEffect,
+            interludeDots: _interludeDots,
+            interludeAfterIndices: _interludeAfterIndices,
+            interludePlaceholderHeight: _interludePlaceholderHeight,
+            activeInterludeIdx: _activeInterludeIdx,
+            lastActiveAnchorIdx: _lastActiveAnchorIdx,
+            interludeExpandProgress: _interludeExpandProgress,
+            perLineOffsets: _buildPerLineOffsets(),
+            blurFade: _blurFade,
+            blurActive: useGaussian,
+            textColorValue: LyricLayout.textColorValue,
+            linesGeneration: _linesGeneration,
+            lineHeightsGeneration: _lineHeightsGeneration,
+            lineTopsGeneration: _lineTopsGeneration,
+            interludeAfterIndicesGeneration: _interludeAfterIndicesGeneration,
+            perLineOffsetsGeneration: _perLineOffsetsGeneration,
+          );
+        } else {
+          // 复用持久化 painter，更新所有字段（布局 + 动画）
+          _painter!.lines = _cleanedLines;
+          _painter!.duetAlignments = _duetAlignments;
+          _painter!.currentLineIndex = _currentLineIndex;
+          _painter!.posY = _scrollController.posY;
+          _painter!.fontSize = fontSize;
+          _painter!.mainLineHeight = mainLineHeight;
+          _painter!.lineHeights = _lineHeights;
+          _painter!.lineTops = _lineTops;
+          _painter!.viewportHeight = constraints.maxHeight;
+          _painter!.viewportWidth = constraints.maxWidth;
+          _painter!.maxLineWidth = maxLineWidth;
+          _painter!.currentTimeMs = widget.currentTimeMs;
+          _painter!.enableScale = widget.enableScale;
+          _painter!.wordRenderers = _wordRenderers;
+          _painter!.lineRenderers = _lineRenderers;
+          _painter!.scaleController = _scaleController;
+          _painter!.emphasizeEffect = _emphasizeEffect;
+          _painter!.interludeDots = _interludeDots;
+          _painter!.interludeAfterIndices = _interludeAfterIndices;
+          _painter!.interludePlaceholderHeight = _interludePlaceholderHeight;
+          _painter!.activeInterludeIdx = _activeInterludeIdx;
+          _painter!.lastActiveAnchorIdx = _lastActiveAnchorIdx;
+          _painter!.interludeExpandProgress = _interludeExpandProgress;
+          _painter!.perLineOffsets = _buildPerLineOffsets();
+          _painter!.blurFade = _blurFade;
+          _painter!.blurActive = useGaussian;
+          _painter!.textColorValue = LyricLayout.textColorValue;
+          _painter!.linesGeneration = _linesGeneration;
+          _painter!.lineHeightsGeneration = _lineHeightsGeneration;
+          _painter!.lineTopsGeneration = _lineTopsGeneration;
+          _painter!.interludeAfterIndicesGeneration = _interludeAfterIndicesGeneration;
+          _painter!.perLineOffsetsGeneration = _perLineOffsetsGeneration;
+        }
+
         final lyricsContent = ClipRect(
           child: CustomPaint(
-            painter: _LyricsPainter(
-              lines: _cleanedLines,
-              duetAlignments: _duetAlignments,
-              currentLineIndex: _currentLineIndex,
-              posY: _scrollController.posY,
-              fontSize: fontSize,
-              mainLineHeight: mainLineHeight,
-              lineHeights: _lineHeights,
-              lineTops: _lineTops,
-              viewportHeight: constraints.maxHeight,
-              viewportWidth: constraints.maxWidth,
-              maxLineWidth: maxLineWidth,
-              currentTimeMs: widget.currentTimeMs,
-              enableScale: widget.enableScale,
-              wordRenderers: _wordRenderers,
-              lineRenderers: _lineRenderers,
-              scaleController: _scaleController,
-              emphasizeEffect: _emphasizeEffect,
-              interludeDots: _interludeDots,
-              interludeAfterIndices: _interludeAfterIndices,
-              interludePlaceholderHeight: _interludePlaceholderHeight,
-              activeInterludeIdx: _activeInterludeIdx,
-              lastActiveAnchorIdx: _lastActiveAnchorIdx,
-              interludeExpandProgress: _interludeExpandProgress,
-              perLineOffsets: _buildPerLineOffsets(),
-              blurFade: _blurFade,
-              blurActive: useGaussian,
-              textColorValue: LyricLayout.textColorValue,
-              // v3 优化：传入 generation counter
-              linesGeneration: _linesGeneration,
-              lineHeightsGeneration: _lineHeightsGeneration,
-              lineTopsGeneration: _lineTopsGeneration,
-              interludeAfterIndicesGeneration: _interludeAfterIndicesGeneration,
-              perLineOffsetsGeneration: _perLineOffsetsGeneration,
-            ),
+            painter: _painter,
             size: Size.infinite,
           ),
         );
@@ -1383,62 +1452,41 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 /// 行顶部 y = lineTops[i] + posY（累加偏移）。renderer 的 paintLine 接收
 /// [maxLineWidth] 参数实现 word 级换行。
 class _LyricsPainter extends CustomPainter {
-  final List<LyricLine> lines;
-  final List<DuetAlignment> duetAlignments;
-  final int currentLineIndex;
-  final double posY;
-  final double fontSize;
-  final double mainLineHeight;
-  final List<double> lineHeights;
-  final List<double> lineTops;
-  final double viewportHeight;
-  final double viewportWidth;
-  final double maxLineWidth;
-  final int currentTimeMs;
-  final bool enableScale;
-  final Map<int, WordRenderer> wordRenderers;
-  final Map<int, LineRenderer> lineRenderers;
-  final LineScaleController scaleController;
-  final EmphasizeEffect emphasizeEffect;
-  final InterludeDots interludeDots;
-  final List<int> interludeAfterIndices;
-  final double interludePlaceholderHeight;
-
-  /// 当前激活间奏在 interludeAfterIndices 中的索引（-1 = 无激活）。
-  /// 只有激活间奏才占位（动态展开/收起），其它间奏占位 = 0。
-  final int activeInterludeIdx;
-
-  /// 最后激活的间奏 anchor 行索引（-1 = 从未激活过）。
-  ///
-  /// 用于间奏结束后 progress 收起期间继续计算占位偏移。
-  final int lastActiveAnchorIdx;
-
-  /// 间奏占位 spring 进度（0 = 完全收起，1 = 完全展开）。
-  /// 占位高度 = interludePlaceholderHeight * interludeExpandProgress
-  final double interludeExpandProgress;
-
-  /// 每行偏移量（级联弹簧延迟动画），正值=向下，负值=向上。
-  final List<double> perLineOffsets;
-
-  /// 模糊淡入淡出系数。
-  final double blurFade;
-
-  /// 是否启用高斯模糊。
-  final bool blurActive;
-
-  /// 当前文字颜色值（0xFFFFFFFF 或 0xFF000000）。
-  /// 主题切换时此值变化，shouldRepaint 据此触发重绘。
-  final int textColorValue;
-
-  // v3 优化：generation counter，替代 listEquals O(n) 比较。
-  // 列表内容变化时 counter++，shouldRepaint 仅比较 counter 是否变化。
-  final int linesGeneration;
-  final int lineHeightsGeneration;
-  final int lineTopsGeneration;
-  final int interludeAfterIndicesGeneration;
-  final int perLineOffsetsGeneration;
+  List<LyricLine> lines;
+  List<DuetAlignment> duetAlignments;
+  int currentLineIndex;
+  double posY;
+  double fontSize;
+  double mainLineHeight;
+  List<double> lineHeights;
+  List<double> lineTops;
+  double viewportHeight;
+  double viewportWidth;
+  double maxLineWidth;
+  int currentTimeMs;
+  bool enableScale;
+  Map<int, WordRenderer> wordRenderers;
+  Map<int, LineRenderer> lineRenderers;
+  LineScaleController scaleController;
+  EmphasizeEffect emphasizeEffect;
+  InterludeDots interludeDots;
+  List<int> interludeAfterIndices;
+  double interludePlaceholderHeight;
+  int activeInterludeIdx;
+  int lastActiveAnchorIdx;
+  double interludeExpandProgress;
+  List<double> perLineOffsets;
+  double blurFade;
+  bool blurActive;
+  int textColorValue;
+  int linesGeneration;
+  int lineHeightsGeneration;
+  int lineTopsGeneration;
+  int interludeAfterIndicesGeneration;
+  int perLineOffsetsGeneration;
 
   _LyricsPainter({
+    super.repaint,
     required this.lines,
     required this.duetAlignments,
     required this.currentLineIndex,
@@ -1472,6 +1520,29 @@ class _LyricsPainter extends CustomPainter {
     required this.interludeAfterIndicesGeneration,
     required this.perLineOffsetsGeneration,
   });
+
+  /// 更新每帧变化的动画字段（在 _onTick 中调用，避免 setState + build）。
+  void updatePerFrame({
+    required int currentLineIndex,
+    required double posY,
+    required int currentTimeMs,
+    required double blurFade,
+    required double interludeExpandProgress,
+    required int activeInterludeIdx,
+    required int lastActiveAnchorIdx,
+    required List<double> perLineOffsets,
+    required int perLineOffsetsGeneration,
+  }) {
+    this.currentLineIndex = currentLineIndex;
+    this.posY = posY;
+    this.currentTimeMs = currentTimeMs;
+    this.blurFade = blurFade;
+    this.interludeExpandProgress = interludeExpandProgress;
+    this.activeInterludeIdx = activeInterludeIdx;
+    this.lastActiveAnchorIdx = lastActiveAnchorIdx;
+    this.perLineOffsets = perLineOffsets;
+    this.perLineOffsetsGeneration = perLineOffsetsGeneration;
+  }
 
   /// 获取指定行 i 的实际高度（含换行），降级到 mainLineHeight。
   double _heightOf(int i) =>
@@ -1616,37 +1687,16 @@ class _LyricsPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _LyricsPainter oldDelegate) {
-    // v3 优化：用 generation counter（O(1)）替代 listEquals（O(n)）。
-    // 列表内容变化时 counter++，这里只比较 counter 与基本类型字段。
-    return oldDelegate.currentLineIndex != currentLineIndex ||
-        oldDelegate.posY != posY ||
-        oldDelegate.fontSize != fontSize ||
-        oldDelegate.mainLineHeight != mainLineHeight ||
-        oldDelegate.viewportHeight != viewportHeight ||
-        oldDelegate.viewportWidth != viewportWidth ||
-        oldDelegate.maxLineWidth != maxLineWidth ||
-        oldDelegate.currentTimeMs != currentTimeMs ||
-        oldDelegate.enableScale != enableScale ||
-        oldDelegate.interludePlaceholderHeight != interludePlaceholderHeight ||
-        oldDelegate.activeInterludeIdx != activeInterludeIdx ||
-        oldDelegate.lastActiveAnchorIdx != lastActiveAnchorIdx ||
-        oldDelegate.interludeExpandProgress != interludeExpandProgress ||
-        oldDelegate.blurFade != blurFade ||
-        oldDelegate.blurActive != blurActive ||
-        oldDelegate.textColorValue != textColorValue ||
-        // v3 优化：generation counter 替代 listEquals
-        oldDelegate.linesGeneration != linesGeneration ||
-        oldDelegate.duetAlignments != duetAlignments ||
-        oldDelegate.lineHeightsGeneration != lineHeightsGeneration ||
-        oldDelegate.lineTopsGeneration != lineTopsGeneration ||
-        oldDelegate.interludeAfterIndicesGeneration !=
-            interludeAfterIndicesGeneration ||
-        oldDelegate.perLineOffsetsGeneration != perLineOffsetsGeneration ||
-        // 引用类型仍用 != （引用比较，O(1)）
-        oldDelegate.scaleController != scaleController ||
-        oldDelegate.emphasizeEffect != emphasizeEffect ||
-        oldDelegate.interludeDots != interludeDots ||
-        oldDelegate.wordRenderers != wordRenderers ||
-        oldDelegate.lineRenderers != lineRenderers;
+    // 持久化 painter：由 notifyListeners() 驱动重绘，shouldRepaint 返回 false。
+    // 仅在 build() 创建新 painter 时（首次构建或 widget 重建）才会调用此方法。
+    return false;
+  }
+}
+
+/// ChangeNotifier 子类，暴露 public fireRepaint() 方法。
+/// 用于驱动持久化 _LyricsPainter 的重绘，替代 setState + build。
+class _RepaintNotifier extends ChangeNotifier {
+  void fireRepaint() {
+    notifyListeners();
   }
 }
