@@ -113,7 +113,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
           kugou.rankList != null ||
           kugou.recommendSongs.isNotEmpty ||
           kugou.sceneData != null) {
-        break;  // 有数据了，退出重试
+        break; // 有数据了，退出重试
       }
 
       retryCount++;
@@ -153,7 +153,8 @@ class _DiscoverPageState extends State<DiscoverPage> {
       ]);
 
       // 只有确实加载到数据时才标记为已加载
-      final hasAnyData = kugou.playlistList.isNotEmpty ||
+      final hasAnyData =
+          kugou.playlistList.isNotEmpty ||
           kugou.rankList != null ||
           kugou.recommendSongs.isNotEmpty ||
           kugou.sceneData != null ||
@@ -194,9 +195,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
           ),
           IconButton(
             icon: const Icon(Icons.mic_outlined),
-            onPressed: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => const SongRecognitionPage())),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SongRecognitionPage()),
+            ),
           ),
           Selector<KugouProvider, (String?, String, bool)>(
             selector: (_, kugou) => (
@@ -210,7 +211,12 @@ class _DiscoverPageState extends State<DiscoverPage> {
                 padding: const EdgeInsets.only(right: 8),
                 child: GestureDetector(
                   onTap: () => widget.onAvatarTap?.call(),
-                  child: _buildAvatar(avatarUrl, userId, isLoggedIn, colorScheme),
+                  child: _buildAvatar(
+                    avatarUrl,
+                    userId,
+                    isLoggedIn,
+                    colorScheme,
+                  ),
                 ),
               );
             },
@@ -248,7 +254,12 @@ class _DiscoverPageState extends State<DiscoverPage> {
     return '晚上好';
   }
 
-  Widget _buildAvatar(String? avatarUrl, String userId, bool isLoggedIn, ColorScheme colorScheme) {
+  Widget _buildAvatar(
+    String? avatarUrl,
+    String userId,
+    bool isLoggedIn,
+    ColorScheme colorScheme,
+  ) {
     if (avatarUrl == null || avatarUrl.isEmpty) {
       return CircleAvatar(
         backgroundColor: colorScheme.primaryContainer,
@@ -331,48 +342,48 @@ class _DiscoverPageState extends State<DiscoverPage> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(minHeight: 140),
           child: Container(
-          margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            color: cs.primaryContainer,
-          ),
-          child: Stack(
-            children: [
-              Positioned(
-                right: -12,
-                top: -12,
-                child: Icon(
-                  Icons.music_note,
-                  size: 80,
-                  color: cs.onPrimaryContainer.withValues(alpha: 0.1),
+            margin: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              color: cs.primaryContainer,
+            ),
+            child: Stack(
+              children: [
+                Positioned(
+                  right: -12,
+                  top: -12,
+                  child: Icon(
+                    Icons.music_note,
+                    size: 80,
+                    color: cs.onPrimaryContainer.withValues(alpha: 0.1),
+                  ),
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.all(24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _getGreeting(),
-                      style: tt.displaySmall?.copyWith(
-                        color: cs.onPrimaryContainer,
-                        fontWeight: FontWeight.bold,
+                Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _getGreeting(),
+                        style: tt.displaySmall?.copyWith(
+                          color: cs.onPrimaryContainer,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '发现你喜欢的音乐',
-                      style: tt.bodyLarge?.copyWith(
-                        color: cs.onPrimaryContainer.withValues(alpha: 0.8),
+                      const SizedBox(height: 4),
+                      Text(
+                        '发现你喜欢的音乐',
+                        style: tt.bodyLarge?.copyWith(
+                          color: cs.onPrimaryContainer.withValues(alpha: 0.8),
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
-       ),
       ),
     );
   }
@@ -418,9 +429,8 @@ class _DiscoverPageState extends State<DiscoverPage> {
                           backgroundColor: cs.primaryContainer,
                           child: Text(
                             '${i + 1}',
-                            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: cs.onPrimaryContainer,
-                            ),
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(color: cs.onPrimaryContainer),
                           ),
                         ),
                         label: Text(s.songName),
@@ -508,10 +518,11 @@ class _DiscoverPageState extends State<DiscoverPage> {
                                 themes[i].name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                                  fontWeight: FontWeight.w500,
-                                  color: cs.onSurface,
-                                ),
+                                style: Theme.of(context).textTheme.titleSmall
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w500,
+                                      color: cs.onSurface,
+                                    ),
                               ),
                             ],
                           ),
@@ -532,7 +543,8 @@ class _DiscoverPageState extends State<DiscoverPage> {
     return Selector<KugouProvider, Map<String, dynamic>?>(
       selector: (_, kugou) => kugou.sceneData,
       builder: (context, sceneData, _) {
-        if (sceneData == null) return const SliverToBoxAdapter(child: SizedBox());
+        if (sceneData == null)
+          return const SliverToBoxAdapter(child: SizedBox());
         final data = sceneData['data'] as Map<String, dynamic>? ?? sceneData;
         final list = data['list'] ?? data['info'] ?? [];
         if (list is! List || list.isEmpty) {
@@ -581,9 +593,8 @@ class _DiscoverPageState extends State<DiscoverPage> {
                                 item['name']?.toString() ?? '',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                                  color: cs.onSurface,
-                                ),
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: cs.onSurface),
                               ),
                             ],
                           ),
@@ -685,9 +696,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
                 apply: (v) => _isRankExpanded = v,
               ),
               trailing: TextButton(
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ChartsPage()),
-                ),
+                onPressed: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const ChartsPage())),
                 child: const Text('查看更多'),
               ),
               child: SizedBox(
@@ -772,7 +783,8 @@ class _PlaylistBrowsePageState extends State<_PlaylistBrowsePage> {
                       ),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => PlaylistPage(playlist: list[i].toPlaylist()),
+                          builder: (_) =>
+                              PlaylistPage(playlist: list[i].toPlaylist()),
                         ),
                       ),
                     ),
@@ -980,8 +992,9 @@ class _CollapsibleSection extends StatelessWidget {
         ),
         AnimatedCrossFade(
           duration: const Duration(milliseconds: 200),
-          crossFadeState:
-              isExpanded ? CrossFadeState.showFirst : CrossFadeState.showSecond,
+          crossFadeState: isExpanded
+              ? CrossFadeState.showFirst
+              : CrossFadeState.showSecond,
           sizeCurve: Curves.easeInOut,
           firstChild: child,
           secondChild: const SizedBox(width: double.infinity),

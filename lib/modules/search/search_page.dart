@@ -272,7 +272,7 @@ class _SearchPageState extends State<SearchPage>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('搜索历史', style: Theme.of(context).textTheme.titleMedium),
+              Text('搜索历史', style: Theme.of(context).textTheme.titleLarge),
               TextButton(
                 onPressed: _clearSearchHistory,
                 child: const Text('清空'),
@@ -368,11 +368,13 @@ class _SearchPageState extends State<SearchPage>
   Widget _buildSongResults() {
     final kugouProvider = context.watch<KugouProvider>();
 
-    if (kugouProvider.isLoading && (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
+    if (kugouProvider.isLoading &&
+        (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
       return const Center(child: MD3ELoadingIndicator());
     }
 
-    if (kugouProvider.error != null && (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
+    if (kugouProvider.error != null &&
+        (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
       return _buildErrorState(kugouProvider.error!, () {
         kugouProvider.clearError();
         _performSearchByType(_query, 'song');
@@ -392,7 +394,8 @@ class _SearchPageState extends State<SearchPage>
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
         if (notification is ScrollEndNotification &&
-            notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
+            notification.metrics.pixels >=
+                notification.metrics.maxScrollExtent - 200) {
           context.read<KugouProvider>().loadMoreSearchResults(type: 'song');
         }
         return false;
@@ -406,7 +409,10 @@ class _SearchPageState extends State<SearchPage>
                 return SongListItem(
                   song: results[index],
                   onTap: () {
-                    context.read<PlayerProvider>().playOnlinePlaylist(results, index);
+                    context.read<PlayerProvider>().playOnlinePlaylist(
+                      results,
+                      index,
+                    );
                   },
                   onMoreTap: () {},
                 );
@@ -432,11 +438,13 @@ class _SearchPageState extends State<SearchPage>
   Widget _buildAlbumResults() {
     final kugouProvider = context.watch<KugouProvider>();
 
-    if (kugouProvider.isLoading && (kugouProvider.searchResults?.albums.isEmpty ?? true)) {
+    if (kugouProvider.isLoading &&
+        (kugouProvider.searchResults?.albums.isEmpty ?? true)) {
       return const Center(child: MD3ELoadingIndicator());
     }
 
-    if (kugouProvider.error != null && (kugouProvider.searchResults?.albums.isEmpty ?? true)) {
+    if (kugouProvider.error != null &&
+        (kugouProvider.searchResults?.albums.isEmpty ?? true)) {
       return _buildErrorState(kugouProvider.error!, () {
         kugouProvider.clearError();
         _performSearchByType(_query, 'album');
@@ -456,7 +464,8 @@ class _SearchPageState extends State<SearchPage>
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
         if (notification is ScrollEndNotification &&
-            notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
+            notification.metrics.pixels >=
+                notification.metrics.maxScrollExtent - 200) {
           context.read<KugouProvider>().loadMoreSearchResults(type: 'album');
         }
         return false;
@@ -475,7 +484,10 @@ class _SearchPageState extends State<SearchPage>
               itemBuilder: (context, index) {
                 final album = results[index];
                 final cleanName = album.name.replaceAll(RegExp(r'<[^>]*>'), '');
-                final cleanArtist = album.artist.replaceAll(RegExp(r'<[^>]*>'), '');
+                final cleanArtist = album.artist.replaceAll(
+                  RegExp(r'<[^>]*>'),
+                  '',
+                );
                 return _SearchAlbumCard(
                   name: cleanName,
                   artist: cleanArtist,
@@ -499,11 +511,13 @@ class _SearchPageState extends State<SearchPage>
   Widget _buildArtistResults() {
     final kugouProvider = context.watch<KugouProvider>();
 
-    if (kugouProvider.isLoading && (kugouProvider.searchResults?.artists.isEmpty ?? true)) {
+    if (kugouProvider.isLoading &&
+        (kugouProvider.searchResults?.artists.isEmpty ?? true)) {
       return const Center(child: MD3ELoadingIndicator());
     }
 
-    if (kugouProvider.error != null && (kugouProvider.searchResults?.artists.isEmpty ?? true)) {
+    if (kugouProvider.error != null &&
+        (kugouProvider.searchResults?.artists.isEmpty ?? true)) {
       return _buildErrorState(kugouProvider.error!, () {
         kugouProvider.clearError();
         _performSearchByType(_query, 'artist');
@@ -519,7 +533,9 @@ class _SearchPageState extends State<SearchPage>
 
     print('[_buildArtistResults] results.count=${results.length}');
     for (final a in results) {
-      print('[_buildArtistResults] artist: id="${a.id}", name="${a.name}", avatar="${a.avatarUrl}"');
+      print(
+        '[_buildArtistResults] artist: id="${a.id}", name="${a.name}", avatar="${a.avatarUrl}"',
+      );
     }
 
     if (results.isEmpty) {
@@ -529,7 +545,8 @@ class _SearchPageState extends State<SearchPage>
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
         if (notification is ScrollEndNotification &&
-            notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
+            notification.metrics.pixels >=
+                notification.metrics.maxScrollExtent - 200) {
           context.read<KugouProvider>().loadMoreSearchResults(type: 'artist');
         }
         return false;
@@ -548,7 +565,11 @@ class _SearchPageState extends State<SearchPage>
                     avatarUrl: artist.avatarUrl,
                     size: 48,
                   ),
-                  title: Text(artist.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  title: Text(
+                    artist.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                   subtitle: const Text('歌手'),
                   onTap: () {
                     Navigator.of(context).push(
@@ -578,11 +599,13 @@ class _SearchPageState extends State<SearchPage>
   Widget _buildPlaylistResults() {
     final kugouProvider = context.watch<KugouProvider>();
 
-    if (kugouProvider.isLoading && (kugouProvider.searchResults?.playlists.isEmpty ?? true)) {
+    if (kugouProvider.isLoading &&
+        (kugouProvider.searchResults?.playlists.isEmpty ?? true)) {
       return const Center(child: MD3ELoadingIndicator());
     }
 
-    if (kugouProvider.error != null && (kugouProvider.searchResults?.playlists.isEmpty ?? true)) {
+    if (kugouProvider.error != null &&
+        (kugouProvider.searchResults?.playlists.isEmpty ?? true)) {
       return _buildErrorState(kugouProvider.error!, () {
         kugouProvider.clearError();
         _performSearchByType(_query, 'special');
@@ -602,7 +625,8 @@ class _SearchPageState extends State<SearchPage>
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
         if (notification is ScrollEndNotification &&
-            notification.metrics.pixels >= notification.metrics.maxScrollExtent - 200) {
+            notification.metrics.pixels >=
+                notification.metrics.maxScrollExtent - 200) {
           context.read<KugouProvider>().loadMoreSearchResults(type: 'special');
         }
         return false;
@@ -744,9 +768,7 @@ class _SearchPageState extends State<SearchPage>
           song: results[index],
           onTap: () {
             // 必须用 playCloudPlaylist 走 /user/cloud/url 解析
-            context
-                .read<PlayerProvider>()
-                .playCloudPlaylist(results, index);
+            context.read<PlayerProvider>().playCloudPlaylist(results, index);
           },
           onMoreTap: () {},
         );
@@ -804,7 +826,7 @@ class _SearchPageState extends State<SearchPage>
           const SizedBox(height: 12),
           Text(
             '未找到相关结果',
-            style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
               color: colorScheme.onSurfaceVariant,
             ),
           ),
@@ -821,11 +843,7 @@ class _ArtistAvatar extends StatefulWidget {
   final String? avatarUrl;
   final double size;
 
-  const _ArtistAvatar({
-    required this.artistId,
-    this.avatarUrl,
-    this.size = 48,
-  });
+  const _ArtistAvatar({required this.artistId, this.avatarUrl, this.size = 48});
 
   @override
   State<_ArtistAvatar> createState() => _ArtistAvatarState();
@@ -883,18 +901,18 @@ class _ArtistAvatarState extends State<_ArtistAvatar> {
     final size = widget.size;
 
     Widget placeholder() => Container(
-          width: size,
-          height: size,
-          decoration: BoxDecoration(
-            color: colorScheme.surfaceContainerHighest,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            Icons.person,
-            color: colorScheme.onSurfaceVariant,
-            size: size * 0.5,
-          ),
-        );
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        shape: BoxShape.circle,
+      ),
+      child: Icon(
+        Icons.person,
+        color: colorScheme.onSurfaceVariant,
+        size: size * 0.5,
+      ),
+    );
 
     if (_loading) {
       return SizedBox(width: size, height: size, child: placeholder());
@@ -966,7 +984,7 @@ class _SearchAlbumCard extends StatelessWidget {
                       name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w500,
                         color: colorScheme.onSurface,
                       ),
