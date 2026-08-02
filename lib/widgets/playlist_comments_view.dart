@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/kugou_provider.dart';
+import '../providers/comment_display_provider.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import '../services/kugou_api/kugou_models.dart';
 import 'md3e_loading_indicator.dart';
@@ -24,7 +25,7 @@ class _FloorState {
 /// 在 PlaylistPage / AlbumDetailPage 中展示评论。
 ///
 /// **功能**：
-/// - 热门评论/歌手评论置顶展示，带徽章标识
+/// - 歌手评论/歌手评论置顶展示，带徽章标识
 /// - 楼层评论（楼中楼），点击"查看N条回复"展开
 /// - 长评论展开/收起（超过 120 字）
 /// - 点赞数格式化（10000+ → "1w"）
@@ -122,10 +123,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
     final kugouProvider = context.read<KugouProvider>();
     KugouCommentList? result;
     if (widget.commentType == 'album') {
-      result = await kugouProvider.getAlbumComments(
-        widget.specialId,
-        page: 1,
-      );
+      result = await kugouProvider.getAlbumComments(widget.specialId, page: 1);
     } else {
       result = await kugouProvider.getPlaylistComments(
         widget.specialId,
@@ -206,8 +204,10 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
     return _floorStates.putIfAbsent(commentId, () => _FloorState());
   }
 
-  Future<void> _fetchFloorReplies(KugouComment comment,
-      {bool reset = false}) async {
+  Future<void> _fetchFloorReplies(
+    KugouComment comment, {
+    bool reset = false,
+  }) async {
     final state = _getFloorState(comment.id);
     if (state.loading) return;
     if (!state.hasMore && !reset) return;
@@ -308,6 +308,10 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
 
   @override
   Widget build(BuildContext context) {
+    final display = context.watch<CommentDisplayProvider>();
+    final commentFontSize = display.commentFontSize;
+    final replyFontSize = display.commentReplyFontSize;
+
     final colorScheme = Theme.of(context).colorScheme;
 
     if (_isLoading && _comments.isEmpty && _hotComments.isEmpty) {
@@ -339,10 +343,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                 ),
               ),
               const SizedBox(height: 12),
-              TextButton(
-                onPressed: _fetchComments,
-                child: const Text('重试'),
-              ),
+              TextButton(onPressed: _fetchComments, child: const Text('重试')),
             ],
           ),
         ),
@@ -374,11 +375,11 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
       );
     }
 
-    // 构建显示列表：热门评论 + 最新评论
+    // 构建显示列表：歌手评论 + 最新评论
     final displayItems = <_CommentDisplayItem>[];
 
     if (_hotComments.isNotEmpty) {
-      displayItems.add(_CommentDisplayItem.header('热门评论'));
+      displayItems.add(_CommentDisplayItem.header('歌手评论'));
       for (final c in _hotComments) {
         displayItems.add(_CommentDisplayItem.comment(c));
       }
@@ -401,10 +402,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
               padding: const EdgeInsets.all(16),
               child: _isLoadingMore
                   ? const MD3ELoadingIndicator(size: 24)
-                  : TextButton(
-                      onPressed: _loadMore,
-                      child: const Text('加载更多'),
-                    ),
+                  : TextButton(onPressed: _loadMore, child: const Text('加载更多')),
             ),
           );
         }
@@ -413,7 +411,12 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
         if (item.isHeader) {
           return _buildSectionHeader(item.headerTitle!, colorScheme);
         }
-        return _buildCommentItem(item.comment!, colorScheme);
+        return _buildCommentItem(
+          item.comment!,
+          colorScheme,
+          commentFontSize,
+          replyFontSize,
+        );
       },
     );
   }
@@ -424,14 +427,19 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
       child: Text(
         title,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: colorScheme.onSurface,
-              fontWeight: FontWeight.bold,
-            ),
+          color: colorScheme.onSurface,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
 
-  Widget _buildCommentItem(KugouComment comment, ColorScheme colorScheme) {
+  Widget _buildCommentItem(
+    KugouComment comment,
+    ColorScheme colorScheme,
+    double commentFontSize,
+    double replyFontSize,
+  ) {
     final floorState = _floorStates[comment.id];
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 12),
@@ -450,7 +458,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                     Flexible(
                       child: Text(
                         comment.username,
-                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
                               color: colorScheme.primary,
                               fontWeight: FontWeight.w500,
                             ),
@@ -469,9 +478,10 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                     Text(
                       _formatTime(comment.time),
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant
-                                .withValues(alpha: 0.6),
-                          ),
+                        color: colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.6,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -481,7 +491,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                   duration: const Duration(milliseconds: 200),
                   curve: Curves.easeInOut,
                   alignment: Alignment.topLeft,
-                  child: _buildContent(comment, colorScheme),
+                  child: _buildContent(comment, colorScheme, commentFontSize),
                 ),
                 // 点赞 + 回复
                 const SizedBox(height: 6),
@@ -491,16 +501,18 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                       Icon(
                         Icons.thumb_up_outlined,
                         size: 12,
-                        color: colorScheme.onSurfaceVariant
-                            .withValues(alpha: 0.5),
+                        color: colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.5,
+                        ),
                       ),
                       const SizedBox(width: 4),
                       Text(
                         _formatLike(comment.likes),
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: colorScheme.onSurfaceVariant
-                                  .withValues(alpha: 0.5),
-                            ),
+                          color: colorScheme.onSurfaceVariant.withValues(
+                            alpha: 0.5,
+                          ),
+                        ),
                       ),
                     ],
                     // 回复按钮
@@ -524,12 +536,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                               floorState?.expanded == true
                                   ? '收起回复'
                                   : '查看${comment.replyCount}条回复',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelSmall
-                                  ?.copyWith(
-                                    color: colorScheme.primary,
-                                  ),
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(color: colorScheme.primary),
                             ),
                           ],
                         ),
@@ -547,6 +555,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                           comment,
                           floorState!,
                           colorScheme,
+                          replyFontSize,
                         )
                       : const SizedBox.shrink(),
                 ),
@@ -558,7 +567,11 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
     );
   }
 
-  Widget _buildContent(KugouComment comment, ColorScheme colorScheme) {
+  Widget _buildContent(
+    KugouComment comment,
+    ColorScheme colorScheme,
+    double fontSize,
+  ) {
     final content = comment.content;
     if (!_needsTruncate(content) || _expandedContents.contains(comment.id)) {
       return RichText(
@@ -567,9 +580,10 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
             TextSpan(
               text: content,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: colorScheme.onSurface,
-                    height: 1.4,
-                  ),
+                color: colorScheme.onSurface,
+                height: 1.4,
+                fontSize: fontSize,
+              ),
             ),
             if (_needsTruncate(content) &&
                 _expandedContents.contains(comment.id))
@@ -579,8 +593,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                   child: Text(
                     ' 收起',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ),
@@ -595,9 +609,10 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
           TextSpan(
             text: '${content.substring(0, 120)}...',
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: colorScheme.onSurface,
-                  height: 1.4,
-                ),
+              color: colorScheme.onSurface,
+              height: 1.4,
+              fontSize: fontSize,
+            ),
           ),
           WidgetSpan(
             child: GestureDetector(
@@ -605,8 +620,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
               child: Text(
                 '展开',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
+                  color: colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           ),
@@ -626,10 +641,10 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: colorScheme.primary,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
+          color: colorScheme.primary,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
@@ -638,6 +653,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
     KugouComment comment,
     _FloorState state,
     ColorScheme colorScheme,
+    double replyFontSize,
   ) {
     return Container(
       margin: const EdgeInsets.only(top: 10),
@@ -651,65 +667,58 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
         children: [
           // 回复列表
           for (final reply in state.replies)
-            _buildFloorReplyItem(reply, colorScheme),
+            _buildFloorReplyItem(reply, colorScheme, replyFontSize),
           // 加载中
           if (state.loading)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Center(
                 child: MD3ELoadingIndicator(
-                    size: 16, color: colorScheme.primary),
+                  size: 16,
+                  color: colorScheme.primary,
+                ),
               ),
             ),
           // 空状态
-          if (!state.loading &&
-              state.initialized &&
-              state.replies.isEmpty)
+          if (!state.loading && state.initialized && state.replies.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Center(
                 child: Text(
                   state.message.isNotEmpty ? state.message : '暂无回复',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
             ),
           // 加载更多
-          if (state.hasMore &&
-              !state.loading &&
-              state.replies.isNotEmpty)
+          if (state.hasMore && !state.loading && state.replies.isNotEmpty)
             Center(
               child: GestureDetector(
                 onTap: () => _fetchFloorReplies(comment),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Text(
-                    state.message.contains('失败')
-                        ? '加载失败，点击重试'
-                        : '加载更多回复',
+                    state.message.contains('失败') ? '加载失败，点击重试' : '加载更多回复',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: colorScheme.primary,
-                        ),
+                      color: colorScheme.primary,
+                    ),
                   ),
                 ),
               ),
             ),
           // 全部加载完
-          if (!state.hasMore &&
-              !state.loading &&
-              state.replies.isNotEmpty)
+          if (!state.hasMore && !state.loading && state.replies.isNotEmpty)
             Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Text(
                   '已加载全部回复',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant
-                            .withValues(alpha: 0.5),
-                        fontSize: 10,
-                      ),
+                    color: colorScheme.onSurfaceVariant.withValues(alpha: 0.5),
+                    fontSize: 10,
+                  ),
                 ),
               ),
             ),
@@ -721,6 +730,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
   Widget _buildFloorReplyItem(
     KugouComment reply,
     ColorScheme colorScheme,
+    double fontSize,
   ) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -738,11 +748,10 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                     Flexible(
                       child: Text(
                         reply.username,
-                        style:
-                            Theme.of(context).textTheme.labelSmall?.copyWith(
-                                  color: colorScheme.primary,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colorScheme.primary,
+                          fontWeight: FontWeight.w500,
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -750,10 +759,11 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                     Text(
                       _formatTime(reply.time),
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: colorScheme.onSurfaceVariant
-                                .withValues(alpha: 0.5),
-                            fontSize: 10,
-                          ),
+                        color: colorScheme.onSurfaceVariant.withValues(
+                          alpha: 0.5,
+                        ),
+                        fontSize: 10,
+                      ),
                     ),
                   ],
                 ),
@@ -761,9 +771,10 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                 Text(
                   reply.content,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurface,
-                        height: 1.3,
-                      ),
+                    color: colorScheme.onSurface,
+                    height: 1.3,
+                    fontSize: fontSize,
+                  ),
                 ),
               ],
             ),
@@ -810,8 +821,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
             width: 24,
             height: 24,
             fit: BoxFit.cover,
-            placeholder: (_, _) =>
-                _buildSmallTextAvatar(comment, colorScheme),
+            placeholder: (_, _) => _buildSmallTextAvatar(comment, colorScheme),
             errorWidget: (_, _, _) =>
                 _buildSmallTextAvatar(comment, colorScheme),
           ),
@@ -827,9 +837,9 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
       backgroundColor: colorScheme.primary.withValues(alpha: 0.15),
       child: Text(
         comment.username.isNotEmpty ? comment.username[0] : '?',
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: colorScheme.primary,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: colorScheme.primary),
       ),
     );
   }
@@ -841,9 +851,9 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
       child: Text(
         comment.username.isNotEmpty ? comment.username[0] : '?',
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: colorScheme.primary,
-              fontSize: 11,
-            ),
+          color: colorScheme.primary,
+          fontSize: 11,
+        ),
       ),
     );
   }

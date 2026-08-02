@@ -763,7 +763,7 @@ class KugouCommentList {
     final data = json['data'] as Map<String, dynamic>? ?? json;
     final list = data['list'] ?? data['comments'] ?? [];
 
-    // 热门评论：weight_list / hot_list
+    // 歌手评论：weight_list / hot_list
     final hotCandidate = data['weight_list'] ?? data['hot_list'];
     final hotList = (hotCandidate is Map && hotCandidate['list'] is List)
         ? hotCandidate['list'] as List<dynamic>
@@ -774,7 +774,7 @@ class KugouCommentList {
         ? starCandidate['list'] as List<dynamic>
         : (starCandidate is List ? starCandidate : <dynamic>[]);
 
-    // 合并：歌手评论 + 热门评论（去重，避免 star_cmts 同时出现在两个列表中）
+    // 合并：歌手评论 + 歌手评论（去重，避免 star_cmts 同时出现在两个列表中）
     final hot = <KugouComment>[];
     final seenIds = <String>{};
     for (final e in starList) {
@@ -835,8 +835,11 @@ class KugouComment {
     this.mixSongId,
   });
 
-  factory KugouComment.fromJson(Map<String, dynamic> json,
-      {bool isHot = false, bool isStar = false}) {
+  factory KugouComment.fromJson(
+    Map<String, dynamic> json, {
+    bool isHot = false,
+    bool isStar = false,
+  }) {
     // 修复头像 URL：http → https，避免 Android 明文 HTTP 请求被拒
     String? fixAvatar(String? url) {
       if (url == null || url.isEmpty) return null;
@@ -880,7 +883,9 @@ class KugouComment {
         ),
       ),
       content: _str(json['content'] ?? json['comment_text'] ?? ''),
-      time: _parseInt(json['createtime'] ?? json['addtime'] ?? json['time'] ?? 0),
+      time: _parseInt(
+        json['createtime'] ?? json['addtime'] ?? json['time'] ?? 0,
+      ),
       likes: _parseInt(
         likeRecord?['count'] ??
             json['like_count'] ??
@@ -889,9 +894,7 @@ class KugouComment {
             json['reply_like_count'] ??
             0,
       ),
-      replyCount: _parseInt(
-        json['reply_num'] ?? json['reply_count'] ?? 0,
-      ),
+      replyCount: _parseInt(json['reply_num'] ?? json['reply_count'] ?? 0),
       isHot: parseBool(json['is_hot'] ?? json['isHot'] ?? isHot),
       isStar: parseBool(json['is_star'] ?? json['isStar'] ?? isStar),
       specialId: _strNull(
@@ -1439,7 +1442,9 @@ class KugouUserVipDetail {
                 // 概念版VIP: product_type 为 "svip"
                 final pt = b['product_type']?.toString() ?? '';
                 final isConcept = pt == 'svip';
-                print('[VIP_DEBUG] product_type=$pt isConcept=$isConcept end_time=$t');
+                print(
+                  '[VIP_DEBUG] product_type=$pt isConcept=$isConcept end_time=$t',
+                );
                 if (isConcept) {
                   conceptExpireTime =
                       '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';

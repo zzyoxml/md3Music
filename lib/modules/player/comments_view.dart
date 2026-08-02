@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models/song.dart';
+import '../../providers/comment_display_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
@@ -90,7 +91,7 @@ class _FloorState {
 ///   评论正文和时间戳根据深浅色模式自动适配。
 ///
 /// **功能**：
-/// - 热门评论/歌手评论置顶展示，带徽章标识
+/// - 歌手评论/歌手评论置顶展示，带徽章标识
 /// - 楼层评论（楼中楼），点击"查看N条回复"展开
 /// - 长评论展开/收起（超过 120 字或 3 行）
 /// - 点赞数格式化（10000+ → "1w"）
@@ -253,8 +254,10 @@ class _CommentsViewState extends State<CommentsView> {
     return _floorStates.putIfAbsent(commentId, () => _FloorState());
   }
 
-  Future<void> _fetchFloorReplies(KugouComment comment,
-      {bool reset = false}) async {
+  Future<void> _fetchFloorReplies(
+    KugouComment comment, {
+    bool reset = false,
+  }) async {
     final state = _getFloorState(comment.id);
     if (state.loading) return;
     if (!state.hasMore && !reset) return;
@@ -356,6 +359,10 @@ class _CommentsViewState extends State<CommentsView> {
 
   @override
   Widget build(BuildContext context) {
+    final display = context.watch<CommentDisplayProvider>();
+    final commentFontSize = display.commentFontSize;
+    final replyFontSize = display.commentReplyFontSize;
+
     final Color primaryTextColor;
     final Color secondaryTextColor;
     final Color usernameColor;
@@ -372,9 +379,7 @@ class _CommentsViewState extends State<CommentsView> {
     }
 
     if (_isLoading) {
-      return Center(
-        child: MD3ELoadingIndicator(color: primaryTextColor),
-      );
+      return Center(child: MD3ELoadingIndicator(color: primaryTextColor));
     }
 
     if (_error != null) {
@@ -388,9 +393,9 @@ class _CommentsViewState extends State<CommentsView> {
               const SizedBox(height: 12),
               Text(
                 '加载评论失败',
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      color: secondaryTextColor,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(color: secondaryTextColor),
               ),
               const SizedBox(height: 16),
               TextButton(
@@ -413,20 +418,20 @@ class _CommentsViewState extends State<CommentsView> {
             const SizedBox(height: 12),
             Text(
               '暂无评论',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: secondaryTextColor,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(color: secondaryTextColor),
             ),
           ],
         ),
       );
     }
 
-    // 构建显示列表：热门评论 + 全部评论
+    // 构建显示列表：歌手评论 + 全部评论
     final displayItems = <_CommentDisplayItem>[];
 
     if (_hotComments.isNotEmpty) {
-      displayItems.add(_CommentDisplayItem.header('热门评论'));
+      displayItems.add(_CommentDisplayItem.header('歌手评论'));
       for (final c in _hotComments) {
         displayItems.add(_CommentDisplayItem.comment(c));
       }
@@ -465,8 +470,7 @@ class _CommentsViewState extends State<CommentsView> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: _isLoadingMore
-                    ? MD3ELoadingIndicator(
-                        size: 24, color: primaryTextColor)
+                    ? MD3ELoadingIndicator(size: 24, color: primaryTextColor)
                     : TextButton(
                         onPressed: _loadMore,
                         style: TextButton.styleFrom(
@@ -480,16 +484,15 @@ class _CommentsViewState extends State<CommentsView> {
 
           final item = displayItems[index];
           if (item.isHeader) {
-            return _buildSectionHeader(
-              item.headerTitle!,
-              primaryTextColor,
-            );
+            return _buildSectionHeader(item.headerTitle!, primaryTextColor);
           }
           return _buildCommentItem(
             item.comment!,
             primaryTextColor,
             secondaryTextColor,
             usernameColor,
+            commentFontSize,
+            replyFontSize,
           );
         },
       ),
@@ -502,9 +505,9 @@ class _CommentsViewState extends State<CommentsView> {
       child: Text(
         title,
         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: color,
-              fontWeight: FontWeight.bold,
-            ),
+          color: color,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
@@ -514,6 +517,8 @@ class _CommentsViewState extends State<CommentsView> {
     Color primaryTextColor,
     Color secondaryTextColor,
     Color usernameColor,
+    double commentFontSize,
+    double replyFontSize,
   ) {
     final floorState = _floorStates[comment.id];
     return Padding(
@@ -533,7 +538,8 @@ class _CommentsViewState extends State<CommentsView> {
                     Flexible(
                       child: Text(
                         comment.username,
-                        style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
                               color: usernameColor,
                               fontWeight: FontWeight.w500,
                             ),
@@ -552,8 +558,8 @@ class _CommentsViewState extends State<CommentsView> {
                     Text(
                       _formatTime(comment.time),
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: secondaryTextColor.withValues(alpha: 0.6),
-                          ),
+                        color: secondaryTextColor.withValues(alpha: 0.6),
+                      ),
                     ),
                   ],
                 ),
@@ -564,7 +570,11 @@ class _CommentsViewState extends State<CommentsView> {
                   curve: Curves.easeInOut,
                   alignment: Alignment.topLeft,
                   child: _buildContent(
-                      comment, primaryTextColor, secondaryTextColor),
+                    comment,
+                    primaryTextColor,
+                    secondaryTextColor,
+                    commentFontSize,
+                  ),
                 ),
                 // 点赞 + 回复
                 const SizedBox(height: 6),
@@ -580,8 +590,8 @@ class _CommentsViewState extends State<CommentsView> {
                       Text(
                         _formatLike(comment.likes),
                         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                              color: secondaryTextColor.withValues(alpha: 0.5),
-                            ),
+                          color: secondaryTextColor.withValues(alpha: 0.5),
+                        ),
                       ),
                     ],
                     // 回复按钮
@@ -605,12 +615,8 @@ class _CommentsViewState extends State<CommentsView> {
                               floorState?.expanded == true
                                   ? '收起回复'
                                   : '查看${comment.replyCount}条回复',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelSmall
-                                  ?.copyWith(
-                                    color: usernameColor,
-                                  ),
+                              style: Theme.of(context).textTheme.labelSmall
+                                  ?.copyWith(color: usernameColor),
                             ),
                           ],
                         ),
@@ -630,6 +636,7 @@ class _CommentsViewState extends State<CommentsView> {
                           primaryTextColor,
                           secondaryTextColor,
                           usernameColor,
+                          replyFontSize,
                         )
                       : const SizedBox.shrink(),
                 ),
@@ -645,6 +652,7 @@ class _CommentsViewState extends State<CommentsView> {
     KugouComment comment,
     Color primaryTextColor,
     Color secondaryTextColor,
+    double fontSize,
   ) {
     final content = comment.content;
     if (!_needsTruncate(content) || _expandedContents.contains(comment.id)) {
@@ -653,10 +661,11 @@ class _CommentsViewState extends State<CommentsView> {
           children: [
             TextSpan(
               text: content,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: primaryTextColor,
-                    height: 1.4,
-                  ),
+              style: TextStyle(
+                color: primaryTextColor,
+                height: 1.4,
+                fontSize: fontSize,
+              ),
             ),
             if (_needsTruncate(content) &&
                 _expandedContents.contains(comment.id))
@@ -665,9 +674,9 @@ class _CommentsViewState extends State<CommentsView> {
                   onTap: () => _toggleContent(comment.id),
                   child: Text(
                     ' 收起',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: secondaryTextColor,
-                        ),
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelSmall?.copyWith(color: secondaryTextColor),
                   ),
                 ),
               ),
@@ -681,19 +690,20 @@ class _CommentsViewState extends State<CommentsView> {
         children: [
           TextSpan(
             text: '${content.substring(0, 120)}...',
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: primaryTextColor,
-                  height: 1.4,
-                ),
+            style: TextStyle(
+              color: primaryTextColor,
+              height: 1.4,
+              fontSize: fontSize,
+            ),
           ),
           WidgetSpan(
             child: GestureDetector(
               onTap: () => _toggleContent(comment.id),
               child: Text(
                 '展开',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: secondaryTextColor,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.labelSmall?.copyWith(color: secondaryTextColor),
               ),
             ),
           ),
@@ -713,10 +723,10 @@ class _CommentsViewState extends State<CommentsView> {
       child: Text(
         text,
         style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: color,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
@@ -727,6 +737,7 @@ class _CommentsViewState extends State<CommentsView> {
     Color primaryTextColor,
     Color secondaryTextColor,
     Color usernameColor,
+    double replyFontSize,
   ) {
     return Container(
       margin: const EdgeInsets.only(top: 10),
@@ -745,6 +756,7 @@ class _CommentsViewState extends State<CommentsView> {
               primaryTextColor,
               secondaryTextColor,
               usernameColor,
+              replyFontSize,
             ),
           // 加载中
           if (state.loading)
@@ -755,53 +767,45 @@ class _CommentsViewState extends State<CommentsView> {
               ),
             ),
           // 空状态
-          if (!state.loading &&
-              state.initialized &&
-              state.replies.isEmpty)
+          if (!state.loading && state.initialized && state.replies.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Center(
                 child: Text(
                   state.message.isNotEmpty ? state.message : '暂无回复',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: secondaryTextColor,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.labelSmall?.copyWith(color: secondaryTextColor),
                 ),
               ),
             ),
           // 加载更多
-          if (state.hasMore &&
-              !state.loading &&
-              state.replies.isNotEmpty)
+          if (state.hasMore && !state.loading && state.replies.isNotEmpty)
             Center(
               child: GestureDetector(
                 onTap: () => _fetchFloorReplies(comment),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Text(
-                    state.message.contains('失败')
-                        ? '加载失败，点击重试'
-                        : '加载更多回复',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: usernameColor,
-                        ),
+                    state.message.contains('失败') ? '加载失败，点击重试' : '加载更多回复',
+                    style: Theme.of(
+                      context,
+                    ).textTheme.labelSmall?.copyWith(color: usernameColor),
                   ),
                 ),
               ),
             ),
           // 全部加载完
-          if (!state.hasMore &&
-              !state.loading &&
-              state.replies.isNotEmpty)
+          if (!state.hasMore && !state.loading && state.replies.isNotEmpty)
             Center(
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 child: Text(
                   '已加载全部回复',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: secondaryTextColor.withValues(alpha: 0.5),
-                        fontSize: 10,
-                      ),
+                    color: secondaryTextColor.withValues(alpha: 0.5),
+                    fontSize: 10,
+                  ),
                 ),
               ),
             ),
@@ -815,6 +819,7 @@ class _CommentsViewState extends State<CommentsView> {
     Color primaryTextColor,
     Color secondaryTextColor,
     Color usernameColor,
+    double fontSize,
   ) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -832,11 +837,10 @@ class _CommentsViewState extends State<CommentsView> {
                     Flexible(
                       child: Text(
                         reply.username,
-                        style:
-                            Theme.of(context).textTheme.labelSmall?.copyWith(
-                                  color: usernameColor,
-                                  fontWeight: FontWeight.w500,
-                                ),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: usernameColor,
+                          fontWeight: FontWeight.w500,
+                        ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -844,9 +848,9 @@ class _CommentsViewState extends State<CommentsView> {
                     Text(
                       _formatTime(reply.time),
                       style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                            color: secondaryTextColor.withValues(alpha: 0.5),
-                            fontSize: 10,
-                          ),
+                        color: secondaryTextColor.withValues(alpha: 0.5),
+                        fontSize: 10,
+                      ),
                     ),
                   ],
                 ),
@@ -854,9 +858,10 @@ class _CommentsViewState extends State<CommentsView> {
                 Text(
                   reply.content,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: primaryTextColor,
-                        height: 1.3,
-                      ),
+                    color: primaryTextColor,
+                    height: 1.3,
+                    fontSize: fontSize,
+                  ),
                 ),
               ],
             ),
@@ -899,7 +904,8 @@ class _CommentsViewState extends State<CommentsView> {
             width: 24,
             height: 24,
             fit: BoxFit.cover,
-            placeholder: (_, _) => _buildSmallTextAvatar(comment, usernameColor),
+            placeholder: (_, _) =>
+                _buildSmallTextAvatar(comment, usernameColor),
             errorWidget: (_, _, _) =>
                 _buildSmallTextAvatar(comment, usernameColor),
           ),
@@ -915,9 +921,9 @@ class _CommentsViewState extends State<CommentsView> {
       backgroundColor: usernameColor.withValues(alpha: 0.15),
       child: Text(
         comment.username.isNotEmpty ? comment.username[0] : '?',
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: usernameColor,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: usernameColor),
       ),
     );
   }
@@ -928,10 +934,9 @@ class _CommentsViewState extends State<CommentsView> {
       backgroundColor: usernameColor.withValues(alpha: 0.15),
       child: Text(
         comment.username.isNotEmpty ? comment.username[0] : '?',
-        style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              color: usernameColor,
-              fontSize: 11,
-            ),
+        style: Theme.of(
+          context,
+        ).textTheme.labelSmall?.copyWith(color: usernameColor, fontSize: 11),
       ),
     );
   }

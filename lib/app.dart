@@ -45,6 +45,7 @@ import 'providers/device_provider.dart';
 import 'providers/grid_columns_provider.dart';
 import 'providers/tab_config_provider.dart';
 import 'providers/theme_provider.dart';
+import 'providers/comment_display_provider.dart';
 import 'services/nodejs_server.dart';
 import 'widgets/dlna_casting_overlay.dart';
 
@@ -134,6 +135,8 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => TabConfigProvider()),
         // DLNA 投屏
         ChangeNotifierProvider(create: (_) => DlnaProvider()),
+        // 评论显示设置（字号等）
+        ChangeNotifierProvider(create: (_) => CommentDisplayProvider()),
       ],
       child: _AppView(
         showOnboarding: showOnboarding,
