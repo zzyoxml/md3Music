@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart' as just_audio;
 import 'package:provider/provider.dart';
@@ -14,6 +15,8 @@ import '../core/services/media_notification_service.dart';
 import '../core/services/wakelock_service.dart';
 import '../core/services/media_store_service.dart';
 import '../data/models/song.dart';
+import '../modules/player/comments_view.dart';
+import '../modules/player/mv_player_page.dart';
 import '../core/utils/audio_scanner.dart';
 import '../data/repositories/history_repository.dart';
 import '../data/repositories/player_state_repository.dart';
@@ -684,7 +687,13 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         } else {
           _isResolvingUrl = false;
           _resolveError = '无法获取播放链接';
+          final failedSong = _currentSong!;
           notifyListeners();
+          // 先弹窗提示，随即切到下一首（不阻塞）
+          _showUnplayableSongDialog(failedSong);
+          if (_playlist.length > 1) {
+            await next(autoPlay: true);
+          }
         }
       } catch (e) {
         _isResolvingUrl = false;
@@ -799,7 +808,13 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         } else {
           _isResolvingUrl = false;
           _resolveError = '无法获取播放链接';
+          final failedSong = _currentSong!;
           notifyListeners();
+          // 先弹窗提示，随即切到下一首（不阻塞）
+          _showUnplayableSongDialog(failedSong);
+          if (_playlist.length > 1) {
+            await next(autoPlay: true);
+          }
         }
       }
     } catch (e) {
@@ -1255,22 +1270,41 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    final nextIndex = (_currentIndex + 1) % _playlist.length;
-    _currentIndex = nextIndex;
-    _currentSong = _playlist[nextIndex];
-    _resolveError = null;
-    _position = Duration.zero; // 切歌时重置位置，避免恢复时跳到上一首的进度
-    _recordHistory(_currentSong!);
-    _updateNotification();
-    _saveState();
+    final startIndex = _currentIndex;
+    // 自动跳过无法获取播放链接的歌曲，直到找到可播放的或全部试过
+    for (int i = 0; i < _playlist.length; i++) {
+      final nextIndex = (_currentIndex + 1) % _playlist.length;
+      // 绕回起点：所有歌曲都试过了
+      if (nextIndex == startIndex) break;
 
-    final ok = await _resolveAndPlayCurrentSong(play: autoPlay);
-    if (!ok) {
+      _currentIndex = nextIndex;
+      _currentSong = _playlist[nextIndex];
+      _resolveError = null;
+      _position = Duration.zero; // 切歌时重置位置，避免恢复时跳到上一首的进度
+      _recordHistory(_currentSong!);
+      _updateNotification();
+      _saveState();
+
+      final ok = await _resolveAndPlayCurrentSong(play: autoPlay);
+      if (ok) {
+        // 切歌后刷新通知栏：_resolveAndPlayCurrentSong 可能更新了 _cachedArtworkPath，
+        // 投屏场景下 play=false 不会触发 playingStream 回调刷新通知，
+        // 需要在此显式刷新，避免 MediaSession 封面停留在上一首。
+        _updateNotification();
+        notifyListeners();
+        return;
+      }
+      // 无法获取链接，继续尝试下一首
       _resolveError = '无法获取播放链接';
+
+      // 非列表循环模式下，到末尾就停止尝试
+      if (_currentIndex >= _playlist.length - 1 &&
+          _loopMode != AppLoopMode.all) {
+        break;
+      }
     }
-    // 切歌后刷新通知栏：_resolveAndPlayCurrentSong 可能更新了 _cachedArtworkPath，
-    // 投屏场景下 play=false 不会触发 playingStream 回调刷新通知，
-    // 需要在此显式刷新，避免 MediaSession 封面停留在上一首。
+
+    // 所有歌曲都试过仍失败
     _updateNotification();
     notifyListeners();
   }
@@ -1329,7 +1363,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _saveState();
     notifyListeners();
 
-    await _resolveAndPlayCurrentSong();
+    final ok = await _resolveAndPlayCurrentSong();
+    if (!ok && _playlist.length > 1) {
+      // 手动选歌无法播放时，先弹窗提示，随即切到下一首（不阻塞）
+      _resolveError = '无法获取播放链接';
+      final failedSong = _currentSong!;
+      _showUnplayableSongDialog(failedSong);
+      await next(autoPlay: true);
+    }
   }
 
   Future<void> clearPlaylist() async {
@@ -1786,6 +1827,42 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
     _lastNotificationUpdate = now;
     _updateNotification();
+  }
+
+  /// 手动选歌无法播放时，弹出提示对话框（提供查看 MV 和评论的入口）。
+  /// 通过 [appNavigatorKey] 获取全局 context，不依赖具体 widget 重建。
+  void _showUnplayableSongDialog(Song song) {
+    final ctx = appNavigatorKey.currentContext;
+    if (ctx == null) return;
+    showDialog(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('歌曲无法播放'),
+        content: Text('「${song.displayName}」暂时无法播放，将切换到下一首'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('关闭'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              Navigator.push(ctx,
+                MaterialPageRoute(builder: (_) => MvPlayerPage(song: song)),
+              );
+            },
+            child: const Text('去看MV'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              showSongCommentsSheet(ctx, song);
+            },
+            child: const Text('看评论'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _updateNotification() {

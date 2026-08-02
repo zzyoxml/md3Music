@@ -649,6 +649,7 @@ class KugouApiClient {
     String? albumId,
     String? albumAudioId,
     bool downgrade = true,
+    String? ppageId,
   }) async {
     final params = <String, dynamic>{
       'hash': hash.toLowerCase(),
@@ -656,13 +657,12 @@ class KugouApiClient {
     };
     if (albumId != null) params['album_id'] = albumId;
     if (albumAudioId != null) params['album_audio_id'] = albumAudioId;
+    if (ppageId != null) params['ppage_id'] = ppageId;
 
     // VIP 用户优先用 /song/url/new（→ /v6/priv_url），它会读取
     // Authorization 头里的 vip_token，能拿到完整音质。
-    // 注意：如果 _getSongUrlNew 因为 priv_status=0 / fail_process 等
-    // 原因返回 null，说明酷狗没认 VIP。这种情况继续走 /song/url
-    // 也只会拿到 30s 试听片段，必须直接返回 null，让上层提示
-    // 用户 VIP 不生效或登录失效。
+    // 如果 _getSongUrlNew 因 priv_status=0 / fail_process 等返回 null，
+    // 继续走 /song/url 兜底，让 ppage_id（收藏页）有机会解锁已收藏的无版权歌曲。
     if (hasVipToken) {
       final vipUrl = await _getSongUrlNew(
         hash,
@@ -671,7 +671,7 @@ class KugouApiClient {
         albumAudioId: albumAudioId,
       );
       if (vipUrl != null) return vipUrl;
-      return null;
+      // 不再直接 return null，继续走 /song/url 兜底
     }
 
     var json = await _get(KugouEndpoints.songUrl, queryParameters: params);
@@ -875,7 +875,25 @@ class KugouApiClient {
       } catch (_) {}
     }
 
-    // 所有音质都失败，最后尝试带降级的 standard 请求
+    // 已收藏无版权歌曲兜底：用 ppage_id=356753938（收藏页）尝试获取完整播放链接。
+    // 酷狗约定：歌曲被收藏后，即便无版权也可通过该 page_id 解锁播放。
+    // 必须放在 free_part 试听兜底之前，否则试听 URL 会抢先返回 30s 片段。
+    // 参考 EchoMusic 的 resolver.ts 中 getSongUrl(track.hash, '', 356753938) 实现。
+    try {
+      final result = await getSongUrl(
+        hash,
+        quality: KugouQuality.standard,
+        albumId: albumId,
+        albumAudioId: albumAudioId,
+        downgrade: false,
+        ppageId: '356753938',
+      );
+      if (result != null && result.url.isNotEmpty) {
+        return result;
+      }
+    } catch (_) {}
+
+    // 最后尝试带降级的 standard 请求
     // （会走 free_part=1 的 30s 试听兜底）
     try {
       return await getSongUrl(
@@ -1366,13 +1384,36 @@ class KugouApiClient {
     }
   }
 
-  Future<KugouCommentList?> getFloorComments(
-    String commentId, {
+  /// 获取楼层评论（楼中楼回复）
+  ///
+  /// [specialId] 歌曲对应的 special_id（从评论数据中获取）
+  /// [tid] 评论 ID
+  /// [mixSongId] 歌曲 ID
+  /// [code] 评论 code（部分接口返回）
+  Future<KugouCommentList?> getFloorComments({
+    required String specialId,
+    required String tid,
+    String? mixSongId,
+    String? code,
     int page = 1,
+    int pagesize = 30,
   }) async {
+    if (specialId.isEmpty || tid.isEmpty) return null;
+    final params = <String, dynamic>{
+      'special_id': specialId,
+      'tid': tid,
+      'page': page,
+      'pagesize': pagesize,
+    };
+    if (mixSongId != null && mixSongId.isNotEmpty) {
+      params['mixsongid'] = mixSongId;
+    }
+    if (code != null && code.isNotEmpty) {
+      params['code'] = code;
+    }
     final json = await _get(
       KugouEndpoints.commentFloor,
-      queryParameters: {'commentid': commentId, 'page': page},
+      queryParameters: params,
     );
     if (json == null) return null;
     try {
