@@ -118,6 +118,9 @@ class WordRenderer {
   /// 渐变路径稳态下每帧只改 shader，0 次 layout。
   final Paint _gradientPaint = Paint();
 
+  /// 辉光层复用的 Paint 实例（避免每帧新建 Paint + ImageFilter）。
+  final Paint _glowBlurPaint = Paint();
+
   // ============== 渐变遮罩状态 ==============
 
   /// 当前正在演唱的 word 索引（-1 表示还未开始）。
@@ -579,12 +582,10 @@ class WordRenderer {
             wordX - blurSigma * 2, wordY - blurSigma * 2,
             width + blurSigma * 4, fontSize * lineHeight + blurSigma * 4,
           );
-          canvas.saveLayer(
-            glowRect,
-            Paint()..imageFilter = ImageFilter.blur(
-              sigmaX: blurSigma, sigmaY: blurSigma,
-            ),
+          _glowBlurPaint.imageFilter = ImageFilter.blur(
+            sigmaX: blurSigma, sigmaY: blurSigma,
           );
+          canvas.saveLayer(glowRect, _glowBlurPaint);
           painter.paint(canvas, wordPos);
           canvas.restore();
         }
