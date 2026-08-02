@@ -81,7 +81,8 @@ class WordRenderer {
   List<double> _wordYOffsets = const <double>[];
 
   /// AMLL 上浮最大幅度（px）：当前字最大上浮 -3px。
-  static const double _maxLiftPx = -3.0;
+  // 临时禁用上浮动画：设为 0 让 Y offset 永远为 0，便于对比效果
+  static const double _maxLiftPx = 0.0;
 
   /// AMLL 上浮 ATTACK 速度：当前字上浮指数衰减系数。
   static const double _liftAttackSpeed = 30.0;
@@ -121,6 +122,14 @@ class WordRenderer {
 
   /// 当前 word 内进度（0.0-1.0）。
   double _intraWordProgress = 0.0;
+
+  /// 行级渐变 mask 位置（相对于行首的累计已播宽度）。
+  ///
+  /// **行级渐变模型**：mask 边界随演唱进度从行首移动到行尾，
+  /// 跨越多个 word。长字上停留久（速度慢），短字上快速掠过，
+  /// 自然实现"根据字长不同改变移动速度"。
+  /// -1 表示无效（非当前行），double.infinity 表示已播完。
+  double _maskX = -1.0;
 
   /// 预计算的每个 word 在行内的起始 X 坐标（相对于行首）。
   /// 在 [_ensureBound] 时一次性计算，避免每帧 O(n²) 循环累加。
@@ -248,6 +257,7 @@ class WordRenderer {
       _isConverged = !anyChanged;
       _currentWordIdx = -1;
       _intraWordProgress = 0.0;
+      _maskX = -1.0;
       return;
     }
 
@@ -279,9 +289,22 @@ class WordRenderer {
       intraWordProgress = 0.0;
     }
 
-    // 记录当前演唱状态，供 paintLine 中字内渐变使用
+    // 记录当前演唱状态，供 paintLine 中行级渐变使用
     _currentWordIdx = currentWordIdx;
     _intraWordProgress = intraWordProgress;
+
+    // === 计算行级 mask 位置（核心：行级渐变模型）===
+    // maskX = 已播字总宽度 + 当前字内进度 × 当前字宽
+    // 渐变边界随演唱进度从行首移动到行尾，跨越多个 word。
+    // 长字上停留久（速度慢），短字上快速掠过。
+    if (currentWordIdx < 0) {
+      _maskX = -1.0; // 无效，全 dark
+    } else if (currentWordIdx >= wordCount) {
+      _maskX = double.infinity; // 已播完，全 bright
+    } else {
+      _maskX = _wordStartXs[currentWordIdx] +
+          _wordWidths[currentWordIdx] * _intraWordProgress;
+    }
 
     // 行级辉光判定（循环外计算一次）：
     // _isMetadataLine 在 _ensureBound 时缓存（行切换时才更新）；
@@ -416,14 +439,31 @@ class WordRenderer {
     double dx = 0; // 相对 baseX 的水平偏移
     double currentY = offset.dy; // 当前视觉行的 y 坐标
     final double dark = dynamicDarkAlpha;
+    final double bright = dynamicBrightAlpha;
     // 换行内部行高 = 主行高 × 0.8（与 LyricLayout.measureLineHeight 一致）
     final double wrapLineHeight =
         fontSize * LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor;
     final double lineHeight = LyricLayout.lineHeight;
 
+    // === 行级渐变参数（核心：行级 maskX 模型）===
+    // 过渡区以 _maskX 为中心，宽度 = 2 × 当前字宽，让渐变跨越 2-3 个 word。
+    // 长字过渡区宽，渐变在字上移动慢；短字过渡区窄，移动快。
+    // _maskX < 0 表示非当前行或未开始，全 dark。
+    final bool useGradient = _isActive &&
+        _boundLine != null &&
+        _boundLine!.words.length == line.words.length &&
+        _maskX >= 0;
+    final double transitionHalfWidth = useGradient &&
+            _currentWordIdx >= 0 &&
+            _currentWordIdx < _wordWidths.length
+        ? _wordWidths[_currentWordIdx]
+        : 0.0;
+    final double transitionStart = _maskX - transitionHalfWidth;
+    final double transitionEnd = _maskX + transitionHalfWidth;
+    final double transitionSpan = transitionEnd - transitionStart;
+
     for (int i = 0; i < line.words.length; i++) {
       final LyricWord word = line.words[i];
-      final double alpha = i < _wordAlphas.length ? _wordAlphas[i] : dark;
       // AMLL 上浮特效：当前字 Y 偏移（上浮）
       final double yOffset = i < _wordYOffsets.length ? _wordYOffsets[i] : 0;
       // 强调辉光状态
@@ -447,69 +487,100 @@ class WordRenderer {
       final double wordY = currentY + yOffset;
       final Offset wordPos = Offset(wordX, wordY);
 
-      // **渐变遮罩效果**：当前行（_isActive）且有 KRC 时间戳时，
-      // 对所有 word 应用字内渐变遮罩效果
-      if (_isActive && _boundLine != null && _boundLine!.words.length == line.words.length) {
-        // 字内渐变遮罩渲染
-        _paintWordWithCharGradient(
-          canvas, word, wordX, wordY, fontSize, lineHeight, i, emState,
-        );
+      // === 计算渲染 alpha ===
+      // 行级 maskX 模型：基于 word 在行内的累计 X 坐标计算边缘 alpha。
+      // 已播区（maskX 左侧远端）= bright，未播区（maskX 右侧远端）= dark，
+      // 过渡区内线性插值，实现跨字平滑渐变。
+      final double leftAlpha;
+      final double rightAlpha;
+      if (!useGradient) {
+        leftAlpha = rightAlpha = i < _wordAlphas.length ? _wordAlphas[i] : dark;
       } else {
-        // **v4 性能优化**：per-word TextPainter + alpha 量化缓存。
-        // alpha 量化到 5% 步长，只有量化值变化时才 set text + layout。
-        final painter = _wordPainters[i];
-        final int alphaStep = (alpha * 20).round();
+        final double wordStartX = i < _wordStartXs.length ? _wordStartXs[i] : 0;
+        final double wordEndX = wordStartX + width;
+        leftAlpha = _alphaAtX(wordStartX, transitionStart, transitionSpan, bright, dark);
+        rightAlpha = _alphaAtX(wordEndX, transitionStart, transitionSpan, bright, dark);
+      }
+
+      final painter = _wordPainters[i];
+
+      // === 强调辉光：save + scale（公共路径）===
+      final bool needEmphasis = emState.scale != 1.0 || emState.glowLevel > 0;
+      if (needEmphasis) {
+        canvas.save();
+        final double centerX = wordX + width / 2;
+        final double centerY = wordY + fontSize * lineHeight / 2;
+        canvas.translate(centerX, centerY);
+        canvas.scale(emState.scale, emState.scale);
+        canvas.translate(-centerX, -centerY);
+      }
+
+      // === 渲染文字 ===
+      // 性能优化：左右 alpha 几乎一致时用均匀绘制（量化缓存，跳过 layout）。
+      // 只有过渡区内的 1-3 个 word 需要渐变 shader。
+      if ((leftAlpha - rightAlpha).abs() < 0.01) {
+        // 均匀绘制：alpha 量化到 5% 步长，只有量化值变化时才 set text + layout
+        final double uniformAlpha = (leftAlpha + rightAlpha) * 0.5;
+        final int alphaStep = (uniformAlpha * 20).round();
         if (_lastSetAlphas[i] != alphaStep) {
           painter.text = TextSpan(
             text: word.text,
             style: TextStyle(
-              color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, alpha),
+              color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, uniformAlpha),
               fontSize: fontSize,
               height: lineHeight,
-              // 显式注入歌词 fontFamily，与测量路径保持一致
               fontFamily: LyricLayout.fontFamily,
             ),
           );
           painter.layout();
           _lastSetAlphas[i] = alphaStep;
         }
+      } else {
+        // 渐变 shader：过渡区内的 word，字内从 leftAlpha 渐变到 rightAlpha
+        // 关键优化：完全避免 saveLayer，shader 直接应用到文字像素
+        final gradPaint = Paint()
+          ..shader = LinearGradient(
+            colors: [
+              Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, leftAlpha),
+              Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, rightAlpha),
+            ],
+            stops: const <double>[0.0, 1.0],
+          ).createShader(Rect.fromLTWH(wordX, wordY, width, fontSize * lineHeight));
+        painter.text = TextSpan(
+          text: word.text,
+          style: TextStyle(
+            foreground: gradPaint,
+            fontSize: fontSize,
+            height: lineHeight,
+            fontFamily: LyricLayout.fontFamily,
+          ),
+        );
+        painter.layout();
+        _lastSetAlphas[i] = -1; // 标记渐变模式，强制下次均匀绘制时重建
+      }
 
-        // 应用强调辉光效果：per-word scale + glow shadow
-        if (emState.scale != 1.0 || emState.glowLevel > 0) {
-          canvas.save();
-          // 以 word 中心为缩放锚点
-          final double centerX = wordX + width / 2;
-          final double centerY = wordY + fontSize * lineHeight / 2;
-          canvas.translate(centerX, centerY);
-          canvas.scale(emState.scale, emState.scale);
-          canvas.translate(-centerX, -centerY);
-
-          // 绘制辉光层：saveLayer + ImageFilter.blur
-          if (emState.glowLevel > 0) {
-            final double blurSigma = emState.shadowBlurEm * fontSize * 0.8;
-            if (blurSigma > 0) {
-              final glowRect = Rect.fromLTWH(
-                wordX - blurSigma * 2, wordY - blurSigma * 2,
-                width + blurSigma * 4, fontSize * lineHeight + blurSigma * 4,
-              );
-              canvas.saveLayer(
-                glowRect,
-                Paint()..imageFilter = ImageFilter.blur(
-                  sigmaX: blurSigma, sigmaY: blurSigma,
-                ),
-              );
-              painter.paint(canvas, wordPos);
-              canvas.restore();
-            }
-          }
-
-          // 绘制正常文字层
+      // === 辉光层 + 正常文字层绘制 ===
+      if (needEmphasis && emState.glowLevel > 0) {
+        final double blurSigma = emState.shadowBlurEm * fontSize * 0.8;
+        if (blurSigma > 0) {
+          final glowRect = Rect.fromLTWH(
+            wordX - blurSigma * 2, wordY - blurSigma * 2,
+            width + blurSigma * 4, fontSize * lineHeight + blurSigma * 4,
+          );
+          canvas.saveLayer(
+            glowRect,
+            Paint()..imageFilter = ImageFilter.blur(
+              sigmaX: blurSigma, sigmaY: blurSigma,
+            ),
+          );
           painter.paint(canvas, wordPos);
           canvas.restore();
-        } else {
-          // 无辉光：直接绘制
-          painter.paint(canvas, wordPos);
         }
+      }
+      painter.paint(canvas, wordPos);
+
+      if (needEmphasis) {
+        canvas.restore();
       }
 
       dx += width;
@@ -550,156 +621,22 @@ class WordRenderer {
     }
   }
 
-  /// 渲染一个 word，实现字内渐变遮罩效果（核心方法）。
+  /// 计算指定 X 坐标处的 alpha 值（行级渐变模型核心）。
   ///
-  /// 优化方案（解决卡顿 + 抽搐）：
-  /// - 已播字（index < _currentWordIdx）：均匀 bright，使用 alpha 缓存
-  /// - 未播字（index > _currentWordIdx）：均匀 dark，使用 alpha 缓存
-  /// - 当前字（index == _currentWordIdx）：字内渐变，仅此 1 个 word 需要 saveLayer
+  /// 过渡区 [transitionStart, transitionStart + transitionSpan]：
+  /// - x <= transitionStart：bright（已播区）
+  /// - x >= transitionStart + transitionSpan：dark（未播区）
+  /// - 过渡区内：bright → dark 线性插值
   ///
-  /// 当前字渐变模型（相对于 word 左边缘）：
-  /// - 亮边缘 = wordWidth × (2 × progress - 1)
-  /// - 暗边缘 = 亮边缘 + wordWidth
-  /// - progress=0 时：亮边缘=-wordWidth, 暗边缘=0 → word 完全 dark
-  /// - progress=1 时：亮边缘=wordWidth, 暗边缘=2×wordWidth → word 完全 bright
-  /// - 渐变过渡时间 = word 演唱时长（progress 从 0→1 的时间）
-  ///
-  /// 只对当前行（_isActive=true）调用。
-  void _paintWordWithCharGradient(
-    Canvas canvas,
-    LyricWord word,
-    double wordX,
-    double wordY,
-    double fontSize,
-    double lineHeight,
-    int wordIndex,
-    EmphasizeState emState,
-  ) {
-    final double wordWidth = _wordWidths[wordIndex];
-    if (wordWidth <= 0) return;
-
-    // 强调辉光：save + scale
-    final bool needEmphasis = emState.scale != 1.0 || emState.glowLevel > 0;
-    if (needEmphasis) {
-      canvas.save();
-      final double centerX = wordX + wordWidth / 2;
-      final double centerY = wordY + fontSize * lineHeight / 2;
-      canvas.translate(centerX, centerY);
-      canvas.scale(emState.scale, emState.scale);
-      canvas.translate(-centerX, -centerY);
-    }
-
-    final double bright = dynamicBrightAlpha;
-    final double dark = dynamicDarkAlpha;
-
-    // 判断 word 相对于当前演唱字的位置
-    final bool isCurrentWord = wordIndex == _currentWordIdx;
-
-    if (!isCurrentWord) {
-      // 非当前字：使用均匀 alpha（已通过 tick 中的指数衰减计算好）
-      // 性能优化：alpha 量化到 5% 步长，只有量化值变化时才 set text + layout
-      // 避免指数衰减产生的微小 alpha 变化导致每帧都 layout
-      final double alpha = _wordAlphas[wordIndex];
-      final int alphaStep = (alpha * 20).round();
-      final painter = _wordPainters[wordIndex];
-      if (_lastSetAlphas[wordIndex] != alphaStep) {
-        painter.text = TextSpan(
-          text: word.text,
-          style: TextStyle(
-            color: Color.fromRGBO(
-              LyricLayout.textRed,
-              LyricLayout.textGreen,
-              LyricLayout.textBlue,
-              alpha,
-            ),
-            fontSize: fontSize,
-            height: lineHeight,
-            fontFamily: LyricLayout.fontFamily,
-          ),
-        );
-        painter.layout();
-        _lastSetAlphas[wordIndex] = alphaStep;
-      }
-      painter.paint(canvas, Offset(wordX, wordY));
-    } else {
-      // 当前字：字内渐变
-      // 渐变模型：亮边缘从 -wordWidth 移动到 wordWidth（相对于 word 左边缘）
-      final double progress = _intraWordProgress;
-      final double brightEdge = wordWidth * (2.0 * progress - 1.0);
-      final double darkEdge = brightEdge + wordWidth;
-
-      // 计算 word 左边缘 alpha（x=0）
-      double leftAlpha;
-      if (0 <= brightEdge) {
-        leftAlpha = bright;
-      } else if (0 >= darkEdge) {
-        leftAlpha = dark;
-      } else {
-        leftAlpha = bright + (dark - bright) * (0 - brightEdge) / wordWidth;
-      }
-
-      // 计算 word 右边缘 alpha（x=wordWidth）
-      double rightAlpha;
-      if (wordWidth <= brightEdge) {
-        rightAlpha = bright;
-      } else if (wordWidth >= darkEdge) {
-        rightAlpha = dark;
-      } else {
-        rightAlpha = bright + (dark - bright) * (wordWidth - brightEdge) / wordWidth;
-      }
-
-      final painter = _wordPainters[wordIndex];
-
-      // 性能优化：左右 alpha 几乎一致时，直接均匀绘制（跳过渐变 shader）
-      if ((leftAlpha - rightAlpha).abs() < 0.01) {
-        final uniformAlpha = (leftAlpha + rightAlpha) / 2;
-        final int uniformStep = (uniformAlpha * 20).round();
-        if (_lastSetAlphas[wordIndex] != uniformStep) {
-          painter.text = TextSpan(
-            text: word.text,
-            style: TextStyle(
-              color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, uniformAlpha),
-              fontSize: fontSize,
-              height: lineHeight,
-              fontFamily: LyricLayout.fontFamily,
-            ),
-          );
-          painter.layout();
-          _lastSetAlphas[wordIndex] = uniformStep;
-        }
-        painter.paint(canvas, Offset(wordX, wordY));
-      } else {
-        // 字内渐变：使用 TextStyle.foreground + Paint..shader 直接绘制
-        // 关键优化：完全避免 saveLayer，shader 直接应用到文字像素上
-        // 当前字不量化 alpha，每帧更新（60fps 流畅渐变）
-        // 单个 word 的 layout 开销约 0.1ms，完全可控
-        final gradPaint = Paint()
-          ..shader = LinearGradient(
-            colors: [
-              Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, leftAlpha),
-              Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, rightAlpha),
-            ],
-            stops: const <double>[0.0, 1.0],
-          ).createShader(Rect.fromLTWH(wordX, wordY, wordWidth, fontSize * lineHeight));
-
-        painter.text = TextSpan(
-          text: word.text,
-          style: TextStyle(
-            foreground: gradPaint,
-            fontSize: fontSize,
-            height: lineHeight,
-            fontFamily: LyricLayout.fontFamily,
-          ),
-        );
-        painter.layout();
-        _lastSetAlphas[wordIndex] = -1; // 标记渐变模式
-        painter.paint(canvas, Offset(wordX, wordY));
-      }
-    }
-
-    if (needEmphasis) {
-      canvas.restore();
-    }
+  /// 通过此函数计算每个 word 左右边缘的 alpha，决定均匀绘制还是渐变 shader。
+  /// 渐变边界随 maskX 移动跨越多个 word，自然实现"长字慢、短字快"。
+  static double _alphaAtX(double x, double transitionStart, double transitionSpan,
+      double bright, double dark) {
+    if (transitionSpan <= 0) return x <= transitionStart ? bright : dark;
+    if (x <= transitionStart) return bright;
+    final double t = (x - transitionStart) / transitionSpan;
+    if (t >= 1.0) return dark;
+    return bright + (dark - bright) * t;
   }
 
   /// 按换行逻辑预扫描，计算每条视觉行的 word 累计宽度。
@@ -872,6 +809,7 @@ class WordRenderer {
     _cachedVisualLineWidths = const <double>[];
     _currentWordIdx = -1;
     _intraWordProgress = 0.0;
+    _maskX = -1.0;
     // 清理辉光判定缓存
     _wordEmphasisFlags = const <bool>[];
     _isMetadataLine = false;
