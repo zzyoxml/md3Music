@@ -81,8 +81,7 @@ class WordRenderer {
   List<double> _wordYOffsets = const <double>[];
 
   /// AMLL 上浮最大幅度（px）：当前字最大上浮 -3px。
-  // 临时禁用上浮动画：设为 0 让 Y offset 永远为 0，便于对比效果
-  static const double _maxLiftPx = 0.0;
+  static const double _maxLiftPx = -3.0;
 
   /// AMLL 上浮 ATTACK 速度：当前字上浮指数衰减系数。
   static const double _liftAttackSpeed = 30.0;
