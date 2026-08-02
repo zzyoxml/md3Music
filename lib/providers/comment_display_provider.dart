@@ -7,14 +7,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// [ThemeProvider]（主题/UI 缩放）和其他领域 Provider。
 ///
 /// 字号单位：物理像素（logical pixels），与 TextTheme 的 `fontSize` 一致。
-/// 默认楼主 14.0，楼中楼回复自动比楼主小 3 号（13.0）。
+/// 默认楼主 17.0，楼中楼回复自动比楼主小 1 号（16.0）。
 class CommentDisplayProvider extends ChangeNotifier {
   /// SharedPreferences key
   static const String _keyCommentFontSize = 'comment_display_font_size';
 
-  /// 楼主评论字号，单位 px，默认 14.0。
+  /// 楼主评论字号，单位 px，默认 17.0。
   /// 允许范围 10.0 ~ 24.0。
-  double _commentFontSize = 14.0;
+  double _commentFontSize = 17.0;
 
   /// 楼主评论字号
   double get commentFontSize => _commentFontSize;
@@ -49,6 +49,6 @@ class CommentDisplayProvider extends ChangeNotifier {
     await prefs.setDouble(_keyCommentFontSize, clamped);
   }
 
-  /// 重置为默认值（楼主 14.0）。
-  Future<void> resetToDefault() => setCommentFontSize(14.0);
+  /// 重置为默认值（楼主 17.0）。
+  Future<void> resetToDefault() => setCommentFontSize(17.0);
 }
