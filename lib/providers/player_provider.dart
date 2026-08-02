@@ -23,7 +23,7 @@ import '../data/repositories/player_state_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../main.dart';
 import '../services/stream_cache_manager.dart';
-import '../services/nodejs_server.dart';
+import '../services/kugou_server.dart';
 import '../widgets/apple_lyrics/models/lyric_line.dart';
 import '../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import 'favorites_provider.dart';
@@ -591,7 +591,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _cachedArtworkPath = null;
 
       // 确保 Node.js 本地代理服务器已启动
-      await _ensureNodeJsServerReady();
+      await _ensureApiServerReady();
 
       final apiClient = KugouApiClient();
 
@@ -665,7 +665,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
 
       try {
-        await _ensureNodeJsServerReady();
+        await _ensureApiServerReady();
         final apiClient = KugouApiClient();
         final result = await apiClient.getSongUrlWithFallback(
           _currentSong!.id,
@@ -769,7 +769,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
       } else {
         _cachedArtworkPath = null;
-        await _ensureNodeJsServerReady();
+        await _ensureApiServerReady();
         final apiClient = KugouApiClient();
         final result = await apiClient.getSongUrlWithFallback(
           _currentSong!.id,
@@ -1106,9 +1106,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
 
         // 确保 Node.js 本地代理服务器已启动（所有酷狗 API 走 127.0.0.1:8080）
-        // 冷启动时 MethodChannel 可能尚未注册，导致 NodeJsServer.start() 失败，
+        // 冷启动时 MethodChannel 可能尚未注册，导致 KugouApiServer.start() 失败，
         // 此处做二次兜底检查，避免 API 请求因服务器未就绪而全部失败
-        await _ensureNodeJsServerReady();
+        await _ensureApiServerReady();
 
         _isResolvingUrl = true;
         notifyListeners();
@@ -1199,10 +1199,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   /// 确保 Node.js 本地代理服务器已就绪（127.0.0.1:8080）。
   ///
-  /// 冷启动时 main() 中的 NodeJsServer.start() 可能因 MethodChannel 尚未注册
+  /// 冷启动时 main() 中的 KugouApiServer.start() 可能因 MethodChannel 尚未注册
   /// 而失败（MissingPluginException），导致后续所有 API 请求因连接被拒绝而失败。
   /// 此方法在播放流程中做二次兜底：探测端口，若不通则重新尝试启动。
-  Future<void> _ensureNodeJsServerReady() async {
+  Future<void> _ensureApiServerReady() async {
     if (kIsWeb || !Platform.isAndroid) return;
     // 快速探测 8080 端口是否可用
     try {
@@ -1214,7 +1214,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       // 端口不通，尝试重新启动
     }
     try {
-      await NodeJsServer.start();
+      await KugouApiServer.start();
     } catch (_) {}
   }
 

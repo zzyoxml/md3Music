@@ -46,7 +46,7 @@ import 'providers/grid_columns_provider.dart';
 import 'providers/tab_config_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/comment_display_provider.dart';
-import 'services/nodejs_server.dart';
+import 'services/kugou_server.dart';
 import 'widgets/dlna_casting_overlay.dart';
 
 /// 主页（`/`）专用的 [MaterialPageRoute] 子类。
@@ -590,7 +590,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     super.initState();
     // 未登录时尝试播放联网歌曲,弹出登录提示
     context.read<PlayerProvider>().onLoginRequired = _showLoginRequiredDialog;
-    // 监听应用生命周期：detached（进程被系统销毁前的最后窗口）时尝试关停本地 Node.js
+    // 监听应用生命周期：detached（进程被系统销毁前的最后窗口）时尝试关停本地 API 服务器
     WidgetsBinding.instance.addObserver(this);
     // 监听 shortcut 入口的 tab 切换请求（来自 main.dart 的 handleShortcut）
     shortcutTabRequest.addListener(_handleShortcutTabRequest);
@@ -614,11 +614,11 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // 当系统即将销毁应用进程时（包含后台划掉 / 系统回收），Flutter 会先收到 detached。
-    // 此时同步触发 Node.js 关闭：若进程随之被 kill 也无副作用；若进程仍存活则关闭 libuv。
+    // 此时同步触发 API 服务器关停：若进程随之被 kill 也无副作用；若进程仍存活则释放 8080 端口。
     if (state == AppLifecycleState.detached) {
       // 同步触发即可，Dart 端很快；不 await，避免阻塞 framework 销毁流程
       // ignore: discarded_futures
-      NodeJsServer.stop();
+      KugouApiServer.stop();
     }
   }
 
@@ -670,7 +670,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     // 一级页面返回拦截：
     // 1) PopScope 拦截系统返回手势 / 物理返回键，canPop=false → 触发 onPopInvoked
     // 2) 弹“退出 App”确认对话框
-    // 3) 确认后顺序关停：暂停播放 → 关停本地 Node.js → SystemNavigator.pop 杀进程
+    // 3) 确认后顺序关停：暂停播放 → 关停本地 API 服务器 → SystemNavigator.pop 杀进程
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -777,7 +777,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   ///
   /// 点击退出按钮会触发：
   /// 1) `PlayerProvider.pause()` — 停 just_audio + 同步通知栏
-  /// 2) `NodeJsServer.stop()` — 释放 127.0.0.1:8080 端口 + 关 libuv
+  /// 2) `KugouApiServer.stop()` — 释放 127.0.0.1:8080 端口，停止本地服务器
   /// 3) `SystemNavigator.pop()` — 通知系统 finish 当前 Activity，
   ///    系统会随之销毁进程（等同 kill app）
   void _showExitConfirmDialog() {
@@ -785,7 +785,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('退出 App'),
-        content: const Text('确定要退出 md3Music 吗？\n将停止播放并释放本地 Node.js 服务器。'),
+        content: const Text('确定要退出 md3Music 吗？\n将停止播放并释放本地 API 服务器 服务器。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(),
@@ -798,15 +798,15 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
               // 1) 暂停播放（just_audio 内部会停音频 + 通知栏可同步清空）
               // ignore: discarded_futures
               context.read<PlayerProvider>().pause();
-              // 2) 关停 Node.js（释放 8080 端口 + libuv 事件循环退出）
+              // 2) 关停 API 服务器（释放 8080 端口）
               // 必须等待完成，否则端口未释放，下次冷启动会冲突导致闪退
               try {
-                await NodeJsServer.stop();
+                await KugouApiServer.stop();
                 // nativeStopNode() 在独立线程执行，MethodChannel 返回只代表调用已发出，
-                // 需要给 native 线程一点时间完成 libuv 事件循环退出
+                // 需要给 native 线程一点时间完成 服务器线程退出
                 await Future.delayed(const Duration(milliseconds: 300));
               } catch (_) {}
-              // 3) 杀进程：exit(0) 立即终止整个进程（含 Node.js 线程），
+              // 3) 杀进程：exit(0) 立即终止整个进程（含服务器线程），
               //    确保 8080 端口一定被释放。SystemNavigator.pop() 只 finish Activity，
               //    进程可能残留，导致下次启动时端口冲突/服务器未启动。
               // ignore: avoid_print

@@ -7,6 +7,7 @@ import '../../data/models/song.dart';
 import '../../data/repositories/collected_playlist_store.dart';
 import '../../data/repositories/favorite_lists_cache.dart';
 import '../../data/repositories/stream_cache_repository.dart';
+import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/downloads_provider.dart';
@@ -28,6 +29,9 @@ class PlaylistPage extends StatefulWidget {
   final String? albumGlobalCollectionId;
   // 是否为用户自己创建的歌单（可批量删除歌曲）
   final bool isUserCreated;
+  // 是否为「我喜欢的」（默认收藏）歌单：加载后把歌曲 hash 喂给
+  // FavoritesProvider，保证红心直接是红的（不依赖启动时的同步时序）。
+  final bool isDefaultFavorite;
 
   const PlaylistPage({
     super.key,
@@ -36,6 +40,7 @@ class PlaylistPage extends StatefulWidget {
     this.isAlbum = false,
     this.albumGlobalCollectionId,
     this.isUserCreated = false,
+    this.isDefaultFavorite = false,
   });
 
   @override
@@ -1010,6 +1015,13 @@ class _PlaylistPageState extends State<PlaylistPage> {
         }
         _invalidateDisplaySongs();
       });
+      // 「我喜欢的」歌单：本歌单里的歌都算已收藏，直接把 hash 喂给
+      // FavoritesProvider，红心无需等待启动同步即可显示为红色。
+      if (widget.isDefaultFavorite && _songs.isNotEmpty) {
+        context
+            .read<FavoritesProvider>()
+            .addFavoriteIds(_songs.map((s) => s.id).toList());
+      }
       // 「我的收藏」里的歌单：成功拉到歌曲时写本地缓存
       if (apiSucceeded && _songs.isNotEmpty) {
         final cacheKey = _cacheKey();
