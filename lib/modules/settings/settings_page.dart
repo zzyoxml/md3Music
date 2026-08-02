@@ -52,7 +52,7 @@ class _SettingsPageState extends State<SettingsPage> {
     text: 'http://127.0.0.1:8080',
   );
   ThemeMode _themeMode = ThemeMode.system;
-  String _defaultQuality = 'hq';
+  String _defaultQuality = '320';
   bool _isTestingConnection = false;
   String? _connectionResult;
   bool _autoReceiveVip = true;
