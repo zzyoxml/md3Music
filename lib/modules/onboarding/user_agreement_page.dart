@@ -60,7 +60,7 @@ class UserAgreementPage extends StatefulWidget {
               Clipboard.setData(
                 const ClipboardData(
                   text:
-                      'https://github.com/zzyoxml/md3Music/blob/arch-local-first/DISCLAIMER.md',
+                      'https://github.com/zzyoxml/md3Music/blob/rust-local-two/DISCLAIMER.md',
                 ),
               );
             },
