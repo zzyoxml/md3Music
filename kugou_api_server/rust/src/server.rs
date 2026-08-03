@@ -49,21 +49,45 @@ fn session_dev() -> &'static str {
     D.get_or_init(|| random_string(10).to_uppercase())
 }
 
-/// Start the HTTP server on 127.0.0.1:port. Returns true if started (or already running).
-pub fn start(port: u16, data_dir: String) -> bool {
+/// Start the HTTP server on 127.0.0.1.
+///
+/// - `port == 0`：随机挑选 [10000, 60000] 内的端口（避开系统保留端口与常用
+///   服务端口）。若被占用则等待 1s 换下一个，最多尝试 10 次。
+/// - `port != 0`：固定端口，单次尝试（失败立即返回 None）。
+///
+/// 返回 Some(实际端口) 表示启动成功（或已在运行），None 表示失败。
+pub fn start(port: u16, data_dir: String) -> Option<u16> {
     if RUNNING.load(Ordering::SeqCst) {
-        return true;
+        return Some(PORT.load(Ordering::SeqCst));
     }
     let _ = DATA_DIR.set(data_dir.clone());
     let _ = DeviceConfig::instance().load_cached(&data_dir);
-    let server = match Server::http(("127.0.0.1", port)) {
-        Ok(s) => s,
-        Err(_) => return false,
+
+    let max_attempts: u32 = if port == 0 { 10 } else { 1 };
+    let mut attempts: u32 = 0;
+    let (server, chosen) = loop {
+        let candidate = if port == 0 { random_port() } else { port };
+        match Server::http(("127.0.0.1", candidate)) {
+            Ok(s) => break (s, candidate),
+            Err(_) => {
+                attempts += 1;
+                if attempts >= max_attempts {
+                    return None;
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
     };
-    PORT.store(port, Ordering::SeqCst);
+
+    PORT.store(chosen, Ordering::SeqCst);
     RUNNING.store(true, Ordering::SeqCst);
     std::thread::spawn(move || run_loop(server, data_dir));
-    true
+    Some(chosen)
+}
+
+/// 随机端口，范围 [10000, 60000]，避开系统保留端口（<1024）与常见开发服务端口。
+fn random_port() -> u16 {
+    10000 + (rand::random::<u32>() % 50_001) as u16
 }
 
 pub fn stop() {

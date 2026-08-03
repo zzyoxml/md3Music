@@ -193,7 +193,7 @@ pub fn handle_cellphone(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleRe
     m.insert("dev".into(), json!(c_str(q, "KUGOU_API_DEV")));
     m.insert("gitversion".into(), json!("5f0b7c4"));
     let mut res = forward(
-        q, ctx, "POST", "/v7/login_by_verifycode", Some("http://115.29.236.96:5621"),
+        q, ctx, "POST", "/v7/login_by_verifycode", Some("https://loginserviceretry.kugou.com"),
         None, Some(Value::Object(m)), "android",
         &[("support-calm", "1"), ("User-Agent", "Android16-1070-11440-130-0-LOGIN-wifi")],
         false, false,
@@ -438,7 +438,7 @@ pub fn handle_openplat(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleRes
 /// login_qr_check.js → /login/qr/check（二维码状态检查）。
 pub fn handle_qr_check(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
     let mut res = forward(
-        q, ctx, "GET", "/login/qr/check", Some("http://115.29.236.96:5621"),
+        q, ctx, "GET", "/v2/get_userinfo_qrcode", Some("https://login-user.kugou.com"),
         Some(json!({ "plat": 4, "appid": 3116, "srcappid": 2919, "qrcode": q_str(q, "key", "") })),
         None, "web", &[], false, false,
     )?;
@@ -507,7 +507,7 @@ pub fn handle_qr_create(q: &Value, _ctx: &Ctx) -> Result<ModuleResponse, ModuleR
 pub fn handle_qr_key(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
     let appid = if q_str(q, "type", "") == "web" { 1014 } else { 1001 };
     forward(
-        q, ctx, "GET", "/login/qr/key", Some("http://115.29.236.96:5621"),
+        q, ctx, "GET", "/v2/qrcode", Some("https://login-user.kugou.com"),
         Some(json!({
             "appid": appid,
             "type": 1,
@@ -584,7 +584,7 @@ pub fn handle_token(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleRespon
     m.insert("clienttime_ms".into(), json!(date_now));
     m.insert("dev".into(), json!(c_str(q, "KUGOU_API_DEV")));
     let mut res = forward(
-        q, ctx, "POST", "/login/token", Some("http://115.29.236.96:5621"),
+        q, ctx, "POST", "/v5/login_by_token", Some("http://login.user.kugou.com"),
         None, Some(Value::Object(m)), "android", &[], false, false,
     )?;
     let mut body = res.body.to_json();

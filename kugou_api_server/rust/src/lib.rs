@@ -1,7 +1,7 @@
 //! kugou_server — Rust 实现的酷狗 API 本地服务器（libkugou_server.so）。
 //!
 //! 取代 libnode.so + server_bundle.js：在进程内启动 tiny_http 服务，监听
-//! 127.0.0.1:8080，行为等价于 kugou_api_server/server.js。
+//! 127.0.0.1 上的随机端口（端口号回传给 Dart），行为等价于 kugou_api_server/server.js。
 //!
 //! 对外接口：
 //!  - JNI：Java_com_md3music_md3music_KugouApiService_{nativeStartNode,nativeIsNodeRunning,nativeStopNode}
@@ -25,7 +25,8 @@ use std::os::raw::{c_char, c_int};
 // 纯 C FFI（供 dart:ffi 直接调用）
 // ---------------------------------------------------------------------------
 
-/// 启动服务器。data_dir 用于持久化 device_info.json。返回 1=成功，0=失败。
+/// 启动服务器。port==0 表示随机选端口（被占用则 1s 后换下一个，最多 10 次）。
+/// data_dir 用于持久化 device_info.json。返回实际监听端口（0=失败）。
 /// # Safety
 /// `data_dir` 必须是指向 NUL 结尾 C 字符串的有效指针，调用者需保证生命周期覆盖本次调用。
 #[no_mangle]
@@ -36,10 +37,9 @@ pub unsafe extern "C" fn start_server(port: c_int, data_dir: *const c_char) -> c
     let dir = unsafe { CStr::from_ptr(data_dir) }
         .to_string_lossy()
         .into_owned();
-    if server::start(port as u16, dir) {
-        1
-    } else {
-        0
+    match server::start(port as u16, dir) {
+        Some(p) => p as c_int,
+        None => 0,
     }
 }
 
@@ -67,6 +67,7 @@ pub extern "C" fn get_server_port() -> c_int {
 // ---------------------------------------------------------------------------
 
 /// Java_com_md3music_md3music_KugouApiService_nativeStartNode(JNIEnv*, jobject, jint port, jstring dataDir)
+/// port==0 表示随机选端口。返回实际监听端口（0=失败）。
 #[no_mangle]
 pub extern "system" fn Java_com_md3music_md3music_KugouApiService_nativeStartNode(
     mut env: jni::JNIEnv,
@@ -78,10 +79,9 @@ pub extern "system" fn Java_com_md3music_md3music_KugouApiService_nativeStartNod
         Ok(s) => s.into(),
         Err(_) => String::new(),
     };
-    if server::start(port as u16, dir) {
-        1
-    } else {
-        0
+    match server::start(port as u16, dir) {
+        Some(p) => p as jni::sys::jint,
+        None => 0,
     }
 }
 

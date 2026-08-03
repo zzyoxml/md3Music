@@ -2,7 +2,8 @@ class KugouEndpoints {
   KugouEndpoints._();
 
   /// 默认 API 服务地址。
-  /// 启动时 KugouProvider 会从 SharedPreferences 读取用户配置的地址覆盖此值。
+  /// 本地服务器启动成功后，KugouApiServer 会用实际随机端口覆盖此值
+  /// （http://127.0.0.1:<port>）。
   static String baseUrl = 'http://127.0.0.1:8080';
 
   // Device
