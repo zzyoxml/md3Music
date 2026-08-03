@@ -49,7 +49,6 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
-    - assets/nodejs-project/
   fonts:
     - family: SimHei
       fonts:

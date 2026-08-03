@@ -36,17 +36,17 @@ class MainActivity : FlutterActivity() {
         // 静态引用：让 Service 也能调用 MethodChannel（无 FlutterEngine 缓存时走这里）
         private var cachedEngine: FlutterEngine? = null
         private var cachedChannel: MethodChannel? = null
-        // NodeJsService 单例引用，便于 Activity onDestroy / onTrimMemory 时确定性关停
-        @Volatile private var nodeJsService: NodeJsService? = null
+        // KugouApiService 单例引用，便于 Activity onDestroy / onTrimMemory 时确定性关停
+        @Volatile private var kugouApiService: KugouApiService? = null
 
-        fun setNodeJsService(service: NodeJsService?) {
-            nodeJsService = service
+        fun setKugouApiService(service: KugouApiService?) {
+            kugouApiService = service
         }
 
-        /** Activity 销毁或被系统回收时调用，尽力通知 Node.js 停止事件循环 */
+        /** Activity 销毁或被系统回收时调用，尽力通知本地 API 服务器停止监听 */
         fun shutdownNodeJs() {
             try {
-                nodeJsService?.stopServer()
+                kugouApiService?.stopServer()
             } catch (_: Exception) {
                 // 进程即将销毁，吞掉异常
             }
@@ -79,10 +79,10 @@ class MainActivity : FlutterActivity() {
         EqualizerPlugin().register(flutterEngine)
 
         // 初始化 Node.js 本地 API 服务器
-        android.util.Log.d("MainActivity", "Initializing NodeJsService...")
-        val nodeSvc = NodeJsService(this, flutterEngine)
-        setNodeJsService(nodeSvc)
-        android.util.Log.d("MainActivity", "NodeJsService initialized")
+        android.util.Log.d("MainActivity", "Initializing KugouApiService...")
+        val apiSvc = KugouApiService(this, flutterEngine)
+        setKugouApiService(apiSvc)
+        android.util.Log.d("MainActivity", "KugouApiService initialized")
 
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FLOATING_CHANNEL)
         channel.setMethodCallHandler { call, result ->

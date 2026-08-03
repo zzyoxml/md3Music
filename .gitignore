@@ -35,6 +35,15 @@ node_modules/
 kugou_api_server/node_modules/
 kugou_api_server/server.log
 
+# Rust 原生库 libkugou_server.so 需入库（其余 jniLibs 内容仍忽略）
+!/android/app/src/main/jniLibs/
+!/android/app/src/main/jniLibs/**/
+!/android/app/src/main/jniLibs/**/*.so
+
+# Rust 构建产物不入库
+kugou_api_server/rust/target/
+kugou_api_server/rust/.cargo/
+
 # Symbolication related
 app.*.symbols
 

@@ -6,13 +6,13 @@
 
 ## 1. 项目架构概览
 
-MD3Music 是一款 Android 音乐播放器，采用 **Flutter 前端 + 嵌入式 Node.js API 服务器** 的混合架构：
+MD3Music 是一款 Android 音乐播放器，采用 **Flutter 前端 + 嵌入式 Rust API 服务器** 的混合架构：
 
 - **Flutter 前端**（Dart）：负责 UI、播放控制、本地数据管理
-- **嵌入式 Node.js 服务器**（JavaScript）：App 启动时通过 `libnode.so`（FFI/MethodChannel）在进程内启动一个 Express HTTP 服务器，监听 `127.0.0.1:8080`，处理所有酷狗音乐 API 请求
-- **公网 API 服务器**（可选）：仅处理登录相关接口，部署在云端，流量 <1MB/月
+- **嵌入式 Rust 服务器**（Rust）：App 启动时通过 `libkugou_server.so`（JNI/MethodChannel，`dart:ffi` 兜底）在进程内启动一个 `tiny_http` HTTP 服务器，监听 `127.0.0.1:8080`，处理所有酷狗音乐 API 请求。Rust 实现取代了旧的 `libnode.so` + `server_bundle.js`（Express）方案，行为与酷狗云端等价。
+- **公网 API 服务器**（可选）：仅处理登录相关接口，部署在云端，流量 <1MB/月（`networkapi/`，仍是 Node.js/Express）
 
-核心设计理念：所有音乐搜索、歌词、排行榜等 API 请求都走本地 Node.js 服务器转发，避免直接暴露 API 密钥在客户端。
+核心设计理念：所有音乐搜索、歌词、排行榜等 API 请求都走本地 Rust 服务器转发，避免直接暴露 API 密钥在客户端。
 
 ---
 
@@ -21,42 +21,49 @@ MD3Music 是一款 Android 音乐播放器，采用 **Flutter 前端 + 嵌入式
 ```
 md3Music/
 ├── lib/                          # Dart 前端（Flutter）
-│   ├── main.dart                 # 入口：权限请求 → 启动 Node.js → runApp
+│   ├── main.dart                 # 入口：权限请求 → 启动本地 API 服务器 → runApp
 │   ├── app.dart                  # MaterialApp 配置、主题、导航、Tab 布局
 │   ├── core/                     # 核心层：主题、布局、服务（桌面歌词、均衡器、Lyricon）
 │   ├── data/                     # 数据层：模型、仓库（settings_repository 等）
 │   ├── modules/                  # 功能模块：discover、player、search、library、login...
 │   ├── providers/                # 状态管理：PlayerProvider、KugouProvider、ThemeProvider...
-│   ├── services/                 # 服务层：nodejs_server.dart（FFI 启动 Node.js）
+│   ├── services/                 # 服务层：kugou_server.dart（MethodChannel + dart:ffi 启动服务器）
 │   └── widgets/                  # 共享 UI 组件（歌词、播放器控件等）
 │
-├── kugou_api_server/             # 本地 API 服务器（嵌入式，打包进 APK）
-│   ├── server.js                 # Express 服务器核心，路由注册，CORS，Cookie 处理
-│   ├── module/                   # 200+ 个 API 模块（search.js、audio.js、lyric.js...）
-│   │                             #   路由规则：文件名下划线转斜杠，如 search_suggest.js → /search/suggest
-│   ├── util/                     # 工具函数（crypto、request、apicache）
-│   ├── bundled_entry.js          # 自动生成：静态 require 所有模块，供 esbuild 打包
-│   └── server_bundle.js          # esbuild 输出产物，复制到 assets/nodejs-project/
+├── kugou_api_server/             # 本地 API 服务器（Rust，编译为 cdylib 打包进 APK）
+│   ├── rust/                     # Rust crate（crate 名 kugou_server）
+│   │   ├── src/
+│   │   │   ├── lib.rs            # 对外 FFI/JNI 符号：start_server/stop_server/is_server_running/
+│   │   │   │                     #   get_server_port + Java_com_md3music_..._native*
+│   │   │   ├── server.rs         # tiny_http 服务器：CORS、cookie、body 解析、apicache、路由分发
+│   │   │   ├── modules/          # 按端点分组的 160+ 个 API 模块（search.rs、audio.rs、lyric.rs、
+│   │   │   │                     #   playlist.rs、user.rs、youth.rs、song_url.rs...）
+│   │   │   ├── crypto.rs         # MD5/SHA1/AES/RSA（与 JS CryptoJS 行为对齐）
+│   │   │   ├── request.rs        # 上游转发（ureq）、签名、响应组装
+│   │   │   ├── device.rs         # dfid/mid 设备信息持久化（device_info.json）
+│   │   │   ├── cache.rs / config.rs / helper.rs / util.rs / simulate.rs
+│   │   │   └── ...
+│   │   ├── tests/smoke.rs        # 本地冒烟测试（不依赖外网）
+│   │   ├── .cargo/               # 可选的 Android 交叉编译 linker/CC 配置
+│   │   └── Cargo.toml            # crate-type = ["cdylib", "rlib"]
+│   ├── module/                   # 旧 JS 模块（200+，已被 Rust 取代，仅作参考/对照）
+│   ├── util/                     # 旧 JS 工具（仅供 networkapi 参考）
+│   └── server.js / bundled_entry.js / server_bundle.js   # 旧 Node 方案遗留，不再打包
 │
-├── networkapi/                   # 公网 API 服务器（云端部署，仅登录接口）
+├── networkapi/                   # 公网 API 服务器（云端部署，仅登录接口，Node.js）
 │   ├── server.js                 # 精简版 Express，只加载登录相关模块
 │   ├── module/                   # 登录、注册、验证码等模块
-│   └── util/                     # 与 kugou_api_server 共享的工具函数
+│   └── util/                     # 与旧 kugou_api_server/util 共享的工具函数
 │
 ├── android/                      # Android 原生层
-│   ├── app/src/main/cpp/         # CMake + JNI 桥接（启动 libnode.so）
-│   ├── app/src/main/jniLibs/     # libnode.so（arm64-v8a、armeabi-v7a、x86_64）
-│   └── app/src/main/kotlin/      # Kotlin 原生代码（MediaSession、桌面歌词等）
+│   ├── app/src/main/jniLibs/     # libkugou_server.so（arm64-v8a、armeabi-v7a、x86_64、x86）
+│   └── app/src/main/kotlin/      # Kotlin 原生代码（MediaSession、KugouApiService、桌面歌词等）
 │
 ├── assets/
-│   ├── nodejs-project/           # server_bundle.js 存放处，Flutter 打包进 APK
 │   ├── fonts/                    # 内置字体（simhei.ttf）
 │   └── images/                   # 应用图标
 │
-└── scripts/                      # 构建脚本
-    ├── build_nodejs_server.bat   # 一键构建 Node.js bundle
-    ├── gen_node_bundle_entry.js  # 生成 bundled_entry.js
-    ├── extract_nodejs.ps1        # 从 zip 提取 libnode.so
+└── scripts/                      # 构建脚本（部分为旧 Node 方案遗留）
     └── test_api.ps1              # API 测试脚本
 ```
 
@@ -64,10 +71,11 @@ md3Music/
 
 | 边界 | 说明 |
 |------|------|
-| `lib/` ↔ `kugou_api_server/` | Dart 前端通过 HTTP `127.0.0.1:8080` 调用 API，不直接 require JS 模块 |
-| `kugou_api_server/` ↔ `networkapi/` | 代码独立，共享 `util/` 结构；networkapi 只包含登录相关模块 |
-| `assets/nodejs-project/` | 构建产物目录，**不要手动编辑** `server_bundle.js`，它由 esbuild 生成 |
-| `android/app/src/main/jniLibs/` | 原生库目录，`libnode.so` 由 `setup_native.bat` 从 GitHub Releases 下载解压 |
+| `lib/` ↔ `kugou_api_server/rust/` | Dart 前端通过 HTTP `127.0.0.1:8080` 调用 API；启动/停止走 `KugouApiService` 的 MethodChannel（`com.md3music.md3music/kugou_api`：startServer/isRunning/stopServer），`dart:ffi` 直连 `start_server` 作为兜底 |
+| `kugou_api_server/rust/` ↔ `networkapi/` | 两者代码完全独立，不再共享 util；networkapi 仍为 Node.js，只含登录接口 |
+| `kugou_api_server/module/` 等 JS 文件 | 旧 Node 方案遗留，已被 Rust 取代，**不要**再修改 JS 版模块或重新打包 |
+| `android/app/src/main/jniLibs/` | 原生库目录，`libkugou_server.so` **已提交进 Git**（从 `rust/target/*/release/` 复制），无需下载 |
+| `assets/nodejs-project/` | 已从 `pubspec.yaml` 移除，不再打包；旧 `server_bundle.js` 仅作参考 |
 
 ---
 
@@ -76,18 +84,23 @@ md3Music/
 ### 3.1 完整构建顺序（CI / 手动发布）
 
 ```
-步骤 1: 解压 native-libs（libnode.so + Node.js headers）
-   └── setup_native.bat 或 CI 中 unzip native-libs.zip
-       → android/app/src/main/jniLibs/{arm64-v8a,armeabi-v7a,x86_64}/libnode.so
-       → android/app/src/main/cpp/include/node/*.h
+步骤 1: 构建 Rust 服务器 cdylib（修改 rust/src 后必须执行）
+   └── cd kugou_api_server/rust
+       一键脚本（推荐，自动定位 NDK、交叉编译 4 ABI 并覆盖 jniLibs）：
+           ./build_android.sh
+           # 可选：--no-copy 只编译；--debug 调试构建；--out=<目录> 自定义复制目标；--host 额外编译主机 release
+       主机：cargo build --release
+            → target/release/libkugou_server.so
+       安卓（交叉编译，4 个 ABI）：
+           cargo build --target aarch64-linux-android --release
+           cargo build --target armv7-linux-androideabi --release
+           cargo build --target i686-linux-android --release
+           cargo build --target x86_64-linux-android --release
+       每个 ABI 需要 NDK 链接器（见 4.1），产物：
+           → target/{target}/release/libkugou_server.so
 
-步骤 2: 构建 Node.js 服务器 bundle
-   └── scripts/build_nodejs_server.bat 依次执行：
-       2a. node scripts/gen_node_bundle_entry.js
-           → 生成 kugou_api_server/bundled_entry.js（静态 require 所有 module/*.js）
-       2b. cd kugou_api_server && npx esbuild bundled_entry.js --bundle --minify
-           → 输出 kugou_api_server/server_bundle.js
-       2c. 复制 server_bundle.js → assets/nodejs-project/server_bundle.js
+步骤 2: 复制到 jniLibs
+   └── 4 个 ABI 的 .so 复制到 android/app/src/main/jniLibs/{abi}/libkugou_server.so
 
 步骤 3: Flutter 构建
    └── flutter build apk --release --split-per-abi
@@ -97,75 +110,101 @@ md3Music/
 ### 3.2 开发时快速迭代
 
 ```bash
-# 只修改了 kugou_api_server/module/ 下的 JS 代码时：
-scripts\build_nodejs_server.bat
-
-# 然后重新安装到设备：
+# 只修改了 rust/src/ 下的代码时：
+cd kugou_api_server/rust && cargo build --release   # 主机验证编译
+# 修改安卓侧行为（JNI 符号等）后需交叉编译并复制 .so，再：
 flutter run
-# 或单独构建 APK：
-flutter build apk --debug
+
+# 只改 Dart/Android/Kotlin 代码时：
+flutter run
 ```
 
-### 3.3 CI 流程（`.github/workflows/ci.yml`）
+### 3.3 测试
+
+```bash
+cd kugou_api_server/rust
+cargo test        # 本地冒烟：404/CORS/RSA 常量解析 + 路由 dispatch 断言
+cargo clippy      # 静态检查（勿引入新 error）
+```
+
+### 3.4 CI 流程（`.github/workflows/ci.yml`）
 
 - 触发条件：push 到 main/master，或手动 workflow_dispatch
-- 环境：Ubuntu + Java 17 + Flutter stable + Node.js 18 + Android SDK 36 + NDK 28
+- 环境：Ubuntu + Java 17 + Flutter stable + Android SDK 36 + NDK 28
+- 注意：CI 中旧 Node 流程（下载 libnode、esbuild 打包）已冗余但不会失败；`libkugou_server.so` 已入库，Flutter 构建直接可用
 - 产物：三个 ABI 的 APK（arm64-v8a、armeabi-v7a、x86_64），自动创建 GitHub Release
 
 ---
 
 ## 4. 已知陷阱和注意事项
 
-### 4.1 esbuild 打包陷阱
+### 4.1 Android 交叉编译（ring / ureq TLS）
 
-**问题**：`server.js` 使用动态 `require('./module/' + name + '.js')` 加载模块，esbuild 无法静态分析，打出的包不含模块实现，所有 API 返回 404。
+**问题**：`ureq` 的 TLS 依赖 `ring`，其 build script 按裸命令名找 C 编译器（`aarch64-linux-android-clang`），而 NDK 只提供带 API 级别的 `aarch64-linux-android21-clang`；且它是以 shell 包装脚本形式存在，**不能**被 symlink 到别的目录（脚本用 `dirname $0` 定位 `clang`）。
 
-**解决**：必须先运行 `scripts/gen_node_bundle_entry.js` 生成 `bundled_entry.js`，里面是静态字面量 `require`，esbuild 才能内联所有模块。
+**解决**：通过环境变量显式指定 CC/AR/链接器为 NDK 完整路径（配合 `cargo build --target`）：
 
-**规则**：修改 `module/` 目录后，必须重新运行 `build_nodejs_server.bat`，否则 APK 内的 bundle 是旧的。
+```bash
+NDK=~/Android/Sdk/ndk/28.2.13676358
+BIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
+env CC_aarch64_linux_android=$BIN/aarch64-linux-android21-clang \
+    AR_aarch64_linux_android=$BIN/llvm-ar \
+    CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$BIN/aarch64-linux-android21-clang \
+    cargo build --target aarch64-linux-android --release
+```
 
-### 4.2 native-libs 缺失
+- CC/AR 用小写目标名（cc-rs 读取 `CC_<target>`，target 用下划线）；cargo 的 linker 变量**必须大写**（`CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER`），小写会被静默忽略。
+- 各 target 对应 linker：`aarch64-linux-android21-clang` / `armv7a-linux-androideabi21-clang` / `i686-linux-android21-clang` / `x86_64-linux-android21-clang`，AR 统一用 `llvm-ar`。
+- 验证产物：`file target/{target}/release/libkugou_server.so` 应为 `for Android 21`。
+- 导出符号核对：`llvm-nm -D --defined-only libkugou_server.so` 应含 `start_server`/`stop_server`/`is_server_running`/`get_server_port` + 3 个 `Java_com_md3music_md3music_KugouApiService_*`。
 
-**问题**：`libnode.so` 不在 Git 仓库中（太大），新 clone 后构建会因缺少 JNI 库而失败。
+### 4.2 RSA PEM 常量必须能被 rsa crate 解析
 
-**解决**：首次构建前运行 `setup_native.bat`，从 GitHub Releases 下载 `native-libs.zip` 并解压。
+**问题**：`PUBLIC_LITE_RAS_KEY`/`PUBLIC_RAS_KEY` 是单行长 base64；`rsa` crate 底层 pem-rfc7468 要求每行 ≤64 字符，直接 `from_public_key_pem` 会 panic（`Pem(Base64(InvalidEncoding))`），导致登录/注册 RSA 路径崩溃。
 
-### 4.3 Node.js 服务器启动时序
+**解决**：`crypto.rs` 内 `rsa_raw_encrypt`/`rsa_pkcs1v15_encrypt`/`rsa_oaep_sha256_encrypt` 先经 `normalize_pem()` 按 64 字符折行。`tests/smoke.rs::rsa_keys_parse` 为回归测试。新增 RSA 使用点也必须走这几个函数。
 
-**问题**：Flutter UI 渲染后发现页立即请求 API，如果 Node.js 还没启动完毕，请求全部失败。
+### 4.3 服务器启动时序
 
-**解决**：`main.dart` 中 `await NodeJsServer.start()` 在 `runApp()` 之前执行；`_waitForReady()` 会轮询 `127.0.0.1:8080` 最多 30 秒。
+**问题**：Flutter UI 渲染后发现页立即请求 API，如果本地服务器还没启动完毕，请求全部失败。
+
+**解决**：`main.dart` 中 `await NodeJsServer.start()` 在 `runApp()` 之前执行；`_waitForReady()` 会轮询 `127.0.0.1:8080` 最多 30 秒。冷启动时 MethodChannel 可能尚未注册（3 次重试失败），此时 `dart:ffi` 兜底直接 `start_server` 也可启动，`server::start` 会检测已在运行并返回 true，幂等。
 
 ### 4.4 端口 8080 冲突
 
-**问题**：退出 App 时如果没有正确关停 Node.js，下次冷启动时端口被占用，服务器启动失败导致闪退。
+**问题**：退出 App 时如果没有正确关停服务器，下次冷启动时端口被占用，服务器启动失败（`Server::http` 返回 Err → `start_server` 返回 0）。
 
-**解决**：退出流程中必须 `await NodeJsServer.stop()` + 等待 300ms + `exit(0)`。`SystemNavigator.pop()` 不够可靠，可能残留进程。
+**解决**：退出流程中必须 `await NodeJsServer.stop()` + 等待 300ms + `exit(0)`；`MainActivity.onDestroy`/`onTrimMemory` 也会调用 `KugouApiService.stopServer()`（`nativeStopNode`）。`SystemNavigator.pop()` 不够可靠。
 
-### 4.5 bundled_entry.js 路由倒序
+### 4.5 JNI 签名必须与 Rust 导出一致
 
-**问题**：Express 的 `app.use` 是前缀匹配，`/search` 会拦截 `/search/suggest`。
+**问题**：Rust `lib.rs` 导出的 JNI 函数签名是 `nativeStartNode(jint port, jstring dataDir)`，旧 Kotlin 声明的是 `nativeStartNode(Array<String>, String)`，参数不匹配会崩溃/调用异常。
 
-**解决**：`gen_node_bundle_entry.js` 对模块列表做了 `.reverse()` 排序，确保更具体的路由（如 `/search/suggest`）先于通用路由（如 `/search`）注册。**不要修改这个排序逻辑。**
+**解决**：`KugouApiService.kt` 的 `external` 声明必须与 Rust 侧一致（见 lib.rs），改了任一侧都要同步更新另一侧，并重打包验证。
 
-### 4.6 networkapi 与 kugou_api_server 的 util 同步
+### 4.6 networkapi 与 kugou_api_server 已分家
 
-**问题**：两个目录各自维护 `util/` 副本，修改一处不会自动同步到另一处。
+**问题**：旧架构中两处 `util/` 各自维护副本，容易失同步。Rust 化后 kugou_api_server 已是 Rust，networkapi 仍是 Node.js。
 
-**解决**：修改工具函数时，需要同时更新 `kugou_api_server/util/` 和 `networkapi/util/`。
+**解决**：修改 Rust 端工具函数只影响 `rust/src/`；如需同步登录行为，以 Rust 实现为准，networkapi 单点修改即可，不再有跨目录拷贝。
 
 ### 4.7 Android 构建配置
 
 - `compileSdk = 36`，`targetSdk = 35`，`ndkVersion = "28.2.13676358"`
-- CMake 3.22.1 用于编译 JNI 桥接代码
-- Release 构建启用 R8 混淆（`isMinifyEnabled = true`），修改原生接口后需检查 `proguard-rules.pro`
+- 已移除 CMake/`externalNativeBuild`（`cpp/` 目录删除）；JNI 符号直接来自 `libkugou_server.so`
+- Release 构建启用 R8 混淆（`isMinifyEnabled = true`），原生库不参与混淆；修改 JNI 后检查 `proguard-rules.pro`
 - 无 `keystore.properties` 时自动使用 debug 签名
 
 ### 4.8 Dart 分析规则
 
 - 使用 `package:flutter_lints/flutter.yaml`
-- `avoid_print` 默认开启，但项目中大量使用 `print()` 做调试日志（如 Node.js 启动日志），通过 `// ignore: avoid_print` 抑制
+- `avoid_print` 默认开启，但项目中大量使用 `print()` 做调试日志（如服务器启动日志），通过 `// ignore: avoid_print` 抑制
 - 部分 `discarded_futures` 也通过 ignore 注释处理
+
+### 4.9 `kugou_server` crate 的 release 构建参数
+
+- `crate-type = ["cdylib", "rlib"]`，cdylib 用于导出 FFI/JNI 符号，rlib 用于测试
+- `[profile.release]`：`opt-level = "s"`（体积优先）、`lto = true`、`panic = "abort"`（Android 端 panic 即崩溃，务必避免在请求线程 panic——4.2 曾踩坑）
 
 ---
 
@@ -179,27 +218,35 @@ flutter build apk --debug
 | 本地存储 | sqflite + shared_preferences | 2.3.3+1 / ^2.5.0 |
 | 网络请求 | dio + http | ^5.4.0 / ^1.2.1 |
 | 主题 | dynamic_color + material_color_utilities | MD3 动态取色 |
-| 嵌入式 Node.js | libnode.so (nodejs-mobile) | Node 18 |
-| API 服务器 | Express | ^4.18.2 |
-| 打包工具 | esbuild | ^0.25.3 |
-| 原生桥接 | JNI + CMake + dart:ffi | NDK 28 |
+| 嵌入式 API 服务器 | Rust（cdylib） + tiny_http + ureq | Rust 2021 / tiny_http 0.12 / ureq 2 |
+| 加密 | rsa / aes / cbc / md-5 / sha1 / sha2 / base64 | 与 JS CryptoJS 行为对齐 |
+| 原生桥接 | JNI + dart:ffi | NDK 28 |
 | 构建工具 | Gradle (Kotlin DSL) | Java 17 |
+| 公网服务器 | Node.js + Express（仅 networkapi） | ^4.18.2 |
 
 ---
 
 ## 6. 常用命令
 
 ```bash
-# 首次环境搭建
-setup_native.bat                          # 下载解压 libnode.so
-cd kugou_api_server && npm install        # 安装 Node.js 依赖
+# Rust 服务器构建 / 测试
+cd kugou_api_server/rust
+cargo build                     # 编译检查
+cargo test                      # 本地冒烟测试
+cargo clippy                    # 静态检查
+cargo build --release           # 主机 release cdylib
+
+# 交叉编译（4 ABI，见 4.1 的完整 env 前缀）
+cargo build --target aarch64-linux-android --release   # 复制到 jniLibs/arm64-v8a
+cargo build --target armv7-linux-androideabi --release # jniLibs/armeabi-v7a
+cargo build --target i686-linux-android --release      # jniLibs/x86
+cargo build --target x86_64-linux-android --release    # jniLibs/x86_64
 
 # 日常开发
-scripts\build_nodejs_server.bat           # 重新构建 Node.js bundle
 flutter run                               # 调试运行
 flutter build apk --release --split-per-abi  # 发布构建
 
-# 测试 API
+# 测试 API（需先启动 App / 本地服务器）
 powershell -File scripts\test_api.ps1     # 测试本地 API 接口
 
 # 代码检查

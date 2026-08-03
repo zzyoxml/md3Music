@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 
@@ -134,6 +135,8 @@ class _LoginPageState extends State<LoginPage> {
             // 触发 provider 拉用户信息
             await kugouProvider.refreshUserInfo();
             if (mounted) {
+              // 登录后重新从云端同步「我喜欢的」，让红心立即生效
+              unawaited(context.read<FavoritesProvider>().loadFavorites());
               setState(() => _statusText = '登录成功！');
               await Future.delayed(const Duration(milliseconds: 800));
               if (mounted) Navigator.of(context).pop();
@@ -174,6 +177,8 @@ class _LoginPageState extends State<LoginPage> {
         timer.cancel();
         _isChecking = false;
         if (mounted) {
+          // 登录后重新从云端同步「我喜欢的」，让红心立即生效
+          unawaited(context.read<FavoritesProvider>().loadFavorites());
           setState(() {
             _statusText = '登录成功！';
           });
@@ -492,6 +497,8 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) return;
     setState(() => _loggingIn = false);
     if (ok) {
+      // 登录后重新从云端同步「我喜欢的」，让红心立即生效
+      unawaited(context.read<FavoritesProvider>().loadFavorites());
       setState(() => _statusText = '登录成功！');
       await Future.delayed(const Duration(milliseconds: 800));
       if (mounted) Navigator.of(context).pop();

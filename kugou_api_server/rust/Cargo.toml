@@ -1,0 +1,32 @@
+[package]
+name = "kugou_server"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "kugou_server"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tiny_http = "0.12"
+ureq = { version = "2", default-features = false, features = ["tls", "gzip", "json"] }
+md-5 = "0.10"
+sha1 = "0.10"
+sha2 = "0.10"
+aes = "0.8"
+rsa = { version = "0.9", features = ["pem", "sha2", "std"] }
+num-traits = "0.2"
+base64 = "0.22"
+flate2 = "1"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+libc = "0.2"
+jni = "0.21"
+qrcode = { version = "0.14.0", features = ["image"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+panic = "abort"

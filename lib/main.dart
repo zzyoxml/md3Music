@@ -17,7 +17,7 @@ import 'data/repositories/settings_repository.dart';
 import 'modules/onboarding/user_agreement_page.dart';
 import 'modules/recognition/song_recognition_page.dart';
 import 'modules/search/search_page.dart';
-import 'services/nodejs_server.dart';
+import 'services/kugou_server.dart';
 import 'widgets/apple_lyrics/layout/lyric_preferences.dart';
 import 'widgets/md3_lyric_preferences.dart';
 
@@ -69,13 +69,13 @@ Future<void> main() async {
     print('Request permissions error (ignored): $e');
   }
 
-  // 先启动本地 Node.js API 服务器，确保就绪后再运行 App
+  // 先启动本地 API 服务器，确保就绪后再运行 App
   // 否则发现页 post-frame callback 发出的请求会因服务器未启动而全部失败
   if (!kIsWeb && Platform.isAndroid) {
     try {
-      await NodeJsServer.start();
+      await KugouApiServer.start();
     } catch (e) {
-      print('Node.js server start error: $e');
+      print('API server start error: $e');
     }
     // 启动本地 HTTP 服务器，供 DLNA 投屏本地音乐
     // 失败不阻塞启动流程，投屏时若未启动会提示用户重启 App

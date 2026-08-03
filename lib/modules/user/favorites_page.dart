@@ -785,6 +785,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                       playlist: playlist.toPlaylist(),
                       isInMyFavorites: true,
                       isUserCreated: _isCreated(playlist),
+                      isDefaultFavorite: playlist.name == '我喜欢',
                     ),
                   ),
                 );
