@@ -365,6 +365,16 @@ pub fn q_truthy(q: &Value, key: &str) -> bool {
     }
 }
 
+/// JS `obj?.[key] ?? default`：缺失/null → default（原样，保持数字/字符串类型）；
+/// 其他 → 原值（URL query 下通常为字符串，不做任何类型转换）。
+/// 用于云盘等需要与 JS `JSON.stringify` 明文逐字节一致的模块。
+pub fn q_raw_or(q: &Value, key: &str, default: Value) -> Value {
+    match q.get(key) {
+        None | Some(Value::Null) => default,
+        Some(v) => v.clone(),
+    }
+}
+
 /// 提取 query cookie 对象（深拷贝，供模块作为 `cookie` 传入）。
 pub fn q_cookie(q: &Value) -> Value {
     q.get("cookie").cloned().unwrap_or_else(|| json!({}))
@@ -429,7 +439,9 @@ pub fn forward(
     not_signature: bool,
 ) -> Result<ModuleResponse, ModuleResponse> {
     let mut o = RequestOptions::new(url);
-    if method == "GET" {
+    // 大小写不敏感比较：兼容调用方误传小写 "get"/"post"，
+    // 否则 "get" 会走 post 分支导致上游 405（云盘 URL 曾踩坑）。
+    if method.eq_ignore_ascii_case("GET") {
         o = o.get(url);
     } else {
         o = o.post(url);

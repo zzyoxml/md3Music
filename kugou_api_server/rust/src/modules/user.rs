@@ -9,7 +9,8 @@ use crate::crypto::{
 };
 use crate::helper::{sign_cloud_key, sign_params_key};
 use crate::modules::{
-    c_str, cookie_or_param_str, forward, param_or_cookie_str, q_cookie, q_num, q_str, Ctx,
+    c_str, cookie_or_param_str, forward, param_or_cookie_str, q_cookie, q_num, q_raw_or, q_str,
+    Ctx,
 };
 use crate::request::{BodyValue, ModuleResponse, RequestOptions};
 use crate::util::json_stringify;
@@ -26,17 +27,19 @@ fn rsa_pk_upper(obj: &Value) -> String {
 
 /// user_cloud.js → /user/cloud（云盘歌曲列表，playlistAES + arraybuffer）。
 pub fn handle_cloud(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
-    let userid = param_or_cookie_str(q, "userid", "0")
-        .trim()
-        .parse()
-        .unwrap_or(0);
+    // JS `params?.userid || params?.cookie?.userid || 0`：保留字符串原值，
+    // 全部缺失时才用数字 0。强转 i64 会让 RSA/AES 明文与 JS 版不一致，鉴权失败。
+    let userid_raw = param_or_cookie_str(q, "userid", "");
+    let userid: Value = if userid_raw.is_empty() { json!(0) } else { json!(userid_raw) };
     let token = param_or_cookie_str(q, "token", "");
     let mid = c_str(q, "KUGOU_API_MID");
     let clienttime = now_secs();
 
+    // dataMap：JS `params.page ?? 1` / `params.pagesize ?? 30` 保留原始字符串，
+    // 缺失时才用数字默认值（与 JSON.stringify 明文逐字节一致）。
     let dm = json!({
-        "page": q_num(q, "page", 1),
-        "pagesize": q_num(q, "pagesize", 30),
+        "page": q_raw_or(q, "page", json!(1)),
+        "pagesize": q_raw_or(q, "pagesize", json!(30)),
         "getkmr": 1,
     });
     let (key, aes_str) = playlist_aes_encrypt(&json_stringify(&dm));
@@ -91,17 +94,21 @@ pub fn handle_cloud_url(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleRe
         "ssa_flag": "is_fromtrack",
         "version": "20102",
         "ssl": 0,
-        "album_audio_id": q_num(q, "album_audio_id", 0),
+        // JS `params.album_audio_id ?? 0` / `params.audio_id ?? 0`：
+        // 保留原始字符串（云盘上传歌曲依赖该字段），缺失才用数字 0。
+        "album_audio_id": q_raw_or(q, "album_audio_id", json!(0)),
         "pid": 20026,
-        "audio_id": q_num(q, "audio_id", 0),
-        "kv_id": 2,
+        "audio_id": q_raw_or(q, "audio_id", json!(0)),
+        // 云盘文件各自有 kv_id（列表接口返回），请求音质需与文件匹配，
+        // 支持前端透传 kv_id，默认 2（JS 版历史默认值）。
+        "kv_id": q_raw_or(q, "kv_id", json!(2)),
         "key": sign_cloud_key(&hash, "20026"),
         "bucket": "musicclound",
         "name": q_str(q, "name", ""),
         "with_res_tag": 0,
     });
     forward(
-        q, ctx, "get", "/bsstrackercdngz/v2/query_musicclound_url", None,
+        q, ctx, "GET", "/bsstrackercdngz/v2/query_musicclound_url", None,
         Some(pm), None, "android", &[], false, false,
     )
 }
