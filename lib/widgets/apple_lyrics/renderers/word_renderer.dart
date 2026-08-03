@@ -10,7 +10,6 @@
 /// 动画驱动由外部 AnimationController + Ticker 调用 [tick] 实现（SubTask 7.7）。
 library;
 
-import 'dart:collection';
 import 'dart:math';
 import 'dart:ui';
 
@@ -64,12 +63,12 @@ class WordRenderer {
   /// （仅当前字 + 边界附近 word 在过渡）。
   List<TextPainter> _wordPainters = const <TextPainter>[];
 
-  /// v4 优化：每个 word index 上次设置的 alpha。
-  /// 仅在 alpha 变化时才 set text + layout，避免每帧 N 次 layout。
-  final Map<int, double> _lastSetAlphas = <int, double>{};
+  /// v4 优化：每个 word index 上次设置的 alpha（量化步进值）。
+  /// 仅在量化值变化时才 set text + layout，避免每帧 N 次 layout。
+  List<int> _lastSetAlphas = const <int>[];
 
   /// 每个 word index 的当前 alpha 值。
-  final Map<int, double> _wordAlphas = <int, double>{};
+  List<double> _wordAlphas = const <double>[];
 
   /// v3 优化：renderer 是否已收敛（alpha 和 Y offset 都不再变化）。
   /// 用于 AppleLyricsView 判断是否可以停止 Ticker。
@@ -79,7 +78,7 @@ class WordRenderer {
   ///
   /// AMLL 规范：当前字会轻微上浮（最大约 -3px），用指数衰减平滑过渡。
   /// 已播字回到 0，未播字保持 0，当前字上浮。
-  final Map<int, double> _wordYOffsets = <int, double>{};
+  List<double> _wordYOffsets = const <double>[];
 
   /// AMLL 上浮最大幅度（px）：当前字最大上浮 -3px。
   static const double _maxLiftPx = -3.0;
@@ -115,14 +114,46 @@ class WordRenderer {
   final TextPainter _translationPainter =
       TextPainter(textDirection: TextDirection.ltr);
 
+  /// 渐变路径复用的 Paint 实例（避免每帧新建，减少 GC）。
+  /// 渐变路径稳态下每帧只改 shader，0 次 layout。
+  final Paint _gradientPaint = Paint();
+
+  /// 辉光层复用的 Paint 实例（避免每帧新建 Paint + ImageFilter）。
+  final Paint _glowBlurPaint = Paint();
+
+  // ============== 渐变遮罩状态 ==============
+
+  /// 当前正在演唱的 word 索引（-1 表示还未开始）。
+  int _currentWordIdx = -1;
+
+  /// 当前 word 内进度（0.0-1.0）。
+  double _intraWordProgress = 0.0;
+
+  /// 行级渐变 mask 位置（相对于行首的累计已播宽度）。
+  ///
+  /// **行级渐变模型**：mask 边界随演唱进度从行首移动到行尾，
+  /// 跨越多个 word。长字上停留久（速度慢），短字上快速掠过，
+  /// 自然实现"根据字长不同改变移动速度"。
+  /// -1 表示无效（非当前行），double.infinity 表示已播完。
+  double _maskX = -1.0;
+
+  /// 预计算的每个 word 在行内的起始 X 坐标（相对于行首）。
+  /// 在 [_ensureBound] 时一次性计算，避免每帧 O(n²) 循环累加。
+  List<double> _wordStartXs = const <double>[];
+
+  /// 缓存的上次换行扫描的 maxWidth，用于判断是否需要重算 _cachedVisualLineWidths。
+  double _cachedMaxWidth = -1;
+  /// 缓存的每条视觉行的 word 累计宽度，避免每帧重新分配 List。
+  List<double> _cachedVisualLineWidths = const <double>[];
+
   // ============== 状态查询 ==============
 
   /// 当前 alpha map（不可变视图，供测试断言）。
   ///
-  /// 使用 [UnmodifiableMapView] 包装，外部只读，修改不影响内部状态。
+  /// 内部用 List 存储（性能优化），此处通过 [List.asMap] 返回 Map 视图，
+  /// 保持测试接口兼容。仅测试调用，非热路径。
   @visibleForTesting
-  Map<int, double> get wordAlphas =>
-      UnmodifiableMapView<int, double>(_wordAlphas);
+  Map<int, double> get wordAlphas => _wordAlphas.asMap();
 
   /// 当前 scale 对应的 factor（0~1）。
   ///
@@ -178,6 +209,13 @@ class WordRenderer {
   /// 用指数衰减公式 `alpha += (target - alpha) * (1 - exp(-speed * dt))`
   /// 平滑过渡：变亮用 [LyricLayout.attackSpeed]（50.0），变暗用 [LyricLayout.releaseSpeed]（7.0）。
   /// 差值小于 [LyricLayout.alphaEpsilon]（0.001）时吸附到目标。
+  ///
+  /// **性能优化（上浮动画功耗优化）**：
+  /// - 预计算 decay：dt 对所有 word 相同，speed 只有 attack/release 两值，
+  ///   每帧只调 4 次 exp() 而非最多 2N 次（N=word 数）
+  /// - 非激活行快速路径：跳过 currentWordIdx 计算、smoothstep、per-word target 分支，
+  ///   所有 word 统一 target=dark / Y=0 / emphasis=idle
+  /// - early-exit 已收敛字：90% 的字已收敛，跳过乘法运算
   void tick(double dt, int currentTimeMs) {
     if (dt <= 0) return;
     if (_boundLine == null || _boundLine!.words.isEmpty) return;
@@ -187,6 +225,49 @@ class WordRenderer {
     final words = _boundLine!.words;
     final int wordCount = words.length;
 
+    // === 预计算 decay 值（核心优化：每帧只调 4 次 exp()）===
+    // 之前每 word 最多调 2 次 exp()（alpha + Y offset），10 word 行 = 20 次/帧
+    // 现在固定 4 次/帧，与 word 数无关
+    final double alphaAttackDecay = 1.0 - exp(-LyricLayout.attackSpeed * dt);
+    final double alphaReleaseDecay = 1.0 - exp(-LyricLayout.releaseSpeed * dt);
+    final double liftAttackDecay = 1.0 - exp(-_liftAttackSpeed * dt);
+    final double liftReleaseDecay = 1.0 - exp(-_liftReleaseSpeed * dt);
+
+    // === 非当前行快速路径 ===
+    // 非当前行：所有 word alpha 目标 = dark，Y offset 目标 = 0，emphasis = idle
+    // 跳过 currentWordIdx 查找、smoothstep、per-word target 分支判断
+    if (!_isActive) {
+      bool anyChanged = false;
+      for (int i = 0; i < wordCount; i++) {
+        // Alpha → dark（使用方向判断选 decay，兼容 dark 值随 scale 变化的情况）
+        final double current = _wordAlphas[i];
+        if ((current - dark).abs() >= LyricLayout.alphaEpsilon) {
+          final double decay = dark >= current ? alphaAttackDecay : alphaReleaseDecay;
+          double next = current + (dark - current) * decay;
+          if ((next - dark).abs() < LyricLayout.alphaEpsilon) next = dark;
+          _wordAlphas[i] = next;
+          anyChanged = true;
+        }
+        // Y offset → 0（非当前行不上浮）
+        final double currentY = _wordYOffsets[i];
+        if (currentY.abs() >= 0.01) {
+          final double yDecay = 0 >= currentY ? liftAttackDecay : liftReleaseDecay;
+          double nextY = currentY + (0 - currentY) * yDecay;
+          if (nextY.abs() < 0.01) nextY = 0;
+          _wordYOffsets[i] = nextY;
+          anyChanged = true;
+        }
+        // Emphasis: 非当前行一律 idle
+        _emphasizeStates[i] = EmphasizeState.idle;
+      }
+      _isConverged = !anyChanged;
+      _currentWordIdx = -1;
+      _intraWordProgress = 0.0;
+      _maskX = -1.0;
+      return;
+    }
+
+    // === 当前行：完整 per-word 处理 ===
     // 找到当前正在演唱的 word 索引及 word 内进度
     int currentWordIdx = -1;
     double intraWordProgress = 0.0;
@@ -214,53 +295,100 @@ class WordRenderer {
       intraWordProgress = 0.0;
     }
 
+    // 记录当前演唱状态，供 paintLine 中行级渐变使用
+    _currentWordIdx = currentWordIdx;
+    _intraWordProgress = intraWordProgress;
+
+    // === 计算行级 mask 位置（核心：行级渐变模型）===
+    // maskX = 已播字总宽度 + 当前字内进度 × 当前字宽
+    // 渐变边界随演唱进度从行首移动到行尾，跨越多个 word。
+    // 长字上停留久（速度慢），短字上快速掠过。
+    if (currentWordIdx < 0) {
+      _maskX = -1.0; // 无效，全 dark
+    } else if (currentWordIdx >= wordCount) {
+      _maskX = double.infinity; // 已播完，全 bright
+    } else {
+      _maskX = _wordStartXs[currentWordIdx] +
+          _wordWidths[currentWordIdx] * _intraWordProgress;
+    }
+
     // 行级辉光判定（循环外计算一次）：
     // _isMetadataLine 在 _ensureBound 时缓存（行切换时才更新）；
     // _isActive / useGlowEffect / _emphasizeEffect 运行时可变，每帧检查。
     final bool skipLineEmphasis = _emphasizeEffect == null ||
-        !_isActive ||
         !LyricPreferences.instance.useGlowEffect ||
         _isMetadataLine;
 
     bool anyChanged = false;
+    // 性能优化：内联 target 计算 + early-exit 已收敛字 + 预计算 decay
+    // 90% 的字在任意时刻已收敛到目标值，跳过乘法运算可大幅降低 CPU 开销
     for (int i = 0; i < wordCount; i++) {
-      final double target = _targetAlphaForExact(i, currentWordIdx, intraWordProgress, dark, bright);
-      final double current = _wordAlphas[i] ?? dark;
-      final double speed = target >= current
-          ? LyricLayout.attackSpeed
-          : LyricLayout.releaseSpeed;
-      final double decay = 1.0 - exp(-speed * dt);
-      double next = current + (target - current) * decay;
-      if ((next - target).abs() < LyricLayout.alphaEpsilon) {
-        next = target;
+      // === Alpha 动画 ===
+      final double target;
+      if (i < currentWordIdx) {
+        target = bright;
+      } else if (i > currentWordIdx) {
+        target = dark;
+      } else {
+        target = dark + (bright - dark) * intraWordProgress;
       }
-      if ((next - current).abs() > 1e-6) anyChanged = true;
-      _wordAlphas[i] = next;
 
-      // AMLL 上浮特效
-      final double targetY = _targetYOffsetForExact(i, currentWordIdx, intraWordProgress);
-      final double currentY = _wordYOffsets[i] ?? 0;
-      final double ySpeed = targetY >= currentY
-          ? _liftAttackSpeed
-          : _liftReleaseSpeed;
-      final double yDecay = 1.0 - exp(-ySpeed * dt);
-      double nextY = currentY + (targetY - currentY) * yDecay;
-      if ((nextY - targetY).abs() < LyricLayout.alphaEpsilon) {
-        nextY = targetY;
+      final double current = _wordAlphas[i];
+      if ((current - target).abs() < LyricLayout.alphaEpsilon) {
+        // 已收敛：直接吸附到目标，跳过乘法
+        if (current != target) _wordAlphas[i] = target;
+      } else {
+        // 使用预计算的 decay，避免每 word 调 exp()
+        final double decay = target >= current
+            ? alphaAttackDecay
+            : alphaReleaseDecay;
+        double next = current + (target - current) * decay;
+        if ((next - target).abs() < LyricLayout.alphaEpsilon) {
+          next = target;
+        }
+        _wordAlphas[i] = next;
+        anyChanged = true;
       }
-      if ((nextY - currentY).abs() > 1e-6) anyChanged = true;
-      _wordYOffsets[i] = nextY;
 
-      // 强调辉光效果：改用缓存的 _wordEmphasisFlags[i] 替代每帧调用 shouldEmphasize。
-      // 字级判定（含正则匹配）在 _ensureBound 时已缓存，此处仅 O(1) 数组读取。
-      final LyricWord emWord = words[i];
+      // === Y 偏移动画（上浮特效）===
+      final double targetY;
+      if (i < currentWordIdx) {
+        targetY = _maxLiftPx;
+      } else if (i == currentWordIdx) {
+        // smoothstep 缓动（仅 3 次乘法 + 1 次加法，开销极低）
+        final double eased = intraWordProgress * intraWordProgress * (3 - 2 * intraWordProgress);
+        targetY = _maxLiftPx * eased;
+      } else {
+        targetY = 0;
+      }
+
+      final double currentY = _wordYOffsets[i];
+      // Y offset 用 0.01px epsilon（3px 范围，0.3% 不可见）
+      if ((currentY - targetY).abs() < 0.01) {
+        // 已收敛：直接吸附到目标，跳过乘法
+        if (currentY != targetY) _wordYOffsets[i] = targetY;
+      } else {
+        // 使用预计算的 decay，避免每 word 调 exp()
+        final double yDecay = targetY >= currentY
+            ? liftAttackDecay
+            : liftReleaseDecay;
+        double nextY = currentY + (targetY - currentY) * yDecay;
+        if ((nextY - targetY).abs() < 0.01) {
+          nextY = targetY;
+        }
+        _wordYOffsets[i] = nextY;
+        anyChanged = true;
+      }
+
+      // === 强调辉光效果 ===
+      // 字级判定（含正则匹配）在 _ensureBound 时已缓存，此处仅 O(1) 数组读取
       if (!skipLineEmphasis && _wordEmphasisFlags[i]) {
         _emphasizeStates[i] = _emphasizeEffect!.computeState(
-          word: emWord,
+          word: words[i],
           currentTimeMs: currentTimeMs,
           isLastWord: i == wordCount - 1,
           wordIndex: i,
-          anchorCharCount: emWord.text.runes.length,
+          anchorCharCount: words[i].text.runes.length,
         );
       } else {
         _emphasizeStates[i] = EmphasizeState.idle;
@@ -268,45 +396,6 @@ class WordRenderer {
     }
     // v3 优化：跟踪 alpha/Y offset 是否仍在变化（用于 AppleLyricsView 判断停止 Ticker）
     _isConverged = !anyChanged;
-  }
-
-  /// 计算指定 word index 的目标 Y 偏移（AMLL 上浮特效），基于逐字时间戳。
-  ///
-  /// - 非当前行：所有 word Y=0。
-  /// - 当前行：
-  ///   - 已播字（index < currentWordIdx）：Y=_maxLiftPx（保持上浮）。
-  ///   - 当前字（index == currentWordIdx）：按 word 内进度 smoothstep 上浮。
-  ///   - 未播字（index > currentWordIdx）：Y=0。
-  double _targetYOffsetForExact(int index, int currentWordIdx, double intraWordProgress) {
-    if (!_isActive) return 0;
-    if (index < currentWordIdx) {
-      return _maxLiftPx;
-    }
-    if (index == currentWordIdx) {
-      final double eased = intraWordProgress * intraWordProgress * (3 - 2 * intraWordProgress);
-      return _maxLiftPx * eased;
-    }
-    return 0;
-  }
-
-  /// 计算指定 word index 的目标 alpha，基于逐字时间戳。
-  ///
-  /// - 非当前行：alpha = dynamicDarkAlpha * (1 - blurFade)。
-  ///   blurFade=1 时 alpha=0（模糊图片覆盖），blurFade=0 时正常显示。
-  /// - 当前行：
-  ///   - 已播字（index < currentWordIdx）目标 = [dynamicBrightAlpha]。
-  ///   - 未播字（index > currentWordIdx）目标 = [dynamicDarkAlpha]。
-  ///   - 当前字（index == currentWordIdx）按 word 内进度在 dark~bright 之间线性插值。
-  double _targetAlphaForExact(
-      int index, int currentWordIdx, double intraWordProgress, double dark, double bright) {
-    if (!_isActive) return dark * (1.0 - _blurFade);
-    if (index < currentWordIdx) {
-      return bright;
-    } else if (index > currentWordIdx) {
-      return dark;
-    } else {
-      return dark + (bright - dark) * intraWordProgress;
-    }
   }
 
   // ============== 绘制 ==============
@@ -336,7 +425,7 @@ class WordRenderer {
 
     // 主题切换时 textColorValue 变化，清空 alpha 缓存强制重建所有 word TextSpan
     if (LyricLayout.textColorValue != _lastTextColorValue) {
-      _lastSetAlphas.clear();
+      _lastSetAlphas = List<int>.filled(_lastSetAlphas.length, -1);
       _lastTextColorValue = LyricLayout.textColorValue;
     }
 
@@ -356,16 +445,33 @@ class WordRenderer {
     double dx = 0; // 相对 baseX 的水平偏移
     double currentY = offset.dy; // 当前视觉行的 y 坐标
     final double dark = dynamicDarkAlpha;
+    final double bright = dynamicBrightAlpha;
     // 换行内部行高 = 主行高 × 0.8（与 LyricLayout.measureLineHeight 一致）
     final double wrapLineHeight =
         fontSize * LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor;
     final double lineHeight = LyricLayout.lineHeight;
 
+    // === 行级渐变参数（核心：行级 maskX 模型）===
+    // 过渡区以 _maskX 为中心，宽度 = 2 × 当前字宽，让渐变跨越 2-3 个 word。
+    // 长字过渡区宽，渐变在字上移动慢；短字过渡区窄，移动快。
+    // _maskX < 0 表示非当前行或未开始，全 dark。
+    final bool useGradient = _isActive &&
+        _boundLine != null &&
+        _boundLine!.words.length == line.words.length &&
+        _maskX >= 0;
+    final double transitionHalfWidth = useGradient &&
+            _currentWordIdx >= 0 &&
+            _currentWordIdx < _wordWidths.length
+        ? _wordWidths[_currentWordIdx]
+        : 0.0;
+    final double transitionStart = _maskX - transitionHalfWidth;
+    final double transitionEnd = _maskX + transitionHalfWidth;
+    final double transitionSpan = transitionEnd - transitionStart;
+
     for (int i = 0; i < line.words.length; i++) {
       final LyricWord word = line.words[i];
-      final double alpha = _wordAlphas[i] ?? dark;
       // AMLL 上浮特效：当前字 Y 偏移（上浮）
-      final double yOffset = _wordYOffsets[i] ?? 0;
+      final double yOffset = i < _wordYOffsets.length ? _wordYOffsets[i] : 0;
       // 强调辉光状态
       final EmphasizeState emState = _emphasizeStates[i] ?? EmphasizeState.idle;
       // 用缓存宽度做换行判断（避免每帧 TextPainter.layout 测量）
@@ -387,59 +493,127 @@ class WordRenderer {
       final double wordY = currentY + yOffset;
       final Offset wordPos = Offset(wordX, wordY);
 
-      // **v4 性能优化**：per-word TextPainter + alpha 缓存。
-      // 仅在 alpha 变化时才 set text + layout，alpha 不变时直接 paint。
-      final painter = _wordPainters[i];
-      if (_lastSetAlphas[i] != alpha) {
-        painter.text = TextSpan(
-          text: word.text,
-          style: TextStyle(
-            color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, alpha),
-            fontSize: fontSize,
-            height: lineHeight,
-            // 显式注入歌词 fontFamily，与测量路径保持一致
-            fontFamily: LyricLayout.fontFamily,
-          ),
-        );
-        painter.layout();
-        _lastSetAlphas[i] = alpha;
+      // === 计算渲染 alpha ===
+      // 行级 maskX 模型：基于 word 在行内的累计 X 坐标计算边缘 alpha。
+      // 已播区（maskX 左侧远端）= bright，未播区（maskX 右侧远端）= dark，
+      // 过渡区内线性插值，实现跨字平滑渐变。
+      final double leftAlpha;
+      final double rightAlpha;
+      if (!useGradient) {
+        leftAlpha = rightAlpha = i < _wordAlphas.length ? _wordAlphas[i] : dark;
+      } else {
+        final double wordStartX = i < _wordStartXs.length ? _wordStartXs[i] : 0;
+        final double wordEndX = wordStartX + width;
+        leftAlpha = _alphaAtX(wordStartX, transitionStart, transitionSpan, bright, dark);
+        rightAlpha = _alphaAtX(wordEndX, transitionStart, transitionSpan, bright, dark);
       }
 
-      // 应用强调辉光效果：per-word scale + glow shadow
-      if (emState.scale != 1.0 || emState.glowLevel > 0) {
+      final painter = _wordPainters[i];
+
+      // === 强调辉光：save + scale（公共路径）===
+      final bool needEmphasis = emState.scale != 1.0 || emState.glowLevel > 0;
+      if (needEmphasis) {
         canvas.save();
-        // 以 word 中心为缩放锚点
         final double centerX = wordX + width / 2;
         final double centerY = wordY + fontSize * lineHeight / 2;
         canvas.translate(centerX, centerY);
         canvas.scale(emState.scale, emState.scale);
         canvas.translate(-centerX, -centerY);
+      }
 
-        // 绘制辉光层：saveLayer + ImageFilter.blur
-        if (emState.glowLevel > 0) {
-          final double blurSigma = emState.shadowBlurEm * fontSize * 0.8;
-          if (blurSigma > 0) {
-            final glowRect = Rect.fromLTWH(
-              wordX - blurSigma * 2, wordY - blurSigma * 2,
-              width + blurSigma * 4, fontSize * lineHeight + blurSigma * 4,
-            );
-            canvas.saveLayer(
-              glowRect,
-              Paint()..imageFilter = ImageFilter.blur(
-                sigmaX: blurSigma, sigmaY: blurSigma,
-              ),
-            );
-            painter.paint(canvas, wordPos);
-            canvas.restore();
-          }
+      // === 渲染文字 ===
+      // 性能优化（核心）：左右 alpha 几乎一致时用均匀绘制（量化缓存，跳过 layout）。
+      // 过渡区内的 word 走渐变路径，用 saveLayer + BlendMode.modulate 应用渐变。
+      //
+      // **layout 复用原理**：
+      // - 渐变路径保持 painter.text 为 plain white（color=white, alpha=1.0）
+      // - TextSpan.== 比较时 plain white 的 color/fontSize/fontFamily 不变 → 不触发 relayout
+      // - 渐变通过 saveLayer + drawRect(modulate) 事后应用，不影响 layout
+      // - 稳态下 0 次 layout/帧（仅路径切换时 1 次 layout）
+      //
+      // **BlendMode.modulate 公式**：result = src × dst（逐分量含 alpha）
+      // - dst = 白色文字（color=white, alpha=文字形状）
+      // - src = 渐变（color=white, alpha=leftAlpha→rightAlpha）
+      // - result.color = white × white = white
+      // - result.alpha = 渐变alpha × 文字形状 ✓
+      final bool isUniform = (leftAlpha - rightAlpha).abs() < 0.01;
+      if (isUniform) {
+        // === 均匀路径 ===
+        final double uniformAlpha = (leftAlpha + rightAlpha) * 0.5;
+        final int alphaStep = (uniformAlpha * 20).round();
+        if (_lastSetAlphas[i] != alphaStep) {
+          // 量化值变化或从渐变路径切换过来：重新 set text + layout
+          painter.text = TextSpan(
+            text: word.text,
+            style: TextStyle(
+              color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, uniformAlpha),
+              fontSize: fontSize,
+              height: lineHeight,
+              fontFamily: LyricLayout.fontFamily,
+            ),
+          );
+          painter.layout();
+          _lastSetAlphas[i] = alphaStep;
         }
-
-        // 绘制正常文字层
-        painter.paint(canvas, wordPos);
-        canvas.restore();
       } else {
-        // 无辉光：直接绘制
+        // === 渐变路径（saveLayer + modulate，复用 layout）===
+        // 确保 painter 处于 plain white 状态（只在切换时 set text + layout）
+        if (_lastSetAlphas[i] != -1) {
+          painter.text = TextSpan(
+            text: word.text,
+            style: TextStyle(
+              color: const Color.fromRGBO(255, 255, 255, 1.0), // plain white
+              fontSize: fontSize,
+              height: lineHeight,
+              fontFamily: LyricLayout.fontFamily,
+            ),
+          );
+          painter.layout();
+          _lastSetAlphas[i] = -1; // 标记 plain white 已缓存
+        }
+      }
+
+      // === 辉光层 + 正常文字层绘制 ===
+      // 辉光逻辑为公共路径，均匀和渐变共用
+      if (needEmphasis && emState.glowLevel > 0) {
+        final double blurSigma = emState.shadowBlurEm * fontSize * 0.8;
+        if (blurSigma > 0) {
+          final glowRect = Rect.fromLTWH(
+            wordX - blurSigma * 2, wordY - blurSigma * 2,
+            width + blurSigma * 4, fontSize * lineHeight + blurSigma * 4,
+          );
+          _glowBlurPaint.imageFilter = ImageFilter.blur(
+            sigmaX: blurSigma, sigmaY: blurSigma,
+          );
+          canvas.saveLayer(glowRect, _glowBlurPaint);
+          painter.paint(canvas, wordPos);
+          canvas.restore();
+        }
+      }
+
+      if (isUniform) {
+        // 均匀路径：直接 paint（text 的 color 已是目标 alpha）
         painter.paint(canvas, wordPos);
+      } else {
+        // 渐变路径：saveLayer + paint(plain white) + drawRect(modulate) 应用渐变
+        final Rect wordRect = Rect.fromLTWH(wordX, wordY, width, fontSize * lineHeight);
+        canvas.saveLayer(wordRect, Paint());
+        painter.paint(canvas, wordPos); // dst = 白色文字（layout 已缓存，不重算）
+        // 复用 _gradientPaint 实例，只改 shader 和 blendMode
+        _gradientPaint.shader = LinearGradient(
+          colors: [
+            Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, leftAlpha),
+            Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, rightAlpha),
+          ],
+          stops: const <double>[0.0, 1.0],
+        ).createShader(wordRect);
+        _gradientPaint.blendMode = BlendMode.modulate;
+        canvas.drawRect(wordRect, _gradientPaint); // src = 渐变
+        canvas.restore();
+      }
+
+      if (needEmphasis) {
+        canvas.restore();
       }
 
       dx += width;
@@ -480,9 +654,32 @@ class WordRenderer {
     }
   }
 
+  /// 计算指定 X 坐标处的 alpha 值（行级渐变模型核心）。
+  ///
+  /// 过渡区 [transitionStart, transitionStart + transitionSpan]：
+  /// - x <= transitionStart：bright（已播区）
+  /// - x >= transitionStart + transitionSpan：dark（未播区）
+  /// - 过渡区内：bright → dark 线性插值
+  ///
+  /// 通过此函数计算每个 word 左右边缘的 alpha，决定均匀绘制还是渐变 shader。
+  /// 渐变边界随 maskX 移动跨越多个 word，自然实现"长字慢、短字快"。
+  static double _alphaAtX(double x, double transitionStart, double transitionSpan,
+      double bright, double dark) {
+    if (transitionSpan <= 0) return x <= transitionStart ? bright : dark;
+    if (x <= transitionStart) return bright;
+    final double t = (x - transitionStart) / transitionSpan;
+    if (t >= 1.0) return dark;
+    return bright + (dark - bright) * t;
+  }
+
   /// 按换行逻辑预扫描，计算每条视觉行的 word 累计宽度。
   /// 与 paintLine 循环中的换行判断一致：dx + width > maxWidth 且 dx > 0 时换行。
+  /// 性能优化：缓存结果，maxWidth 不变时直接返回缓存。
   List<double> _computeVisualLineWidths(double maxWidth) {
+    if (maxWidth == _cachedMaxWidth && _cachedVisualLineWidths.isNotEmpty) {
+      return _cachedVisualLineWidths;
+    }
+    _cachedMaxWidth = maxWidth;
     final List<double> widths = <double>[];
     double dx = 0;
     double lineW = 0;
@@ -497,6 +694,7 @@ class WordRenderer {
       lineW += w;
     }
     if (lineW > 0) widths.add(lineW);
+    _cachedVisualLineWidths = widths;
     return widths;
   }
 
@@ -578,10 +776,9 @@ class WordRenderer {
     }
     _boundLine = line;
     _boundFontSize = fontSize;
-    _wordAlphas.clear();
-    _wordYOffsets.clear();
+    // 注意：_wordAlphas/_wordYOffsets/_lastSetAlphas 不能用 .clear()，
+    // 因为它们可能被 const <T>[] 初始化（不可修改）。后面会直接重新赋值，无需 clear。
     _emphasizeStates.clear();
-    _lastSetAlphas.clear(); // v4 优化：line 切换时清空 alpha 缓存
 
     // 行级元数据判定缓存：作词/作曲/编曲 等元数据行整行禁用辉光。
     // 仅依赖 line.text（行绑定后不变），此处计算一次，tick 中仅读取字段。
@@ -601,6 +798,14 @@ class WordRenderer {
     );
     // 预分配辉光判定缓存数组（与 _wordPainters 同长度同索引）
     _wordEmphasisFlags = List<bool>.filled(line.words.length, false);
+    // 预计算 word 起始 X 坐标（避免每帧 O(n²) 循环累加）
+    _wordStartXs = List<double>.filled(line.words.length, 0);
+    // 预分配 alpha / Y offset / lastSetAlphas 数组
+    _wordAlphas = List<double>.filled(line.words.length, dark);
+    _wordYOffsets = List<double>.filled(line.words.length, 0);
+    _lastSetAlphas = List<int>.filled(line.words.length, -1);
+    
+    double accumWidth = 0;
     for (int i = 0; i < line.words.length; i++) {
       _wordPainters[i].text = TextSpan(
         text: line.words[i].text,
@@ -614,8 +819,8 @@ class WordRenderer {
       );
       _wordPainters[i].layout();
       _wordWidths[i] = _wordPainters[i].width;
-      _wordAlphas[i] = dark;
-      _wordYOffsets[i] = 0;
+      _wordStartXs[i] = accumWidth;
+      accumWidth += _wordPainters[i].width;
       // 缓存该 word 的辉光判定结果（含正则匹配，仅在此执行一次）
       // tick 中通过 _wordEmphasisFlags[i] O(1) 读取，避免每帧重复正则匹配
       _wordEmphasisFlags[i] = EmphasizeEffect.shouldEmphasize(line.words[i]);
@@ -632,6 +837,12 @@ class WordRenderer {
     _boundLine = null;
     _boundFontSize = -1;
     _wordWidths = const <double>[];
+    _wordStartXs = const <double>[];
+    _cachedMaxWidth = -1;
+    _cachedVisualLineWidths = const <double>[];
+    _currentWordIdx = -1;
+    _intraWordProgress = 0.0;
+    _maskX = -1.0;
     // 清理辉光判定缓存
     _wordEmphasisFlags = const <bool>[];
     _isMetadataLine = false;
@@ -640,9 +851,9 @@ class WordRenderer {
       painter.dispose();
     }
     _wordPainters = const <TextPainter>[];
-    _wordAlphas.clear();
-    _wordYOffsets.clear();
+    _wordAlphas = const <double>[];
+    _wordYOffsets = const <double>[];
+    _lastSetAlphas = const <int>[];
     _emphasizeStates.clear();
-    _lastSetAlphas.clear();
   }
 }
