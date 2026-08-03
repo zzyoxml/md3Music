@@ -614,7 +614,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // 当系统即将销毁应用进程时（包含后台划掉 / 系统回收），Flutter 会先收到 detached。
-    // 此时同步触发 API 服务器关停：若进程随之被 kill 也无副作用；若进程仍存活则释放 8080 端口。
+    // 此时同步触发 API 服务器关停：若进程随之被 kill 也无副作用；若进程仍存活则释放端口。
     if (state == AppLifecycleState.detached) {
       // 同步触发即可，Dart 端很快；不 await，避免阻塞 framework 销毁流程
       // ignore: discarded_futures
@@ -777,7 +777,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   ///
   /// 点击退出按钮会触发：
   /// 1) `PlayerProvider.pause()` — 停 just_audio + 同步通知栏
-  /// 2) `KugouApiServer.stop()` — 释放 127.0.0.1:8080 端口，停止本地服务器
+  /// 2) `KugouApiServer.stop()` — 释放本地 API 服务器端口，停止服务器
   /// 3) `SystemNavigator.pop()` — 通知系统 finish 当前 Activity，
   ///    系统会随之销毁进程（等同 kill app）
   void _showExitConfirmDialog() {
@@ -798,7 +798,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
               // 1) 暂停播放（just_audio 内部会停音频 + 通知栏可同步清空）
               // ignore: discarded_futures
               context.read<PlayerProvider>().pause();
-              // 2) 关停 API 服务器（释放 8080 端口）
+              // 2) 关停 API 服务器（释放端口）
               // 必须等待完成，否则端口未释放，下次冷启动会冲突导致闪退
               try {
                 await KugouApiServer.stop();
@@ -807,7 +807,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
                 await Future.delayed(const Duration(milliseconds: 300));
               } catch (_) {}
               // 3) 杀进程：exit(0) 立即终止整个进程（含服务器线程），
-              //    确保 8080 端口一定被释放。SystemNavigator.pop() 只 finish Activity，
+              //    确保端口一定被释放。SystemNavigator.pop() 只 finish Activity，
               //    进程可能残留，导致下次启动时端口冲突/服务器未启动。
               // ignore: avoid_print
               print('Exiting app...');

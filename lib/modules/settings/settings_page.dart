@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
-import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
@@ -25,6 +24,7 @@ import '../onboarding/user_agreement_page.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/tab_config_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../services/kugou_server.dart';
 import '../../services/stream_cache_manager.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
@@ -48,14 +48,11 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final SettingsRepository _settingsRepository = SettingsRepository();
-  final TextEditingController _apiServerController = TextEditingController(
-    text: 'http://127.0.0.1:8080',
-  );
   ThemeMode _themeMode = ThemeMode.system;
   String _defaultQuality = '320';
-  bool _isTestingConnection = false;
-  String? _connectionResult;
   bool _autoReceiveVip = true;
+  // 本地 API 服务器重启中（在线音乐区块显示加载态）
+  bool _isRestarting = false;
   bool _useDynamicColor = false;
   // Apple Music 风格播放页开关（默认关闭，开启后用 AM 风格 FullPlayer）
   bool _useAmStylePlayer = false;
@@ -99,7 +96,6 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   void dispose() {
     LyriconProviderService.instance.removeListener(_onLyriconStateChanged);
-    _apiServerController.dispose();
     super.dispose();
   }
 
@@ -158,7 +154,6 @@ class _SettingsPageState extends State<SettingsPage> {
     final themeMode = await _settingsRepository.getThemeMode();
     final quality = await _settingsRepository.getDefaultQuality();
     final autoReceiveVip = await _settingsRepository.getAutoReceiveVip();
-    final apiServerUrl = await _settingsRepository.getApiServerUrl();
     // 从 ThemeProvider 同步「使用系统主题色」开关状态
     final useDynamicColor = context.read<ThemeProvider>().useDynamicColor;
     // 从 ThemeProvider 同步「Apple Music 风格播放页」开关状态
@@ -189,7 +184,6 @@ class _SettingsPageState extends State<SettingsPage> {
       _themeMode = themeMode;
       _defaultQuality = quality;
       _autoReceiveVip = autoReceiveVip;
-      _apiServerController.text = apiServerUrl;
       _useDynamicColor = useDynamicColor;
       _useAmStylePlayer = useAmStylePlayer;
       _lyricDoubleTapToJump = lyricDoubleTapToJump;
@@ -224,38 +218,6 @@ class _SettingsPageState extends State<SettingsPage> {
         });
       }
     }
-  }
-
-  Future<void> _testConnection() async {
-    setState(() {
-      _isTestingConnection = true;
-      _connectionResult = null;
-    });
-
-    final url = _apiServerController.text.trim();
-
-    try {
-      final response = await http
-          .get(Uri.parse('$url/server/now'))
-          .timeout(const Duration(seconds: 5));
-      final success = response.statusCode == 200;
-      setState(() {
-        _connectionResult = success
-            ? '连接成功'
-            : '连接失败: HTTP ${response.statusCode}';
-      });
-      if (success) {
-        await _settingsRepository.setApiServerUrl(url);
-      }
-    } catch (e) {
-      setState(() {
-        _connectionResult = '连接失败: $e';
-      });
-    }
-
-    setState(() {
-      _isTestingConnection = false;
-    });
   }
 
   @override
@@ -1295,66 +1257,38 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget _buildOnlineMusicSection(ColorScheme colorScheme) {
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-          child: TextField(
-            controller: _apiServerController,
-            decoration: InputDecoration(
-              labelText: '在线登录接口地址',
-              hintText: 'http://115.29.236.96:5621',
-              border: const OutlineInputBorder(),
-            ),
-            onSubmitted: (_) => _testConnection(),
-          ),
-        ),
-        if (_connectionResult != null)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: Text(
-              _connectionResult!,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: _connectionResult == '连接成功'
-                    ? colorScheme.primary
-                    : colorScheme.error,
-              ),
-            ),
-          )
-        else
-          const SizedBox(height: 8),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              icon: const Icon(Icons.wifi_tethering),
-              label: const Text('测试连接'),
-              onPressed: _isTestingConnection ? null : _testConnection,
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
         ListTile(
           leading: Icon(Icons.dns, color: colorScheme.primary),
           title: const Text('本地数据接口'),
-          subtitle: const Text('http://127.0.0.1:8080'),
-          trailing: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: colorScheme.primaryContainer,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              '运行中',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: colorScheme.onPrimaryContainer,
-              ),
-            ),
-          ),
+          subtitle: Text('端口：${KugouApiServer.currentPort}'),
+          trailing: _isRestarting
+              ? SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: colorScheme.primary,
+                  ),
+                )
+              : Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '运行中',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                ),
+          onTap: _isRestarting ? null : _confirmRestartServer,
         ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Text(
-            '本地 Node.js 服务器运行中，推荐/排行/搜索/播放等数据接口均通过本地处理',
+            '本地 Rust 服务器运行中，推荐/排行/搜索/播放/登录等数据接口均通过本地处理（点击上方可重启）',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: colorScheme.onSurfaceVariant,
             ),
@@ -1362,6 +1296,55 @@ class _SettingsPageState extends State<SettingsPage> {
         ),
       ],
     );
+  }
+
+  /// 询问是否重启本地 API 服务器，确认后重启并更新端口展示。
+  Future<void> _confirmRestartServer() async {
+    final port = KugouApiServer.currentPort;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('重启本地 API 服务器'),
+        content: Text('确定要重启本地 Rust API 服务器吗？\n当前端口：$port\n重启后将重新分配随机端口。\n如果你遇到了玄学问题，那就重启一下试试吧（）'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('重启'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _isRestarting = true);
+    try {
+      final ok = await KugouApiServer.restart();
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok
+              ? '已重启，新端口：${KugouApiServer.currentPort}'
+              : '重启失败，服务器未就绪'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('重启失败：$e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isRestarting = false);
+    }
   }
 
   Widget _buildCacheSection(ColorScheme colorScheme) {
