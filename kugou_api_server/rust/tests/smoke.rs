@@ -133,6 +133,8 @@ fn server_responds_404_and_cors() {
         "POST /login HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}",
         "POST /playlist/add HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}",
         "POST /user/cloud HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}",
+        // 上传路由：无文件二进制 body → 400（"请通过请求体传入文件二进制数据"），非 404 即证明 dispatch 成功
+        "POST /user/cloud/upload HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}",
     ];
     for raw in paths {
         let resp = tcp_request(port, raw);

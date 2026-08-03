@@ -614,6 +614,13 @@ class AudioPlaybackService : Service() {
 
         // 封面加载：支持 http(s):// / content:// / local:// / file:// / 文件路径
         val effectiveArtUrl = artUrl ?: fallbackFilePath
+
+        // 先立即发布通知（默认封面），避免 startForegroundService 的 5 秒限制；
+        // 同时立即同步 MediaSession 元数据（title/artist/时长），
+        // 防止封面缺失时残留上一首歌曲的封面/标题（云盘歌封面为异步提取，会晚到）
+        startForeground(NOTIFICATION_ID, builder.build())
+        updateMediaSessionMetadata(displayTitle, displayArtist, duration, null, effectiveArtUrl)
+
         if (!effectiveArtUrl.isNullOrEmpty()) {
             Thread {
                 try {
@@ -631,25 +638,12 @@ class AudioPlaybackService : Service() {
 
                         // MediaSession Metadata：用原始分辨率 bitmap + URI
                         // title/artist 用 display 值（蓝牙歌词开启时为歌词文本）
-                        mediaSession?.setMetadata(
-                            MediaMetadataCompat.Builder()
-                                .putString(MediaMetadataCompat.METADATA_KEY_TITLE, displayTitle)
-                                .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, displayArtist)
-                                .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
-                                .putBitmap(MediaMetadataCompat.METADATA_KEY_ART, originalBitmap)
-                                .putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, originalBitmap)
-                                .putString(MediaMetadataCompat.METADATA_KEY_ART_URI, effectiveArtUrl)
-                                .build()
+                        updateMediaSessionMetadata(
+                            displayTitle, displayArtist, duration, originalBitmap, effectiveArtUrl
                         )
-                    } else {
-                        startForeground(NOTIFICATION_ID, builder.build())
                     }
-                } catch (_: Exception) {
-                    startForeground(NOTIFICATION_ID, builder.build())
-                }
+                } catch (_: Exception) {}
             }.start()
-        } else {
-            startForeground(NOTIFICATION_ID, builder.build())
         }
 
         mediaSession?.setPlaybackState(
@@ -688,6 +682,30 @@ class AudioPlaybackService : Service() {
         try {
             lyriconProvider?.player?.setPlaybackState(isPlaying)
         } catch (_: Exception) {}
+    }
+
+    /// 统一更新 MediaSession 元数据。每次新建 Builder 重建，
+    /// 避免封面缺失/加载失败时残留上一首歌曲的封面 bitmap。
+    /// [artwork] 为 null 时仅同步 title/artist（封面留给异步线程补充）。
+    private fun updateMediaSessionMetadata(
+        title: String,
+        artist: String,
+        duration: Long,
+        artwork: Bitmap?,
+        artUri: String?
+    ) {
+        val metaBuilder = MediaMetadataCompat.Builder()
+            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
+            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
+        if (artwork != null) {
+            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artwork)
+            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork)
+        }
+        if (!artUri.isNullOrEmpty()) {
+            metaBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artUri)
+        }
+        mediaSession?.setMetadata(metaBuilder.build())
     }
 
     /// 蓝牙歌词轻量刷新：歌词行变化或开关切换时，复用缓存的 bitmap 和播放状态

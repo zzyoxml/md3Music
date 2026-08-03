@@ -657,7 +657,15 @@ pub fn raw_request(
         req = req.set(k, v);
     }
     let resp = match &data {
-        BodyData::None => req.call(),
+        BodyData::None => {
+            // 对齐 axios 行为：POST 无 body 时也发送 Content-Length: 0。
+            // ureq 对空 body 的 POST 默认不带 Content-Length，
+            // 部分上游（如云盘上传 bssulbig 的 multipart/complete）会因此返回 411 Length Required。
+            if method.eq_ignore_ascii_case("POST") {
+                req = req.set("Content-Length", "0");
+            }
+            req.call()
+        }
         BodyData::Json(v) => {
             let body = crate::util::json_stringify(v);
             req = req.set("Content-Type", "application/json;charset=utf-8");

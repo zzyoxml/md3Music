@@ -5,16 +5,18 @@
 use crate::cache::now_epoch_secs;
 use crate::config::{APP_ID, CLIENT_VER};
 use crate::crypto::{
-    base64_decode, crypto_rsa_encrypt, playlist_aes_decrypt, playlist_aes_encrypt, rsa_encrypt2,
+    base64_decode, crypto_rsa_encrypt, md5_hex, playlist_aes_decrypt, playlist_aes_encrypt,
+    rsa_encrypt2,
 };
 use crate::helper::{sign_cloud_key, sign_params_key};
 use crate::modules::{
     c_str, cookie_or_param_str, forward, param_or_cookie_str, q_cookie, q_num, q_raw_or, q_str,
     Ctx,
 };
-use crate::request::{BodyValue, ModuleResponse, RequestOptions};
+use crate::request::{raw_request, BodyData, BodyValue, ModuleResponse, RequestOptions};
 use crate::util::json_stringify;
 use serde_json::{json, Map, Value};
+use std::collections::HashMap;
 
 fn now_secs() -> i64 {
     now_epoch_secs() as i64
@@ -111,6 +113,247 @@ pub fn handle_cloud_url(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleRe
         q, ctx, "GET", "/bsstrackercdngz/v2/query_musicclound_url", None,
         Some(pm), None, "android", &[], false, false,
     )
+}
+
+/// user_cloud_upload.js → /user/cloud/upload（上传音乐文件到云盘）。
+///
+/// 5 步流程（对齐 JS 版）：
+///   1. GET bssulbig.kugou.com/v2/authorization         → authorization
+///   2. POST bssulbig.kugou.com/multipart/initiate/music → external_host + upload_id
+///      （upload_id 为空表示文件已在服务器 → 秒传，跳过 3/4）
+///   3. POST {external_host}/multipart/upload            → 4MB/片 上传分片
+///   4. POST {external_host}/multipart/complete          → 完成上传
+///   5. POST mcloudservice.kugou.com/v1/add_files        → playlistAES+RSA 添加到云盘
+///
+/// 请求体为前端透传的文件二进制（application/octet-stream）。
+/// 步骤 1-4 用 raw_request（无签名，对齐 JS 版原生 axios）；步骤 5 走签名工厂。
+pub fn handle_cloud_upload(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
+    // userid 必须为字符串（步骤 5 RSA 加密时服务端校验 uid 类型）
+    let userid = param_or_cookie_str(q, "userid", "");
+    let token = param_or_cookie_str(q, "token", "");
+    let mid = c_str(q, "KUGOU_API_MID");
+    let version = CLIENT_VER.to_string();
+    let bucket = "musicclound".to_string();
+
+    // 文件二进制数据（octet-stream body）
+    let file_data = ctx.body_bytes.clone().unwrap_or_default();
+    if file_data.is_empty() {
+        return Err(ModuleResponse {
+            status: 400,
+            body: BodyValue::Json(json!({ "status": 0, "msg": "请通过请求体传入文件二进制数据" })),
+            cookie: Vec::new(),
+            headers: HashMap::new(),
+        });
+    }
+
+    // filename 即文件 MD5（小写），可传覆盖，默认自动计算
+    let filename = {
+        let f = q_str(q, "filename", "").to_ascii_lowercase();
+        if f.is_empty() { md5_hex(&file_data) } else { f }
+    };
+    // 扩展名（自动去掉点号），默认 mp3
+    let extendname = q_str(q, "extendname", "mp3").trim_start_matches('.').to_string();
+    let author_name = q_str(q, "author_name", "");
+    let name = {
+        let n = q_str(q, "name", "");
+        if n.is_empty() {
+            let prefix = if author_name.is_empty() {
+                String::new()
+            } else {
+                format!("{} - ", author_name)
+            };
+            format!("{}{}.{}", prefix, filename, extendname)
+        } else {
+            n
+        }
+    };
+
+    // 模拟客户端随机 KG-THash（固定 7 位 hex）
+    let thash = format!("{:07x}", (now_epoch_secs() as u64) & 0x0FFF_FFFF);
+    let mut base_headers: HashMap<String, String> = HashMap::new();
+    base_headers.insert("User-Agent".to_string(), "Android15-1070-10672-201-0-wifi".to_string());
+    base_headers.insert("KG-RC".to_string(), "1".to_string());
+    base_headers.insert("KG-Rec".to_string(), "1".to_string());
+    base_headers.insert("KG-THash".to_string(), thash);
+
+    // ========== 步骤1 获取上传授权 ==========
+    let auth_res = raw_request(
+        "GET",
+        "http://bssulbig.kugou.com/v2/authorization",
+        &json!({ "version": version, "userid": userid, "filename": filename, "token": token, "appid": APP_ID, "method": "POST", "bucket": bucket }),
+        BodyData::None,
+        &base_headers,
+    ).map_err(|e| e)?;
+    let authorization = auth_res
+        .body
+        .to_json()
+        .get("data")
+        .and_then(|d| d.get("authorization"))
+        .and_then(|a| a.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if authorization.is_empty() {
+        return Err(ModuleResponse {
+            status: 502,
+            body: BodyValue::Json(json!({ "status": 0, "msg": "获取上传授权失败" })),
+            cookie: Vec::new(),
+            headers: HashMap::new(),
+        });
+    }
+
+    // ========== 步骤2 初始化分片上传 ==========
+    let mut init_headers = base_headers.clone();
+    init_headers.insert("Authorization".to_string(), authorization.clone());
+    let init_res = raw_request(
+        "POST",
+        "http://bssulbig.kugou.com/multipart/initiate/music",
+        &json!({ "version": version, "extendname": extendname, "userid": userid, "filename": filename, "appid": APP_ID, "bucket": bucket }),
+        BodyData::None,
+        &init_headers,
+    ).map_err(|e| e)?;
+    let init_json = init_res.body.to_json();
+    let external_host = init_json
+        .get("data")
+        .and_then(|d| d.get("external_host"))
+        .and_then(|h| h.as_str())
+        .unwrap_or_default()
+        .to_string();
+    let upload_id = init_json
+        .get("data")
+        .and_then(|d| d.get("upload_id"))
+        .and_then(|u| u.as_str())
+        .unwrap_or_default()
+        .to_string();
+
+    // 秒传分支：upload_id 为空且返回 x-bss-hash 说明文件已在服务器，跳过步骤3/4
+    if !upload_id.is_empty() {
+        // ========== 步骤3 上传分片（默认 4MB 一片） ==========
+        let part_size: usize = 1024 * 1024 * 4;
+        let part_count = (file_data.len() + part_size - 1) / part_size;
+        let mut upload_headers = base_headers.clone();
+        upload_headers.insert("Authorization".to_string(), authorization.clone());
+        upload_headers.insert("Content-Type".to_string(), "application/octet-stream".to_string());
+        for i in 0..part_count {
+            let start = i * part_size;
+            let end = ((i + 1) * part_size).min(file_data.len());
+            let part = file_data[start..end].to_vec();
+            let upload_res = raw_request(
+                "POST",
+                &format!("http://{}/multipart/upload", external_host),
+                &json!({ "version": version, "userid": userid, "filename": filename, "appid": APP_ID, "upload_id": upload_id, "partnumber": i + 1, "bucket": bucket }),
+                BodyData::Bytes(part),
+                &upload_headers,
+            ).map_err(|e| e)?;
+            let ok = upload_res.body.to_json().get("status").and_then(|s| s.as_i64()) == Some(1);
+            if !ok {
+                return Err(ModuleResponse {
+                    status: 502,
+                    body: BodyValue::Json(json!({ "status": 0, "msg": format!("分片上传失败: part {}", i + 1) })),
+                    cookie: Vec::new(),
+                    headers: HashMap::new(),
+                });
+            }
+        }
+
+        // ========== 步骤4 完成上传 ==========
+        let mut complete_headers = base_headers.clone();
+        complete_headers.insert("Authorization".to_string(), authorization.clone());
+        let complete_res = raw_request(
+            "POST",
+            &format!("http://{}/multipart/complete", external_host),
+            &json!({ "filename": filename, "bucket": bucket, "if_id3": 1, "upload_id": upload_id, "userid": userid, "md5": filename, "version": version, "appid": APP_ID, "partnumber": part_count }),
+            BodyData::None,
+            &complete_headers,
+        ).map_err(|e| e)?;
+        let ok = complete_res.body.to_json().get("status").and_then(|s| s.as_i64()) == Some(1);
+        if !ok {
+            return Err(ModuleResponse {
+                status: 502,
+                body: BodyValue::Json(json!({ "status": 0, "msg": "完成上传失败" })),
+                cookie: Vec::new(),
+                headers: HashMap::new(),
+            });
+        }
+    }
+
+    // ========== 步骤5 添加文件到云盘（AES 加密 body + RSA 加密密钥） ==========
+    // 数字字段必须为 number 类型（字符串会导致上游 500）
+    let clienttime = now_secs();
+    let aes_encrypt = playlist_aes_encrypt(&json_stringify(&json!({
+        "data": [
+            {
+                "name": name,
+                "ext": extendname,
+                "author_name": author_name,
+                "hash": filename,
+                "hash_std": filename,
+                "audio_id": q_num(q, "audio_id", 0),
+                "bitrate": q_num(q, "bitrate", 4),
+                "album_audio_id": q_num(q, "album_audio_id", 0),
+                "size": file_data.len() as i64,
+                "timelen": q_num(q, "timelen", 0),
+            }
+        ],
+        "list_ver": q_num(q, "list_ver", 0),
+    })));
+    let p = rsa_encrypt2(&json_stringify(&json!({
+        "aes": aes_encrypt.0,
+        "uid": if userid.is_empty() { json!(0) } else { json!(userid) },
+        "token": token,
+    }))).to_uppercase();
+
+    let mut pm: Map<String, Value> = Map::new();
+    pm.insert("clienttime".to_string(), json!(clienttime));
+    if !mid.is_empty() {
+        pm.insert("mid".to_string(), json!(mid));
+    }
+    pm.insert("key".to_string(), json!(sign_params_key(&clienttime.to_string(), APP_ID, "")));
+    pm.insert("clientver".to_string(), json!(CLIENT_VER));
+    pm.insert("appid".to_string(), json!(APP_ID));
+    pm.insert("p".to_string(), json!(p));
+
+    let opts = RequestOptions::new("/v1/add_files")
+        .base_url("https://mcloudservice.kugou.com")
+        .post("/v1/add_files")
+        .params(Value::Object(pm.clone()))
+        .bytes_body(base64_decode(&aes_encrypt.1))
+        .encrypt_type("android")
+        .cookie(q_cookie(q))
+        .response_type("arraybuffer")
+        .clear_default_params(true)
+        .not_signature(true);
+    let res = ctx.send(&opts)?;
+
+    // 尝试解密响应；解密结果为非 JSON（乱码字符串）时回退明文 JSON，
+    // 与 JS 版 try/decrypt → catch → JSON.parse 的兜底行为一致。
+    let body = if res.status == 200 {
+        let dec = playlist_aes_decrypt(&aes_encrypt.0, &res.body.to_base64());
+        match dec {
+            Value::String(_) => res.body.to_json(),
+            other => other,
+        }
+    } else {
+        res.body.to_json()
+    };
+
+    // 附带整个上传流程的关键信息，便于排查
+    let mut body = body;
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert(
+            "uploadInfo".to_string(),
+            json!({
+                "hash": filename,
+                "filesize": file_data.len(),
+            }),
+        );
+    }
+
+    Ok(ModuleResponse {
+        status: res.status,
+        body: BodyValue::Json(body),
+        cookie: res.cookie,
+        headers: res.headers,
+    })
 }
 
 /// user_detail.js → /user/detail（获取用户信息）。

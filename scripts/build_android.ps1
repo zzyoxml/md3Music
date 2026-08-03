@@ -57,6 +57,12 @@ $ABIs = @(
 
 function Write-Step([string]$Msg) { Write-Host "`n=== $Msg ===" -ForegroundColor Cyan }
 
+# 结束前暂停，避免双击运行/外部调用时窗口一闪而过
+function Wait-Exit {
+    Write-Host "`n按任意键退出..." -ForegroundColor Cyan
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+}
+
 # 运行外部命令：cargo/flutter 正常进度输出走 stderr，PowerShell 会视为 NativeCommandError，
 # 这里临时把 ErrorActionPreference 切回 Continue 并检查退出码，真正失败再 throw。
 function Invoke-Native {
@@ -166,6 +172,7 @@ else {
 # ---------- 5. Flutter 分包打包（排除 x86） ----------
 if ($SkipFlutter) {
     Write-Host "`n完成（-SkipFlutter）。jniLibs 已就绪，可用 flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm,android-x64 手动打包" -ForegroundColor Green
+    Wait-Exit
     exit 0
 }
 
@@ -181,3 +188,5 @@ $outDir = Join-Path $RepoRoot 'build\app\outputs\flutter-apk'
 Get-ChildItem "$outDir\*release.apk" | ForEach-Object {
     Write-Host "    $($_.Name)  $([math]::Round($_.Length / 1MB, 1)) MB" -ForegroundColor Green
 }
+
+Wait-Exit

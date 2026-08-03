@@ -83,9 +83,15 @@ fn run_loop(server: Server, data_dir: String) {
     while RUNNING.load(Ordering::SeqCst) {
         match server.recv_timeout(Duration::from_millis(500)) {
             Ok(Some(request)) => {
-                if let Err(e) = handle_request(request, &data_dir) {
-                    eprintln!("[server] handler error: {}", e);
-                }
+                // 每个请求独立线程处理：云盘上传等耗时请求（分片串行可达数十秒）
+                // 不再阻塞其他请求（如列表刷新、搜索），避免串行排队造成"卡住"。
+                // 全局状态（CACHE/DeviceConfig/session 常量）均持锁或 OnceLock，并发安全。
+                let dd = data_dir.clone();
+                std::thread::spawn(move || {
+                    if let Err(e) = handle_request(request, &dd) {
+                        eprintln!("[server] handler error: {}", e);
+                    }
+                });
             }
             Ok(None) => {}
             Err(_) => {
