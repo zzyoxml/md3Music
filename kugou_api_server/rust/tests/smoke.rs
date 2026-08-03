@@ -14,6 +14,28 @@ fn rsa_keys_parse() {
     );
 }
 
+/// q_raw_or 必须复刻 JS `obj?.[key] ?? default`：缺失/null → 默认值（原样保持数字），
+/// 其他 → 原值（URL query 下为字符串，不做类型转换）。
+/// 回归：云盘 /user/cloud 的 AES 明文、/user/cloud/url 的 album_audio_id 依赖此语义
+/// 与 JS `JSON.stringify` 逐字节一致（强转 i64 曾导致鉴权明文不一致）。
+#[test]
+fn q_raw_or_nullish_semantics() {
+    use kugou_server::modules::q_raw_or;
+    use serde_json::json;
+
+    let q = json!({ "page": "1", "pagesize": "100", "null_field": null });
+    // 存在 → 保留字符串原值（不转数字）
+    assert_eq!(q_raw_or(&q, "page", json!(1)), json!("1"));
+    assert_eq!(q_raw_or(&q, "pagesize", json!(30)), json!("100"));
+    // 缺失 → 数字默认值（与 JS `?? 1` 一致）
+    assert_eq!(q_raw_or(&q, "missing", json!(1)), json!(1));
+    assert_eq!(q_raw_or(&q, "missing", json!(30)), json!(30));
+    // null → 数字默认值
+    assert_eq!(q_raw_or(&q, "null_field", json!(5)), json!(5));
+    // 空串是有效值，保留（JS 空串 !== null/undefined）
+    assert_eq!(q_raw_or(&q, "empty", json!(7)), json!(7));
+}
+
 /// AES-CBC 必须与 CryptoJS/Python 逐字节一致（回归：cbc crate 的 Encryptor/Decryptor
 /// 在 aes 0.8 + cipher 0.4 组合下对 AES-192/256 输出错误，导致关注歌手 20010、
 /// 云盘/登录 AES-256 路径失败；手动 CBC 已替换）。
@@ -105,7 +127,9 @@ fn server_responds_404_and_cors() {
         "GET /youth/user/song?userid=1 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         "GET /youth/vip HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         "GET /song/url?hash=abc HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        "GET /song/url?hash=abc&quality=flac HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         "GET /song/url/new?hash=abc HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        "GET /user/cloud/url?hash=abc&album_audio_id=123&audio_id=456 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         "POST /login HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}",
         "POST /playlist/add HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}",
         "POST /user/cloud HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\nContent-Length: 2\r\n\r\n{}",
