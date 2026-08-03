@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 pub fn handle(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
     let hash = q_str(q, "hash", "").to_ascii_lowercase();
     let ppage_id = q_str(q, "ppage_id", "356753938,823673182,967485191");
-    let quality = q_num(q, "quality", 128);
+    // JS `params.quality || 128` 保留字符串（'128'/'320'/'flac'/'high'）。
+    // 不能用 q_num：'flac'/'high' 解析失败会回落 128，导致始终最低音质。
+    let quality = q_str(q, "quality", "128");
 
     let dev = DeviceConfig::instance();
     let dev_info = dev.get_device_info();

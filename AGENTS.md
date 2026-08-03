@@ -2,6 +2,9 @@
 
 > 本文件供 AI Agent 和开发者快速了解项目结构、模块边界、构建流程与已知陷阱。
 
+> **分支适用说明**：本仓库存在两个并行开发分支，正文 1~6 节全部内容仅描述当前分支 `rust-local-two`（Rust 架构）。
+> 切换到 `arch-local-first`（Node.js 架构）时，请以其自带版本的 AGENTS.md 为准；两分支内容对比与切换注意事项见[第 7 节](#7-git-分支约定)。
+
 ---
 
 ## 1. 项目架构概览
@@ -53,7 +56,7 @@ md3Music/
 ├── networkapi/                   # 公网 API 服务器（云端部署，仅登录接口，Node.js）
 │   ├── server.js                 # 精简版 Express，只加载登录相关模块
 │   ├── module/                   # 登录、注册、验证码等模块
-│   └── util/                     # 与旧 kugou_api_server/util 共享的工具函数
+│   └── util/                     # 独立的工具函数副本（与 Rust 端已分家，见 4.6）
 │
 ├── android/                      # Android 原生层
 │   ├── app/src/main/jniLibs/     # libkugou_server.so（arm64-v8a、armeabi-v7a、x86_64、x86）
@@ -168,13 +171,13 @@ env CC_aarch64_linux_android=$BIN/aarch64-linux-android21-clang \
 
 **问题**：Flutter UI 渲染后发现页立即请求 API，如果本地服务器还没启动完毕，请求全部失败。
 
-**解决**：`main.dart` 中 `await NodeJsServer.start()` 在 `runApp()` 之前执行；`_waitForReady()` 会轮询 `127.0.0.1:8080` 最多 30 秒。冷启动时 MethodChannel 可能尚未注册（3 次重试失败），此时 `dart:ffi` 兜底直接 `start_server` 也可启动，`server::start` 会检测已在运行并返回 true，幂等。
+**解决**：`main.dart` 中 `await KugouApiServer.start()` 在 `runApp()` 之前执行；`_waitForReady()` 会轮询 `127.0.0.1:8080` 最多 30 秒。冷启动时 MethodChannel 可能尚未注册（3 次重试失败），此时 `dart:ffi` 兜底直接 `start_server` 也可启动，`server::start` 会检测已在运行并返回 true，幂等。
 
 ### 4.4 端口 8080 冲突
 
 **问题**：退出 App 时如果没有正确关停服务器，下次冷启动时端口被占用，服务器启动失败（`Server::http` 返回 Err → `start_server` 返回 0）。
 
-**解决**：退出流程中必须 `await NodeJsServer.stop()` + 等待 300ms + `exit(0)`；`MainActivity.onDestroy`/`onTrimMemory` 也会调用 `KugouApiService.stopServer()`（`nativeStopNode`）。`SystemNavigator.pop()` 不够可靠。
+**解决**：退出流程中必须 `await KugouApiServer.stop()` + 等待 300ms + `exit(0)`；`MainActivity.onDestroy`/`onTrimMemory` 也会调用 `KugouApiService.stopServer()`（`nativeStopNode`）。`SystemNavigator.pop()` 不够可靠。
 
 ### 4.5 JNI 签名必须与 Rust 导出一致
 
@@ -219,7 +222,7 @@ env CC_aarch64_linux_android=$BIN/aarch64-linux-android21-clang \
 | 网络请求 | dio + http | ^5.4.0 / ^1.2.1 |
 | 主题 | dynamic_color + material_color_utilities | MD3 动态取色 |
 | 嵌入式 API 服务器 | Rust（cdylib） + tiny_http + ureq | Rust 2021 / tiny_http 0.12 / ureq 2 |
-| 加密 | rsa / aes / cbc / md-5 / sha1 / sha2 / base64 | 与 JS CryptoJS 行为对齐 |
+| 加密 | rsa / aes / md-5 / sha1 / sha2 / base64（CBC + PKCS7 手动实现） | 与 JS CryptoJS 行为对齐 |
 | 原生桥接 | JNI + dart:ffi | NDK 28 |
 | 构建工具 | Gradle (Kotlin DSL) | Java 17 |
 | 公网服务器 | Node.js + Express（仅 networkapi） | ^4.18.2 |
@@ -252,3 +255,76 @@ powershell -File scripts\test_api.ps1     # 测试本地 API 接口
 # 代码检查
 flutter analyze                           # Dart 静态分析
 ```
+
+---
+
+## 7. Git 分支约定
+
+> 本仓库的 `arch-local-first` 与 `rust-local-two` 是基于 `c7ec59b` 并行分叉的两个开发分支，各自独立演进（见 7.3）。
+> **切换分支时注意**：不同分支的 AGENTS.md 内容不同（`arch-local-first` 上描述的是 Node.js 架构，`rust-local-two` 上是 Rust 架构），请以当前分支的文件为准。
+
+**两分支快速对照**：
+
+| 维度 | `rust-local-two`（当前） | `arch-local-first` |
+|------|------|------|
+| 本地 API 服务器 | Rust（`libkugou_server.so` + tiny_http + ureq） | Node.js（`libnode.so` + Express） |
+| Dart 服务类 | `KugouApiServer`（`kugou_server.dart`） | `NodeJsServer`（`nodejs_server.dart`） |
+| Kotlin 服务 | `KugouApiService` | `NodeJsService` |
+| 服务器构建入口 | `build_android.sh`（cargo 交叉编译） | `build_nodejs_server.bat`（esbuild） |
+| jniLibs | `libkugou_server.so`（4 ABI，已提交进 Git） | `libnode.so`（需 `setup_native.bat` 下载解压） |
+| 原生层 | 无 CMake（JNI 符号来自 .so） | CMake + `cpp/` 桥接目录 |
+| 前端独有变更 | apple_lyrics 重构（渲染实现改动） | apple_lyrics 性能优化、搜索结果去重等 |
+| 对应文档 | 本文档正文（1~6 节） | 该分支自带版本的 AGENTS.md |
+
+### 7.1 `rust-local-two`（Rust 化改造分支，当前所在分支）
+
+**定位**：Rust 化改造主线（PR #35，作者 LyonHyrik）。用嵌入式 Rust API 服务器替换 Node.js 方案，本文档 1~6 节描述的即为该分支架构。
+
+**独有提交**（`git log rust-local-two --not arch-local-first`）：
+
+| 提交 | 说明 |
+|------|------|
+| `b86ec67` | feat: 用嵌入式 Rust API 服务器替换 Node.js 方案（核心变更，见下） |
+| `ed96df0` | Merge pull request #35 from LyonHyrik/rust-local-two |
+
+**核心变更内容**：
+
+- 新增 `kugou_api_server/rust/` crate（tiny_http + ureq），编译为 `libkugou_server.so` cdylib，覆盖 160+ 酷狗 API 端点
+- 修复 AES-192/256 CBC 密文错误（cbc crate 输出异常，改为在 `BlockEncrypt`/`BlockDecrypt` 上手动实现 CBC + PKCS7，与 JS CryptoJS 逐字节一致）；新增 smoke 测试中的 AES-CBC 对照回归
+- 修复关注/取消关注歌手 userid 读取（`param_or_cookie_num`），Rust 与旧 Node 行为对齐
+- Kotlin：`NodeJsService` → `KugouApiService`；Dart：`nodejs_server` → `kugou_server`（MethodChannel `com.md3music.md3music/kugou_api` + dart:ffi 兜底）
+- jniLibs 提交 4 ABI（arm64-v8a、armeabi-v7a、x86、x86_64）的 `libkugou_server.so`；移除 `cpp/` CMake 原生构建
+- 新增一键交叉编译脚本 `kugou_api_server/rust/build_android.sh`
+- 附带前端改动：`apple_lyrics_view.dart` / `word_renderer.dart` 重构、`full_player.dart` 精简、登录页/收藏页小改
+
+**相关命令**：见本文档 3、6 节；新增 API 模块统一在 `kugou_api_server/rust/src/modules/` 下实现（勿再改 `module/` 下旧 JS 模块）。
+
+### 7.2 `arch-local-first`（Node.js 架构 + 前端优化分支）
+
+**定位**：并行开发分支。保持 Node.js 旧架构（`libnode.so` + Express `server_bundle.js`）不变，叠加来自 zzyoxml 的前端功能与性能优化。该分支上的 AGENTS.md 是 Node.js 方案说明（构建需 `build_nodejs_server.bat`）。
+
+**独有提交**（`git log arch-local-first --not rust-local-two`）：
+
+| 提交 | 说明 |
+|------|------|
+| `384e80b` | perf(apple_lyrics): 优化上浮动画功耗与平滑度 |
+| `1fa6010` | perf(apple_lyrics): 字内渐变改为行级 maskX 模型，扩大渐变范围 |
+| `cb3ff95` | perf(apple_lyrics): 修复真正的卡顿瓶颈 |
+| `f82f589` | revert(lyrics): 还原被禁用的文字上浮动画 |
+| `1492588` | perf(lyrics): 复用辉光层 Paint 对象，消除每帧分配 |
+| `fd100db` | fix(ui): 搜索结果去重 + 进度条拖动自动暂停 |
+| `59aa692` | Merge branch 'zzyoxml:arch-local-first' into arch-local-first |
+
+**核心变更内容**：
+
+- **apple_lyrics 性能优化**：修复歌词卡顿瓶颈、字内渐变改为行级 `maskX` 模型、上浮动画功耗与平滑度优化、辉光层 `Paint` 对象复用消除每帧分配、还原被禁用的文字上浮动画
+- **UI 修复**：搜索结果去重、进度条拖动自动暂停
+
+**注意**：该分支的 `apple_lyrics_view.dart` / `word_renderer.dart` 与 7.1 分支的实现已分叉（各自独立重构），后续合流需手动合并。
+
+### 7.3 分支关系与切换
+
+- **remote**：`origin = https://github.com/Little-White3110/md3Music`
+- **分叉点**：两分支基于 `c7ec59b` 并行分叉，后端架构（Rust vs Node.js）与前端功能各自演进；后续合流需手动处理 AGENTS.md、构建脚本、jniLibs 及歌词渲染代码的差异
+- **切换分支的坑**：两分支 jniLibs 下的 `.so` 不同（`libkugou_server.so` vs `libnode.so`）；切回旧架构分支时，残留的 `libnode.so` 会以 untracked 文件形式留在工作区，可手动删除
+- **其他分支**：`main`（旧主线，无 AGENTS.md，Node.js）；`feat-*` / `fix-*`（一次性功能/修复分支）；`pr/update-md3music-content`（内容更新 PR 分支）

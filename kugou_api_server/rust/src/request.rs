@@ -523,7 +523,8 @@ pub fn create_request(opts: &RequestOptions) -> Result<ModuleResponse, ModuleRes
     // First attempt (+ possible SSA retry), replicating request.js.
     let raw = match do_send(opts, &params, &final_headers, &extra) {
         Ok(r) => r,
-        Err(_) => return Err(transport_error()),
+        // 携带具体错误原因（DNS/TLS/连接等），便于定位 transport 失败。
+        Err(e) => return Err(transport_error_with(e.to_string())),
     };
 
     let mut body = BodyValue::from_bytes(&raw.body);
