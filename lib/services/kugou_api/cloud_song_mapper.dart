@@ -67,6 +67,7 @@ Song mapCloudApiItemToSong(Map<String, dynamic> item) {
     album: '',
     duration: Duration(milliseconds: durationMs),
     isOnline: true,
+    isCloud: true,
     albumId: albumId,
     albumAudioId: albumAudioId,
   );

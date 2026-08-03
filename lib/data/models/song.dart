@@ -13,6 +13,9 @@ class Song {
   final String? quality;
   final String? albumAudioId;
   final int? fileId;
+  /// 是否为酷狗云盘歌曲（用户上传到云盘）。
+  /// 播放/投屏时 URL 解析优先走 /user/cloud/url，而非通用 /song/url。
+  final bool isCloud;
   /// 高潮部分开始时间（秒），由酷狗 /song/climax 接口返回。
   final double? climaxStart;
   /// 高潮部分结束时间（秒），由酷狗 /song/climax 接口返回。
@@ -36,6 +39,7 @@ class Song {
     this.quality,
     this.albumAudioId,
     this.fileId,
+    this.isCloud = false,
     this.climaxStart,
     this.climaxEnd,
     this.isLocallyFavorited = false,
@@ -74,6 +78,7 @@ class Song {
       quality: json['quality'] as String?,
       albumAudioId: json['albumAudioId'] as String?,
       fileId: json['fileId'] as int?,
+      isCloud: (json['isCloud'] as bool?) ?? false,
       climaxStart: (json['climaxStart'] as num?)?.toDouble(),
       climaxEnd: (json['climaxEnd'] as num?)?.toDouble(),
       isLocallyFavorited: (json['isLocallyFavorited'] as bool?) ?? false,
@@ -96,6 +101,7 @@ class Song {
       'quality': quality,
       'albumAudioId': albumAudioId,
       'fileId': fileId,
+      'isCloud': isCloud,
       'climaxStart': climaxStart,
       'climaxEnd': climaxEnd,
       'isLocallyFavorited': isLocallyFavorited,
@@ -117,6 +123,7 @@ class Song {
     String? quality,
     String? albumAudioId,
     int? fileId,
+    bool? isCloud,
     double? climaxStart,
     double? climaxEnd,
     bool? isLocallyFavorited,
@@ -136,6 +143,7 @@ class Song {
       quality: quality ?? this.quality,
       albumAudioId: albumAudioId ?? this.albumAudioId,
       fileId: fileId ?? this.fileId,
+      isCloud: isCloud ?? this.isCloud,
       climaxStart: climaxStart ?? this.climaxStart,
       climaxEnd: climaxEnd ?? this.climaxEnd,
       isLocallyFavorited: isLocallyFavorited ?? this.isLocallyFavorited,

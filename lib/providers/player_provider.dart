@@ -900,7 +900,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     try {
       final apiClient = KugouApiClient();
-      final url = await _resolveCloudUrl(apiClient, songs[startIndex]);
+      final url = await resolveCloudUrl(apiClient, songs[startIndex]);
       if (url != null && url.isNotEmpty) {
         final resolvedSong = songs[startIndex].copyWith(url: url);
         _currentSong = resolvedSong;
@@ -925,8 +925,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _fetchClimaxData();
   }
 
-  /// 云盘歌曲 URL 解析：先 /user/cloud/url，后 /song/url 兜底
-  Future<String?> _resolveCloudUrl(
+  /// 云盘歌曲 URL 解析：先 /user/cloud/url，后 /song/url 兜底。
+  /// 公开给投屏（DlnaProvider）等场景复用。
+  Future<String?> resolveCloudUrl(
     KugouApiClient apiClient,
     Song song,
   ) async {
@@ -976,7 +977,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         i++) {
       final song = _playlist[i];
       if (song.isOnline && song.url == null) {
-        _resolveCloudUrl(apiClient, song).then((url) {
+        resolveCloudUrl(apiClient, song).then((url) {
           if (url != null && url.isNotEmpty) {
             _playlist[i] = song.copyWith(url: url);
           }

@@ -148,19 +148,33 @@ class DlnaProvider extends ChangeNotifier {
       if (song.isOnline) {
         // ── 在线歌曲：通过酷狗 API 获取新鲜播放 URL ──
         final apiClient = KugouApiClient();
-        final result = await apiClient.getSongUrlWithFallback(
-          song.id,
-          quality: playerProvider.audioQuality.value,
-          albumId: song.albumId,
-          albumAudioId: song.albumAudioId,
-        );
-        if (result == null || result.url.isEmpty) {
-          _state = DlnaCastState.error;
-          _errorMessage = '无法获取播放地址';
-          notifyListeners();
-          return;
+        if (song.isCloud) {
+          // ── 云盘歌曲：URL 解析必须走 /user/cloud/url（失败回退 /song/url）──
+          // 与 PlayerProvider.playCloudPlaylist 的解析路径保持一致，
+          // 云盘上传歌曲用通用 /song/url 拿不到有效地址。
+          final cloudUrl = await playerProvider.resolveCloudUrl(apiClient, song);
+          if (cloudUrl == null || cloudUrl.isEmpty) {
+            _state = DlnaCastState.error;
+            _errorMessage = '无法获取云盘播放地址';
+            notifyListeners();
+            return;
+          }
+          url = cloudUrl;
+        } else {
+          final result = await apiClient.getSongUrlWithFallback(
+            song.id,
+            quality: playerProvider.audioQuality.value,
+            albumId: song.albumId,
+            albumAudioId: song.albumAudioId,
+          );
+          if (result == null || result.url.isEmpty) {
+            _state = DlnaCastState.error;
+            _errorMessage = '无法获取播放地址';
+            notifyListeners();
+            return;
+          }
+          url = result.url;
         }
-        url = result.url;
       } else {
         // ── 本地歌曲：通过 LocalHttpServer 暴露到局域网 ──
         final rawPath = song.localPath;
