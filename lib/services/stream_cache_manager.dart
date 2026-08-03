@@ -90,7 +90,7 @@ class StreamCacheManager {
     switch (q) {
       case '128':
         return 1;
-      case '320':
+      case 'hq':
         return 2;
       case 'flac':
         return 3;

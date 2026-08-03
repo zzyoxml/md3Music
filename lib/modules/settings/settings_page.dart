@@ -49,7 +49,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final SettingsRepository _settingsRepository = SettingsRepository();
   ThemeMode _themeMode = ThemeMode.system;
-  String _defaultQuality = '320';
+  String _defaultQuality = '128';
   bool _autoReceiveVip = true;
   // 本地 API 服务器重启中（在线音乐区块显示加载态）
   bool _isRestarting = false;
@@ -1518,7 +1518,6 @@ class _SettingsPageState extends State<SettingsPage> {
       case '128':
         return '标准 128k';
       case 'hq':
-      case '320':
         return '高品质 320k';
       case 'sq':
       case 'flac':
@@ -1534,7 +1533,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void _showQualityDialog() {
     final qualities = [
       ('128', '标准 128k'),
-      ('320', '高品质 320k'),
+      ('hq', '高品质 320k'),
       ('flac', '无损 FLAC'),
       ('high', 'Hi-Res 无损'),
     ];

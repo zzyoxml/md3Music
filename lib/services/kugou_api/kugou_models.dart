@@ -603,15 +603,21 @@ class KugouPlayUrl {
     } else {
       url = rawUrl.toString();
     }
+    // 检测是否为试听片段：fail_process 含 'buy' 说明该音质需要购买/VIP；
+    // fileSize 小于 200KB 且歌曲正常时长 3-5 分钟，大概率是 30s 试听。
+    final failProcess = json['fail_process'];
+    final fileSize = _parseInt(
+      json['fileSize'] ??
+          json['file_size'] ??
+          json['FileSize'] ??
+          json['filesize'] ??
+          0,
+    );
+    final isTrial = (failProcess is List && failProcess.contains('buy')) ||
+        (fileSize > 0 && fileSize < 200 * 1024);
     return KugouPlayUrl(
       url: url,
-      fileSize: _parseInt(
-        json['fileSize'] ??
-            json['file_size'] ??
-            json['FileSize'] ??
-            json['filesize'] ??
-            0,
-      ),
+      fileSize: fileSize,
       bitRate: _parseInt(
         json['bitRate'] ??
             json['bit_rate'] ??
@@ -620,6 +626,7 @@ class KugouPlayUrl {
             0,
       ),
       quality: _str(json['quality'] ?? '128'),
+      isTrial: isTrial,
     );
   }
 }
@@ -1350,7 +1357,7 @@ class KugouQuality {
   KugouQuality._();
 
   static const String standard = '128';
-  static const String high = '320';
+  static const String high = 'hq';
   static const String lossless = 'flac';
   static const String hires = 'high';
   static const String master = 'hi-res';

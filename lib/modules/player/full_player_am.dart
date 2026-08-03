@@ -2525,10 +2525,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             _buildDownloadQualityOption(
               ctx,
               '高音质 (320kbps)',
-              '320',
+              'hq',
               song,
               downloadsProvider,
-              enabled: available.contains('320'),
+              enabled: available.contains('hq'),
             ),
             _buildDownloadQualityOption(
               ctx,

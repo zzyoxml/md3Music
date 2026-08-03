@@ -142,7 +142,7 @@ class SongListItem extends StatelessWidget {
             Text('选择音质', style: Theme.of(ctx).textTheme.titleSmall),
             const SizedBox(height: 8),
             _buildQualityOption(ctx, '标准音质 (128kbps)', '128', downloadsProvider, enabled: available.contains('128')),
-            _buildQualityOption(ctx, '高音质 (320kbps)', '320', downloadsProvider, enabled: available.contains('320')),
+            _buildQualityOption(ctx, '高音质 (320kbps)', 'hq', downloadsProvider, enabled: available.contains('hq')),
             _buildQualityOption(ctx, '无损音质 (FLAC)', 'flac', downloadsProvider, enabled: available.contains('flac')),
             _buildQualityOption(ctx, 'Hi-Res 无损', 'high', downloadsProvider, enabled: available.contains('high')),
           ],

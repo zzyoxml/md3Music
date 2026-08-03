@@ -35,7 +35,7 @@ enum AppLoopMode { off, one, all }
 
 enum AudioQuality {
   standard('128', '标准音质'),
-  high('320', '高音质'),
+  high('hq', '高音质'),
   flac('flac', '无损音质'),
   hires('high', 'Hi-Res 无损');
 
@@ -47,7 +47,7 @@ enum AudioQuality {
 /// 旧版本 SharedPreferences 中存储的音质值 → 当前 AudioQuality.value 映射。
 /// 升级后首次读取时自动转换，避免遗留值导致回退到标准音质。
 const _legacyQualityMap = <String, String>{
-  'hq': '320',
+  '320': 'hq',
   'sq': 'flac',
   'standard': '128',
   'hires': 'high',

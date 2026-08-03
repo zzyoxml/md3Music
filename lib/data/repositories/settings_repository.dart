@@ -50,7 +50,7 @@ class SettingsRepository {
 
   Future<String> getDefaultQuality() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyDefaultQuality) ?? '320';
+    return prefs.getString(_keyDefaultQuality) ?? '128';
   }
 
   Future<void> setDefaultQuality(String quality) async {
