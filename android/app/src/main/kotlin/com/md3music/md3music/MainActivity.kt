@@ -571,7 +571,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onDestroy() {
         // Activity 销毁（含应用从最近任务划掉时系统先回调 onDestroy 再杀进程）
-        // 同步通知 Node.js 停止 libuv 事件循环，释放 8080 端口
+        // 同步通知 Rust 服务器停止监听，释放端口
         shutdownNodeJs()
         cachedEngine = null
         cachedChannel = null

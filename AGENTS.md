@@ -12,10 +12,10 @@
 MD3Music 是一款 Android 音乐播放器，采用 **Flutter 前端 + 嵌入式 Rust API 服务器** 的混合架构：
 
 - **Flutter 前端**（Dart）：负责 UI、播放控制、本地数据管理
-- **嵌入式 Rust 服务器**（Rust）：App 启动时通过 `libkugou_server.so`（JNI/MethodChannel，`dart:ffi` 兜底）在进程内启动一个 `tiny_http` HTTP 服务器，监听 `127.0.0.1:8080`，处理所有酷狗音乐 API 请求。Rust 实现取代了旧的 `libnode.so` + `server_bundle.js`（Express）方案，行为与酷狗云端等价。
-- **公网 API 服务器**（可选）：仅处理登录相关接口，部署在云端，流量 <1MB/月（`networkapi/`，仍是 Node.js/Express）
+- **嵌入式 Rust 服务器**（Rust）：App 启动时通过 `libkugou_server.so`（JNI/MethodChannel，`dart:ffi` 兜底）在进程内启动一个 `tiny_http` HTTP 服务器，监听 `127.0.0.1` 上的**随机端口**（`[10000, 60000]`，被占用则 1s 后换下一个，最多 10 次），实际端口通过 MethodChannel/FFI 返回给 Dart 写入 `KugouEndpoints.baseUrl`。处理所有酷狗音乐 API 请求。Rust 实现取代了旧的 `libnode.so` + `server_bundle.js`（Express）方案，行为与酷狗云端等价。
+- **登录接口同样走本地 Rust 服务器**：`/login/*`、`/captcha/sent`、`/register/dev` 等 16 个登录端点由 Rust `login.rs`/`misc.rs` 用本地设备身份（dfid/mid）直连酷狗上游（`login-user.kugou.com` / `loginserviceretry.kugou.com` / `login.user.kugou.com` / `gateway.kugou.com` 等），不再依赖第三方云端（旧 `networkapi/` 已退役，仅作 JS 参考）。
 
-核心设计理念：所有音乐搜索、歌词、排行榜等 API 请求都走本地 Rust 服务器转发，避免直接暴露 API 密钥在客户端。
+核心设计理念：所有音乐搜索、歌词、排行榜、登录等 API 请求都走本地 Rust 服务器转发，避免直接暴露 API 密钥在客户端。
 
 ---
 
@@ -53,7 +53,7 @@ md3Music/
 │   ├── util/                     # 旧 JS 工具（仅供 networkapi 参考）
 │   └── server.js / bundled_entry.js / server_bundle.js   # 旧 Node 方案遗留，不再打包
 │
-├── networkapi/                   # 公网 API 服务器（云端部署，仅登录接口，Node.js）
+├── networkapi/                   # 旧公网登录服务器（Node.js，已退役，仅作 JS 参考）
 │   ├── server.js                 # 精简版 Express，只加载登录相关模块
 │   ├── module/                   # 登录、注册、验证码等模块
 │   └── util/                     # 独立的工具函数副本（与 Rust 端已分家，见 4.6）
@@ -74,8 +74,8 @@ md3Music/
 
 | 边界 | 说明 |
 |------|------|
-| `lib/` ↔ `kugou_api_server/rust/` | Dart 前端通过 HTTP `127.0.0.1:8080` 调用 API；启动/停止走 `KugouApiService` 的 MethodChannel（`com.md3music.md3music/kugou_api`：startServer/isRunning/stopServer），`dart:ffi` 直连 `start_server` 作为兜底 |
-| `kugou_api_server/rust/` ↔ `networkapi/` | 两者代码完全独立，不再共享 util；networkapi 仍为 Node.js，只含登录接口 |
+| `lib/` ↔ `kugou_api_server/rust/` | Dart 前端通过 HTTP `127.0.0.1:<随机端口>` 调用 API（端口由 `startServer`/`start_server` 返回，写入 `KugouEndpoints.baseUrl`）；启动/停止走 `KugouApiService` 的 MethodChannel（`com.md3music.md3music/kugou_api`：startServer/isRunning/stopServer），`dart:ffi` 直连 `start_server` 作为兜底 |
+| `kugou_api_server/rust/` ↔ `networkapi/` | 两者代码完全独立，不再共享 util；networkapi 已退役（登录已改由 Rust 直连酷狗），仅作 JS 参考 |
 | `kugou_api_server/module/` 等 JS 文件 | 旧 Node 方案遗留，已被 Rust 取代，**不要**再修改 JS 版模块或重新打包 |
 | `android/app/src/main/jniLibs/` | 原生库目录，`libkugou_server.so` **已提交进 Git**（从 `rust/target/*/release/` 复制），无需下载 |
 | `assets/nodejs-project/` | 已从 `pubspec.yaml` 移除，不再打包；旧 `server_bundle.js` 仅作参考 |
@@ -167,17 +167,19 @@ env CC_aarch64_linux_android=$BIN/aarch64-linux-android21-clang \
 
 **解决**：`crypto.rs` 内 `rsa_raw_encrypt`/`rsa_pkcs1v15_encrypt`/`rsa_oaep_sha256_encrypt` 先经 `normalize_pem()` 按 64 字符折行。`tests/smoke.rs::rsa_keys_parse` 为回归测试。新增 RSA 使用点也必须走这几个函数。
 
+**附加坑（SSA simulate 公钥）**：`simulate.rs` 的 `PUBLIC_KEY`（RSA-OAEP，来自 WASM 反作弊）曾把 `MIIBIjANBgkqhkiG9w0…` 误抄成 `…G09w0…`（多了个 `0`），导致 SSA 重试路径一触发就 panic。该常量虽是标准多行 PEM，但内容 corrupted，`normalize_pem` 只能折行、无法修复内容。**拷贝任何 PEM 常量后必须用 `openssl rsa -pubin -in <(echo "$PEM") -text` 或对照 JS 原串逐字符比对**；`tests/smoke.rs::simulate_rsa_key_parses` 为回归测试。
+
 ### 4.3 服务器启动时序
 
 **问题**：Flutter UI 渲染后发现页立即请求 API，如果本地服务器还没启动完毕，请求全部失败。
 
-**解决**：`main.dart` 中 `await KugouApiServer.start()` 在 `runApp()` 之前执行；`_waitForReady()` 会轮询 `127.0.0.1:8080` 最多 30 秒。冷启动时 MethodChannel 可能尚未注册（3 次重试失败），此时 `dart:ffi` 兜底直接 `start_server` 也可启动，`server::start` 会检测已在运行并返回 true，幂等。
+**解决**：`main.dart` 中 `await KugouApiServer.start()` 在 `runApp()` 之前执行；`_waitForReady()` 会轮询实际端口最多 30 秒。冷启动时 MethodChannel 可能尚未注册（3 次重试失败），此时 `dart:ffi` 兜底直接 `start_server(0, dataDir)` 也可启动（`0` 表示随机端口），`server::start` 会检测已在运行并返回当前端口，幂等。
 
-### 4.4 端口 8080 冲突
+### 4.4 随机端口与端口冲突
 
-**问题**：退出 App 时如果没有正确关停服务器，下次冷启动时端口被占用，服务器启动失败（`Server::http` 返回 Err → `start_server` 返回 0）。
+**问题**：旧方案固定 8080，退出 App 时如果没有正确关停服务器，下次冷启动端口被占用导致启动失败（`Server::http` 返回 Err → `start_server` 返回 0）。
 
-**解决**：退出流程中必须 `await KugouApiServer.stop()` + 等待 300ms + `exit(0)`；`MainActivity.onDestroy`/`onTrimMemory` 也会调用 `KugouApiService.stopServer()`（`nativeStopNode`）。`SystemNavigator.pop()` 不够可靠。
+**解决**：Rust 启动时改用**随机端口**（`server::start(0, dir)` 在 `[10000, 60000]` 内随机，被占用则 sleep 1s 换下一个，最多 10 次），成功返回实际端口，`start_server`/`nativeStartNode` 以端口为返回值（0=失败），Kotlin MethodChannel `startServer` 与 dart:ffi 兜底都会把端口回传给 Dart 写入 `KugouEndpoints.baseUrl`（`KugouApiClient.updateBaseUrl`）。退出流程仍必须 `await KugouApiServer.stop()` + 等待 300ms + `exit(0)`；`MainActivity.onDestroy`/`onTrimMemory` 也会调用 `KugouApiService.stopServer()`（`nativeStopNode`）。`SystemNavigator.pop()` 不够可靠。设置页「在线音乐 → 本地数据接口」点击可确认重启服务器（`KugouApiServer.restart()`，停服→重新随机端口→`KugouEndpoints.baseUrl` 更新，dfid/mid 因 device_info.json 持久化保持不变）。
 
 ### 4.5 JNI 签名必须与 Rust 导出一致
 
@@ -190,6 +192,13 @@ env CC_aarch64_linux_android=$BIN/aarch64-linux-android21-clang \
 **问题**：旧架构中两处 `util/` 各自维护副本，容易失同步。Rust 化后 kugou_api_server 已是 Rust，networkapi 仍是 Node.js。
 
 **解决**：修改 Rust 端工具函数只影响 `rust/src/`；如需同步登录行为，以 Rust 实现为准，networkapi 单点修改即可，不再有跨目录拷贝。
+
+### 4.6.1 登录已全部本地化，networkapi 已退役
+
+- 登录端点（`/login/*`、`/captcha/sent`、`/register/dev` 等）已由 Rust `login.rs`/`misc.rs` **直连酷狗上游**，不再转发到第三方云端 `networkapi/`；`networkapi/` 仅作 JS 参考，云端服务器可下线。
+- **为什么不能再转发到云端**：酷狗登录的 QR key / token 绑定**申请它的设备**（dfid/mid）。Rust 本地设备（dfid）≠ 云端设备，本地→云端转发 `/login/qr/check` 必然返回 `20010`→502。
+- Rust 各登录端点的上游目标以旧 `networkapi/module/*.js` 为准：`/login/qr/key`→`login-user.kugou.com/v2/qrcode`、`/login/qr/check`→`login-user.kugou.com/v2/get_userinfo_qrcode`、`/login/token`→`login.user.kugou.com/v5/login_by_token`、`/login/cellphone`→`loginserviceretry.kugou.com/v7/login_by_verifycode`、`/captcha/sent`→`login.user.kugou.com/v7/send_mobile_code`。
+- Dart 端 `kugou_api_client.dart` 曾把登录路径硬编码到 `http://115.29.236.96:5621`（`_loginPaths`），已移除——全部请求统一走本地 `KugouEndpoints.baseUrl`。
 
 ### 4.7 Android 构建配置
 
@@ -225,7 +234,7 @@ env CC_aarch64_linux_android=$BIN/aarch64-linux-android21-clang \
 | 加密 | rsa / aes / md-5 / sha1 / sha2 / base64（CBC + PKCS7 手动实现） | 与 JS CryptoJS 行为对齐 |
 | 原生桥接 | JNI + dart:ffi | NDK 28 |
 | 构建工具 | Gradle (Kotlin DSL) | Java 17 |
-| 公网服务器 | Node.js + Express（仅 networkapi） | ^4.18.2 |
+| 公网服务器 | 已退役（原 networkapi 为 Node.js + Express，登录已改由 Rust 本地直连） | — |
 
 ---
 

@@ -279,14 +279,6 @@ class _OnboardingPageState extends State<OnboardingPage>
         onColor: colorScheme.onPrimary,
       ),
       _HiddenOp(
-        icon: Icons.download,
-        gesture: '长按',
-        target: '封面图标',
-        action: '下载当前歌曲',
-        color: colorScheme.tertiary,
-        onColor: colorScheme.onTertiary,
-      ),
-      _HiddenOp(
         icon: Icons.lyrics,
         gesture: '长按',
         target: '歌词图标',
@@ -314,7 +306,7 @@ class _OnboardingPageState extends State<OnboardingPage>
         icon: Icons.queue_music,
         gesture: '长按',
         target: '播放列表图标',
-        action: '进入歌词沉浸模式',
+        action: '进入 Zen 沉浸模式',
         color: colorScheme.secondary,
         onColor: colorScheme.onSecondary,
       ),

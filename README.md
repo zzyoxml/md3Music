@@ -1,8 +1,8 @@
 # MD3Music - Material Design 3 音乐播放器
 
 <div align="center">
-
-基于酷狗音乐 API 的 Flutter 音乐播放器，采用 Material Design 3 设计规范，自带本地 Node.js 服务。
+  
+基于酷狗音乐 API 的 Flutter 音乐播放器，采用 Material Design 3 设计规范，自带嵌入式 Rust API 服务器。
 支持手机/平板自适应，提供 Apple Music 风格播放页与逐字歌词。
 本项目仅供学习使用，请勿用于商业用途，详情请参阅 [免责声明](DISCLAIMER.md)。
 
@@ -10,7 +10,6 @@
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.12+-02569B?logo=flutter)](https://flutter.dev)
 [![Platform](https://img.shields.io/badge/Platform-Android-green)]()
-[![Version](https://img.shields.io/badge/Version-4.0.0-blue)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 </div>
@@ -84,14 +83,14 @@
 ```
 ┌─────────────────────────────────────────────────────────┐
 │                    MD3Music App                         │
-│  ┌─────────────────────┐  ┌────────────────────────┐  │
-│  │   Flutter UI        │  │  嵌入式 Node.js 服务器 │  │
-│  │   (Dart)           │  │  (127.0.0.1:8080)    │  │
+│  ┌─────────────────────┐  ┌────────────────────────       │
+│  │   Flutter UI        │  │  嵌入式 Rust API 服务器  │  │
+│  │   (Dart)            │   │  (127.0.0.1:8080)     │  │
 │  └──────────┬──────────┘  └──────────┬─────────────┘  │
 │             │                          │                  │
 │             └──────────┬───────────────┘                  │
 │                        │                                  │
-│             ┌──────────▼───────────────┐                  │
+│             ──────────▼───────────────┐                  │
 │             │   本地数据 / 缓存         │                  │
 │             └──────────────────────────┘                  │
 └─────────────────────────────────────────────────────────┘
@@ -106,10 +105,11 @@
 
 ### 核心特点
 
-- **内置 Node.js 服务器**：App 启动时会自动启动本地 Node.js 服务器（127.0.0.1:8080），所有 API 请求都在本地处理
+- **嵌入式 Rust 服务器**：App 启动时通过 `libkugou_server.so`（JNI/MethodChannel）启动本地 tiny_http 服务器（127.0.0.1:8080），所有酷狗 API 请求都在本地处理
+- **高性能低资源**：Rust 实现取代旧 Node.js 方案，内存占用更低，启动更快
 - **流量优化**：仅有登录和同步功能走云端，其他所有功能都在本地运行，月流量 < 100MB
 - **无需外部服务器**：用户无需自行搭建 API 服务器
-- **多架构支持**：支持 armeabi-v7a（32位）、arm64-v8a（64位）、x86_64（模拟器）
+- **多架构支持**：支持 armeabi-v7a（32位）、arm64-v8a（64位）、x86、x86_64（模拟器）
 
 ---
 
@@ -117,7 +117,7 @@
 
 项目已配置 GitHub Actions 自动构建，推送 `v*` 标签即可触发：
 
-- 自动构建 3 个架构的 APK
+- 自动构建 4 个架构的 APK（arm64-v8a、armeabi-v7a、x86、x86_64）
 - 自动创建 GitHub Release 并上传产物
 - 自动递增 versionCode 并生成 Changelog
 
@@ -207,9 +207,9 @@
 ### 前置要求
 
 - **Flutter SDK** 3.12.0 或更高版本
-- **Node.js** 18.0 或更高版本（用于构建服务器包）
+- **Rust** 1.70+（用于构建嵌入式 API 服务器）
 - **Android Studio** / VS Code
-- **Android NDK** (用于编译 nodejs-mobile)
+- **Android NDK** 28（用于 Rust 交叉编译）
 
 ### 1. 克隆项目
 
@@ -218,56 +218,35 @@ git clone https://github.com/zzyoxml/md3Music.git
 cd md3Music
 ```
 
-### 2. 下载 Native 依赖（必需）
-
-本项目使用 `nodejs-mobile` 运行嵌入式 Node.js，预编译的 `libnode.so` 和 Node.js 头文件通过 GitHub Release 分发，未包含在 Git 仓库中。
-
-运行以下命令自动下载并解压：
-
-```bash
-# Windows
-.\setup_native.bat
-
-# macOS / Linux
-curl -L -o native-libs.zip "https://github.com/zzyoxml/md3Music/releases/latest/download/native-libs.zip"
-unzip native-libs.zip
-rm native-libs.zip
-```
-
-下载内容：
-- `android/app/src/main/jniLibs/` — 3个架构的 `libnode.so`
-- `android/app/src/main/cpp/include/` — Node.js v18 头文件
-
-### 3. 安装 Flutter 依赖
+### 2. 安装 Flutter 依赖
 
 ```bash
 flutter pub get
 ```
 
-### 4. 构建 Node.js 服务器包（可选）
+### 3. 构建 Rust 服务器（可选）
 
-如果你修改了 `kugou_api_server/` 目录下的代码，需要重新构建服务器包：
+`libkugou_server.so` 已提交进 Git 仓库，通常无需重新编译。如果你修改了 `kugou_api_server/rust/src/` 下的代码，需要重新构建：
 
 ```bash
-cd scripts
-.\build_nodejs_server.bat
+# 主机编译验证
+cd kugou_api_server/rust
+cargo build --release
+
+# 安卓交叉编译（3 个 ABI，需要 NDK）
+./build_android.sh
 ```
 
-这会执行以下操作：
-1. 在 `kugou_api_server/` 目录安装 npm 依赖
-2. 使用 esbuild 打包成 `server_bundle.js`
-3. 复制到 `assets/nodejs-project/` 目录
+> **注意**：`libkugou_server.so`（arm64-v8a、armeabi-v7a、x86、x86_64）已包含在仓库中，修改服务器代码才需要重新编译。
 
-> **注意**：项目已经包含了预构建的 `server_bundle.js`，如果不是修改服务器代码，可以跳过此步骤。
-
-### 5. 运行应用（调试模式）
+### 4. 运行应用（调试模式）
 
 ```bash
 # 连接 Android 设备后执行
 flutter run
 ```
 
-### 6. 构建发布版 APK
+### 5. 构建发布版 APK
 
 ```bash
 # 构建三个架构的 APK（分拆包）
@@ -287,7 +266,8 @@ flutter build apk --release --split-per-abi
 
 - **arm64-v8a**：大多数现代 Android 设备（推荐）
 - **armeabi-v7a**：较旧的 32 位设备
-- **x86_64**：Android 模拟器
+- **x86**：32 位 Android 模拟器
+
 
 ---
 
@@ -324,25 +304,30 @@ md3Music/
 │   ├── services/               # API 服务（元数据写入/下载管理）
 │   └── widgets/                # 公共组件
 │       └── apple_lyrics/       # Apple Music 风格歌词
-├── kugou_api_server/           # Node.js API 服务器源代码
-│   ├── index.js                # 服务器入口
-│   ├── module/                 # API 模块
-│   └── package.json            # npm 依赖配置
-├── img/                        # 界面预览截图（README 用）
+├── kugou_api_server/           # 嵌入式 Rust API 服务器
+│   ├── rust/                   # Rust crate（tiny_http + ureq）
+│   │   ├── src/
+│   │   │   ├── lib.rs          # FFI/JNI 导出符号
+│   │   │   ├── server.rs       # HTTP 服务器：路由分发、CORS、缓存
+│   │   │   ├── modules/        # 160+ 个 API 模块
+│   │   │   ├── crypto.rs       # MD5/SHA1/AES/RSA 加密
+│   │   │   ├── request.rs      # 上游转发（ureq）
+│   │   │   └── device.rs       # 设备信息持久化
+│   │   ├── tests/smoke.rs      # 本地冒烟测试
+│   │   ├── build_android.sh    # 一键交叉编译脚本
+│   │   └── Cargo.toml
+│   └── module/                 # 旧 JS 模块（已废弃，仅供参考）
+── img/                        # 界面预览截图（README 用）
 │   ├── phone/                  # 手机：md3 / applemusic / other
 │   └── pad/                    # 平板：md3 / applemusic / other
 ├── assets/                     # 资源文件
 │   ├── images/                 # 图片资源
-│   ├── fonts/                  # 字体文件
-│   └── nodejs-project/        # 嵌入式 Node.js 服务器包
-│       └── server_bundle.js    # 打包后的服务器代码
-├── scripts/                    # 构建和工具脚本
-│   └── build_nodejs_server.bat # 构建服务器包脚本
+│   └── fonts/                  # 字体文件
 ├── android/                    # Android 平台配置
 │   └── app/src/main/
-│       ├── kotlin/.../        # NodeJsService（启动本地服务器）
-│       └── jniLibs/           # libnode.so（三个架构）
-├── networkapi/                 # 云端登录 API（Node.js）
+│       ├── kotlin/.../        # KugouApiService（启动本地服务器）
+│       └── jniLibs/           # libkugou_server.so（四个架构）
+├── networkapi/                 # 云端登录 API（Node.js，仅登录接口）
 └── pubspec.yaml                # Flutter 配置
 ```
 
@@ -359,13 +344,13 @@ md3Music/
 | **网络请求** | Dio |
 | **本地存储** | SharedPreferences + SQLite |
 | **图片缓存** | cached_network_image |
-| **嵌入式服务器** | nodejs-mobile (Node.js 18) |
-| **服务器打包** | esbuild |
+| **嵌入式服务器** | Rust（tiny_http + ureq） |
+| **加密** | rsa / aes / md-5 / sha1 / sha2 |
 | **元数据写入** | JAudioTagger (MP3/FLAC/M4A) |
 | **桌面歌词** | Lyricon Provider |
 | **音频均衡器** | just_audio 平台均衡器 |
 | **音乐源** | 酷狗音乐 API |
-| **云端登录** | networkapi (Node.js) |
+| **云端登录** | networkapi (Node.js，仅登录接口) |
 
 ---
 
@@ -373,7 +358,7 @@ md3Music/
 
 ### 嵌入式服务器
 
-应用启动时会自动启动本地 Node.js 服务器，监听 `127.0.0.1:8080`。无需任何配置。
+应用启动时会自动启动本地 Rust 服务器（`libkugou_server.so`），监听 `127.0.0.1:8080`。无需任何配置。
 
 ### 云端登录 API
 
@@ -394,7 +379,7 @@ md3Music/
 
 ### Q: 应用启动后无法搜索或播放音乐？
 
-**A:** 检查日志确认 Node.js 服务器是否成功启动。可以在 Android Studio Logcat 中搜索 "NodeJsService" 查看启动日志。
+**A:** 检查日志确认 Rust 服务器是否成功启动。可以在 Android Studio Logcat 中搜索 "KugouApiService" 查看启动日志。
 
 ### Q: 登录功能无法使用？
 
@@ -403,13 +388,14 @@ md3Music/
 ### Q: 如何修改 API 服务器代码？
 
 **A:**
-1. 修改 `kugou_api_server/` 目录下的代码
-2. 运行 `scripts/build_nodejs_server.bat` 重新构建
-3. 重新编译 App
+1. 修改 `kugou_api_server/rust/src/` 目录下的 Rust 代码
+2. 运行 `cd kugou_api_server/rust && cargo build --release` 编译验证
+3. 安卓侧需交叉编译：`./build_android.sh`
+4. 重新编译 App
 
-### Q: 为什么不包含 x86 (32位) 支持？
+### Q: 为什么 Rust 服务器需要 NDK？
 
-**A:** x86 (32位) 模拟器已经非常罕见，且 `nodejs-mobile` 的预编译库也不包含 x86 版本。如果需要，可以自行编译 `nodejs-mobile` 的 x86 版本。
+**A:** Rust 的 TLS 依赖（`ring` crate）需要交叉编译为 Android 平台的 `.so` 文件。NDK 提供了 `aarch64-linux-android-clang` 等交叉编译工具链。
 
 ---
 
@@ -417,42 +403,43 @@ md3Music/
 
 ### 修改嵌入式服务器代码
 
-1. 修改 `kugou_api_server/` 目录下的源代码
-2. 运行构建脚本：
+1. 修改 `kugou_api_server/rust/src/` 目录下的 Rust 源代码
+2. 主机编译验证：
    ```bash
-   cd scripts
-   .\build_nodejs_server.bat
+   cd kugou_api_server/rust
+   cargo build --release
+   cargo test        # 运行测试
+   cargo clippy      # 静态检查
    ```
-3. 重新编译 App
+3. 安卓交叉编译（需要 NDK）：
+   ```bash
+   ./build_android.sh
+   ```
+4. 重新编译 App
 
-### 添加新架构支持
+### 添加新 API 模块
 
-1. 获取对应架构的 `libnode.so`
-2. 放入 `android/app/src/main/jniLibs/<abi>/`
-3. 修改 `android/app/build.gradle.kts` 中的 CMake 配置
-4. 重新编译
+在 `kugou_api_server/rust/src/modules/` 下新建 `.rs` 文件，实现对应的 API 端点处理函数，然后在 `server.rs` 中注册路由即可。
 
-### 调试 Node.js 服务器
+### 调试 API 服务器
 
 如果想在本地调试 API 服务器（不嵌入 App）：
 
 ```bash
-cd kugou_api_server
-npm install
-node index.js
+cd kugou_api_server/rust
+cargo test          # 本地测试（不依赖外网）
 ```
-
-然后修改 App 代码中的 API 地址为 `http://127.0.0.1:3000`（本地服务器默认端口）。
 
 ---
 
-## 🙏 致谢
+##  致谢
 
 感谢以下项目的支持：
 
 - [EchoMusic](https://github.com/hoowhoami/EchoMusic) - UI 设计和架构参考
 - [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) - API 代理服务
-- [nodejs-mobile](https://github.com/janeasystems/nodejs-mobile) - 嵌入式 Node.js 框架
+- [tiny_http](https://github.com/tiny-http/tiny-http) - Rust HTTP 服务器
+- [ureq](https://github.com/algesten/ureq) - Rust HTTP 客户端
 - [JAudioTagger](https://www.jthink.net/jaudiotagger/) - 音频元数据读写
 
 ---

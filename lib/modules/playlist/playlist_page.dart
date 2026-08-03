@@ -325,7 +325,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
     final qualityOptions = [
       ('标准音质 (128kbps)', '128'),
-      ('高音质 (320kbps)', '320'),
+      ('高音质 (320kbps)', 'hq'),
       ('无损音质 (FLAC)', 'flac'),
       ('Hi-Res 无损', 'high'),
     ];

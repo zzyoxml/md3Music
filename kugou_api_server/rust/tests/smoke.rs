@@ -1,7 +1,12 @@
 //! 本地冒烟测试：启动 server 并验证 HTTP 中间件行为（不依赖外网）。
 
 use std::io::{Read, Write};
+use std::sync::Mutex;
 use std::time::Duration;
+
+/// 服务器是进程级单例（静态 RUNNING/PORT），两个冒烟测试若并行会互相 stop/start，
+/// 用这把锁串行化所有会启停服务器的测试。
+static SERVER_LOCK: Mutex<()> = Mutex::new(());
 
 /// RSA 常量（PUBLIC_LITE_RAS_KEY）经 pem-rfc7468 解析必须成功（回归：单行长 base64 曾导致 panic）。
 #[test]
@@ -12,6 +17,16 @@ fn rsa_keys_parse() {
         kugou_server::crypto::crypto_rsa_encrypt(r#"{"a":1}"#, Some(kugou_server::crypto::PUBLIC_RAS_KEY)).len(),
         256
     );
+}
+
+/// SSA simulate 路径的 RSA-OAEP 公钥（simulate.rs PUBLIC_KEY）必须能解析并加密。
+/// 回归：常量中多了一个 `0`（MIIBIjANBgkqhkiG09w0…）导致 Base64(InvalidEncoding)
+/// panic，SSA 反作弊重试一触发即崩溃（release panic=abort 会挂掉整个 App）。
+#[test]
+fn simulate_rsa_key_parses() {
+    let sim = kugou_server::simulate::generate_simulate("123", "456", "dfid", Some("webgl"));
+    assert!(!sim.edt.is_empty());
+    assert!(!sim.sid.is_empty());
 }
 
 /// q_raw_or 必须复刻 JS `obj?.[key] ?? default`：缺失/null → 默认值（原样保持数字），
@@ -87,9 +102,10 @@ fn tcp_request(port: u16, raw: &str) -> String {
 
 #[test]
 fn server_responds_404_and_cors() {
+    let _guard = SERVER_LOCK.lock().unwrap();
     let port: u16 = 18080;
     let dir = std::env::temp_dir().join("kugou_smoke").to_string_lossy().into_owned();
-    assert!(kugou_server::server::start(port, dir));
+    assert_eq!(kugou_server::server::start(port, dir), Some(port));
 
     // 404 fallback: Cannot GET /nonexistent
     let resp = tcp_request(port, "GET /nonexistent HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
@@ -146,4 +162,22 @@ fn server_responds_404_and_cors() {
     }
 
     kugou_server::server::stop();
+}
+
+/// 随机端口模式（port==0）：必须返回非 0 端口，且该端口可连通；连续启动几次
+/// 端口都在合法范围内（回归：端口占用时不阻塞、返回实际端口）。
+#[test]
+fn server_starts_on_random_port() {
+    let _guard = SERVER_LOCK.lock().unwrap();
+    let dir = std::env::temp_dir().join("kugou_smoke_rand").to_string_lossy().into_owned();
+    for _ in 0..3 {
+        let port = kugou_server::server::start(0, dir.clone()).expect("random start");
+        assert!((10000..=60000).contains(&port), "port out of range: {port}");
+        let resp = tcp_request(
+            port,
+            "GET /nonexistent HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        );
+        assert!(resp.contains("404 Not Found"), "got: {}", resp);
+        kugou_server::server::stop();
+    }
 }

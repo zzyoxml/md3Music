@@ -145,9 +145,9 @@ pub fn handle_captcha_sent(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, Modul
         m.clear();
         m.insert("mid".to_string(), json!(mid));
     }
-    let opts = RequestOptions::new("/captcha/sent")
-        .post("/captcha/sent")
-        .base_url("http://115.29.236.96:5621")
+    let opts = RequestOptions::new("/v7/send_mobile_code")
+        .post("/v7/send_mobile_code")
+        .base_url("http://login.user.kugou.com")
         .json_body(data_map)
         .encrypt_type("android")
         .cookie(cookie);

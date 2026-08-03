@@ -12,7 +12,6 @@ class SettingsRepository {
   static const String _keyAutoPlay = 'settings_auto_play';
   static const String _keyShowLyrics = 'settings_show_lyrics';
   static const String _keyAutoReceiveVip = 'settings_auto_receive_vip';
-  static const String _keyApiServerUrl = 'settings_api_server_url';
   static const String _keySignedDays = 'settings_signed_days';
   // 自定义下载目录：空字符串表示使用默认目录（应用私有 documents/downloads）
   static const String _keyDownloadDir = 'settings_download_dir';
@@ -35,16 +34,6 @@ class SettingsRepository {
     await prefs.setStringList(_keySignedDays, days.toList());
   }
 
-  Future<String> getApiServerUrl() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyApiServerUrl) ?? 'http://115.29.236.96:5621';
-  }
-
-  Future<void> setApiServerUrl(String url) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyApiServerUrl, url);
-  }
-
   Future<ThemeMode> getThemeMode() async {
     final prefs = await SharedPreferences.getInstance();
     final index = prefs.getInt(_keyThemeMode);
@@ -61,7 +50,7 @@ class SettingsRepository {
 
   Future<String> getDefaultQuality() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_keyDefaultQuality) ?? '320';
+    return prefs.getString(_keyDefaultQuality) ?? '128';
   }
 
   Future<void> setDefaultQuality(String quality) async {

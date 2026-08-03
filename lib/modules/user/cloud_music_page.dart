@@ -52,6 +52,9 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
     }).toList();
   }
 
+  /// 云盘歌曲加载上限，与服务端实际限制对齐。
+  static const int _maxCloudSongs = 6000;
+
   Future<void> _loadCloudSongs() async {
     if (!mounted) return;
     setState(() {
@@ -71,35 +74,49 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
         return;
       }
 
-      final result = await api.getUserCloud(pagesize: 100, noCache: true);
-      if (!mounted) return;
-
-      if (result == null) {
-        setState(() {
-          _isLoading = false;
-          _error = '加载失败，请稍后重试';
-        });
-        return;
-      }
-
-      // 响应结构兼容：data 可能是 List 或 Map，列表字段可能是 info/list，
-      // 且这些字段在酷狗接口下有时是 JSON 编码的字符串（需安全解析，避免强转崩溃）。
-      final data = result['data'];
-      final list = _safeExtractList(data);
+      const int pageSize = 100;
+      // 向上取整，保证能拉到 _maxCloudSongs 首（100*60=6000）
+      const int maxPages = (_maxCloudSongs + pageSize - 1) ~/ pageSize;
 
       final songs = <Song>[];
-      if (list != null) {
-        // 打印首条原始数据，便于字段确认（仅 debug 模式）
-        if (list.isNotEmpty && kDebugMode) {
+      for (int page = 1; page <= maxPages; page++) {
+        final result =
+            await api.getUserCloud(page: page, pagesize: pageSize, noCache: true);
+        if (!mounted) return;
+
+        if (result == null) {
+          // 第一页失败才报错，后续页失败静默停止
+          if (page == 1) {
+            setState(() {
+              _isLoading = false;
+              _error = '加载失败，请稍后重试';
+            });
+            return;
+          }
+          break;
+        }
+
+        final data = result['data'];
+        final list = _safeExtractList(data);
+        if (list == null || list.isEmpty) break;
+
+        if (page == 1 && list.isNotEmpty && kDebugMode) {
           debugPrint('[CloudMusic] first item keys: ${list.first is Map<String, dynamic> ? (list.first as Map<String, dynamic>).keys.toList() : list.first.runtimeType}');
           debugPrint('[CloudMusic] first item: ${list.first}');
         }
+
         for (final e in list) {
           if (e is Map<String, dynamic>) {
             final song = mapCloudApiItemToSong(e);
             if (song.id.isNotEmpty) songs.add(song);
           }
         }
+
+        if (songs.length >= _maxCloudSongs) {
+          songs.removeRange(_maxCloudSongs, songs.length);
+          break;
+        }
+        if (list.length < pageSize) break;
       }
 
       setState(() {

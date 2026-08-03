@@ -70,24 +70,6 @@ class KugouApiClient {
   bool _isInitialized = false;
   Completer<void>? _initCompleter;
 
-  static const _loginPaths = {
-    '/login/qr/key',
-    '/login/qr/create',
-    '/login/qr/check',
-    '/login/cellphone',
-    '/login/token',
-    '/login',
-    '/login/wx/create',
-    '/login/wx/check',
-    '/login/openplat',
-    '/login/device',
-    '/login/device/kick',
-    '/captcha/sent',
-    '/youth/day/vip',
-    '/youth/day/vip/upgrade',
-    '/youth/month/vip/record',
-  };
-
   void _onRequest(
     RequestOptions options,
     RequestInterceptorHandler handler,
@@ -96,12 +78,8 @@ class KugouApiClient {
       await _initCompleter?.future;
     }
 
-    // 登录相关接口直接走云服务器，避免 local→cloud 双重签名
-    if (_loginPaths.contains(options.path)) {
-      options.baseUrl = 'http://115.29.236.96:5621';
-    } else {
-      options.baseUrl = KugouEndpoints.baseUrl;
-    }
+    // 登录等全部请求统一走本地 API 服务器（Rust），不再依赖第三方云端
+    options.baseUrl = KugouEndpoints.baseUrl;
 
     // 关键修复：每次请求前验证用户身份
     // /images 接口不需要登录态，带 token 会导致上游返回不同响应（缺少 imgs 字段）
@@ -144,10 +122,15 @@ class KugouApiClient {
     handler.next(options);
   }
 
-  void setBaseUrl(String url) {
+  /// 服务器随机端口就绪后更新 baseUrl。不清登录态、不重新注册设备。
+  void updateBaseUrl(String url) {
     final cleanUrl = url.replaceAll(RegExp(r'/+$'), '');
     KugouEndpoints.baseUrl = cleanUrl;
     _dio.options.baseUrl = cleanUrl;
+  }
+
+  void setBaseUrl(String url) {
+    updateBaseUrl(url);
     _dfid = null;
     registerDevice();
   }
@@ -720,23 +703,30 @@ class KugouApiClient {
     }
 
     try {
-      if (data['url'] != null) {
-        return KugouPlayUrl.fromJson(data);
-      }
-
+      // 先检查 fail_process：上游返回 fail_process: ['buy'] 时，
+      // 说明该音质需要购买/VIP，返回的 URL 实际是试听片段。
+      // 必须在此处拦截，不能让 data['url'] 检查抢先返回试听 URL。
       final failProcess = data['fail_process'];
-      if (downgrade &&
-          failProcess is List &&
+      if (failProcess is List &&
           failProcess.contains('buy') &&
           quality != KugouQuality.standard) {
-        params['quality'] = KugouQuality.standard;
-        json = await _get(KugouEndpoints.songUrl, queryParameters: params);
-        if (json != null) {
-          final fallbackData = _extractData(json['data'] ?? json);
-          if (fallbackData['url'] != null) {
-            return KugouPlayUrl.fromJson(fallbackData);
+        if (downgrade) {
+          // 降级到标准音质重新请求
+          params['quality'] = KugouQuality.standard;
+          json = await _get(KugouEndpoints.songUrl, queryParameters: params);
+          if (json != null) {
+            final fallbackData = _extractData(json['data'] ?? json);
+            if (fallbackData['url'] != null) {
+              return KugouPlayUrl.fromJson(fallbackData);
+            }
           }
         }
+        // 不降级则返回 null，让上层调用者处理降级
+        return null;
+      }
+
+      if (data['url'] != null) {
+        return KugouPlayUrl.fromJson(data);
       }
 
       // VIP 用户不要再走 free_part=1 主动拉 30 秒试听。
@@ -836,7 +826,7 @@ class KugouApiClient {
         return [KugouQuality.hires, KugouQuality.lossless, KugouQuality.high, KugouQuality.standard];
       case KugouQuality.lossless: // 'flac'
         return [KugouQuality.lossless, KugouQuality.high, KugouQuality.standard];
-      case KugouQuality.high: // '320'
+      case KugouQuality.high: // 'hq'
         return [KugouQuality.high, KugouQuality.standard];
       default:
         return [KugouQuality.standard];

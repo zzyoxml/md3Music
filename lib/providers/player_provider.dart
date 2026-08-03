@@ -35,7 +35,7 @@ enum AppLoopMode { off, one, all }
 
 enum AudioQuality {
   standard('128', '标准音质'),
-  high('320', '高音质'),
+  high('hq', '高音质'),
   flac('flac', '无损音质'),
   hires('high', 'Hi-Res 无损');
 
@@ -47,7 +47,7 @@ enum AudioQuality {
 /// 旧版本 SharedPreferences 中存储的音质值 → 当前 AudioQuality.value 映射。
 /// 升级后首次读取时自动转换，避免遗留值导致回退到标准音质。
 const _legacyQualityMap = <String, String>{
-  'hq': '320',
+  '320': 'hq',
   'sq': 'flac',
   'standard': '128',
   'hires': 'high',
@@ -1167,7 +1167,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           return false;
         }
 
-        // 确保 Node.js 本地代理服务器已启动（所有酷狗 API 走 127.0.0.1:8080）
+        // 确保本地 API 服务器已启动（所有酷狗 API 走本地随机端口）
         // 冷启动时 MethodChannel 可能尚未注册，导致 KugouApiServer.start() 失败，
         // 此处做二次兜底检查，避免 API 请求因服务器未就绪而全部失败
         await _ensureApiServerReady();
@@ -1269,16 +1269,21 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     return true;
   }
 
-  /// 确保 Node.js 本地代理服务器已就绪（127.0.0.1:8080）。
+  /// 确保本地 API 服务器已就绪（随机端口，见 KugouApiServer.currentPort）。
   ///
   /// 冷启动时 main() 中的 KugouApiServer.start() 可能因 MethodChannel 尚未注册
   /// 而失败（MissingPluginException），导致后续所有 API 请求因连接被拒绝而失败。
   /// 此方法在播放流程中做二次兜底：探测端口，若不通则重新尝试启动。
   Future<void> _ensureApiServerReady() async {
     if (kIsWeb || !Platform.isAndroid) return;
-    // 快速探测 8080 端口是否可用
+    final port = KugouApiServer.currentPort;
+    if (port <= 0) {
+      await KugouApiServer.start();
+      return;
+    }
+    // 快速探测端口是否可用
     try {
-      final socket = await Socket.connect('127.0.0.1', 8080,
+      final socket = await Socket.connect('127.0.0.1', port,
           timeout: const Duration(milliseconds: 500));
       await socket.close();
       return; // 服务器已就绪
