@@ -24,6 +24,7 @@ import '../../providers/local_favorites_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/downloads_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../providers/comment_display_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/apple_lyrics/apple_lyrics_view.dart';
@@ -1050,26 +1051,32 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                               ? 1.0
                                               : 0.85,
                                           duration: const Duration(
-                                              milliseconds: 500),
+                                            milliseconds: 500,
+                                          ),
                                           curve: Curves.easeOutBack,
                                           child: ClipRRect(
-                                            borderRadius:
-                                                BorderRadius.circular(16),
-                                            // Selector 让封面仅在 artworkUri 变化时重建
-                                            child: Selector<PlayerProvider,
-                                                (String?, String?)>(
-                                              selector: (_, p) => (
-                                                p.currentSong?.artworkUri,
-                                                p.currentSong?.localPath
-                                              ),
-                                              builder: (context, data, __) =>
-                                                  _buildCrossfadeArtwork(
-                                                data.$1,
-                                                colorScheme,
-                                                iconSize: 48,
-                                                fallbackFilePath: data.$2,
-                                              ),
+                                            borderRadius: BorderRadius.circular(
+                                              16,
                                             ),
+                                            // Selector 让封面仅在 artworkUri 变化时重建
+                                            child:
+                                                Selector<
+                                                  PlayerProvider,
+                                                  (String?, String?)
+                                                >(
+                                                  selector: (_, p) => (
+                                                    p.currentSong?.artworkUri,
+                                                    p.currentSong?.localPath,
+                                                  ),
+                                                  builder: (context, data, __) =>
+                                                      _buildCrossfadeArtwork(
+                                                        data.$1,
+                                                        colorScheme,
+                                                        iconSize: 48,
+                                                        fallbackFilePath:
+                                                            data.$2,
+                                                      ),
+                                                ),
                                           ),
                                         ),
                                         _buildZenLongPressHint(),
@@ -1297,26 +1304,31 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                                 ? 1.0
                                                 : 0.85,
                                             duration: const Duration(
-                                                milliseconds: 500),
+                                              milliseconds: 500,
+                                            ),
                                             curve: Curves.easeOutBack,
                                             child: ClipRRect(
                                               borderRadius:
                                                   BorderRadius.circular(16),
                                               // Selector 让封面仅在 artworkUri 变化时重建
-                                              child: Selector<PlayerProvider,
-                                                  (String?, String?)>(
-                                                selector: (_, p) => (
-                                                  p.currentSong?.artworkUri,
-                                                  p.currentSong?.localPath
-                                                ),
-                                                builder: (context, data, __) =>
-                                                    _buildCrossfadeArtwork(
-                                                  data.$1,
-                                                  colorScheme,
-                                                  iconSize: 48,
-                                                  fallbackFilePath: data.$2,
-                                                ),
-                                              ),
+                                              child:
+                                                  Selector<
+                                                    PlayerProvider,
+                                                    (String?, String?)
+                                                  >(
+                                                    selector: (_, p) => (
+                                                      p.currentSong?.artworkUri,
+                                                      p.currentSong?.localPath,
+                                                    ),
+                                                    builder: (context, data, __) =>
+                                                        _buildCrossfadeArtwork(
+                                                          data.$1,
+                                                          colorScheme,
+                                                          iconSize: 48,
+                                                          fallbackFilePath:
+                                                              data.$2,
+                                                        ),
+                                                  ),
                                             ),
                                           ),
                                           _buildZenLongPressHint(),
@@ -2649,9 +2661,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   title: const Text('歌词类型'),
                   trailing: Text(
                     lyricTypeLabel,
-                    style: Theme.of(sheetContext).textTheme.bodyMedium?.copyWith(
-                      color: Theme.of(sheetContext).colorScheme.primary,
-                    ),
+                    style: Theme.of(sheetContext).textTheme.bodyMedium
+                        ?.copyWith(
+                          color: Theme.of(sheetContext).colorScheme.primary,
+                        ),
                   ),
                 ),
                 ListTile(
@@ -2660,6 +2673,23 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   onTap: () {
                     Navigator.pop(sheetContext);
                     _showLyricPreferencesSheet(rootContext);
+                  },
+                ),
+                ListenableBuilder(
+                  listenable: context.read<CommentDisplayProvider>(),
+                  builder: (context, _) {
+                    final display = context.read<CommentDisplayProvider>();
+                    return ListTile(
+                      leading: const Icon(Icons.comment_outlined),
+                      title: const Text('评论显示设置'),
+                      subtitle: Text(
+                        '楼主 ${display.commentFontSize.toStringAsFixed(0)} 号 · 楼中楼 ${display.commentReplyFontSize.toStringAsFixed(0)} 号',
+                      ),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _showCommentDisplaySheet(rootContext);
+                      },
+                    );
                   },
                 ),
                 ListenableBuilder(
@@ -2768,6 +2798,211 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
+  /// 评论显示设置：调节楼主 / 楼中楼字体大小。
+  /// AM 风格下用纯白文字 + 半透明背景适配深色模糊封面。
+  void _showCommentDisplaySheet(BuildContext rootContext) {
+    showModalBottomSheet(
+      context: rootContext,
+      isScrollControlled: true,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Consumer<CommentDisplayProvider>(
+            builder: (context, display, _) {
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 32,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.4),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const Text(
+                      '评论显示设置',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      '楼中楼回复字号 = 楼主 − 3',
+                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        const Text(
+                          '楼主',
+                          style: TextStyle(color: Colors.white, fontSize: 14),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${display.commentFontSize.toStringAsFixed(0)} 号',
+                          style: TextStyle(
+                            fontSize: display.commentFontSize,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Slider(
+                      value: display.commentFontSize,
+                      min: 10.0,
+                      max: 24.0,
+                      divisions: 14,
+                      label: display.commentFontSize.toStringAsFixed(0),
+                      onChanged: (v) => display.setCommentFontSize(v),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              CircleAvatar(
+                                radius: 12,
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.2,
+                                ),
+                                child: const Icon(
+                                  Icons.person,
+                                  size: 14,
+                                  color: Colors.white70,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '楼主',
+                                      style: TextStyle(
+                                        fontSize: display.commentFontSize - 2,
+                                        color: Colors.white70,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '这是一条楼主评论的内容示例。',
+                                      style: TextStyle(
+                                        fontSize: display.commentFontSize,
+                                        height: 1.3,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                CircleAvatar(
+                                  radius: 10,
+                                  backgroundColor: Colors.white.withValues(
+                                    alpha: 0.2,
+                                  ),
+                                  child: const Icon(
+                                    Icons.person,
+                                    size: 12,
+                                    color: Colors.white70,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        '楼中楼',
+                                        style: TextStyle(
+                                          fontSize:
+                                              display.commentReplyFontSize - 2,
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 1),
+                                      Text(
+                                        '这是一条楼中楼回复示例。',
+                                        style: TextStyle(
+                                          fontSize:
+                                              display.commentReplyFontSize,
+                                          height: 1.3,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        TextButton(
+                          onPressed: () => display.resetToDefault(),
+                          child: const Text(
+                            '恢复默认',
+                            style: TextStyle(color: Colors.white70),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton(
+                          onPressed: () => Navigator.pop(sheetCtx),
+                          child: const Text('完成'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
   /// AM v2 睡眠定时药丸 — 复用 _buildQualityPill 样式（白色 15% 背景）。
   Widget _buildSleepTimerPill(PlayerProvider playerProvider) {
     final textTheme = Theme.of(context).textTheme;
@@ -2818,12 +3053,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               ),
               ..._sleepTimerPresets.map((d) {
                 final r = player.sleepTimerRemaining;
-                final active = r != null &&
-                    (r.inSeconds - d.inSeconds).abs() < 2;
+                final active =
+                    r != null && (r.inSeconds - d.inSeconds).abs() < 2;
                 return ListTile(
-                  leading: Icon(active
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked),
+                  leading: Icon(
+                    active
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_unchecked,
+                  ),
                   title: Text('${d.inMinutes} 分钟'),
                   onTap: () {
                     player.setSleepTimer(d);
@@ -2869,25 +3106,17 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     showDialog(
       context: rootContext,
       builder: (dialogCtx) => Dialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(28),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 320),
           child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 24,
-              vertical: 20,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Icon(Icons.timer_outlined, size: 32),
                 const SizedBox(height: 8),
-                const Text(
-                  '自定义定时关闭',
-                  style: TextStyle(fontSize: 16),
-                ),
+                const Text('自定义定时关闭', style: TextStyle(fontSize: 16)),
                 const SizedBox(height: 16),
                 TextField(
                   controller: controller,

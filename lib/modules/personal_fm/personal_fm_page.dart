@@ -324,17 +324,14 @@ class _PersonalFmPageState extends State<PersonalFmPage>
             FadeInUp(
               child: Text(
                 '实时推荐会根据你的反馈持续更新',
-                style: textTheme.bodySmall?.copyWith(
+                style: textTheme.bodyMedium?.copyWith(
                   color: cs.onSurfaceVariant.withValues(alpha: 0.58),
                 ),
               ),
             ),
             const SizedBox(height: 16),
             if (isLoggedIn)
-              FadeInUp(
-                delayMs: 30,
-                child: _buildToolbar(cs, textTheme),
-              ),
+              FadeInUp(delayMs: 30, child: _buildToolbar(cs, textTheme)),
             const SizedBox(height: 18),
             FadeInUp(
               delayMs: 60,
@@ -380,14 +377,14 @@ class _PersonalFmPageState extends State<PersonalFmPage>
             const SizedBox(height: 20),
             Text(
               '登录后查看私人 FM',
-              style: textTheme.titleLarge?.copyWith(
+              style: textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: 8),
             Text(
               '猜你喜欢和实时推荐需要登录状态',
-              style: textTheme.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              style: textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
             ),
           ],
         ),
@@ -428,19 +425,17 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                 children: [
                   Text(
                     '推荐方式',
-                    style: textTheme.labelSmall?.copyWith(
+                    style: textTheme.bodySmall?.copyWith(
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.08,
                       color: cs.onSurfaceVariant.withValues(alpha: 0.54),
-                      fontSize: isSmallScreen ? 10 : null,
                     ),
                   ),
                   Expanded(
                     child: Text(
                       '${_getModeLabel(_selectedMode)} · ${_songPoolOptions.firstWhere((o) => o['value'] == _selectedSongPoolId)['label']}',
-                      style: textTheme.bodySmall?.copyWith(
+                      style: textTheme.bodyMedium?.copyWith(
                         color: cs.onSurfaceVariant.withValues(alpha: 0.64),
-                        fontSize: isSmallScreen ? 10 : null,
                       ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -497,8 +492,8 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                     : null,
                 child: Text(
                   option['label'],
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    fontSize: isSmallScreen ? 11 : null,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontSize: isSmallScreen ? 12 : null,
                     fontWeight: FontWeight.w700,
                     color: isActive
                         ? cs.onPrimary
@@ -673,10 +668,12 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               SizedBox(height: isUltraSmall ? 0.5 : (isVerySmall ? 1 : 2)),
               Text(
                 currentTrack != null ? currentTrack.songName : '暂无推荐',
-                style: textTheme.bodySmall?.copyWith(
+                style: textTheme.bodyMedium?.copyWith(
                   color: cs.onPrimaryContainer.withValues(alpha: 0.9),
                   fontWeight: FontWeight.w600,
-                  fontSize: 9 * textSizeMultiplier,
+                  fontSize:
+                      (isUltraSmall ? 11 : (isVerySmall ? 12 : 14)) *
+                      textSizeMultiplier,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -684,10 +681,12 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               SizedBox(height: isUltraSmall ? 0.3 : (isVerySmall ? 0.5 : 1)),
               Text(
                 currentTrack?.artistName ?? '',
-                style: textTheme.bodySmall?.copyWith(
+                style: textTheme.bodyMedium?.copyWith(
                   color: cs.onPrimaryContainer.withValues(alpha: 0.6),
                   fontWeight: FontWeight.w500,
-                  fontSize: 8 * textSizeMultiplier,
+                  fontSize:
+                      (isUltraSmall ? 9 : (isVerySmall ? 10 : 12)) *
+                      textSizeMultiplier,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -695,7 +694,11 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               SizedBox(height: height * 0.08),
               Row(
                 children: [
-                  _buildAudioBars(cs, isSmall: isVerySmall, isUltraSmall: isUltraSmall),
+                  _buildAudioBars(
+                    cs,
+                    isSmall: isVerySmall,
+                    isUltraSmall: isUltraSmall,
+                  ),
                   const Spacer(),
                   FittedBox(
                     fit: BoxFit.scaleDown,
@@ -726,7 +729,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         : (isSmall
               ? const EdgeInsets.symmetric(horizontal: 6, vertical: 2)
               : const EdgeInsets.symmetric(horizontal: 8, vertical: 4));
-    final fontSize = isUltraSmall ? 8.0 : (isSmall ? 9.0 : 10.0);
+    final fontSize = isUltraSmall ? 10.0 : (isSmall ? 11.0 : 12.0);
 
     return FittedBox(
       fit: BoxFit.scaleDown,
@@ -756,7 +759,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                     : null,
                 child: Text(
                   option['label'],
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     fontSize: fontSize,
                     fontWeight: FontWeight.w700,
                     color: isActive
@@ -850,9 +853,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               color: cs.primary,
             ),
             child: _isLoading
-                ? MD3ELoadingIndicator(
-                    color: cs.onPrimary,
-                  )
+                ? MD3ELoadingIndicator(color: cs.onPrimary)
                 : Icon(
                     isPlaying ? Icons.pause : Icons.play_arrow,
                     color: cs.onPrimary,
@@ -900,10 +901,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
         height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(
-            color: cs.outlineVariant,
-            width: borderWidth,
-          ),
+          border: Border.all(color: cs.outlineVariant, width: borderWidth),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.32),
@@ -1056,9 +1054,8 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                 children: [
                   Text(
                     '当前播放',
-                    style: textTheme.titleSmall?.copyWith(
+                    style: textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w700,
-                      fontSize: isSmallScreen ? 13 : null,
                     ),
                   ),
                   const Spacer(),
@@ -1075,10 +1072,10 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                         ),
                         child: Text(
                           '${_getModeLabel(_selectedMode)} 实时推荐',
-                          style: textTheme.bodySmall?.copyWith(
+                          style: textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.w700,
                             color: cs.onPrimaryContainer,
-                            fontSize: isSmallScreen ? 11 : 12,
+                            fontSize: isSmallScreen ? 12 : 13,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -1143,10 +1140,10 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               SizedBox(height: isSmallScreen ? 3 : 4),
               Text(
                 track.artistName ?? '',
-                style: textTheme.bodySmall?.copyWith(
+                style: textTheme.bodyMedium?.copyWith(
                   fontWeight: FontWeight.w600,
                   color: cs.onSurfaceVariant.withValues(alpha: 0.74),
-                  fontSize: isSmallScreen ? 12 : 13,
+                  fontSize: isSmallScreen ? 13 : 14,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -1157,7 +1154,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                   style: textTheme.bodySmall?.copyWith(
                     fontWeight: FontWeight.w500,
                     color: cs.onSurfaceVariant.withValues(alpha: 0.56),
-                    fontSize: isSmallScreen ? 10 : 11,
+                    fontSize: isSmallScreen ? 12 : 13,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1167,7 +1164,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                 '${_getModeLabel(_selectedMode)} 实时推荐',
                 style: textTheme.bodySmall?.copyWith(
                   color: cs.primary,
-                  fontSize: isSmallScreen ? 10 : 11,
+                  fontSize: isSmallScreen ? 12 : 13,
                 ),
               ),
               SizedBox(height: isSmallScreen ? 4 : 6),
@@ -1210,8 +1207,8 @@ class _PersonalFmPageState extends State<PersonalFmPage>
           ),
           child: Text(
             chip,
-            style: Theme.of(context).textTheme.labelSmall?.copyWith(
-              fontSize: isSmallScreen ? 10 : null,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              fontSize: isSmallScreen ? 11 : null,
               fontWeight: FontWeight.w700,
               color: cs.onSurfaceVariant.withValues(alpha: 0.68),
             ),

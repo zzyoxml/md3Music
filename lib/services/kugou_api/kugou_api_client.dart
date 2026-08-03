@@ -862,14 +862,18 @@ class KugouApiClient {
           albumAudioId: albumAudioId,
           downgrade: false,
         );
-        if (result != null && result.url.isNotEmpty) {
+        // 跳过试听结果：非 VIP 用户在高等级音质请求时，getSongUrl 内部的
+        // free_part=1 兜底可能返回 30s 试听 URL。如果在此处接受试听结果，
+        // 降级链会被短路——更低音质的完整播放链接永远不会被尝试。
+        // 试听兜底统一在本方法末尾（所有音质都尝试完毕后）执行。
+        if (result != null && result.url.isNotEmpty && !result.isTrial) {
           // 用实际请求的音质覆盖返回值中的 quality 字段
           return KugouPlayUrl(
             url: result.url,
             fileSize: result.fileSize,
             bitRate: result.bitRate,
             quality: q,
-            isTrial: result.isTrial,
+            isTrial: false,
           );
         }
       } catch (_) {}

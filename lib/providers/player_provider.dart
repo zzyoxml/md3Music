@@ -29,6 +29,7 @@ import '../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import 'favorites_provider.dart';
 import 'kugou_provider.dart';
 import '../services/kugou_api/kugou_api_client.dart';
+import '../services/kugou_api/kugou_models.dart';
 
 enum AppLoopMode { off, one, all }
 
@@ -42,6 +43,15 @@ enum AudioQuality {
   final String value;
   final String label;
 }
+
+/// 旧版本 SharedPreferences 中存储的音质值 → 当前 AudioQuality.value 映射。
+/// 升级后首次读取时自动转换，避免遗留值导致回退到标准音质。
+const _legacyQualityMap = <String, String>{
+  'hq': '320',
+  'sq': 'flac',
+  'standard': '128',
+  'hires': 'high',
+};
 
 class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Song? _currentSong;
@@ -60,6 +70,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   // 边听边存：当前歌曲的本地缓存封面路径（缓存命中时设置，供 MediaSession 兜底）
   String? _cachedArtworkPath;
   AudioQuality _audioQuality = AudioQuality.standard;
+  // 当前在线歌曲实际播放的音质标签（降级后可能与用户设置不同）。
+  // 每次成功获取播放链接时由 result.quality 更新；切歌或切换音质时重置。
+  String? _actualPlayingQuality;
 
   // —— 睡眠定时（到点自动暂停） ——
   // 用 wall clock（DateTime.now()）计算剩余时间，避免 Timer 漂移；
@@ -102,8 +115,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool get isSleepTimerActive => _sleepTimerEndTime != null;
 
   /// 当前歌曲的实际音质标签。
-  /// 本地歌曲优先使用 song.quality 推断的标签，在线歌曲始终使用全局音质偏好
-  /// （因为在线歌曲的实际播放音质由用户设置决定，而非歌曲元数据中的 quality 字段）。
+  /// 本地歌曲优先使用 song.quality 推断的标签；
+  /// 在线歌曲优先显示实际播放音质（降级后可能与用户设置不同），
+  /// 若尚无实际音质则回退到用户设置的全局音质偏好。
   String get currentQualityLabel {
     final song = _currentSong;
     if (song != null && !song.isOnline && song.quality != null) {
@@ -120,7 +134,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           return song.quality!;
       }
     }
-    // 在线歌曲始终显示用户当前设置的全局音质偏好
+    // 在线歌曲：优先显示实际播放音质（可能因降级而与设置不同）
+    if (_actualPlayingQuality != null) {
+      return KugouQuality.labelOf(_actualPlayingQuality!);
+    }
     return _audioQuality.label;
   }
 
@@ -187,8 +204,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final settings = SettingsRepository();
       final qualityValue = await settings.getDefaultQuality();
+      // 兼容旧版本存储的遗留值：hq→320, sq→flac, standard→128, hires→high
+      final mapped = _legacyQualityMap[qualityValue] ?? qualityValue;
       _audioQuality = AudioQuality.values.firstWhere(
-        (q) => q.value == qualityValue,
+        (q) => q.value == mapped,
         orElse: () {
           return AudioQuality.standard;
         },
@@ -497,6 +516,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   void _resetAbnormalRetry() {
     _abnormalEndRetries = 0;
     _retryingSongId = null;
+    _actualPlayingQuality = null;
   }
 
   Future<void> playSong(Song song) async {
@@ -570,6 +590,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       // 缓存命中：直接用本地路径播放
       if (cachedPath != null) {
+        _actualPlayingQuality = _audioQuality.value;
         final fileUri = Uri.file(cachedPath).toString();
         final resolvedSong = song.copyWith(url: fileUri);
         _currentSong = resolvedSong;
@@ -603,6 +624,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       );
 
       if (result != null && result.url.isNotEmpty) {
+        _actualPlayingQuality = result.quality;
         final resolvedSong = song.copyWith(url: result.url);
         _currentSong = resolvedSong;
         _playlist = [resolvedSong];
@@ -675,6 +697,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         );
 
         if (result != null && result.url.isNotEmpty) {
+          _actualPlayingQuality = result.quality;
           final resolvedSong = _currentSong!.copyWith(url: result.url);
           _currentSong = resolvedSong;
           _playlist[startIndex] = resolvedSong;
@@ -754,6 +777,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       // 缓存命中：直接播放本地文件
       if (cachedPath != null) {
+        _actualPlayingQuality = _audioQuality.value;
         final fileUri = Uri.file(cachedPath).toString();
         final resolvedSong = _currentSong!.copyWith(url: fileUri);
         _currentSong = resolvedSong;
@@ -779,6 +803,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         );
 
         if (result != null && result.url.isNotEmpty) {
+          _actualPlayingQuality = result.quality;
           final resolvedSong = _currentSong!.copyWith(url: result.url);
           _currentSong = resolvedSong;
           _playlist[startIndex] = resolvedSong;
@@ -935,6 +960,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         albumAudioId: song.albumAudioId,
       );
       if (result != null && result.url.isNotEmpty) {
+        _actualPlayingQuality = result.quality;
         return result.url;
       }
     } catch (_) {}
@@ -1089,6 +1115,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         );
         if (cachedPath != null) {
           // 缓存命中，直接播放本地文件
+          _actualPlayingQuality = _audioQuality.value;
           // 查询本地缓存封面路径，供 MediaSession 断网兜底
           _cachedArtworkPath = await StreamCacheManager.instance
               .getCachedArtworkPath(song.id);
@@ -1128,6 +1155,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           );
 
           if (result != null && result.url.isNotEmpty) {
+            _actualPlayingQuality = result.quality;
             final resolvedSong = _currentSong!.copyWith(url: result.url);
             _currentSong = resolvedSong;
             _playlist[_currentIndex] = resolvedSong;
@@ -1588,6 +1616,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
             albumAudioId: _currentSong!.albumAudioId,
           );
           if (result != null && result.url.isNotEmpty) {
+            _actualPlayingQuality = result.quality;
             final resolvedSong = _currentSong!.copyWith(url: result.url);
             _currentSong = resolvedSong;
             _playlist[_currentIndex] = resolvedSong;
@@ -1732,6 +1761,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   void setAudioQuality(AudioQuality quality) {
     if (_audioQuality == quality) return;
     _audioQuality = quality;
+    _actualPlayingQuality = null;
     SettingsRepository().setDefaultQuality(quality.value);
     notifyListeners();
     _applyQualityToCurrent();
@@ -1794,6 +1824,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
 
+      _actualPlayingQuality = result.quality;
       final resolvedSong = song.copyWith(url: result.url);
       _currentSong = resolvedSong;
       if (_playlist.isNotEmpty && _currentIndex >= 0) {

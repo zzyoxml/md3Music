@@ -92,7 +92,9 @@ class _FavoritesPageState extends State<FavoritesPage>
       await _loadAccessOrder();
       if (!mounted) return;
       _loadAllData();
-      context.read<PlaylistCollectionNotifier>().addListener(_onCollectionChanged);
+      context.read<PlaylistCollectionNotifier>().addListener(
+        _onCollectionChanged,
+      );
     });
   }
 
@@ -108,7 +110,9 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   @override
   void dispose() {
-    context.read<PlaylistCollectionNotifier>().removeListener(_onCollectionChanged);
+    context.read<PlaylistCollectionNotifier>().removeListener(
+      _onCollectionChanged,
+    );
     _tabController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -123,7 +127,8 @@ class _FavoritesPageState extends State<FavoritesPage>
       final cachedArtists = await FavoriteListsCache.readArtists();
       final lastSync = await FavoriteListsCache.readLastSyncTime();
       if (!mounted) return;
-      final hasAny = cachedPlaylists.isNotEmpty ||
+      final hasAny =
+          cachedPlaylists.isNotEmpty ||
           cachedAlbums.isNotEmpty ||
           cachedArtists.isNotEmpty;
       if (hasAny) {
@@ -188,11 +193,7 @@ class _FavoritesPageState extends State<FavoritesPage>
   }
 
   Future<void> _loadAllData() async {
-    await Future.wait([
-      _loadPlaylists(),
-      _loadAlbums(),
-      _loadArtists(),
-    ]);
+    await Future.wait([_loadPlaylists(), _loadAlbums(), _loadArtists()]);
   }
 
   String? get _currentUserId => KugouApiClient().userid;
@@ -212,15 +213,13 @@ class _FavoritesPageState extends State<FavoritesPage>
   int _getAccessTime(KugouPlaylistBrief p) =>
       _playlistAccessOrder[p.globalCollectionId ?? p.id] ?? 0;
 
-  List<KugouPlaylistBrief> get _createdPlaylists => _playlists
-      .where(_isCreated)
-      .toList()
-    ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+  List<KugouPlaylistBrief> get _createdPlaylists =>
+      _playlists.where(_isCreated).toList()
+        ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
 
-  List<KugouPlaylistBrief> get _collectedPlaylists => _playlists
-      .where((p) => !_isCreated(p))
-      .toList()
-    ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+  List<KugouPlaylistBrief> get _collectedPlaylists =>
+      _playlists.where((p) => !_isCreated(p)).toList()
+        ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
 
   // ==================== 数据加载 ====================
 
@@ -421,7 +420,9 @@ class _FavoritesPageState extends State<FavoritesPage>
           for (final found in searchResult) {
             // 匹配专辑名，取 numericId（来自 albumid 字段）
             if (found.name == album.name && found.numericId != null) {
-              debugPrint('[AlbumIDs] ${album.name} -> numericId=${found.numericId}');
+              debugPrint(
+                '[AlbumIDs] ${album.name} -> numericId=${found.numericId}',
+              );
               if (mounted) {
                 setState(() {
                   _albumOriginalIds[album.id] = found.numericId!;
@@ -593,57 +594,57 @@ class _FavoritesPageState extends State<FavoritesPage>
         _exitManageMode();
       },
       child: Scaffold(
-      appBar: AppBar(
-        title: Text(
-          '我的收藏',
-          style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+        appBar: AppBar(
+          title: Text(
+            '我的收藏',
+            style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+          ),
+          actions: [
+            if (_isManaging)
+              IconButton(
+                icon: const Icon(Icons.delete),
+                onPressed: _deleteSelectedPlaylists,
+              )
+            else
+              IconButton(
+                icon: const Icon(Icons.add),
+                onPressed: _showCreatePlaylistDialog,
+              ),
+          ],
+          bottom: TabBar(
+            controller: _tabController,
+            tabs: const [
+              Tab(icon: Icon(Icons.queue_music), text: '歌单'),
+              Tab(icon: Icon(Icons.album), text: '专辑'),
+              Tab(icon: Icon(Icons.person), text: '歌手'),
+            ],
+          ),
         ),
-        actions: [
-          if (_isManaging)
-            IconButton(
-              icon: const Icon(Icons.delete),
-              onPressed: _deleteSelectedPlaylists,
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.add),
-              onPressed: _showCreatePlaylistDialog,
+        body: Column(
+          children: [
+            // 监听 dio 拦截器维护的全局网络状态：任意 dio 请求失败 → 显示 banner
+            ValueListenableBuilder<bool>(
+              valueListenable: KugouApiClient.networkReachable,
+              builder: (context, reachable, _) {
+                if (reachable) return const SizedBox.shrink();
+                return OfflineBanner(
+                  lastSyncTime: _lastSyncTime,
+                  onRetry: _retryFromBanner,
+                );
+              },
             ),
-        ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: const [
-            Tab(icon: Icon(Icons.queue_music), text: '歌单'),
-            Tab(icon: Icon(Icons.album), text: '专辑'),
-            Tab(icon: Icon(Icons.person), text: '歌手'),
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildPlaylistsTab(),
+                  _buildAlbumsTab(),
+                  _buildArtistsTab(),
+                ],
+              ),
+            ),
           ],
         ),
-      ),
-      body: Column(
-        children: [
-          // 监听 dio 拦截器维护的全局网络状态：任意 dio 请求失败 → 显示 banner
-          ValueListenableBuilder<bool>(
-            valueListenable: KugouApiClient.networkReachable,
-            builder: (context, reachable, _) {
-              if (reachable) return const SizedBox.shrink();
-              return OfflineBanner(
-                lastSyncTime: _lastSyncTime,
-                onRetry: _retryFromBanner,
-              );
-            },
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildPlaylistsTab(),
-                _buildAlbumsTab(),
-                _buildArtistsTab(),
-              ],
-            ),
-          ),
-        ],
-      ),
       ),
     );
   }
@@ -674,21 +675,23 @@ class _FavoritesPageState extends State<FavoritesPage>
             Icon(
               Icons.queue_music,
               size: 64,
-              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
             ),
             const SizedBox(height: 16),
             Text(
               '还没有歌单',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 8),
             Text(
               '去发现页找找喜欢的歌单吧',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -714,7 +717,8 @@ class _FavoritesPageState extends State<FavoritesPage>
               _GroupSection(
                 title: '我创建的歌单',
                 expanded: _createdExpanded,
-                onToggle: () => setState(() => _createdExpanded = !_createdExpanded),
+                onToggle: () =>
+                    setState(() => _createdExpanded = !_createdExpanded),
                 playlists: _createdPlaylists,
                 onBuildTile: (playlist) =>
                     _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
@@ -723,7 +727,8 @@ class _FavoritesPageState extends State<FavoritesPage>
               _GroupSection(
                 title: '我收藏的歌单',
                 expanded: _collectedExpanded,
-                onToggle: () => setState(() => _collectedExpanded = !_collectedExpanded),
+                onToggle: () =>
+                    setState(() => _collectedExpanded = !_collectedExpanded),
                 playlists: _collectedPlaylists,
                 onBuildTile: (playlist) =>
                     _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
@@ -734,15 +739,16 @@ class _FavoritesPageState extends State<FavoritesPage>
                 padding: EdgeInsets.all(16),
                 child: Center(child: MD3ELoadingIndicator()),
               )
-            else if (!_hasMorePlaylists && _playlists.length > _playlistPageSize)
+            else if (!_hasMorePlaylists &&
+                _playlists.length > _playlistPageSize)
               Padding(
                 padding: const EdgeInsets.all(16),
                 child: Center(
                   child: Text(
                     '没有更多了',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ),
               ),
@@ -759,118 +765,122 @@ class _FavoritesPageState extends State<FavoritesPage>
     return FadeInUp(
       delayMs: index * 30,
       child: InkWell(
-      onTap: _isManaging
-          ? () {
-              setState(() {
-                if (isSelected) {
-                  _selectedIndices.remove(index);
-                } else {
-                  _selectedIndices.add(index);
-                }
-              });
-            }
-          : () async {
-              await _recordPlaylistAccess(playlist);
-              if (!mounted) return;
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => PlaylistPage(
-                    playlist: playlist.toPlaylist(),
-                    isInMyFavorites: true,
-                    isUserCreated: _isCreated(playlist),
+        onTap: _isManaging
+            ? () {
+                setState(() {
+                  if (isSelected) {
+                    _selectedIndices.remove(index);
+                  } else {
+                    _selectedIndices.add(index);
+                  }
+                });
+              }
+            : () async {
+                await _recordPlaylistAccess(playlist);
+                if (!mounted) return;
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => PlaylistPage(
+                      playlist: playlist.toPlaylist(),
+                      isInMyFavorites: true,
+                      isUserCreated: _isCreated(playlist),
+                    ),
+                  ),
+                );
+              },
+        onLongPress: _isManaging
+            ? null
+            : () {
+                _enterManageMode();
+                setState(() => _selectedIndices.add(index));
+              },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          color: isSelected
+              ? colorScheme.primaryContainer.withValues(alpha: 0.3)
+              : null,
+          child: Row(
+            children: [
+              if (_isManaging)
+                Padding(
+                  padding: const EdgeInsets.only(right: 12),
+                  child: Icon(
+                    isSelected ? Icons.check_circle : Icons.circle_outlined,
+                    color: isSelected
+                        ? colorScheme.primary
+                        : colorScheme.onSurfaceVariant,
+                    size: 22,
                   ),
                 ),
-              );
-            },
-      onLongPress: _isManaging
-          ? null
-          : () {
-              _enterManageMode();
-              setState(() => _selectedIndices.add(index));
-            },
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        color: isSelected ? colorScheme.primaryContainer.withValues(alpha: 0.3) : null,
-        child: Row(
-          children: [
-            if (_isManaging)
-              Padding(
-                padding: const EdgeInsets.only(right: 12),
-                child: Icon(
-                  isSelected ? Icons.check_circle : Icons.circle_outlined,
-                  color: isSelected ? colorScheme.primary : colorScheme.onSurfaceVariant,
-                  size: 22,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: playlist.coverUrl != null
+                      ? CachedNetworkImage(
+                          imageUrl: playlist.coverUrl!,
+                          fit: BoxFit.cover,
+                          placeholder: (_, _) => Container(
+                            color: colorScheme.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.queue_music,
+                              size: 24,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          errorWidget: (_, _, _) => Container(
+                            color: colorScheme.surfaceContainerHighest,
+                            child: Icon(
+                              Icons.queue_music,
+                              size: 24,
+                              color: colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        )
+                      : Container(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.queue_music,
+                            size: 24,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
                 ),
               ),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: SizedBox(
-                width: 52,
-                height: 52,
-                child: playlist.coverUrl != null
-                    ? CachedNetworkImage(
-                        imageUrl: playlist.coverUrl!,
-                        fit: BoxFit.cover,
-                        placeholder: (_, _) => Container(
-                          color: colorScheme.surfaceContainerHighest,
-                          child: Icon(
-                            Icons.queue_music,
-                            size: 24,
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        errorWidget: (_, _, _) => Container(
-                          color: colorScheme.surfaceContainerHighest,
-                          child: Icon(
-                            Icons.queue_music,
-                            size: 24,
-                            color: colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      )
-                    : Container(
-                        color: colorScheme.surfaceContainerHighest,
-                        child: Icon(
-                          Icons.queue_music,
-                          size: 24,
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      playlist.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w500,
                       ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${playlist.songCount} 首',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    playlist.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w500,
-                        ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${playlist.songCount} 首',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-            if (!_isManaging)
-              Icon(
-                Icons.chevron_right,
-                color: colorScheme.onSurfaceVariant,
-                size: 20,
-              ),
-          ],
+              if (!_isManaging)
+                Icon(
+                  Icons.chevron_right,
+                  color: colorScheme.onSurfaceVariant,
+                  size: 20,
+                ),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
@@ -890,14 +900,16 @@ class _FavoritesPageState extends State<FavoritesPage>
             Icon(
               Icons.album,
               size: 64,
-              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
             ),
             const SizedBox(height: 16),
             Text(
               '还没有收藏专辑',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -911,10 +923,7 @@ class _FavoritesPageState extends State<FavoritesPage>
         itemCount: _albums.length,
         itemBuilder: (context, index) {
           final album = _albums[index];
-          return FadeInUp(
-            delayMs: index * 30,
-            child: _buildAlbumTile(album),
-          );
+          return FadeInUp(delayMs: index * 30, child: _buildAlbumTile(album));
         },
       ),
     );
@@ -924,11 +933,15 @@ class _FavoritesPageState extends State<FavoritesPage>
     final colorScheme = Theme.of(context).colorScheme;
     // 优先使用搜索到的原始数字 album ID
     final originalId = _albumOriginalIds[album.id] ?? album.numericId;
-    debugPrint('[AlbumTile] ${album.name}: originalId=$originalId (from map: ${_albumOriginalIds[album.id]}, numericId: ${album.numericId})');
+    debugPrint(
+      '[AlbumTile] ${album.name}: originalId=$originalId (from map: ${_albumOriginalIds[album.id]}, numericId: ${album.numericId})',
+    );
 
     return InkWell(
       onTap: () {
-        debugPrint('[AlbumTile] tapping ${album.name} -> albumGlobalCollectionId=$originalId');
+        debugPrint(
+          '[AlbumTile] tapping ${album.name} -> albumGlobalCollectionId=$originalId',
+        );
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -990,16 +1003,16 @@ class _FavoritesPageState extends State<FavoritesPage>
                     album.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w500,
-                        ),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     '${album.songCount} 首',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                      color: colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ),
@@ -1030,14 +1043,16 @@ class _FavoritesPageState extends State<FavoritesPage>
             Icon(
               Icons.person,
               size: 64,
-              color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
             ),
             const SizedBox(height: 16),
             Text(
               '还没有关注歌手',
               style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -1051,10 +1066,7 @@ class _FavoritesPageState extends State<FavoritesPage>
         itemCount: _artists.length,
         itemBuilder: (context, index) {
           final artist = _artists[index];
-          return FadeInUp(
-            delayMs: index * 30,
-            child: _buildArtistTile(artist),
-          );
+          return FadeInUp(delayMs: index * 30, child: _buildArtistTile(artist));
         },
       ),
     );
@@ -1071,12 +1083,21 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildArtistTile(Map<String, dynamic> artist) {
     final colorScheme = Theme.of(context).colorScheme;
-    final name = artist['nickname'] ?? artist['user_name'] ?? artist['name'] ?? '';
+    final name =
+        artist['nickname'] ?? artist['user_name'] ?? artist['name'] ?? '';
     final avatar = _fixImageUrl(
-      (artist['pic'] ?? artist['user_pic'] ?? artist['user_img'] ?? artist['avatar'])?.toString(),
+      (artist['pic'] ??
+              artist['user_pic'] ??
+              artist['user_img'] ??
+              artist['avatar'])
+          ?.toString(),
     );
     // 使用 singerid 作为歌手 ID（userid 是用户 ID，不是歌手 ID）
-    final id = artist['singerid']?.toString() ?? artist['userid']?.toString() ?? artist['id']?.toString() ?? '';
+    final id =
+        artist['singerid']?.toString() ??
+        artist['userid']?.toString() ??
+        artist['id']?.toString() ??
+        '';
 
     return InkWell(
       onTap: () {
@@ -1119,9 +1140,9 @@ class _FavoritesPageState extends State<FavoritesPage>
                     name.toString(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w500,
-                        ),
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ],
               ),
@@ -1224,16 +1245,16 @@ class _GroupSectionState extends State<_GroupSection>
                 const SizedBox(width: 4),
                 Text(
                   widget.title,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(width: 8),
                 Text(
                   '${widget.playlists.length}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colorScheme.onSurfaceVariant,
-                      ),
+                    color: colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),

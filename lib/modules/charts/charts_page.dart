@@ -22,6 +22,7 @@ class ChartsPage extends StatefulWidget {
 class _ChartsPageState extends State<ChartsPage> {
   /// 顶栏渐变 ScrollController：与 ScrollAwareAppBar 共享
   final ScrollController _scrollController = ScrollController();
+
   /// 布局模式：true=列表（一行一个），false=网格（一行两个）
   bool _isListMode = true;
   bool _isLoading = true;
@@ -62,8 +63,8 @@ class _ChartsPageState extends State<ChartsPage> {
       body: _isLoading
           ? const Center(child: MD3ELoadingIndicator())
           : _isListMode
-              ? _buildRankList(context, cs)
-              : _buildRankGrid(context, cs),
+          ? _buildRankList(context, cs)
+          : _buildRankGrid(context, cs),
     );
   }
 
@@ -85,13 +86,13 @@ class _ChartsPageState extends State<ChartsPage> {
                 const SizedBox(height: 12),
                 Text(
                   '暂无排行榜数据',
-                  style: tt.bodyLarge?.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
+                  style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
                 FilledButton.tonal(
-                  onPressed: () => context.read<KugouProvider>().getRankList(forceRefresh: true),
+                  onPressed: () => context.read<KugouProvider>().getRankList(
+                    forceRefresh: true,
+                  ),
                   child: const Text('重试'),
                 ),
               ],
@@ -99,7 +100,8 @@ class _ChartsPageState extends State<ChartsPage> {
           );
         }
         return MD3ERefreshIndicator(
-          onRefresh: () => context.read<KugouProvider>().getRankList(forceRefresh: true),
+          onRefresh: () =>
+              context.read<KugouProvider>().getRankList(forceRefresh: true),
           child: ListView.builder(
             controller: _scrollController,
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -120,8 +122,10 @@ class _ChartsPageState extends State<ChartsPage> {
                       borderRadius: BorderRadius.circular(16),
                       onTap: () => Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) =>
-                              _RankSongPage(rankId: rank.id, rankName: rank.name),
+                          builder: (_) => _RankSongPage(
+                            rankId: rank.id,
+                            rankName: rank.name,
+                          ),
                         ),
                       ),
                       child: Padding(
@@ -223,13 +227,15 @@ class _ChartsPageState extends State<ChartsPage> {
                 const SizedBox(height: 12),
                 Text(
                   '暂无排行榜数据',
-                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: cs.onSurfaceVariant,
-                  ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.titleMedium?.copyWith(color: cs.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
                 FilledButton.tonal(
-                  onPressed: () => context.read<KugouProvider>().getRankList(forceRefresh: true),
+                  onPressed: () => context.read<KugouProvider>().getRankList(
+                    forceRefresh: true,
+                  ),
                   child: const Text('重试'),
                 ),
               ],
@@ -237,7 +243,8 @@ class _ChartsPageState extends State<ChartsPage> {
           );
         }
         return MD3ERefreshIndicator(
-          onRefresh: () => context.read<KugouProvider>().getRankList(forceRefresh: true),
+          onRefresh: () =>
+              context.read<KugouProvider>().getRankList(forceRefresh: true),
           // 使用 PinchableGridView 替代固定2列 GridView：
           // Pad 模式下双指捏合可动态调整列数，非 Pad 模式仍固定 2 列
           child: PinchableGridView(
@@ -319,7 +326,7 @@ class _RankGridCard extends StatelessWidget {
                       name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w600,
                         color: colorScheme.onSurface,
                       ),
@@ -408,7 +415,7 @@ class _RankSongPageState extends State<_RankSongPage> {
                         const SizedBox(height: 12),
                         Text(
                           '暂无数据',
-                          style: tt.bodyLarge?.copyWith(
+                          style: tt.titleMedium?.copyWith(
                             color: cs.onSurfaceVariant,
                           ),
                         ),
