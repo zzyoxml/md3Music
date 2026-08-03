@@ -33,7 +33,13 @@ void applyImmersiveForOrientation() {
     // 横屏：完全沉浸，隐藏状态栏和导航栏
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   } else {
-    // 竖屏：edgeToEdge，导航栏透明，内容延伸到导航栏后面
+    // 竖屏：edgeToEdge，导航栏透明，内容延伸到导航栏后面。
+    // 先强制恢复系统栏显示：从 immersiveSticky（zen/横屏）切到 edgeToEdge 时，
+    // 部分设备状态栏不会自动重新显示，必须先 manual 显式 show 再切 edgeToEdge。
+    SystemChrome.setEnabledSystemUIMode(
+      SystemUiMode.manual,
+      overlays: SystemUiOverlay.values,
+    );
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     // 引用公共 const，与 AnnotatedRegion 共用同一实例
     // 避免引用不等触发平台 channel 真实调用导致闪烁
