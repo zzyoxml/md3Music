@@ -910,6 +910,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         if (_audioService != null) {
           await _setUrlAndPlay(url);
         }
+        // 云盘封面内嵌在音频文件中（API 不返回封面 URL）：
+        // 播放后异步从音频提取并回填 artworkUri
+        _extractCloudArtwork(resolvedSong, url);
       } else {
         _isResolvingUrl = false;
         _resolveError = '无法获取云盘播放链接';
@@ -966,6 +969,31 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
     } catch (_) {}
     return null;
+  }
+
+  /// 云盘封面内嵌在音频文件中（API 不返回封面 URL），播放后异步提取。
+  ///
+  /// 从音频 URL 下载头部字节解析内嵌封面，缓存为本地图片并回填
+  /// [_currentSong] / [_playlist] 的 artworkUri（file:// 形式），
+  /// 使 App 端播放页能显示与 DLNA 一致的封面。
+  /// 失败静默（封面缺失不阻塞播放）。
+  Future<void> _extractCloudArtwork(Song song, String audioUrl) async {
+    try {
+      final path = await StreamCacheManager.instance
+          .cacheEmbeddedArtwork(song.id, audioUrl);
+      if (path == null) return;
+      // 回填封面路径（file://），并同步通知栏/UI
+      final updated = song.copyWith(artworkUri: path);
+      final idx = _playlist.indexWhere((s) => s.id == song.id);
+      if (idx >= 0) _playlist[idx] = updated;
+      if (_currentSong?.id == song.id) {
+        _currentSong = updated;
+        _updateNotification();
+      }
+      notifyListeners();
+    } catch (_) {
+      // 提取失败静默，保持无封面
+    }
   }
 
   /// 预取云盘列表后续歌曲 URL（对齐 _prefetchNextSongs）
@@ -1209,6 +1237,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     _isResolvingUrl = false;
     notifyListeners();
+
+    // 云盘歌曲封面内嵌在音频中：切歌后同样异步提取（URL 已就绪时）
+    final curSong = _currentSong;
+    if (curSong != null && curSong.isCloud && curSong.artworkUri == null) {
+      final curUrl = curSong.url;
+      if (curUrl != null && curUrl.isNotEmpty) {
+        _extractCloudArtwork(curSong, curUrl);
+      }
+    }
 
     if (_audioService != null) {
       final playbackUrl = await _resolvePlaybackUrl(_currentSong!);

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -394,35 +395,8 @@ class StreamCacheManager {
       final data = response.data;
       if (data == null || data.isEmpty) return;
 
-      // magic bytes 判断图片格式
-      String ext;
-      if (data.length >= 2 && data[0] == 0xFF && data[1] == 0xD8) {
-        ext = 'jpg';
-      } else if (data.length >= 4 &&
-          data[0] == 0x89 &&
-          data[1] == 0x50 &&
-          data[2] == 0x4E &&
-          data[3] == 0x47) {
-        ext = 'png';
-      } else {
-        ext = 'jpg'; // 兜底 jpg
-      }
-
       final bytes = Uint8List.fromList(data);
-      final path = '${_artworkDir.path}${Platform.pathSeparator}$hash.$ext';
-      await File(path).writeAsBytes(bytes);
-
-      final now = DateTime.now().toIso8601String();
-      await StreamCacheRepository.instance.upsertArtworkEntry(
-        hash,
-        ArtworkCacheInfo(
-          path: 'artwork${Platform.pathSeparator}$hash.$ext',
-          size: bytes.length,
-          ext: ext,
-          cachedAt: now,
-          lastAccessedAt: now,
-        ),
-      );
+      await _saveArtworkBytes(hash, bytes);
 
       // 按边听边存上限清理
       try {
@@ -437,6 +411,102 @@ class StreamCacheManager {
       // ignore: avoid_print
       print('[StreamCacheManager] cacheArtwork 失败: $e');
     }
+  }
+
+  /// 从在线音频 URL 提取内嵌封面并缓存。
+  ///
+  /// 云盘等场景的封面内嵌在音频文件元数据（ID3/FLAC 标签）中，
+  /// API 不返回封面 URL。这里用 Range 请求只下载音频头部（封面通常
+  /// 位于文件头部几 KB～几百 KB），写入临时文件后用 audio_metadata_reader
+  /// 解析内嵌封面，缓存为 artwork 图片。
+  ///
+  /// 成功返回缓存封面文件的 `file://` 绝对路径；无封面/失败返回 null。
+  /// 不抛异常，失败静默（封面缺失不阻塞播放）。
+  Future<String?> cacheEmbeddedArtwork(String hash, String audioUrl) async {
+    await ensureInitialized();
+    if (audioUrl.isEmpty) return null;
+    final sep = Platform.pathSeparator;
+    final tempPath = '${_artworkDir.path}${sep}embedded_$hash.tmp';
+    try {
+      // 只取前 2MB：内嵌封面（ID3v2 APIC / FLAC PICTURE）在文件头部。
+      // 若服务器忽略 Range 返回全量，仅保留前 2MB 用于解析。
+      const headBytes = 2 * 1024 * 1024;
+      final response = await _dio.get<List<int>>(
+        audioUrl,
+        options: Options(
+          responseType: ResponseType.bytes,
+          headers: {'Range': 'bytes=0-${headBytes - 1}'},
+          receiveTimeout: const Duration(seconds: 15),
+        ),
+      );
+      final data = response.data;
+      if (data == null || data.isEmpty) return null;
+      final head = data.length > headBytes
+          ? data.sublist(0, headBytes)
+          : data;
+
+      // 写入临时文件供 audio_metadata_reader 解析
+      final tempFile = File(tempPath);
+      await tempFile.writeAsBytes(head, flush: true);
+
+      Uint8List? cover;
+      try {
+        final metadata = readMetadata(tempFile, getImage: true);
+        if (metadata.pictures.isNotEmpty) {
+          final frontCover = metadata.pictures.firstWhere(
+            (p) => p.pictureType == PictureType.coverFront,
+            orElse: () => metadata.pictures.first,
+          );
+          cover = frontCover.bytes;
+        }
+      } catch (_) {
+        // 头部字节不足以解析（异常格式）→ 视为无封面
+      } finally {
+        if (await tempFile.exists()) await tempFile.delete();
+      }
+
+      if (cover == null || cover.isEmpty) return null;
+      final path = await _saveArtworkBytes(hash, cover);
+      return path == null ? null : 'file://$path';
+    } catch (e) {
+      // ignore: avoid_print
+      print('[StreamCacheManager] cacheEmbeddedArtwork 失败: $e');
+      return null;
+    }
+  }
+
+  /// 将封面字节写入 artwork 目录并更新索引，返回绝对路径（无扩展名推断失败返回 null）。
+  Future<String?> _saveArtworkBytes(String hash, Uint8List bytes) async {
+    if (bytes.isEmpty) return null;
+    // magic bytes 判断图片格式
+    String ext;
+    if (bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8) {
+      ext = 'jpg';
+    } else if (bytes.length >= 4 &&
+        bytes[0] == 0x89 &&
+        bytes[1] == 0x50 &&
+        bytes[2] == 0x4E &&
+        bytes[3] == 0x47) {
+      ext = 'png';
+    } else {
+      ext = 'jpg'; // 兜底 jpg
+    }
+
+    final path = '${_artworkDir.path}${Platform.pathSeparator}$hash.$ext';
+    await File(path).writeAsBytes(bytes);
+
+    final now = DateTime.now().toIso8601String();
+    await StreamCacheRepository.instance.upsertArtworkEntry(
+      hash,
+      ArtworkCacheInfo(
+        path: 'artwork${Platform.pathSeparator}$hash.$ext',
+        size: bytes.length,
+        ext: ext,
+        cachedAt: now,
+        lastAccessedAt: now,
+      ),
+    );
+    return path;
   }
 
   /// 返回缓存统计信息

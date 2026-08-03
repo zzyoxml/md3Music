@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -131,26 +132,26 @@ class _PlayerArtworkImageState extends State<PlayerArtworkImage> {
       return _placeholder(bg, icon, iSize);
     }
 
-    // file:// URI
+    // file:// URI：直接读本地文件（云盘提取的内嵌封面等场景）
     if (uri.startsWith('file://')) {
-      // file:// 可能是本地文件路径，也可能指向内嵌封面
-      // 先尝试用 Image.network（Flutter 对 file:// 有原生支持）
-      return Image.network(
-        uri,
-        width: widget.isFill ? double.infinity : null,
-        height: widget.isFill ? double.infinity : null,
-        fit: widget.fit,
-        errorBuilder: (_, _, _) {
-          // file:// 加载失败，尝试读取内嵌封面
-          if (widget.fallbackFilePath != null && !_embeddedLoaded) {
-            _loadEmbedded(widget.fallbackFilePath!);
-          }
-          if (_embeddedBytes != null) {
-            return Image.memory(_embeddedBytes!, fit: widget.fit);
-          }
-          return _placeholder(bg, icon, iSize);
-        },
-      );
+      final file = File.fromUri(Uri.parse(uri));
+      if (file.existsSync()) {
+        return Image.file(
+          file,
+          width: widget.isFill ? double.infinity : null,
+          height: widget.isFill ? double.infinity : null,
+          fit: widget.fit,
+          errorBuilder: (_, _, _) => _placeholder(bg, icon, iSize),
+        );
+      }
+      // 文件不存在：尝试 fallbackFilePath 读内嵌封面，否则占位符
+      if (widget.fallbackFilePath != null && !_embeddedLoaded) {
+        _loadEmbedded(widget.fallbackFilePath!);
+      }
+      if (_embeddedBytes != null) {
+        return Image.memory(_embeddedBytes!, fit: widget.fit);
+      }
+      return _placeholder(bg, icon, iSize);
     }
 
     // content:// URI：Image.network 无法加载（非 HTTP 协议），

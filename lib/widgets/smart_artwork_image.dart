@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -63,7 +64,10 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
   Future<void> _prefetchCachedArtwork() async {
     if (widget.songId == null || widget.songId!.isEmpty) return;
     final uri = widget.artworkUri;
-    if (uri == null || !uri.startsWith('http://') && !uri.startsWith('https://')) {
+    // artworkUri 为 null（云盘歌曲封面内嵌、无 URL）或 http(s) 封面时，
+    // 尝试从 StreamCache 读取已缓存封面（云盘歌曲播放时提取的内嵌封面）。
+    // 其余类型（local:// / content:// 等）走各自的本地加载逻辑，不查缓存。
+    if (uri != null && !uri.startsWith('http://') && !uri.startsWith('https://')) {
       return;
     }
     try {
@@ -86,8 +90,17 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
 
     Widget child;
     if (uri == null) {
-      // URI 为空时，尝试用 fallbackFilePath 读内嵌封面
-      if (widget.fallbackFilePath != null) {
+      // 云盘歌曲封面内嵌、无 URL：优先显示 StreamCache 已缓存封面
+      // （播放/缓存过歌曲后，SmartArtworkImage 预查缓存拿到了字节）
+      if (_cachedArtworkBytes != null) {
+        child = Image.memory(
+          _cachedArtworkBytes!,
+          width: widget.size,
+          height: widget.size,
+          fit: BoxFit.cover,
+        );
+      } else if (widget.fallbackFilePath != null) {
+        // URI 为空时，尝试用 fallbackFilePath 读内嵌封面
         child = LocalArtworkImage(
           filePath: widget.fallbackFilePath!,
           size: widget.size,
@@ -97,8 +110,9 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
           borderRadius: BorderRadius.circular(widget.borderRadius),
           child: child,
         );
+      } else {
+        child = _placeholder(colorScheme);
       }
-      child = _placeholder(colorScheme);
     } else if (uri.startsWith('local://')) {
       // local:// 占位符：从文件路径读取内嵌封面
       final filePath = uri.substring('local://'.length);
@@ -183,15 +197,20 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
         );
       }
     } else if (uri.startsWith('file://')) {
-      // file:// URI
+      // file:// 本地文件（云盘提取的内嵌封面等）
       final isFill = widget.size == double.infinity;
-      child = Image.network(
-        uri,
-        width: isFill ? double.infinity : widget.size,
-        height: isFill ? double.infinity : widget.size,
-        fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => _placeholder(colorScheme),
-      );
+      final file = File.fromUri(Uri.parse(uri));
+      if (file.existsSync()) {
+        child = Image.file(
+          file,
+          width: isFill ? double.infinity : widget.size,
+          height: isFill ? double.infinity : widget.size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => _placeholder(colorScheme),
+        );
+      } else {
+        child = _placeholder(colorScheme);
+      }
     } else {
       // 兜底：当作普通 URL 处理
       child = Image.network(
