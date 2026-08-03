@@ -234,7 +234,7 @@ flutter pub get
 cd kugou_api_server/rust
 cargo build --release
 
-# 安卓交叉编译（4 个 ABI，需要 NDK）
+# 安卓交叉编译（3 个 ABI，需要 NDK）
 ./build_android.sh
 ```
 
@@ -268,7 +268,7 @@ flutter build apk --release --split-per-abi
 - **arm64-v8a**：大多数现代 Android 设备（推荐）
 - **armeabi-v7a**：较旧的 32 位设备
 - **x86**：32 位 Android 模拟器
-- **x86_64**：64 位 Android 模拟器
+
 
 ---
 
@@ -409,7 +409,7 @@ md3Music/
    ```bash
    cd kugou_api_server/rust
    cargo build --release
-   cargo test        # 运行冒烟测试
+   cargo test        # 运行测试
    cargo clippy      # 静态检查
    ```
 3. 安卓交叉编译（需要 NDK）：
@@ -428,7 +428,7 @@ md3Music/
 
 ```bash
 cd kugou_api_server/rust
-cargo test          # 本地冒烟测试（不依赖外网）
+cargo test          # 本地测试（不依赖外网）
 ```
 
 ---
