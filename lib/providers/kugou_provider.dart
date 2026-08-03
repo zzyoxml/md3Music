@@ -434,7 +434,9 @@ class KugouProvider extends ChangeNotifier {
         );
         if (albums != null && albums.isNotEmpty) {
           final existing = current?.albums ?? [];
-          final merged = [...existing, ...albums];
+          final existingIds = existing.map((a) => a.id).toSet();
+          final newAlbums = albums.where((a) => !existingIds.contains(a.id)).toList();
+          final merged = [...existing, ...newAlbums];
           _searchResults = KugouSearchResult(
             albums: merged,
             total: merged.length,
@@ -452,7 +454,9 @@ class KugouProvider extends ChangeNotifier {
         );
         if (playlists != null && playlists.isNotEmpty) {
           final existing = current?.playlists ?? [];
-          final merged = [...existing, ...playlists];
+          final existingIds = existing.map((p) => p.id).toSet();
+          final newPlaylists = playlists.where((p) => !existingIds.contains(p.id)).toList();
+          final merged = [...existing, ...newPlaylists];
           _searchResults = KugouSearchResult(
             playlists: merged,
             total: merged.length,
@@ -474,7 +478,9 @@ class KugouProvider extends ChangeNotifier {
         );
         if (result != null && result.songs.isNotEmpty) {
           final existing = current?.songs ?? [];
-          final merged = [...existing, ...result.songs];
+          final existingHashes = existing.map((s) => s.hash).toSet();
+          final newSongs = result.songs.where((s) => !existingHashes.contains(s.hash)).toList();
+          final merged = [...existing, ...newSongs];
           _searchResults = KugouSearchResult(
             songs: merged,
             total: merged.length,

@@ -79,10 +79,10 @@ class SettingsRepository {
     await prefs.setInt(_keyCacheSize, sizeMb);
   }
 
-  /// 边听边存功能是否开启，默认开启。
+  /// 边听边存功能是否开启，默认关闭。
   Future<bool> getStreamCacheEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyStreamCacheEnabled) ?? true;
+    return prefs.getBool(_keyStreamCacheEnabled) ?? false;
   }
 
   Future<void> setStreamCacheEnabled(bool value) async {
