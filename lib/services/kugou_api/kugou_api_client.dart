@@ -2332,6 +2332,32 @@ class KugouApiClient {
     );
   }
 
+  /// 删除云盘音乐（支持单首与批量）。
+  /// [hashes] 歌曲 hash；[fileids] 云盘文件 ID（列表接口返回的 kv_id）；
+  /// [albumAudioIds] 专辑音频 ID，与 [fileids] 一一对应。
+  /// 三者至少传一个；服务端支持逗号分隔多值（数组会 join 成逗号串）。
+  Future<Map<String, dynamic>?> deleteCloudSongs({
+    List<String>? hashes,
+    List<String>? fileids,
+    List<String>? albumAudioIds,
+  }) async {
+    final params = <String, dynamic>{};
+    if (hashes != null && hashes.isNotEmpty) {
+      params['hashes'] = hashes.join(',');
+    }
+    if (fileids != null && fileids.isNotEmpty) {
+      params['fileids'] = fileids.join(',');
+    }
+    if (albumAudioIds != null && albumAudioIds.isNotEmpty) {
+      params['album_audio_ids'] = albumAudioIds.join(',');
+    }
+    return await _get(
+      KugouEndpoints.userCloudDel,
+      queryParameters: params,
+      noCache: true,
+    );
+  }
+
   Future<Map<String, dynamic>?> getUserVideoCollect({
     int page = 1,
     int pagesize = 30,

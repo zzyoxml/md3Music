@@ -356,6 +356,146 @@ pub fn handle_cloud_upload(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, Modul
     })
 }
 
+/// JS `Number(s) || s`：能解析为 i64 则转数字（上游要求 number 类型），
+/// 否则保留原字符串（对应 JS 中 NaN || 字符串 的兜底）。
+fn num_or_keep(s: &str) -> Value {
+    s.trim()
+        .parse::<i64>()
+        .map(|n| json!(n))
+        .unwrap_or_else(|_| json!(s))
+}
+
+/// user_cloud_del.js → /user/cloud/del（删除云盘音乐，支持单首与批量）。
+///
+/// 加密流程与 handle_cloud / handle_cloud_upload 一致：
+/// dataMap（有 fileids 时按 kv_id+album_audio_id 构造，否则按 hash 数组）
+/// → playlistAES 加密为 body；rsa_encrypt2({aes, uid, token}) 为 p；
+/// POST mcloudservice.kugou.com/v1/del_files。
+pub fn handle_cloud_del(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
+    // userid 保留字符串原值，缺失时用数字 0（与 handle_cloud 一致，RSA 明文逐字节对齐 JS）
+    let userid_raw = param_or_cookie_str(q, "userid", "");
+    let userid: Value = if userid_raw.is_empty() {
+        json!(0)
+    } else {
+        json!(userid_raw)
+    };
+    let token = param_or_cookie_str(q, "token", "");
+    let mid = c_str(q, "KUGOU_API_MID");
+    let clienttime = now_secs();
+
+    // 逗号分隔多值 → 去空字符串数组（兼容 JS 的 fileids/fileid/kv_ids/kv_id 等参数名）
+    let split_csv = |key: &[&str]| -> Vec<String> {
+        for k in key {
+            if let Some(v) = q.get(*k) {
+                if let Some(s) = v.as_str() {
+                    let items: Vec<String> = s
+                        .split(',')
+                        .map(|x| x.trim().to_string())
+                        .filter(|x| !x.is_empty())
+                        .collect();
+                    if !items.is_empty() {
+                        return items;
+                    }
+                }
+            }
+        }
+        Vec::new()
+    };
+    let fileids = split_csv(&["fileids", "fileid", "kv_ids", "kv_id"]);
+    let album_audio_ids = split_csv(&["album_audio_ids", "album_audio_id"]);
+    let hashes = split_csv(&["hashes", "hash", "filename"]);
+
+    if fileids.is_empty() && hashes.is_empty() {
+        return Err(ModuleResponse {
+            status: 400,
+            body: BodyValue::Json(json!({ "status": 0, "msg": "请传入 fileid、kv_id、hash 或 hashes" })),
+            cookie: Vec::new(),
+            headers: HashMap::new(),
+        });
+    }
+
+    // JS `params?.mixid || params?.mix_id` 兜底 album_audio_id
+    let mix = q_str(q, "mixid", "");
+    let mix_val = if mix.is_empty() { q_str(q, "mix_id", "") } else { mix };
+    let fallback_aa = |i: usize| -> Value {
+        let v = album_audio_ids
+            .get(i)
+            .or_else(|| album_audio_ids.first())
+            .map(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or(mix_val.as_str());
+        if v.is_empty() {
+            json!(0)
+        } else {
+            num_or_keep(v)
+        }
+    };
+
+    // 有 fileids 时按 {kv_id, album_audio_id} 构造；否则按 hash 字符串数组
+    let dm = if !fileids.is_empty() {
+        let data: Vec<Value> = fileids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| {
+                json!({
+                    "kv_id": num_or_keep(id),
+                    "album_audio_id": fallback_aa(i),
+                })
+            })
+            .collect();
+        json!({ "data": data })
+    } else {
+        json!({ "data": hashes })
+    };
+
+    let (key, aes_str) = playlist_aes_encrypt(&json_stringify(&dm));
+    let p = rsa_encrypt2(&json_stringify(&json!({ "aes": key, "uid": userid, "token": token })))
+        .to_uppercase();
+
+    let mut pm: Map<String, Value> = Map::new();
+    pm.insert("clienttime".to_string(), json!(clienttime));
+    if !mid.is_empty() {
+        pm.insert("mid".to_string(), json!(mid));
+    }
+    pm.insert(
+        "key".to_string(),
+        json!(sign_params_key(&clienttime.to_string(), APP_ID, "")),
+    );
+    pm.insert("clientver".to_string(), json!(CLIENT_VER));
+    pm.insert("appid".to_string(), json!(APP_ID));
+    pm.insert("p".to_string(), json!(p));
+
+    let opts = RequestOptions::new("/v1/del_files")
+        .base_url("https://mcloudservice.kugou.com")
+        .post("/v1/del_files")
+        .params(Value::Object(pm.clone()))
+        .bytes_body(base64_decode(&aes_str))
+        .encrypt_type("android")
+        .cookie(q_cookie(q))
+        .response_type("arraybuffer")
+        .clear_default_params(true)
+        .not_signature(true);
+    let res = ctx.send(&opts)?;
+
+    // 尝试解密响应；解密结果为非 JSON（乱码字符串）时回退明文 JSON，与 JS 版一致
+    let body = if res.status == 200 {
+        let dec = playlist_aes_decrypt(&key, &res.body.to_base64());
+        match dec {
+            Value::String(_) => res.body.to_json(),
+            other => other,
+        }
+    } else {
+        res.body.to_json()
+    };
+
+    Ok(ModuleResponse {
+        status: res.status,
+        body: BodyValue::Json(body),
+        cookie: res.cookie,
+        headers: res.headers,
+    })
+}
+
 /// user_detail.js → /user/detail（获取用户信息）。
 pub fn handle_detail(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
     let token = param_or_cookie_str(q, "token", "");

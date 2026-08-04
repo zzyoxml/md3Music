@@ -44,6 +44,8 @@ Song mapCloudApiItemToSong(Map<String, dynamic> item) {
 
   final albumId = item['album_id']?.toString();
   final albumAudioId = item['album_audio_id']?.toString();
+  // 云盘文件 ID（删除云盘歌曲时优先使用 kv_id + album_audio_id）
+  final fileId = int.tryParse((item['kv_id'] ?? '').toString());
 
   // 时长：云盘 duration 单位通常为秒，需 ×1000 转毫秒
   // 兼容 timelength/time_length/timelen 等可能的字段名
@@ -70,5 +72,6 @@ Song mapCloudApiItemToSong(Map<String, dynamic> item) {
     isCloud: true,
     albumId: albumId,
     albumAudioId: albumAudioId,
+    fileId: fileId,
   );
 }

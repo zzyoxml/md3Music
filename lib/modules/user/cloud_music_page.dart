@@ -29,6 +29,9 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
   String? _error;
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
+  /// 批量删除多选模式：true 时列表进入勾选态（按当前过滤列表下标选中）。
+  bool _isSelectMode = false;
+  final Set<int> _selectedIndices = {};
 
   @override
   void initState() {
@@ -571,14 +574,34 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('云盘音乐'),
-        actions: [
-          IconButton(
-            tooltip: '上传本地音乐',
-            icon: const Icon(Icons.cloud_upload_outlined),
-            onPressed: _showLocalSongPicker,
-          ),
-        ],
+        title: Text(
+          _isSelectMode ? '已选 ${_selectedIndices.length} 首' : '云盘音乐',
+        ),
+        actions: _isSelectMode
+            ? [
+                IconButton(
+                  tooltip: '全选',
+                  icon: const Icon(Icons.select_all),
+                  onPressed: _toggleSelectAll,
+                ),
+                IconButton(
+                  tooltip: '取消',
+                  icon: const Icon(Icons.close),
+                  onPressed: _exitSelectMode,
+                ),
+              ]
+            : [
+                IconButton(
+                  tooltip: '多选删除',
+                  icon: const Icon(Icons.checklist),
+                  onPressed: _enterSelectMode,
+                ),
+                IconButton(
+                  tooltip: '上传本地音乐',
+                  icon: const Icon(Icons.cloud_upload_outlined),
+                  onPressed: _showLocalSongPicker,
+                ),
+              ],
       ),
       body: _isLoading
           ? const Center(child: MD3ELoadingIndicator())
@@ -595,16 +618,17 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
                       onRefresh: _loadCloudSongs,
                       child: Column(
                         children: [
-                          _buildHeader(),
-                          _buildSearchBar(),
+                          if (!_isSelectMode) _buildHeader(),
+                          if (!_isSelectMode) _buildSearchBar(),
                           Expanded(
                             child: _filteredSongs.isEmpty
                                 ? _buildNoMatch()
                                 : ListView.builder(
                                     itemCount: _filteredSongs.length,
                                     itemBuilder: (context, index) {
+                                      final song = _filteredSongs[index];
                                       return SongListItem(
-                                        song: _filteredSongs[index],
+                                        song: song,
                                         onTap: () {
                                           context
                                               .read<PlayerProvider>()
@@ -613,16 +637,196 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
                                                 index,
                                               );
                                         },
-                                        onMoreTap: () {},
+                                        onMoreTap: _isSelectMode
+                                            ? null
+                                            : () => _showSongMoreMenu(song),
+                                        isSelectMode: _isSelectMode,
+                                        isSelected:
+                                            _selectedIndices.contains(index),
+                                        onSelectToggle: () =>
+                                            _toggleSelect(index),
+                                        onLongPress: _isSelectMode
+                                            ? _toggleSelectAll
+                                            : null,
                                       );
                                     },
                                   ),
                           ),
+                          if (_isSelectMode) _buildSelectActionBar(),
                           const MiniPlayer(),
                         ],
                       ),
                     ),
     );
+  }
+
+  /// 进入批量删除多选模式。
+  void _enterSelectMode() {
+    setState(() {
+      _isSelectMode = true;
+      _selectedIndices.clear();
+    });
+  }
+
+  /// 退出多选模式并清空选中。
+  void _exitSelectMode() {
+    setState(() {
+      _isSelectMode = false;
+      _selectedIndices.clear();
+    });
+  }
+
+  /// 切换某一下标的选中状态。
+  void _toggleSelect(int index) {
+    setState(() {
+      if (!_selectedIndices.remove(index)) {
+        _selectedIndices.add(index);
+      }
+    });
+  }
+
+  /// 全选 / 取消全选（作用于当前过滤后的可见列表）。
+  void _toggleSelectAll() {
+    setState(() {
+      if (_selectedIndices.length == _filteredSongs.length) {
+        _selectedIndices.clear();
+      } else {
+        _selectedIndices
+            .addAll(List.generate(_filteredSongs.length, (i) => i));
+      }
+    });
+  }
+
+  /// 列表项三点菜单：单曲删除入口。
+  void _showSongMoreMenu(Song song) {
+    final colorScheme = Theme.of(context).colorScheme;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.music_note),
+              title: Text(song.displayName),
+              subtitle: Text(song.artist),
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(Icons.delete_outline, color: colorScheme.error),
+              title: Text(
+                '删除',
+                style: TextStyle(color: colorScheme.error),
+              ),
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                _confirmDelete([song]);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 多选模式底部操作栏：删除所选。
+  Widget _buildSelectActionBar() {
+    final colorScheme = Theme.of(context).colorScheme;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: colorScheme.error,
+              foregroundColor: colorScheme.onError,
+            ),
+            onPressed: _selectedIndices.isEmpty
+                ? null
+                : () {
+                    final songs = _selectedIndices
+                        .map((i) => _filteredSongs[i])
+                        .toList();
+                    _confirmDelete(songs);
+                  },
+            icon: const Icon(Icons.delete_outline),
+            label: Text('删除所选 ${_selectedIndices.length} 首'),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 删除确认对话框，确认后调用 [_deleteCloudSongs] 并刷新列表。
+  Future<void> _confirmDelete(List<Song> songs) async {
+    if (songs.isEmpty) return;
+    // await 前捕获 messenger，避免 async gap 后使用 BuildContext
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          songs.length > 1 ? '删除所选 ${songs.length} 首歌曲？' : '删除这首歌曲？',
+        ),
+        content: const Text('删除后云端文件不可恢复，请谨慎操作。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final r = await _deleteCloudSongs(songs);
+    if (!mounted) return;
+    if (r.ok) {
+      if (_isSelectMode) _exitSelectMode();
+      messenger.showSnackBar(_snack('已删除 ${songs.length} 首'));
+      await _loadCloudSongs();
+    } else {
+      messenger.showSnackBar(_snack('删除失败：${r.reason ?? '未知错误'}'));
+    }
+  }
+
+  /// 删除云盘歌曲（单首/批量共用）。
+  ///
+  /// 优先用 fileid(kv_id)+album_audio_id（服务端精确删除），
+  /// fileId 缺失（旧数据）时回退 hash。返回 (ok, reason)。
+  Future<({bool ok, String? reason})> _deleteCloudSongs(
+    List<Song> songs,
+  ) async {
+    final api = KugouApiClient();
+    if (!api.isLoggedIn) return (ok: false, reason: '未登录');
+    final fileids = <String>[];
+    final albumAudioIds = <String>[];
+    final hashes = <String>[];
+    for (final s in songs) {
+      if (s.fileId != null) {
+        fileids.add(s.fileId.toString());
+        albumAudioIds.add(s.albumAudioId ?? '0');
+      } else {
+        hashes.add(s.id);
+      }
+    }
+    final result = await api.deleteCloudSongs(
+      fileids: fileids.isEmpty ? null : fileids,
+      albumAudioIds: albumAudioIds.isEmpty ? null : albumAudioIds,
+      hashes: hashes.isEmpty ? null : hashes,
+    );
+    if (result?['status'] == 1) return (ok: true, reason: null);
+    return (ok: false, reason: (result?['msg'] ?? '未知错误').toString());
   }
 
   Widget _buildHeader() {
