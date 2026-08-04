@@ -17,15 +17,15 @@ class AudioService {
   AudioService._internal();
 
   final AudioPlayer _player = AudioPlayer(
-    // 增大 ExoPlayer 缓冲区：默认仅 ~10s，在国产安卓设备 CPU 降频时
-    // 流媒体下载速度跟不上播放速度，1-2 秒就耗尽缓冲触发 completed。
-    // 60s 缓冲给降频状态下的网络足够时间预加载数据。
+    // Media3 (just_audio 0.10.x) 下缓冲区默认值已较合理，
+    // 这里适度收紧：maxBuffer 从 60s 降到 30s（减少内存占用），
+    // rebuffer 从 10s 降到 3s（缩短欠载后恢复等待，用户体验更流畅）。
     audioLoadConfiguration: AudioLoadConfiguration(
       androidLoadControl: AndroidLoadControl(
-        minBufferDuration: Duration(seconds: 30),
-        maxBufferDuration: Duration(seconds: 60),
-        bufferForPlaybackDuration: Duration(seconds: 3),
-        bufferForPlaybackAfterRebufferDuration: Duration(seconds: 10),
+        minBufferDuration: Duration(seconds: 15),
+        maxBufferDuration: Duration(seconds: 30),
+        bufferForPlaybackDuration: Duration(seconds: 2),
+        bufferForPlaybackAfterRebufferDuration: Duration(seconds: 3),
       ),
     ),
   );
@@ -42,6 +42,8 @@ class AudioService {
   Stream<bool> get playingStream => _player.playingStream;
 
   Stream<PlayerState> get playerStateStream => _player.playerStateStream;
+
+  ProcessingState get processingState => _player.processingState;
 
   Stream<SequenceState?> get sequenceStateStream => _player.sequenceStateStream;
 

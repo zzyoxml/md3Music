@@ -300,6 +300,21 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         notifyListeners();
         // 防抖保存位置（3 秒）
         _scheduleSave();
+
+        // 位置兜底：播放中 position >= duration 且 processingState 非 completed
+        // 时主动触发切歌，防止 completed 事件丢失导致永不切歌（Media3 偶发）。
+        final duration = _duration ?? Duration.zero;
+        if (_isPlaying &&
+            duration > Duration.zero &&
+            position >= duration &&
+            _audioService?.processingState !=
+                just_audio.ProcessingState.completed &&
+            !_handlingCompletion) {
+          print('[PlaybackCompleted] position >= duration but not completed, '
+              'triggering completion manually (pos=${position.inSeconds}s '
+              'dur=${duration.inSeconds}s)');
+          _handlePlaybackCompleted();
+        }
         // 直接转发给 Lyricon，无节流。
         // positionStream 本身就是 ~200ms 周期（just_audio 默认），是天然节流。
         // MethodChannel 是异步的，不阻塞 Dart UI；setPosition 是 fire-and-forget。
@@ -505,7 +520,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
       } else {
         // 不在末尾：正常切下一首（用户切歌会重置计数器）
-        next();
+        await next();
       }
     } finally {
       _handlingCompletion = false;

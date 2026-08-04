@@ -1622,26 +1622,11 @@ class KugouProvider extends ChangeNotifier {
       final now = DateTime.now();
       final month = '${now.year}-${now.month.toString().padLeft(2, '0')}';
       final r = await _apiClient.getYouthMonthVipRecord(month: month);
-      print('[VIP_RECORD] getYouthMonthVipRecord($month) response: $r');
       if (r != null) {
         _vipMonthRecord = r;
-        final data = r['data'];
-        final list = data?['list'] ?? data?['record_list'] ?? r['list'];
-        if (list is List) {
-          print('[VIP_RECORD] 解析到 ${list.length} 条记录');
-          for (final item in list) {
-            if (item is Map<String, dynamic>) {
-              print(
-                '[VIP_RECORD] 记录: day=${item['day']} vip_type=${item['vip_type']} receive_vip=${item['receive_vip']} keys=${item.keys.toList()}',
-              );
-            }
-          }
-        }
         notifyListeners();
       }
-    } catch (e) {
-      print('[VIP_RECORD] 异常: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> getUserHistory() async {
