@@ -1843,6 +1843,9 @@ class _TabManagementPanel extends StatelessWidget {
     switch (tabId) {
       case 'discover':
         return Icons.explore;
+      case 'coverflow':
+        // 与主页 tab 图标保持一致（见 app.dart 的 coverflow case）
+        return Icons.album;
       case 'library':
         return Icons.library_music;
       case 'favorites':
