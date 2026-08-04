@@ -156,7 +156,7 @@ class _UserAgreementPageState extends State<UserAgreementPage> {
                       ),
                       _Clause(
                         index: '三、',
-                        text: '本应用中相关资源、音乐的版权归知乎原公司及原创作者所有。本应用不对其中的内容负责。',
+                        text: '本应用中相关资源、音乐的版权归酷狗原公司及原创作者所有。本应用不对其中的内容负责。',
                       ),
                       _Clause(
                         index: '四、',
