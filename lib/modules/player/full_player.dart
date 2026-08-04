@@ -32,6 +32,7 @@ import 'comments_view.dart';
 import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/md3_lyric_preferences_panel.dart';
+import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_transport_row.dart';
 import '../../widgets/player_artwork_image.dart';
@@ -1963,6 +1964,10 @@ class _FullPlayerState extends State<FullPlayer>
                           );
                         }
                       }
+                    : null,
+                // 长按：在线歌曲弹出 AI 推荐歌曲面板
+                onLongPress: song != null && isOnline
+                    ? () => showAiRecommendSheet(context, song)
                     : null,
                 child: Center(
                   child: Icon(

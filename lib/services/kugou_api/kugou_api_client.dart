@@ -2603,8 +2603,35 @@ class KugouApiClient {
     return await _get(KugouEndpoints.brush);
   }
 
-  Future<Map<String, dynamic>?> getAiRecommend() async {
-    return await _get(KugouEndpoints.aiRecommend);
+  /// 根据专辑音乐 id（album_audio_id/MixSongID，可多个逗号分隔）获取 AI 推荐歌曲。
+  ///
+  /// 服务端 `/ai/recommend` 从 query 读取 `album_audio_id`（见 rust extras.rs::handle_ai_recommend）。
+  Future<List<KugouSongDetail>?> getAiRecommend(String albumAudioId) async {
+    final json = await _get(
+      KugouEndpoints.aiRecommend,
+      queryParameters: {'album_audio_id': albumAudioId},
+    );
+    if (json == null) return null;
+    try {
+      // /recommend 返回 data 可能是歌曲数组，也可能是嵌套列表字段，防御性解析
+      final data = json['data'];
+      List<dynamic> list;
+      if (data is List) {
+        list = data;
+      } else if (data is Map<String, dynamic>) {
+        list =
+            (data['song_list'] ?? data['songs'] ?? data['list'] ?? data['info'] ?? [])
+                as List<dynamic>;
+      } else {
+        list = [];
+      }
+      return list
+          .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('[API getAiRecommend] parse error: $e');
+      return null;
+    }
   }
 
   Future<Map<String, dynamic>?> getServerNow() async {

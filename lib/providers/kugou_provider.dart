@@ -97,7 +97,7 @@ class KugouProvider extends ChangeNotifier {
   final Set<String> _localSignedDays = {};
   Map<String, dynamic>? _userHistoryData;
   Map<String, dynamic>? _brushData;
-  Map<String, dynamic>? _aiRecommendData;
+  List<KugouSongDetail> _aiRecommendSongs = [];
   Map<String, dynamic>? _youthData;
   Map<String, dynamic>? _longAudioData;
   Map<String, dynamic>? _fmRecommendData;
@@ -263,7 +263,7 @@ class KugouProvider extends ChangeNotifier {
   Set<String> get localSignedDays => _localSignedDays;
   Map<String, dynamic>? get userHistoryData => _userHistoryData;
   Map<String, dynamic>? get brushData => _brushData;
-  Map<String, dynamic>? get aiRecommendData => _aiRecommendData;
+  List<KugouSongDetail> get aiRecommendSongs => _aiRecommendSongs;
   Map<String, dynamic>? get youthData => _youthData;
   Map<String, dynamic>? get longAudioData => _longAudioData;
   Map<String, dynamic>? get fmRecommendData => _fmRecommendData;
@@ -1865,11 +1865,12 @@ class KugouProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> getAiRecommend() async {
+  /// 根据专辑音乐 id（album_audio_id/MixSongID）拉取 AI 推荐歌曲。
+  Future<void> getAiRecommend(String albumAudioId) async {
     try {
-      final r = await _apiClient.getAiRecommend();
+      final r = await _apiClient.getAiRecommend(albumAudioId);
       if (r != null) {
-        _aiRecommendData = r;
+        _aiRecommendSongs = r;
         notifyListeners();
       }
     } catch (_) {}
