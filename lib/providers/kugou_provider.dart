@@ -1178,10 +1178,8 @@ class KugouProvider extends ChangeNotifier {
           '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
       print('[SIGN_IN] receiveDay: $receiveDay');
 
-      // 手动签到：今天已签到则跳过，不再发送请求到服务器
-      if (_localSignedDays.contains(receiveDay)) {
-        return (true, '今天已签到，无需重复签到');
-      }
+      // 手动签到：始终发送请求，不做本地已签拦截
+      // （服务端会正确返回"今日已领取"，由前端统一提示）
 
       // 1. 领取畅听VIP（基础签到）
       //    与 EchoMusic 一致：必传 receive_day，否则后端可能判定为无效签到。
