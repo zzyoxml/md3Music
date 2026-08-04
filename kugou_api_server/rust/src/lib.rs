@@ -4,7 +4,7 @@
 //! 127.0.0.1 上的随机端口（端口号回传给 Dart），行为等价于 kugou_api_server/server.js。
 //!
 //! 对外接口：
-//!  - JNI：Java_com_md3music_md3music_KugouApiService_{nativeStartNode,nativeIsNodeRunning,nativeStopNode}
+//!  - JNI：Java_com_md3music_premium_KugouApiService_{nativeStartNode,nativeIsNodeRunning,nativeStopNode}
 //!  - 纯 C FFI：start_server / stop_server / is_server_running / get_server_port
 
 pub mod cache;
@@ -63,13 +63,13 @@ pub extern "C" fn get_server_port() -> c_int {
 }
 
 // ---------------------------------------------------------------------------
-// JNI（供 NodeJsService.kt 的 external 声明调用）
+// JNI（供 KugouApiService.kt 的 external 声明调用）
 // ---------------------------------------------------------------------------
 
-/// Java_com_md3music_md3music_KugouApiService_nativeStartNode(JNIEnv*, jobject, jint port, jstring dataDir)
+/// Java_com_md3music_premium_KugouApiService_nativeStartNode(JNIEnv*, jobject, jint port, jstring dataDir)
 /// port==0 表示随机选端口。返回实际监听端口（0=失败）。
 #[no_mangle]
-pub extern "system" fn Java_com_md3music_md3music_KugouApiService_nativeStartNode(
+pub extern "system" fn Java_com_md3music_premium_KugouApiService_nativeStartNode(
     mut env: jni::JNIEnv,
     _this: jni::objects::JObject,
     port: jni::sys::jint,
@@ -85,9 +85,9 @@ pub extern "system" fn Java_com_md3music_md3music_KugouApiService_nativeStartNod
     }
 }
 
-/// Java_com_md3music_md3music_KugouApiService_nativeIsNodeRunning(JNIEnv*, jobject)
+/// Java_com_md3music_premium_KugouApiService_nativeIsNodeRunning(JNIEnv*, jobject)
 #[no_mangle]
-pub extern "system" fn Java_com_md3music_md3music_KugouApiService_nativeIsNodeRunning(
+pub extern "system" fn Java_com_md3music_premium_KugouApiService_nativeIsNodeRunning(
     _env: jni::JNIEnv,
     _this: jni::objects::JObject,
 ) -> jni::sys::jboolean {
@@ -98,9 +98,9 @@ pub extern "system" fn Java_com_md3music_md3music_KugouApiService_nativeIsNodeRu
     }
 }
 
-/// Java_com_md3music_md3music_KugouApiService_nativeStopNode(JNIEnv*, jobject)
+/// Java_com_md3music_premium_KugouApiService_nativeStopNode(JNIEnv*, jobject)
 #[no_mangle]
-pub extern "system" fn Java_com_md3music_md3music_KugouApiService_nativeStopNode(
+pub extern "system" fn Java_com_md3music_premium_KugouApiService_nativeStopNode(
     _env: jni::JNIEnv,
     _this: jni::objects::JObject,
 ) {

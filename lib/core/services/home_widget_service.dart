@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 /// 调用时机：播放/暂停、切歌、进度更新（节流）时调用 [updateWidget]。
 /// 原生侧 MusicWidgetProvider 接收广播后刷新 RemoteViews。
 class HomeWidgetService {
-  static const _channel = MethodChannel('com.md3music.md3music/home_widget');
+  static const _channel = MethodChannel('com.md3music.premium/home_widget');
 
   /// 更新桌面小组件显示内容。
   ///

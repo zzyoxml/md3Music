@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'kugou_api/kugou_api_client.dart';
 import 'kugou_api/kugou_endpoints.dart';
@@ -17,15 +18,31 @@ typedef StartServer = int Function(int port, Pointer<Utf8> dataDir);
 typedef IsRunningNative = Int32 Function();
 typedef IsRunning = int Function();
 
+/// libkugou_server.so FFI: void stop_server()
+typedef StopServerNative = Void Function();
+typedef StopServer = void Function();
+
 class KugouApiServer {
-  static const _channel = MethodChannel('com.md3music.md3music/kugou_api');
+  static const _channel = MethodChannel('com.md3music.premium/kugou_api');
   static bool _started = false;
+  static DynamicLibrary? _lib;
+  static StopServer? _stopServerFn;
+  static IsRunning? _isRunningFn;
 
   static Future<void> start() async {
     if (_started || kIsWeb || !Platform.isAndroid) return;
 
-    // 先尝试通过 MethodChannel（JNI 方式，Kotlin 加载 libkugou_server.so）
-    for (int attempt = 0; attempt < 3; attempt++) {
+    // 优先走 dart:ffi（纯 C 函数名不含包名，JNI 符号不匹配时也能用）
+    try {
+      await _startViaFfi();
+      _started = true;
+      return;
+    } catch (e) {
+      print('dart:ffi start failed, falling back to MethodChannel: $e');
+    }
+
+    // FFI 失败再尝试 MethodChannel（JNI 方式）
+    for (int attempt = 0; attempt < 2; attempt++) {
       try {
         final port = await _channel.invokeMethod<int>('startServer');
         if (port != null && port > 0) {
@@ -40,33 +57,35 @@ class KugouApiServer {
         await Future.delayed(const Duration(seconds: 1));
       }
     }
+  }
 
-    // MethodChannel 失败，尝试 dart:ffi 直接调用 start_server
-    print('Falling back to dart:ffi approach...');
-    try {
-      await _startViaFfi();
-    } catch (e) {
-      print('dart:ffi start also failed: $e');
-    }
+  static DynamicLibrary _loadLib() {
+    _lib ??= DynamicLibrary.open('libkugou_server.so');
+    return _lib!;
   }
 
   static Future<void> _startViaFfi() async {
-    final lib = DynamicLibrary.open('libkugou_server.so');
+    final lib = _loadLib();
     final startServer = lib
         .lookupFunction<StartServerNative, StartServer>('start_server');
+    _stopServerFn ??=
+        lib.lookupFunction<StopServerNative, StopServer>('stop_server');
+    _isRunningFn ??=
+        lib.lookupFunction<IsRunningNative, IsRunning>('is_server_running');
 
-    final dataDir =
-        '/data/user/0/com.md3music.md3music/files'.toNativeUtf8();
+    // 用 path_provider 获取 filesDir，避免硬编码包名路径
+    final appDir = await getApplicationSupportDirectory();
+    final dataDirPath = appDir.path.toNativeUtf8();
     late int port;
     try {
-      port = startServer(0, dataDir);
+      port = startServer(0, dataDirPath);
       print('kugou_server start_server returned port: $port');
       if (port <= 0) {
         throw StateError('start_server failed with code $port');
       }
       _applyPort(port);
     } finally {
-      calloc.free(dataDir);
+      calloc.free(dataDirPath);
     }
     await _waitForReady(port);
   }
@@ -102,10 +121,19 @@ class KugouApiServer {
   }
 
   static Future<bool> isRunning() async {
+    // 优先用 FFI 查询（不依赖 JNI 符号）
     try {
-      return await _channel.invokeMethod('isRunning') ?? false;
+      final lib = _loadLib();
+      _isRunningFn ??=
+          lib.lookupFunction<IsRunningNative, IsRunning>('is_server_running');
+      return _isRunningFn!() == 1;
     } catch (_) {
-      return false;
+      // FFI 不可用再试 MethodChannel
+      try {
+        return await _channel.invokeMethod('isRunning') ?? false;
+      } catch (_) {
+        return false;
+      }
     }
   }
 
@@ -114,17 +142,31 @@ class KugouApiServer {
   /// （确认退出 / Activity 销毁）场景能确定性关停。
   static Future<void> stop() async {
     if (kIsWeb || !Platform.isAndroid) return;
+
+    // 优先用 FFI 停止（不依赖 JNI 符号）
+    try {
+      final lib = _loadLib();
+      _stopServerFn ??=
+          lib.lookupFunction<StopServerNative, StopServer>('stop_server');
+      _stopServerFn!();
+      print('KugouApiServer stopped via FFI');
+      return;
+    } catch (e) {
+      print('KugouApiServer FFI stop error: $e');
+    }
+
+    // FFI 失败再试 MethodChannel
     try {
       await _channel.invokeMethod('stopServer');
     } catch (e) {
-      print('KugouApiServer stop error: $e');
+      print('KugouApiServer MethodChannel stop error: $e');
     }
   }
 
   /// 重启本地 API 服务器（设置页「运行中」点击触发）。
   /// 停掉后清空 _started 标记，重新走 start() 分配新随机端口并更新 baseUrl。
   /// Rust 侧 device_info.json 已持久化，重启后 dfid/mid 不变，无需重新注册。
-  /// 返回是否成功（以 JNI 侧 nativeIsNodeRunning 为准）。
+  /// 返回是否成功。
   static Future<bool> restart() async {
     await stop();
     await Future.delayed(const Duration(milliseconds: 300));

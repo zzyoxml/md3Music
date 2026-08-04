@@ -1,4 +1,4 @@
-package com.md3music.md3music
+package com.md3music.premium
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -67,13 +67,13 @@ class FloatingLyricService : Service() {
     companion object {
         const val CHANNEL_ID = "floating_lyric_channel"
         const val NOTIFICATION_ID = 1001
-        const val ACTION_UPDATE_LYRIC = "com.md3music.md3music.UPDATE_LYRIC"
-        const val ACTION_UPDATE_TITLE = "com.md3music.md3music.UPDATE_TITLE"
-        const val ACTION_UPDATE_PROGRESS = "com.md3music.md3music.UPDATE_PROGRESS"
-        const val ACTION_SET_CONFIG = "com.md3music.md3music.SET_CONFIG"
-        const val ACTION_SET_PLAYING = "com.md3music.md3music.SET_PLAYING"
-        const val ACTION_STOP = "com.md3music.md3music.STOP_LYRIC"
-        const val ACTION_TOGGLE_LOCK = "com.md3music.md3music.TOGGLE_LOCK"
+        const val ACTION_UPDATE_LYRIC = "com.md3music.premium.UPDATE_LYRIC"
+        const val ACTION_UPDATE_TITLE = "com.md3music.premium.UPDATE_TITLE"
+        const val ACTION_UPDATE_PROGRESS = "com.md3music.premium.UPDATE_PROGRESS"
+        const val ACTION_SET_CONFIG = "com.md3music.premium.SET_CONFIG"
+        const val ACTION_SET_PLAYING = "com.md3music.premium.SET_PLAYING"
+        const val ACTION_STOP = "com.md3music.premium.STOP_LYRIC"
+        const val ACTION_TOGGLE_LOCK = "com.md3music.premium.TOGGLE_LOCK"
         const val EXTRA_LYRIC = "lyric"
         const val EXTRA_NEXT_LYRIC = "nextLyric"
         // 当前行已唱字数（KRC 逐字）。-1 表示无逐字（LRC/纯文本），原生侧整行渐变色
@@ -619,7 +619,7 @@ class FloatingLyricService : Service() {
         if (engine != null) {
             io.flutter.plugin.common.MethodChannel(
                 engine.dartExecutor.binaryMessenger,
-                "com.md3music.md3music/floating_lyric"
+                "com.md3music.premium/floating_lyric"
             ).invokeMethod("desktopLyricAction", action)
         } else {
             MainActivity.sendDesktopLyricAction(action)
@@ -640,7 +640,7 @@ class FloatingLyricService : Service() {
         if (engine != null) {
             io.flutter.plugin.common.MethodChannel(
                 engine.dartExecutor.binaryMessenger,
-                "com.md3music.md3music/floating_lyric"
+                "com.md3music.premium/floating_lyric"
             ).invokeMethod("desktopLyricConfigChanged", args)
         }
     }

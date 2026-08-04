@@ -9,7 +9,7 @@ import 'package:flutter/services.dart';
 /// MediaStore 会自动聚合系统已索引的所有可见音频。
 class MediaStoreService {
   static const _channel =
-      MethodChannel('com.md3music.md3music/media_store');
+      MethodChannel('com.md3music.premium/media_store');
 
   /// 缓存最近一次查询到的 SDK 版本。
   static int? _cachedSdkVersion;

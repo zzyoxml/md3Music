@@ -5,13 +5,13 @@ import 'package:flutter/services.dart';
 /// 将标题/艺术家/专辑/封面/歌词嵌入已下载的音频文件。
 ///
 /// 原生端实现见 [MetadataWriterPlugin.kt]，channel 名为
-/// "com.md3music.md3music/metadata"。
+/// "com.md3music.premium/metadata"。
 ///
 /// 调用方应在下载完成后 fire-and-forget 调用 [writeMetadata]：
 /// 失败返回 false，不阻断下载流程（用户已能播放文件，只是缺元数据）。
 class MetadataWriter {
   static const MethodChannel _channel = MethodChannel(
-    'com.md3music.md3music/metadata',
+    'com.md3music.premium/metadata',
   );
 
   /// 将元数据写入 [filePath] 指向的音频文件。

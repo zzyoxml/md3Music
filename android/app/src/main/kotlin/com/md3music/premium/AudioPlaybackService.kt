@@ -1,4 +1,4 @@
-package com.md3music.md3music
+package com.md3music.premium
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -38,15 +38,15 @@ class AudioPlaybackService : Service() {
     companion object {
         const val CHANNEL_ID = "md3music_audio_playback"
         const val NOTIFICATION_ID = 1002
-        const val ACTION_PREV = "com.md3music.md3music.ACTION_PREV"
-        const val ACTION_PLAY_PAUSE = "com.md3music.md3music.ACTION_PLAY_PAUSE"
-        const val ACTION_NEXT = "com.md3music.md3music.ACTION_NEXT"
-        const val ACTION_STOP = "com.md3music.md3music.ACTION_STOP"
-        const val ACTION_TOGGLE_DESKTOP_LYRIC = "com.md3music.md3music.ACTION_TOGGLE_DESKTOP_LYRIC"
-        const val ACTION_TOGGLE_FAVORITE = "com.md3music.md3music.ACTION_TOGGLE_FAVORITE"
+        const val ACTION_PREV = "com.md3music.premium.ACTION_PREV"
+        const val ACTION_PLAY_PAUSE = "com.md3music.premium.ACTION_PLAY_PAUSE"
+        const val ACTION_NEXT = "com.md3music.premium.ACTION_NEXT"
+        const val ACTION_STOP = "com.md3music.premium.ACTION_STOP"
+        const val ACTION_TOGGLE_DESKTOP_LYRIC = "com.md3music.premium.ACTION_TOGGLE_DESKTOP_LYRIC"
+        const val ACTION_TOGGLE_FAVORITE = "com.md3music.premium.ACTION_TOGGLE_FAVORITE"
         // 蓝牙歌词：通过修改 MediaSession 元数据模拟 AVRCP 歌词显示
-        const val ACTION_UPDATE_BT_LYRIC = "com.md3music.md3music.ACTION_UPDATE_BT_LYRIC"
-        const val ACTION_SET_BT_LYRIC_ENABLED = "com.md3music.md3music.ACTION_SET_BT_LYRIC_ENABLED"
+        const val ACTION_UPDATE_BT_LYRIC = "com.md3music.premium.ACTION_UPDATE_BT_LYRIC"
+        const val ACTION_SET_BT_LYRIC_ENABLED = "com.md3music.premium.ACTION_SET_BT_LYRIC_ENABLED"
         const val EXTRA_TITLE = "title"
         const val EXTRA_ARTIST = "artist"
         const val EXTRA_ART_URL = "artUrl"
@@ -59,8 +59,8 @@ class AudioPlaybackService : Service() {
         const val EXTRA_BT_LYRIC_TEXT = "btLyricText"
         const val EXTRA_BT_LYRIC_ENABLED = "btLyricEnabled"
         // 桌面小组件按钮动作（由 MusicWidgetProvider 转发）
-        const val ACTION_WIDGET_PLAY_PAUSE = "com.md3music.md3music.ACTION_WIDGET_PLAY_PAUSE"
-        const val ACTION_WIDGET_NEXT = "com.md3music.md3music.ACTION_WIDGET_NEXT"
+        const val ACTION_WIDGET_PLAY_PAUSE = "com.md3music.premium.ACTION_WIDGET_PLAY_PAUSE"
+        const val ACTION_WIDGET_NEXT = "com.md3music.premium.ACTION_WIDGET_NEXT"
 
         // 静态变量用于跨组件传递 FlutterEngine
         private var staticFlutterEngine: FlutterEngine? = null
@@ -324,7 +324,7 @@ class AudioPlaybackService : Service() {
                 ACTION_TOGGLE_FAVORITE -> "toggleFavorite"
                 else -> return
             }
-            MethodChannel(engine.dartExecutor.binaryMessenger, "com.md3music.md3music/floating_lyric")
+            MethodChannel(engine.dartExecutor.binaryMessenger, "com.md3music.premium/floating_lyric")
                 .invokeMethod(method, null)
         } else {
             sendFlutterCommand(action)
@@ -340,7 +340,7 @@ class AudioPlaybackService : Service() {
             ACTION_TOGGLE_FAVORITE -> "toggleFavorite"
             else -> return
         }
-        val intent = Intent("com.md3music.md3music.FLUTTER_COMMAND").apply {
+        val intent = Intent("com.md3music.premium.FLUTTER_COMMAND").apply {
             putExtra("method", method)
         }
         sendBroadcast(intent)
@@ -370,7 +370,7 @@ class AudioPlaybackService : Service() {
                 override fun onStop() = handleAction(ACTION_STOP)
                 override fun onSeekTo(pos: Long) {
                     val engine = flutterEngine ?: staticFlutterEngine ?: return
-                    MethodChannel(engine.dartExecutor.binaryMessenger, "com.md3music.md3music/floating_lyric")
+                    MethodChannel(engine.dartExecutor.binaryMessenger, "com.md3music.premium/floating_lyric")
                         .invokeMethod("seekTo", pos.toInt())
                 }
                 override fun onCustomAction(action: String?, extras: android.os.Bundle?) {

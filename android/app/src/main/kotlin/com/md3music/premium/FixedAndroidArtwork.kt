@@ -1,4 +1,4 @@
-package com.md3music.md3music
+package com.md3music.premium
 
 import org.jaudiotagger.tag.images.AndroidArtwork
 import java.io.File

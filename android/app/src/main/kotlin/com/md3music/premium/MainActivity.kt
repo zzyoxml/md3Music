@@ -1,4 +1,4 @@
-package com.md3music.md3music
+package com.md3music.premium
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -14,17 +14,17 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
-import com.md3music.md3music.AudioPlaybackService
-import com.md3music.md3music.FloatingLyricService
+import com.md3music.premium.AudioPlaybackService
+import com.md3music.premium.FloatingLyricService
 import io.github.proify.lyricon.lyric.model.Song
 import java.io.File
 
 class MainActivity : FlutterActivity() {
-    private val FLOATING_CHANNEL = "com.md3music.md3music/floating_lyric"
-    private val FOLDER_PICKER_CHANNEL = "com.md3music.md3music/folder_picker"
-    private val FONT_PICKER_CHANNEL = "com.md3music.md3music/font_picker"
-    private val MEDIA_STORE_CHANNEL = "com.md3music.md3music/media_store"
-    private val HOME_WIDGET_CHANNEL = "com.md3music.md3music/home_widget"
+    private val FLOATING_CHANNEL = "com.md3music.premium/floating_lyric"
+    private val FOLDER_PICKER_CHANNEL = "com.md3music.premium/folder_picker"
+    private val FONT_PICKER_CHANNEL = "com.md3music.premium/font_picker"
+    private val MEDIA_STORE_CHANNEL = "com.md3music.premium/media_store"
+    private val HOME_WIDGET_CHANNEL = "com.md3music.premium/home_widget"
     private var pendingDesktopLyricAction: String? = null
     private var folderPickerResult: MethodChannel.Result? = null
     private var fontPickerResult: MethodChannel.Result? = null
@@ -78,11 +78,18 @@ class MainActivity : FlutterActivity() {
         // 注册均衡器插件：Android 原生 Equalizer，绑定 just_audio 的 audio session ID
         EqualizerPlugin().register(flutterEngine)
 
-        // 初始化 Node.js 本地 API 服务器
+        // 初始化本地 API 服务器（KugouApiService 含 JNI external 方法，
+        // 如果 .so 的 JNI 符号名与当前包名不匹配，实例化可能触发类验证错误，
+        // 这里包一层 try-catch，失败时 Dart 端会走 dart:ffi 兜底）。
         android.util.Log.d("MainActivity", "Initializing KugouApiService...")
-        val apiSvc = KugouApiService(this, flutterEngine)
-        setKugouApiService(apiSvc)
-        android.util.Log.d("MainActivity", "KugouApiService initialized")
+        try {
+            val apiSvc = KugouApiService(this, flutterEngine)
+            setKugouApiService(apiSvc)
+            android.util.Log.d("MainActivity", "KugouApiService initialized")
+        } catch (e: Throwable) {
+            android.util.Log.e("MainActivity", "KugouApiService init failed: ${e.message}")
+            setKugouApiService(null)
+        }
 
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FLOATING_CHANNEL)
         channel.setMethodCallHandler { call, result ->
@@ -243,7 +250,7 @@ class MainActivity : FlutterActivity() {
         // 注册 Lyricon Provider MethodChannel，让 Dart 端能控制 Lyricon 播放器
         val lyriconChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "com.md3music.md3music/lyricon"
+            "com.md3music.premium/lyricon"
         )
         AudioPlaybackService.setLyriconChannel(lyriconChannel)
         lyriconChannel.setMethodCallHandler { call, result ->
@@ -498,7 +505,7 @@ class MainActivity : FlutterActivity() {
         // 注册屏幕常亮 MethodChannel：Dart 端 WakelockService 调用，开关 FLAG_KEEP_SCREEN_ON
         val wakelockChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
-            "com.md3music.md3music/wakelock"
+            "com.md3music.premium/wakelock"
         )
         wakelockChannel.setMethodCallHandler { call, result ->
             when (call.method) {

@@ -1,4 +1,4 @@
-package com.md3music.md3music
+package com.md3music.premium
 
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -9,7 +9,7 @@ import java.util.logging.Level
 import java.util.logging.Logger
 
 /**
- * 元数据写入插件：通过 MethodChannel "com.md3music.md3music/metadata" 暴露 writeMetadata
+ * 元数据写入插件：通过 MethodChannel "com.md3music.premium/metadata" 暴露 writeMetadata
  *
  * Dart 端在下载完成后调用，将以下信息嵌入音频文件：
  * - 标题 / 艺术家 / 专辑（写入 ID3v2 TIT2/TPE1/TALB 或 FLAC VorbisComment）
@@ -24,7 +24,7 @@ import java.util.logging.Logger
 class MetadataWriterPlugin {
 
     companion object {
-        private const val CHANNEL_NAME = "com.md3music.md3music/metadata"
+        private const val CHANNEL_NAME = "com.md3music.premium/metadata"
     }
 
     /**

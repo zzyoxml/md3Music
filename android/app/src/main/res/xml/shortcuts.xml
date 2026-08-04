@@ -8,8 +8,8 @@
         android:shortcutLongLabel="@string/shortcut_favorites">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.md3music.md3music"
-            android:targetClass="com.md3music.md3music.MainActivity">
+            android:targetPackage="com.md3music.premium"
+            android:targetClass="com.md3music.premium.MainActivity">
             <extra android:name="shortcutType" android:value="action_open_favorites" />
         </intent>
     </shortcut>
@@ -21,8 +21,8 @@
         android:shortcutLongLabel="@string/shortcut_recognition">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.md3music.md3music"
-            android:targetClass="com.md3music.md3music.MainActivity">
+            android:targetPackage="com.md3music.premium"
+            android:targetClass="com.md3music.premium.MainActivity">
             <extra android:name="shortcutType" android:value="action_open_recognition" />
         </intent>
     </shortcut>
@@ -34,8 +34,8 @@
         android:shortcutLongLabel="@string/shortcut_search">
         <intent
             android:action="android.intent.action.VIEW"
-            android:targetPackage="com.md3music.md3music"
-            android:targetClass="com.md3music.md3music.MainActivity">
+            android:targetPackage="com.md3music.premium"
+            android:targetClass="com.md3music.premium.MainActivity">
             <extra android:name="shortcutType" android:value="action_open_search" />
         </intent>
     </shortcut>

@@ -295,7 +295,7 @@ class DesktopLyricService {
     } catch (_) {}
   }
 
-  static const _channel = MethodChannel('com.md3music.md3music/floating_lyric');
+  static const _channel = MethodChannel('com.md3music.premium/floating_lyric');
 
   void _syncCurrentFromPlayer() {
     if (_player == null) return;

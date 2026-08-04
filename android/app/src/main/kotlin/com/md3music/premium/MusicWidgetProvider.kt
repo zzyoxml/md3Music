@@ -1,4 +1,4 @@
-package com.md3music.md3music
+package com.md3music.premium
 
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
@@ -18,9 +18,9 @@ import android.widget.RemoteViews
 class MusicWidgetProvider : AppWidgetProvider() {
 
     companion object {
-        const val ACTION_UPDATE_WIDGET = "com.md3music.md3music.ACTION_UPDATE_WIDGET"
-        const val ACTION_PLAY_PAUSE = "com.md3music.md3music.ACTION_WIDGET_PLAY_PAUSE"
-        const val ACTION_NEXT = "com.md3music.md3music.ACTION_WIDGET_NEXT"
+        const val ACTION_UPDATE_WIDGET = "com.md3music.premium.ACTION_UPDATE_WIDGET"
+        const val ACTION_PLAY_PAUSE = "com.md3music.premium.ACTION_WIDGET_PLAY_PAUSE"
+        const val ACTION_NEXT = "com.md3music.premium.ACTION_WIDGET_NEXT"
 
         const val EXTRA_TITLE = "widget_title"
         const val EXTRA_ARTIST = "widget_artist"
