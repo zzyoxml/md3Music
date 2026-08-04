@@ -18,6 +18,7 @@ import 'main.dart'
 import 'modules/discover/discover_page.dart';
 import 'modules/coverflow/coverflow_page.dart';
 import 'modules/charts/charts_page.dart';
+import 'modules/ip/ip_page.dart';
 import 'modules/user/user_center_page.dart';
 import 'modules/user/favorites_page.dart';
 
@@ -409,6 +410,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return const SearchPage(showMiniPlayer: false);
       case 'charts':
         return const ChartsPage();
+      case 'ip':
+        return const IpPage();
       case 'recognition':
         return const SongRecognitionPage();
       case 'audiobook':
@@ -463,6 +466,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDestination(
           icon: const Icon(Icons.leaderboard_outlined),
           selectedIcon: const Icon(Icons.leaderboard),
+          label: tab.label,
+        );
+      case 'ip':
+        return NavigationDestination(
+          icon: const Icon(Icons.edit_note_outlined),
+          selectedIcon: const Icon(Icons.edit_note),
           label: tab.label,
         );
       case 'recognition':
@@ -536,6 +545,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           selectedIcon: const Icon(Icons.leaderboard),
           label: Text(tab.label),
         );
+      case 'ip':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.edit_note_outlined),
+          selectedIcon: const Icon(Icons.edit_note),
+          label: Text(tab.label),
+        );
       case 'recognition':
         return NavigationRailDestination(
           icon: const Icon(Icons.mic_none_outlined),
@@ -605,6 +620,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDrawerDestination(
           icon: const Icon(Icons.leaderboard_outlined),
           selectedIcon: const Icon(Icons.leaderboard),
+          label: Text(tab.label),
+        );
+      case 'ip':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.edit_note_outlined),
+          selectedIcon: const Icon(Icons.edit_note),
           label: Text(tab.label),
         );
       case 'recognition':

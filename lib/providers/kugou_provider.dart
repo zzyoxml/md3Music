@@ -85,6 +85,7 @@ class KugouProvider extends ChangeNotifier {
   Map<String, dynamic>? _sceneData;
   Map<String, dynamic>? _themeMusicData;
   Map<String, dynamic>? _ipHomeData;
+  Map<String, dynamic>? _ipZoneData;
   Map<String, dynamic>? _fmData;
   Map<String, dynamic>? _sheetData;
   Map<String, dynamic>? _everydayHistory;
@@ -253,6 +254,7 @@ class KugouProvider extends ChangeNotifier {
   Map<String, dynamic>? get sceneData => _sceneData;
   Map<String, dynamic>? get themeMusicData => _themeMusicData;
   Map<String, dynamic>? get ipHomeData => _ipHomeData;
+  Map<String, dynamic>? get ipZoneData => _ipZoneData;
   Map<String, dynamic>? get fmData => _fmData;
   Map<String, dynamic>? get sheetData => _sheetData;
   Map<String, dynamic>? get everydayHistory => _everydayHistory;
@@ -311,6 +313,7 @@ class KugouProvider extends ChangeNotifier {
     _sceneData = null;
     _themePlaylistData = [];
     _ipHomeData = null;
+    _ipZoneData = null;
     _personalFmSongs = [];
     _hasLoadedDiscoverData = false;
     _dataTimestamps.clear();
@@ -1622,6 +1625,19 @@ class KugouProvider extends ChangeNotifier {
       if (r != null) {
         _ipHomeData = r;
         _dataTimestamps['ipHome'] = DateTime.now();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  /// 编辑精选专区（/ip/zone）。
+  Future<void> getIpZone({bool forceRefresh = false}) async {
+    if (!forceRefresh && _isDataFresh('ipZone')) return;
+    try {
+      final r = await _apiClient.getIpZone();
+      if (r != null) {
+        _ipZoneData = r;
+        _dataTimestamps['ipZone'] = DateTime.now();
         notifyListeners();
       }
     } catch (_) {}

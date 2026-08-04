@@ -47,6 +47,7 @@ const List<TabItem> kDefaultTabs = [
 const List<TabItem> kOptionalTabs = [
   TabItem(id: 'search', label: '搜索'),
   TabItem(id: 'charts', label: '排行榜'),
+  TabItem(id: 'ip', label: '编辑精选'),
   TabItem(id: 'recognition', label: '听歌识曲'),
   TabItem(id: 'audiobook', label: '听书'),
 ];

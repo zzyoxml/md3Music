@@ -1729,26 +1729,58 @@ class KugouApiClient {
 
   // ==================== IP (Edit Picks) ====================
 
+  /// 编辑精选主列表（/top/ip → musicadservice 每日推荐）。
   Future<Map<String, dynamic>?> getIpHome() async {
-    return await _get(KugouEndpoints.ipHome);
+    return await _get(KugouEndpoints.topIp);
+  }
+
+  /// 编辑精选数据（/ip → /openapi/v1/ip/{type}）。
+  /// [type] 支持 audios / albums / videos / author_list，非法值回退 audios。
+  Future<Map<String, dynamic>?> getIpData(
+    String id, {
+    String type = 'audios',
+    int page = 1,
+    int pagesize = 30,
+  }) async {
+    final safeType = ['audios', 'albums', 'videos', 'author_list'].contains(type)
+        ? type
+        : 'audios';
+    return await _get(
+      KugouEndpoints.ip,
+      queryParameters: {
+        'id': id,
+        'type': safeType,
+        'page': page,
+        'pagesize': pagesize,
+      },
+    );
   }
 
   Future<Map<String, dynamic>?> getIpDateil() async {
     return await _get(KugouEndpoints.ipDateil);
   }
 
-  Future<Map<String, dynamic>?> getIpPlaylist() async {
-    return await _get(KugouEndpoints.ipPlaylist);
+  /// 编辑精选歌单（/ip/playlist → /ocean/v6/pubsongs/list_info_for_ip）。
+  Future<Map<String, dynamic>?> getIpPlaylist(
+    String id, {
+    int page = 1,
+    int pagesize = 30,
+  }) async {
+    return await _get(
+      KugouEndpoints.ipPlaylist,
+      queryParameters: {'id': id, 'page': page, 'pagesize': pagesize},
+    );
   }
 
   Future<Map<String, dynamic>?> getIpZone() async {
     return await _get(KugouEndpoints.ipZone);
   }
 
-  Future<Map<String, dynamic>?> getIpZoneHome(String zoneId) async {
+  /// 编辑精选专区详情（/ip/zone/home），query 参数名 `id` 与服务端一致。
+  Future<Map<String, dynamic>?> getIpZoneHome(String id) async {
     return await _get(
       KugouEndpoints.ipZoneHome,
-      queryParameters: {'zone_id': zoneId},
+      queryParameters: {'id': id},
     );
   }
 

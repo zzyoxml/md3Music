@@ -1880,6 +1880,8 @@ class _TabManagementPanel extends StatelessWidget {
         return Icons.search;
       case 'charts':
         return Icons.leaderboard;
+      case 'ip':
+        return Icons.edit_note;
       case 'recognition':
         return Icons.mic;
       case 'audiobook':
