@@ -130,11 +130,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Set up Node.js 18 (for server bundle)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
       # ============================================================
       # 4. 缓存 Gradle（加速依赖下载）
       # ============================================================
@@ -147,44 +142,6 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
-
-      # ============================================================
-      # 5. 下载 native-libs（libnode.so + Node headers）
-      #    优先从专用的 native-libs release 下载；
-      #    若不存在则报错，提示用户先创建该 release。
-      # ============================================================
-      - name: Download native-libs.zip
-        run: |
-          set -e
-          echo "Downloading native-libs.zip from 'native-libs' release..."
-          if ! curl -fL --retry 3 -o native-libs.zip \
-              "https://github.com/${GITHUB_REPOSITORY}/releases/download/native-libs/native-libs.zip"; then
-            echo ""
-            echo "============================================================"
-            echo "ERROR: native-libs.zip 下载失败"
-            echo ""
-            echo "首次启用 CI 时需要手动上传一次 native-libs.zip："
-            echo "  1. 在本地把 android/app/src/main/jniLibs/ 和"
-            echo "     android/app/src/main/cpp/include/ 打包成 native-libs.zip"
-            echo "  2. 创建一个名为 'native-libs' 的 release："
-            echo "     https://github.com/${GITHUB_REPOSITORY}/releases/new?tag=native-libs"
-            echo "  3. 把 native-libs.zip 作为资产上传"
-            echo "  4. 重新触发本 workflow"
-            echo "============================================================"
-            exit 1
-          fi
-          ls -lh native-libs.zip
-
-      - name: Extract native libs
-        run: |
-          set -e
-          unzip -q -o native-libs.zip -d .
-          rm native-libs.zip
-          echo "jniLibs/:"
-          ls -la android/app/src/main/jniLibs/ 2>/dev/null || echo "  (missing)"
-          echo ""
-          echo "cpp/include/node/:"
-          ls android/app/src/main/cpp/include/node/ 2>/dev/null | head -5 || echo "  (missing)"
 
       # ============================================================
       # 5.5 下载持久化 release keystore
@@ -234,31 +191,6 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-
-      # ============================================================
-      # 6. 构建嵌入式 Node.js 服务器 bundle
-      # ============================================================
-      - name: Install server dependencies
-        working-directory: kugou_api_server
-        run: npm install --omit=dev
-
-      - name: Generate bundled entry
-        run: node scripts/gen_node_bundle_entry.js
-
-      - name: Build server bundle with esbuild
-        working-directory: kugou_api_server
-        run: |
-          npx --yes esbuild bundled_entry.js \
-            --bundle --minify \
-            --outfile=server_bundle.js \
-            --platform=node \
-            --target=node18
-
-      - name: Copy server bundle to Flutter assets
-        run: |
-          mkdir -p assets/nodejs-project
-          cp kugou_api_server/server_bundle.js assets/nodejs-project/server_bundle.js
-          ls -lh assets/nodejs-project/server_bundle.js
 
       # ============================================================
       # 7. 构建 Android APK
