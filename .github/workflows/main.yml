@@ -30,7 +30,7 @@ jobs:
   build-android:
     name: Build Android APK
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 60
 
     steps:
       # ============================================================
@@ -105,6 +105,8 @@ jobs:
 
       # ============================================================
       # 3. 基础工具链
+      #    Rust 架构下 libkugou_server.so 已提交进 Git，
+      #    不需要 NDK/cmake/Node.js 等旧架构依赖。
       # ============================================================
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -112,7 +114,7 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK & NDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK packages
@@ -120,20 +122,13 @@ jobs:
           sdkmanager --install \
             "cmdline-tools;latest" \
             "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "ndk;28.2.13676358" \
-            "cmake;3.22.1"
+            "build-tools;36.0.0"
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
-
-      - name: Set up Node.js 18 (for server bundle)
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
 
       # ============================================================
       # 4. 缓存 Gradle（加速依赖下载）
@@ -149,47 +144,17 @@ jobs:
             gradle-${{ runner.os }}-
 
       # ============================================================
-      # 5. 下载 native-libs（libnode.so + Node headers）
-      #    优先从专用的 native-libs release 下载；
-      #    若不存在则报错，提示用户先创建该 release。
+      # 4.5 验证 jniLibs 存在（Rust .so 已入库）
       # ============================================================
-      - name: Download native-libs.zip
+      - name: Verify native libraries
         run: |
-          set -e
-          echo "Downloading native-libs.zip from 'native-libs' release..."
-          if ! curl -fL --retry 3 -o native-libs.zip \
-              "https://github.com/${GITHUB_REPOSITORY}/releases/download/native-libs/native-libs.zip"; then
-            echo ""
-            echo "============================================================"
-            echo "ERROR: native-libs.zip 下载失败"
-            echo ""
-            echo "首次启用 CI 时需要手动上传一次 native-libs.zip："
-            echo "  1. 在本地把 android/app/src/main/jniLibs/ 和"
-            echo "     android/app/src/main/cpp/include/ 打包成 native-libs.zip"
-            echo "  2. 创建一个名为 'native-libs' 的 release："
-            echo "     https://github.com/${GITHUB_REPOSITORY}/releases/new?tag=native-libs"
-            echo "  3. 把 native-libs.zip 作为资产上传"
-            echo "  4. 重新触发本 workflow"
-            echo "============================================================"
-            exit 1
-          fi
-          ls -lh native-libs.zip
-
-      - name: Extract native libs
-        run: |
-          set -e
-          unzip -q -o native-libs.zip -d .
-          rm native-libs.zip
           echo "jniLibs/:"
-          ls -la android/app/src/main/jniLibs/ 2>/dev/null || echo "  (missing)"
-          echo ""
-          echo "cpp/include/node/:"
-          ls android/app/src/main/cpp/include/node/ 2>/dev/null | head -5 || echo "  (missing)"
+          ls -lh android/app/src/main/jniLibs/*/libkugou_server.so 2>/dev/null || echo "  WARNING: libkugou_server.so not found"
 
       # ============================================================
-      # 5.5 下载持久化 release keystore
-      #     从 'keystore' release 下载 release.keystore，
-      #     并生成 keystore.properties（密码用 GitHub Secrets）
+      # 5. 下载持久化 release keystore
+      #    从 'keystore' release 下载 release.keystore，
+      #    并生成 keystore.properties（密码用 GitHub Secrets）
       # ============================================================
       - name: Download release keystore
         id: keystore
@@ -236,32 +201,7 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
       # ============================================================
-      # 6. 构建嵌入式 Node.js 服务器 bundle
-      # ============================================================
-      - name: Install server dependencies
-        working-directory: kugou_api_server
-        run: npm install --omit=dev
-
-      - name: Generate bundled entry
-        run: node scripts/gen_node_bundle_entry.js
-
-      - name: Build server bundle with esbuild
-        working-directory: kugou_api_server
-        run: |
-          npx --yes esbuild bundled_entry.js \
-            --bundle --minify \
-            --outfile=server_bundle.js \
-            --platform=node \
-            --target=node18
-
-      - name: Copy server bundle to Flutter assets
-        run: |
-          mkdir -p assets/nodejs-project
-          cp kugou_api_server/server_bundle.js assets/nodejs-project/server_bundle.js
-          ls -lh assets/nodejs-project/server_bundle.js
-
-      # ============================================================
-      # 7. 构建 Android APK
+      # 6. 构建 Android APK
       # ============================================================
       - name: Flutter pub get
         run: flutter pub get
@@ -289,7 +229,7 @@ jobs:
           done
 
       # ============================================================
-      # 8. 生成更新日志
+      # 7. 生成更新日志
       # ============================================================
       - name: Generate changelog
         id: changelog
@@ -313,10 +253,10 @@ jobs:
           # 验证 CURRENT_TAG 是否存在
           if git rev-parse --verify "refs/tags/${CURRENT_TAG}" >/dev/null 2>&1; then
             echo "Current tag ${CURRENT_TAG} exists in repo"
-            # 找前一个 release tag（排除 native-libs 这种内部 tag 和当前 tag）
+            # 找前一个 release tag（排除 keystore 这种内部 tag 和当前 tag）
             PREV_TAG=$(git tag --sort=-version:refname \
               | grep -v "^${CURRENT_TAG}$" \
-              | grep -v "^native-libs$" \
+              | grep -v "^keystore$" \
               | head -1 || true)
 
             if [ -n "$PREV_TAG" ] && git rev-parse --verify "refs/tags/${PREV_TAG}" >/dev/null 2>&1; then
@@ -363,7 +303,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       # ============================================================
-      # 9. 创建/更新 GitHub Release（仅在 tag 真实存在时执行）
+      # 8. 创建/更新 GitHub Release（仅在 tag 真实存在时执行）
       #    append=true 保留历史资产，不会删除旧版本
       # ============================================================
       - name: Upload APKs to Release
