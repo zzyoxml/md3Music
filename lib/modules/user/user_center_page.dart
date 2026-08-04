@@ -565,6 +565,12 @@ class _UserCenterPageState extends State<UserCenterPage> {
               ),
             ],
           ),
+          const SizedBox(height: 4),
+          // 仅签到异常时点击 —— 提示语
+          Text(
+            '仅签到异常时点击',
+            style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+          ),
         ],
       ),
     );
