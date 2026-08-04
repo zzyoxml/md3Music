@@ -58,6 +58,10 @@ class ResponsiveScaffold extends StatefulWidget {
   final PreferredSizeWidget? appBar;
   final Widget? floatingActionButton;
 
+  /// 为 true 时隐藏导航栏（横屏不渲染 NavigationRail、竖屏不渲染 NavigationBar），
+  /// 用于封面流页的横屏沉浸浏览。
+  final bool hideNavigation;
+
   const ResponsiveScaffold({
     super.key,
     required this.destinations,
@@ -71,6 +75,7 @@ class ResponsiveScaffold extends StatefulWidget {
     this.expandedBody,
     this.appBar,
     this.floatingActionButton,
+    this.hideNavigation = false,
   });
 
   @override
@@ -99,12 +104,14 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
       appBar: widget.appBar,
       body: widget.compactBody ?? widget.body,
       floatingActionButton: widget.floatingActionButton,
-      bottomNavigationBar: NavigationBar(
-        height: 56,
-        selectedIndex: widget.selectedIndex,
-        onDestinationSelected: widget.onDestinationSelected,
-        destinations: widget.destinations,
-      ),
+      bottomNavigationBar: widget.hideNavigation
+          ? null
+          : NavigationBar(
+              height: 56,
+              selectedIndex: widget.selectedIndex,
+              onDestinationSelected: widget.onDestinationSelected,
+              destinations: widget.destinations,
+            ),
     );
   }
 
@@ -114,18 +121,44 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
       appBar: widget.appBar,
       body: Row(
         children: [
-          NavigationRail(
-            selectedIndex: widget.selectedIndex,
-            onDestinationSelected: widget.onDestinationSelected,
-            destinations: widget.railDestinations,
-            leading: widget.floatingActionButton,
-            groupAlignment: 0.0,
-            labelType: NavigationRailLabelType.all,
+          // Visibility(maintainState) 内部用 Offstage 隐藏：元素树结构保持稳定，
+          // hideNavigation 切换时 body（Expanded 子项）不会卸载重建，避免页面
+          // dispose→重建死循环导致横屏无法滑动/点击。
+          Visibility(
+            visible: !widget.hideNavigation,
+            maintainState: true,
+            // tab 项过多时 NavigationRail 内容超出高度，包一层可滚动容器：
+            // 内容少时 ConstrainedBox(minHeight) 撑满视口保持 groupAlignment 居中，
+            // 内容多时 SingleChildScrollView 支持上下滑动查看全部 tab。
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  scrollDirection: Axis.vertical,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight,
+                    ),
+                    child: NavigationRail(
+                      selectedIndex: widget.selectedIndex,
+                      onDestinationSelected: widget.onDestinationSelected,
+                      destinations: widget.railDestinations,
+                      leading: widget.floatingActionButton,
+                      groupAlignment: 0.0,
+                      labelType: NavigationRailLabelType.all,
+                    ),
+                  ),
+                );
+              },
+            ),
           ),
-          VerticalDivider(
-            thickness: 1,
-            width: 1,
-            color: Theme.of(context).colorScheme.outlineVariant,
+          Visibility(
+            visible: !widget.hideNavigation,
+            maintainState: true,
+            child: VerticalDivider(
+              thickness: 1,
+              width: 1,
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
           ),
           Expanded(child: widget.mediumBody ?? widget.body),
         ],

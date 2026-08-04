@@ -15,6 +15,7 @@ import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
+import '../coverflow/coverflow_page.dart';
 import '../settings/equalizer_settings_page.dart';
 import 'mv_player_page.dart';
 import '../../providers/device_provider.dart';
@@ -277,8 +278,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     _artworkFadeController.dispose();
     _zenController.dispose();
     _tabController.dispose();
-    // 退出播放器时立即恢复系统栏，确保从横屏沉浸模式正确退出
-    restoreSystemUi();
+    // 退出播放器时恢复系统栏；若仍处于封面流页横屏沉浸（从封面流进入播放器后返回），
+    // 则保持沉浸，避免返回后状态栏闪现。
+    if (kCoverFlowImmersiveActive.value) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      restoreSystemUi();
+    }
     super.dispose();
   }
 
@@ -2799,7 +2805,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   }
 
   /// 评论显示设置：调节楼主 / 楼中楼字体大小。
-  /// AM 风格下用纯白文字 + 半透明背景适配深色模糊封面。
+  /// 与 MD 风格面板保持一致：全部使用主题标准色（onSurface / onSurfaceVariant /
+  /// primary），由主题自动适配深色/浅色模式，不再硬编码白色文字。
   void _showCommentDisplaySheet(BuildContext rootContext) {
     showModalBottomSheet(
       context: rootContext,
@@ -2808,6 +2815,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         return SafeArea(
           child: Consumer<CommentDisplayProvider>(
             builder: (context, display, _) {
+              final colorScheme = Theme.of(context).colorScheme;
               return Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                 child: Column(
@@ -2820,30 +2828,33 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         height: 4,
                         margin: const EdgeInsets.only(bottom: 12),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.4),
+                          color: colorScheme.outline.withValues(alpha: 0.4),
                           borderRadius: BorderRadius.circular(2),
                         ),
                       ),
                     ),
-                    const Text(
+                    Text(
                       '评论显示设置',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         fontWeight: FontWeight.w600,
                       ),
                     ),
                     const SizedBox(height: 4),
-                    const Text(
+                    Text(
                       '楼中楼回复字号 = 楼主 − 3',
-                      style: TextStyle(color: Colors.white70, fontSize: 12),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colorScheme.onSurfaceVariant,
+                      ),
                     ),
                     const SizedBox(height: 20),
                     Row(
                       children: [
-                        const Text(
+                        Text(
                           '楼主',
-                          style: TextStyle(color: Colors.white, fontSize: 14),
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: colorScheme.onSurface,
+                          ),
                         ),
                         const SizedBox(width: 8),
                         Text(
@@ -2851,7 +2862,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           style: TextStyle(
                             fontSize: display.commentFontSize,
                             fontWeight: FontWeight.w500,
-                            color: Colors.white,
+                            color: colorScheme.primary,
                           ),
                         ),
                       ],
@@ -2871,7 +2882,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         vertical: 10,
                       ),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
+                        color: colorScheme.surfaceContainerHighest.withValues(
+                          alpha: 0.4,
+                        ),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Column(
@@ -2882,13 +2895,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                             children: [
                               CircleAvatar(
                                 radius: 12,
-                                backgroundColor: Colors.white.withValues(
-                                  alpha: 0.2,
+                                backgroundColor: colorScheme.primary.withValues(
+                                  alpha: 0.15,
                                 ),
                                 child: const Icon(
                                   Icons.person,
                                   size: 14,
-                                  color: Colors.white70,
+                                  color: Colors.grey,
                                 ),
                               ),
                               const SizedBox(width: 8),
@@ -2900,7 +2913,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                       '楼主',
                                       style: TextStyle(
                                         fontSize: display.commentFontSize - 2,
-                                        color: Colors.white70,
+                                        color: colorScheme.primary,
                                         fontWeight: FontWeight.w500,
                                       ),
                                     ),
@@ -2910,7 +2923,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                       style: TextStyle(
                                         fontSize: display.commentFontSize,
                                         height: 1.3,
-                                        color: Colors.white,
+                                        color: colorScheme.onSurface,
                                       ),
                                     ),
                                   ],
@@ -2925,7 +2938,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               vertical: 8,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.1),
+                              color: colorScheme.surfaceContainerHighest
+                                  .withValues(alpha: 0.3),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Row(
@@ -2933,13 +2947,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               children: [
                                 CircleAvatar(
                                   radius: 10,
-                                  backgroundColor: Colors.white.withValues(
-                                    alpha: 0.2,
-                                  ),
+                                  backgroundColor: colorScheme.primary
+                                      .withValues(alpha: 0.15),
                                   child: const Icon(
                                     Icons.person,
                                     size: 12,
-                                    color: Colors.white70,
+                                    color: Colors.grey,
                                   ),
                                 ),
                                 const SizedBox(width: 6),
@@ -2953,7 +2966,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                         style: TextStyle(
                                           fontSize:
                                               display.commentReplyFontSize - 2,
-                                          color: Colors.white70,
+                                          color: colorScheme.primary,
                                         ),
                                       ),
                                       const SizedBox(height: 1),
@@ -2963,7 +2976,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                           fontSize:
                                               display.commentReplyFontSize,
                                           height: 1.3,
-                                          color: Colors.white,
+                                          color: colorScheme.onSurfaceVariant,
                                         ),
                                       ),
                                     ],
@@ -2981,10 +2994,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                       children: [
                         TextButton(
                           onPressed: () => display.resetToDefault(),
-                          child: const Text(
-                            '恢复默认',
-                            style: TextStyle(color: Colors.white70),
-                          ),
+                          child: const Text('恢复默认'),
                         ),
                         const SizedBox(width: 8),
                         FilledButton(

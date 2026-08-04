@@ -56,6 +56,18 @@ class DesktopLyricService {
   int _gradientEnd = 0xFFFF00FF;
   int _unplayedColor = 0xFF666666;
   bool _locked = false;
+  /// 悬浮窗是否锁定（锁定后原生端加 FLAG_NOT_TOUCHABLE 点击穿透，
+  /// 悬浮窗自身无法再点击，只能从设置页/通知栏等外部入口解锁）。
+  bool get locked => _locked;
+
+  /// 解锁桌面歌词悬浮窗（锁定时悬浮窗点击穿透，需从外部解锁）。
+  Future<void> unlock() async {
+    if (!_locked) return;
+    _locked = false;
+    await _settings.setDesktopLyricLocked(false);
+    _pushConfig(); // 推送原生端解除 FLAG_NOT_TOUCHABLE
+    _notify();
+  }
 
   // 通知外部状态变化（让 mini_player 等可以监听刷新）
   final List<VoidCallback> _listeners = [];

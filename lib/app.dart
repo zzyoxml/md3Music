@@ -16,6 +16,7 @@ import 'main.dart'
         pendingShortcutType,
         shortcutTabRequest;
 import 'modules/discover/discover_page.dart';
+import 'modules/coverflow/coverflow_page.dart';
 import 'modules/charts/charts_page.dart';
 import 'modules/user/user_center_page.dart';
 import 'modules/user/favorites_page.dart';
@@ -335,6 +336,10 @@ class _SystemUiUpdaterState extends State<_SystemUiUpdater>
   }
 
   void _updateSystemUi() {
+    // 封面流页横屏实际沉浸中：保留 SystemUiMode.immersiveSticky，
+    // 不覆盖系统栏模式（否则方向变化等 rebuild 会冲掉沉浸设置）。
+    // 用「实际生效」标志：用户请求沉浸但切到其他 tab/竖屏时仍需恢复系统栏样式。
+    if (kCoverFlowImmersiveActive.value) return;
     final brightness = Theme.of(context).brightness;
     final surfaceColor = Theme.of(context).colorScheme.surface;
     final isDark = brightness == Brightness.dark;
@@ -371,6 +376,9 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   int _previousSelectedIndex = 0;
 
+  /// 上一次同步的沉浸状态，避免重复调用 SystemChrome（幂等去重）。
+  bool _immersiveSynced = false;
+
   /// 根据 tab id 构建对应页面 Widget。
   Widget _buildPageForTab(String tabId) {
     switch (tabId) {
@@ -387,6 +395,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
             }
           },
         );
+      case 'coverflow':
+        return const CoverFlowPage();
       case 'library':
         return const LibraryPage();
       case 'favorites':
@@ -414,6 +424,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDestination(
           icon: const Icon(Icons.explore_outlined),
           selectedIcon: const Icon(Icons.explore),
+          label: tab.label,
+        );
+      case 'coverflow':
+        return NavigationDestination(
+          icon: const Icon(Icons.album_outlined),
+          selectedIcon: const Icon(Icons.album),
           label: tab.label,
         );
       case 'library':
@@ -475,6 +491,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           selectedIcon: const Icon(Icons.explore),
           label: Text(tab.label),
         );
+      case 'coverflow':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.album_outlined),
+          selectedIcon: const Icon(Icons.album),
+          label: Text(tab.label),
+        );
       case 'library':
         return NavigationRailDestination(
           icon: const Icon(Icons.library_music_outlined),
@@ -532,6 +554,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDrawerDestination(
           icon: const Icon(Icons.explore_outlined),
           selectedIcon: const Icon(Icons.explore),
+          label: Text(tab.label),
+        );
+      case 'coverflow':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.album_outlined),
+          selectedIcon: const Icon(Icons.album),
           label: Text(tab.label),
         );
       case 'library':
@@ -594,13 +622,31 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     // 监听 shortcut 入口的 tab 切换请求（来自 main.dart 的 handleShortcut）
     shortcutTabRequest.addListener(_handleShortcutTabRequest);
+    // 监听封面流沉浸请求（长按切换 / 返回键恢复），变更时重算沉浸状态
+    kCoverFlowImmersive.addListener(_onCoverFlowImmersiveChanged);
   }
 
   @override
   void dispose() {
+    kCoverFlowImmersive.removeListener(_onCoverFlowImmersiveChanged);
     shortcutTabRequest.removeListener(_handleShortcutTabRequest);
     WidgetsBinding.instance.removeObserver(this);
+    // 若 App 销毁时仍处于封面流沉浸，恢复系统栏
+    if (_immersiveSynced) {
+      _immersiveSynced = false;
+      kCoverFlowImmersiveActive.value = false;
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.manual,
+        overlays: SystemUiOverlay.values,
+      );
+    }
     super.dispose();
+  }
+
+  /// 封面流沉浸请求变化（长按 / 返回键）→ 重算实际沉浸状态。
+  void _onCoverFlowImmersiveChanged() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   /// 处理 shortcut 入口的 tab 切换请求
@@ -667,15 +713,31 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         .map(_buildDrawerDestination)
         .toList();
 
+    // 封面流页横屏沉浸：由「当前 tab + 方向 + 用户长按请求」统一判定。
+    // 横屏默认显示 tab 栏，用户长按封面流页面进入沉浸（隐藏 tab 栏），
+    // 沉浸中按返回键恢复。判定与页面生命周期无关，
+    // 保证「在封面流页内竖屏→横屏旋转」也能正确进入/退出沉浸。
+    final safeIndex = _selectedIndex.clamp(0, visibleTabs.length - 1);
+    final currentTab = visibleTabs[safeIndex];
+    final immersive =
+        currentTab.id == 'coverflow' &&
+        MediaQuery.orientationOf(context) == Orientation.landscape &&
+        kCoverFlowImmersive.value;
+    _syncImmersiveMode(immersive);
+
     // 一级页面返回拦截：
     // 1) PopScope 拦截系统返回手势 / 物理返回键，canPop=false → 触发 onPopInvoked
-    // 2) 弹“退出 App”确认对话框
-    // 3) 确认后顺序关停：暂停播放 → 关停本地 API 服务器 → SystemNavigator.pop 杀进程
+    // 2) 封面流沉浸中：返回键先恢复 tab 栏（退出沉浸），不弹退出确认
+    // 3) 否则弹“退出 App”确认对话框
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        _showExitConfirmDialog();
+        if (immersive) {
+          kCoverFlowImmersive.value = false;
+        } else {
+          _showExitConfirmDialog();
+        }
       },
       child: ResponsiveScaffold(
         destinations: destinations,
@@ -693,15 +755,40 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
             _selectedIndex = index;
           });
         },
-        body: _buildBody(context, visibleTabs),
-        compactBody: _buildBody(context, visibleTabs),
-        mediumBody: _buildBody(context, visibleTabs),
-        expandedBody: _buildBody(context, visibleTabs),
+        hideNavigation: immersive,
+        body: _buildBody(context, visibleTabs, immersive),
+        compactBody: _buildBody(context, visibleTabs, immersive),
+        mediumBody: _buildBody(context, visibleTabs, immersive),
+        expandedBody: _buildBody(context, visibleTabs, immersive),
       ),
     );
   }
 
-  Widget _buildBody(BuildContext context, List<TabItem> visibleTabs) {
+  /// 封面流横屏沉浸：同步「实际生效」标志并设置系统栏沉浸模式。
+  /// [immersive] 已由调用方按「tab + 方向 + 用户请求」算好；
+  /// 状态变化时调用，非沉浸时恢复默认系统栏。
+  void _syncImmersiveMode(bool immersive) {
+    if (_immersiveSynced == immersive) return;
+    _immersiveSynced = immersive;
+    kCoverFlowImmersiveActive.value = immersive;
+    // build 阶段不直接调用平台 channel，推迟到帧末执行
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (immersive) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      } else {
+        SystemChrome.setEnabledSystemUIMode(
+          SystemUiMode.manual,
+          overlays: SystemUiOverlay.values,
+        );
+      }
+    });
+  }
+
+  Widget _buildBody(
+    BuildContext context,
+    List<TabItem> visibleTabs,
+    bool immersive,
+  ) {
     // 切换方向：横屏（侧边导航栏）用上下淡入，竖屏（底部导航栏）用左右滑动
     final isLandscape =
         MediaQuery.orientationOf(context) == Orientation.landscape;
@@ -768,7 +855,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
             ),
           ),
         ),
-        const MiniPlayer(),
+        // 封面流页横屏沉浸：隐藏 MiniPlayer，实现全屏浏览
+        if (!immersive) const MiniPlayer(),
       ],
     );
   }

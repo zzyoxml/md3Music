@@ -36,6 +36,7 @@ class TabItem {
 /// 默认 Tab 定义（与 app.dart _MainLayout._pages 顺序对应）。
 const List<TabItem> kDefaultTabs = [
   TabItem(id: 'discover', label: '发现'),
+  TabItem(id: 'coverflow', label: '封面流'),
   TabItem(id: 'library', label: '本地音乐'),
   TabItem(id: 'favorites', label: '我收藏'),
   TabItem(id: 'fm', label: '私人FM'),

@@ -91,16 +91,26 @@ class _SettingsPageState extends State<SettingsPage> {
     _loadVersion();
     _loadLyriconSettings();
     LyriconProviderService.instance.addListener(_onLyriconStateChanged);
+    // 桌面歌词状态变化（设置页开关 / 播放器长按 / 通知栏按钮）→ 刷新 UI
+    DesktopLyricService.instance.addListener(_onDesktopLyricChanged);
   }
 
   @override
   void dispose() {
     LyriconProviderService.instance.removeListener(_onLyriconStateChanged);
+    DesktopLyricService.instance.removeListener(_onDesktopLyricChanged);
     super.dispose();
   }
 
   /// Lyricon 服务状态变化回调：触发 UI 刷新
   void _onLyriconStateChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// 桌面歌词开关状态变化回调：触发 UI 刷新
+  void _onDesktopLyricChanged() {
     if (mounted) {
       setState(() {});
     }
@@ -357,6 +367,20 @@ class _SettingsPageState extends State<SettingsPage> {
                   } catch (_) {}
                 }
               : null,
+        ),
+        // 解锁桌面歌词：悬浮窗锁定后点击穿透（无法点击自身解锁），
+        // 且无法下拉通知栏时，可在此一键解锁悬浮窗。
+        SwitchListTile(
+          title: const Text('解锁桌面歌词'),
+          subtitle: Text(
+            DesktopLyricService.instance.locked
+                ? '悬浮窗已锁定（点击穿透），点按此开关解除锁定'
+                : '悬浮窗未锁定，此开关用于锁定后无法点击时解除锁定',
+          ),
+          value: DesktopLyricService.instance.locked,
+          onChanged: (_) async {
+            await DesktopLyricService.instance.unlock();
+          },
         ),
         // 蓝牙歌词：通过 MediaSession 元数据替换在车机等设备显示歌词
         SwitchListTile(
@@ -1843,6 +1867,9 @@ class _TabManagementPanel extends StatelessWidget {
     switch (tabId) {
       case 'discover':
         return Icons.explore;
+      case 'coverflow':
+        // 与主页 tab 图标保持一致（见 app.dart 的 coverflow case）
+        return Icons.album;
       case 'library':
         return Icons.library_music;
       case 'favorites':

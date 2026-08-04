@@ -14,6 +14,7 @@ import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
+import '../coverflow/coverflow_page.dart';
 import '../settings/equalizer_settings_page.dart';
 import 'artist_photo_background.dart';
 import 'mv_player_page.dart';
@@ -471,8 +472,13 @@ class _FullPlayerState extends State<FullPlayer>
     _artworkFadeController.dispose();
     _zenController.dispose();
     _tabController.dispose();
-    // 退出播放器时立即恢复系统栏，确保从横屏沉浸模式正确退出
-    restoreSystemUi();
+    // 退出播放器时恢复系统栏；若仍处于封面流页横屏沉浸（从封面流进入播放器后返回），
+    // 则保持沉浸，避免返回后状态栏闪现。
+    if (kCoverFlowImmersiveActive.value) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      restoreSystemUi();
+    }
     super.dispose();
   }
 
@@ -2509,6 +2515,9 @@ class _FullPlayerState extends State<FullPlayer>
           child: Consumer<CommentDisplayProvider>(
             builder: (context, display, _) {
               final colorScheme = Theme.of(context).colorScheme;
+              // 文字颜色与其它二级菜单（如歌词显示设置）保持一致：
+              // 全部使用主题标准色（onSurface / onSurfaceVariant / primary），
+              // 由主题自动适配深色/浅色模式，不做手写黑白。
               return Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                 child: Column(
@@ -2543,7 +2552,13 @@ class _FullPlayerState extends State<FullPlayer>
                     // 楼主字号滑块
                     Row(
                       children: [
-                        const Text('楼主', style: TextStyle(fontSize: 14)),
+                        Text(
+                          '楼主',
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: colorScheme.onSurface,
+                          ),
+                        ),
                         const SizedBox(width: 8),
                         Text(
                           '${display.commentFontSize.toStringAsFixed(0)} 号',
@@ -2613,6 +2628,7 @@ class _FullPlayerState extends State<FullPlayer>
                                       style: TextStyle(
                                         fontSize: display.commentFontSize,
                                         height: 1.3,
+                                        color: colorScheme.onSurface,
                                       ),
                                     ),
                                   ],
@@ -2666,6 +2682,7 @@ class _FullPlayerState extends State<FullPlayer>
                                           fontSize:
                                               display.commentReplyFontSize,
                                           height: 1.3,
+                                          color: colorScheme.onSurfaceVariant,
                                         ),
                                       ),
                                     ],
