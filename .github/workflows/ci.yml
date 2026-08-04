@@ -51,11 +51,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Set up Node.js 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
       # 缓存 Gradle
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -66,52 +61,6 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
-
-      # 下载 native-libs（libnode.so + Node headers）
-      - name: Download native-libs.zip
-        run: |
-          set -e
-          echo "Downloading native-libs.zip..."
-          if ! curl -fL --retry 3 -o native-libs.zip \
-              "https://github.com/zzyoxml/md3Music/releases/download/native-libs/native-libs.zip"; then
-            echo "native-libs.zip 下载失败，尝试从本仓库下载..."
-            if ! curl -fL --retry 3 -o native-libs.zip \
-                "https://github.com/${GITHUB_REPOSITORY}/releases/download/native-libs/native-libs.zip"; then
-              echo "native-libs.zip 下载失败，构建可能失败"
-              exit 1
-            fi
-          fi
-          ls -lh native-libs.zip
-
-      - name: Extract native libs
-        run: |
-          set -e
-          unzip -q -o native-libs.zip -d .
-          rm native-libs.zip
-          echo "jniLibs/:"
-          ls -la android/app/src/main/jniLibs/ 2>/dev/null || echo "  (missing)"
-
-      # 构建嵌入式 Node.js 服务器 bundle
-      - name: Install server dependencies
-        working-directory: kugou_api_server
-        run: npm install --omit=dev
-
-      - name: Generate bundled entry
-        run: node scripts/gen_node_bundle_entry.js
-
-      - name: Build server bundle with esbuild
-        working-directory: kugou_api_server
-        run: |
-          npx --yes esbuild bundled_entry.js \
-            --bundle --minify \
-            --outfile=server_bundle.js \
-            --platform=node \
-            --target=node18
-
-      - name: Copy server bundle to Flutter assets
-        run: |
-          mkdir -p assets/nodejs-project
-          cp kugou_api_server/server_bundle.js assets/nodejs-project/server_bundle.js
 
       # Flutter 构建
       - name: Flutter pub get

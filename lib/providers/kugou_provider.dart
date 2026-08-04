@@ -1343,6 +1343,99 @@ class KugouProvider extends ChangeNotifier {
     return '签到失败，请稍后重试（错误码：${errorCode ?? '未知'}）';
   }
 
+  // ── 听歌领取 / 广告领取（独立按钮触发，不影响自动签到） ──────────
+
+  bool _listenClaimRunning = false;
+  bool get listenClaimRunning => _listenClaimRunning;
+
+  bool _adClaimRunning = false;
+  bool get adClaimRunning => _adClaimRunning;
+
+  /// 听歌上报领取 VIP。error_code 130012（今日已领取）视为成功。
+  Future<(bool, String)> listenSongClaim() async {
+    if (_listenClaimRunning) return (false, '请求进行中');
+    if (!_isLoggedIn) return (false, '请先登录');
+    _listenClaimRunning = true;
+    notifyListeners();
+    try {
+      final resp = await _apiClient.listenSong();
+      if (resp == null) return (false, '请求无响应，请稍后重试');
+      if (resp['status'] == 1) return (true, '听歌领取成功');
+      final code = resp['error_code'] as int?;
+      if (code == 130012) return (true, '今日已领取');
+      return (false, _mapListenAdError(code));
+    } catch (e) {
+      return (false, _friendlyNetworkError(e));
+    } finally {
+      _listenClaimRunning = false;
+      notifyListeners();
+    }
+  }
+
+  /// 广告播放上报领取 VIP：最多 8 次，成功且非最后一次间隔 30s，
+  /// error_code 30002（次数已用光）提前正常停止（对齐 kgcheckin main.js）。
+  Future<(bool, String)> claimAdVip() async {
+    if (_adClaimRunning) return (false, '请求进行中');
+    if (!_isLoggedIn) return (false, '请先登录');
+    _adClaimRunning = true;
+    notifyListeners();
+    var success = 0;
+    try {
+      for (var i = 1; i <= 8; i++) {
+        final resp = await _apiClient.claimAdVip();
+        switch (KugouApiClient.parseAdClaimOutcome(resp)) {
+          case AdClaimOutcome.success:
+            success++;
+            if (i != 8) {
+              await Future<void>.delayed(const Duration(seconds: 30));
+            }
+          case AdClaimOutcome.quotaDone:
+            return (
+              true,
+              success > 0
+                  ? '广告领取 $success/8 次，今日次数已用光'
+                  : '今日广告次数已用光',
+            );
+          case AdClaimOutcome.failure:
+            final code = resp?['error_code'] as int?;
+            return (
+              false,
+              success > 0
+                  ? '领取 $success/8 次后失败：${_mapListenAdError(code)}'
+                  : '领取失败：${_mapListenAdError(code)}',
+            );
+        }
+      }
+      return (true, '广告领取 $success/8 次');
+    } catch (e) {
+      return (
+        false,
+        success > 0
+            ? '领取 $success/8 次后中断：${_friendlyNetworkError(e)}'
+            : _friendlyNetworkError(e),
+      );
+    } finally {
+      _adClaimRunning = false;
+      notifyListeners();
+    }
+  }
+
+  /// 听歌/广告领取相关错误码 → 可读中文提示
+  String _mapListenAdError(int? errorCode) {
+    const map = <int, String>{
+      130012: '今日已领取',
+      30002: '今日广告次数已用光',
+      20006: '签名错误，请重新登录后重试',
+      20010: '参数错误',
+      20018: '登录已过期，请重新登录',
+      20028: '酷狗拒绝领取：账号可能不符合资格，或该功能已停用',
+    };
+    if (errorCode != null && map.containsKey(errorCode)) {
+      return map[errorCode]!;
+    }
+    return '领取失败，请稍后重试（错误码：${errorCode ?? '未知'}）';
+  }
+
   Future<void> getRankSongs({
     required String rankId,
     int rankCid = 0,

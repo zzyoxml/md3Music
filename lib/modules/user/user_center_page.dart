@@ -458,60 +458,118 @@ class _UserCenterPageState extends State<UserCenterPage> {
   ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            icon: const Icon(Icons.chevron_left),
-            color: cs.onSurfaceVariant,
-            onPressed: () {},
-          ),
-          Expanded(
-            child: Text(
-              monthLabel,
-              textAlign: TextAlign.center,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-          ),
-          IconButton(
-            visualDensity: VisualDensity.compact,
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            icon: const Icon(Icons.chevron_right),
-            color: cs.onSurfaceVariant,
-            onPressed: () {},
-          ),
-          // 概念版会员徽章 —— 今天签到后显示
-          if (kugou.isTodayYouthVip) ...[
-            const SizedBox(width: 4),
-            _buildConceptVipBadge(cs, tt),
-          ],
-          const SizedBox(width: 4),
-          Flexible(
-            child: FilledButton.tonalIcon(
-              style: FilledButton.styleFrom(
+          Row(
+            children: [
+              IconButton(
                 visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                minimumSize: const Size(0, 32),
-                textStyle: tt.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                icon: const Icon(Icons.chevron_left),
+                color: cs.onSurfaceVariant,
+                onPressed: () {},
+              ),
+              Expanded(
+                child: Text(
+                  monthLabel,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
-              onPressed: kugou.manualSignInRunning
-                  ? null
-                  : () => _handleManualSignIn(context, kugou),
-              icon: kugou.manualSignInRunning
-                  ? MD3ELoadingIndicator(
-                      size: 16,
-                      color: cs.onSecondaryContainer,
-                    )
-                  : const Icon(Icons.check_circle_outline, size: 16),
-              label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
-            ),
+              IconButton(
+                visualDensity: VisualDensity.compact,
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                icon: const Icon(Icons.chevron_right),
+                color: cs.onSurfaceVariant,
+                onPressed: () {},
+              ),
+              // 概念版会员徽章 —— 今天签到后显示
+              if (kugou.isTodayYouthVip) ...[
+                const SizedBox(width: 4),
+                _buildConceptVipBadge(cs, tt),
+              ],
+              const SizedBox(width: 4),
+              Flexible(
+                child: FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    minimumSize: const Size(0, 32),
+                    textStyle: tt.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  onPressed: kugou.manualSignInRunning
+                      ? null
+                      : () => _handleManualSignIn(context, kugou),
+                  icon: kugou.manualSignInRunning
+                      ? MD3ELoadingIndicator(
+                          size: 16,
+                          color: cs.onSecondaryContainer,
+                        )
+                      : const Icon(Icons.check_circle_outline, size: 16),
+                  label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  minimumSize: const Size(0, 32),
+                  textStyle: tt.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onPressed: kugou.listenClaimRunning
+                    ? null
+                    : () => _handleListenClaim(context, kugou),
+                icon: kugou.listenClaimRunning
+                    ? MD3ELoadingIndicator(
+                        size: 16,
+                        color: cs.onSecondaryContainer,
+                      )
+                    : const Icon(Icons.headphones, size: 16),
+                label: Text(kugou.listenClaimRunning ? '领取中' : '听歌领取'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  minimumSize: const Size(0, 32),
+                  textStyle: tt.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onPressed: kugou.adClaimRunning
+                    ? null
+                    : () => _handleAdClaim(context, kugou),
+                icon: kugou.adClaimRunning
+                    ? MD3ELoadingIndicator(
+                        size: 16,
+                        color: cs.onSecondaryContainer,
+                      )
+                    : const Icon(Icons.monetization_on_outlined, size: 16),
+                label: Text(kugou.adClaimRunning ? '领取中' : '广告领取'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          // 仅签到异常时点击 —— 提示语
+          Text(
+            '仅签到异常时点击',
+            style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
           ),
         ],
       ),
@@ -555,6 +613,40 @@ class _UserCenterPageState extends State<UserCenterPage> {
   ) async {
     final messenger = ScaffoldMessenger.of(context);
     final (ok, msg) = await kugou.manualSignIn();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: ok
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.errorContainer,
+      ),
+    );
+  }
+
+  Future<void> _handleListenClaim(
+    BuildContext context,
+    KugouProvider kugou,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final (ok, msg) = await kugou.listenSongClaim();
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: ok
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.errorContainer,
+      ),
+    );
+  }
+
+  Future<void> _handleAdClaim(
+    BuildContext context,
+    KugouProvider kugou,
+  ) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final (ok, msg) = await kugou.claimAdVip();
     messenger.showSnackBar(
       SnackBar(
         content: Text(msg),
