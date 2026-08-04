@@ -139,8 +139,14 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
   /// 从本地音乐库弹出选歌面板（复用 LibraryProvider，无文件选择器）。
   ///
   /// 单击歌曲 = 立即上传；长按 = 进入多选模式，可勾选多首批量上传。
-  void _showLocalSongPicker() {
+  Future<void> _showLocalSongPicker() async {
     final library = context.read<LibraryProvider>();
+    // 尚未加载过本地音乐时先恢复上次扫描的缓存歌曲：
+    // 修复「必须先切换到本地音乐 tab 加载过一次才能上传」的问题。
+    if (library.allSongs.isEmpty) {
+      await library.loadSavedSongs();
+      if (!mounted) return;
+    }
     final localSongs = library.allSongs.where((s) => !s.isOnline).toList();
 
     showModalBottomSheet<void>(
