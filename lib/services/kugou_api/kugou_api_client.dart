@@ -10,6 +10,18 @@ import '../../data/models/mv_models.dart';
 import 'kugou_endpoints.dart';
 import 'kugou_models.dart';
 
+/// 一次广告领取（/youth/vip → /youth/v1/ad/play_report）的判定结果。
+enum AdClaimOutcome {
+  /// 领取成功（status == 1），可继续下一轮
+  success,
+
+  /// 今日次数已用光（error_code == 30002），正常停止
+  quotaDone,
+
+  /// 领取失败（其他错误码或响应为空），停止并上报
+  failure,
+}
+
 class KugouApiClient {
   static final KugouApiClient _instance = KugouApiClient._internal();
 
@@ -2817,6 +2829,27 @@ class KugouApiClient {
 
   Future<Map<String, dynamic>?> getYouthVip() async {
     return await _get(KugouEndpoints.youthVip);
+  }
+
+  /// 解析一次广告领取响应的结果（纯函数，便于单测）。
+  /// 与 kgcheckin main.js 判定一致：status==1 成功；error_code==30002 次数用光；其余失败。
+  static AdClaimOutcome parseAdClaimOutcome(Map<String, dynamic>? resp) {
+    if (resp == null) return AdClaimOutcome.failure;
+    if (resp['status'] == 1) return AdClaimOutcome.success;
+    if (resp['error_code'] == 30002) return AdClaimOutcome.quotaDone;
+    return AdClaimOutcome.failure;
+  }
+
+  /// 听歌上报领取 VIP（/youth/listen/song → /youth/v2/report/listen_song）。
+  /// error_code 130012 = 今日已领取。
+  Future<Map<String, dynamic>?> listenSong() {
+    return _post(KugouEndpoints.youthListenSong);
+  }
+
+  /// 广告播放上报领取 VIP（/youth/vip → /youth/v1/ad/play_report）。
+  /// error_code 30002 = 今日次数已用光。
+  Future<Map<String, dynamic>?> claimAdVip() {
+    return _post(KugouEndpoints.youthVip);
   }
 
   Future<Map<String, dynamic>?> getYouthUnionVip() async {
