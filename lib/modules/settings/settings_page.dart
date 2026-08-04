@@ -1882,6 +1882,8 @@ class _TabManagementPanel extends StatelessWidget {
         return Icons.leaderboard;
       case 'recognition':
         return Icons.mic;
+      case 'audiobook':
+        return Icons.auto_stories;
       case 'user':
         return Icons.person;
       default:

@@ -48,6 +48,7 @@ const List<TabItem> kOptionalTabs = [
   TabItem(id: 'search', label: '搜索'),
   TabItem(id: 'charts', label: '排行榜'),
   TabItem(id: 'recognition', label: '听歌识曲'),
+  TabItem(id: 'audiobook', label: '听书'),
 ];
 
 /// 所有可用 Tab（默认显示 + 可选）。
@@ -90,11 +91,15 @@ class TabConfigProvider extends ChangeNotifier {
           if (tab != null) ordered.add(tab);
         }
         // 补充新增的 tab（版本更新可能新增 tab）
-        // 新增的 tab 默认隐藏，避免老用户升级后突然多出 Tab
+        // 新增的 tab 默认隐藏，避免老用户升级后突然多出 Tab；
+        // 但若用户此前已主动打开过（不在持久化 hidden 中），保持可见，
+        // 避免每次启动都把开关状态重置回隐藏。
         for (final tab in kAllAvailableTabs) {
           if (!ordered.any((t) => t.id == tab.id)) {
             ordered.add(tab);
-            _hiddenTabs.add(tab.id);
+            if (hidden.contains(tab.id)) {
+              _hiddenTabs.add(tab.id);
+            }
           }
         }
         _allTabs = ordered;
@@ -129,6 +134,10 @@ class TabConfigProvider extends ChangeNotifier {
 
     if (_hiddenTabs.contains(tabId)) {
       _hiddenTabs.remove(tabId);
+      // 显示 tab 时同步持久化顺序：_load() 会把持久化 order 中缺失的
+      // tab 当作"新增 tab"重新加回隐藏列表，因此必须让 order 包含该 tab，
+      // 否则重启后开关状态被重置（如新增的 audiobook tab）。
+      await _repo.setTabOrder(_allTabs.map((t) => t.id).toList());
     } else {
       // 不允许隐藏所有可移除 tab（至少保留一个可见）
       final visibleCount =

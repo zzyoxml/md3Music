@@ -1652,6 +1652,8 @@ class KugouLongAudioAlbum {
   final String? coverUrl;
   final String? author;
   final int audioCount;
+  /// 专辑简介（详情页展示，可空）。
+  final String? intro;
 
   const KugouLongAudioAlbum({
     required this.id,
@@ -1659,6 +1661,7 @@ class KugouLongAudioAlbum {
     this.coverUrl,
     this.author,
     this.audioCount = 0,
+    this.intro,
   });
 
   factory KugouLongAudioAlbum.fromJson(Map<String, dynamic> json) {
@@ -1666,10 +1669,76 @@ class KugouLongAudioAlbum {
       id: _str(json['id'] ?? json['album_id'] ?? ''),
       name: _str(json['name'] ?? json['album_name'] ?? json['title'] ?? ''),
       coverUrl: _resolveArtworkUri(
-        json['img'] ?? json['imgurl'] ?? json['cover'],
+        json['sizable_cover'] ??
+            json['img'] ??
+            json['imgurl'] ??
+            json['cover'],
       ),
       author: _strNull(json['author'] ?? json['author_name']),
-      audioCount: _parseInt(json['audio_count'] ?? json['audiocount'] ?? 0),
+      audioCount: _parseInt(json['audio_count'] ?? json['audiocount'] ?? json['audio_total'] ?? 0),
+      intro: _strNull(json['intro'] ?? json['mix_intro'] ?? json['full_intro']),
+    );
+  }
+}
+
+/// 听书专辑下的音频（章节）。
+class KugouLongAudioAudio {
+  /// 播放用 id：hash 优先，兜底 album_audio_id / audio_id / mixsongid。
+  final String id;
+  final String name;
+  final String? author;
+  final Duration duration;
+  final String? artworkUri;
+  final String? albumAudioId;
+  final String? albumId;
+
+  const KugouLongAudioAudio({
+    required this.id,
+    required this.name,
+    this.author,
+    this.duration = Duration.zero,
+    this.artworkUri,
+    this.albumAudioId,
+    this.albumId,
+  });
+
+  factory KugouLongAudioAudio.fromJson(Map<String, dynamic> json) {
+    // 封面字段在 trans_param.union_cover（听书章节无顶层 img 字段）
+    final transParam = json['trans_param'];
+    final unionCover = transParam is Map<String, dynamic>
+        ? transParam['union_cover']
+        : null;
+    return KugouLongAudioAudio(
+      id: _str(
+        json['hash'] ??
+            json['play_hash'] ??
+            json['album_audio_id'] ??
+            json['audio_id'] ??
+            json['mixsongid'] ??
+            '',
+      ),
+      name: _str(
+        json['audio_name'] ??
+            json['filename'] ??
+            json['song_name'] ??
+            json['title'] ??
+            '',
+      ),
+      author: _strNull(json['author_name'] ?? json['singer_name']),
+      duration: Duration(
+        seconds: _parseInt(
+          json['timelength'] ??
+              json['timelength_128'] ??
+              json['timelength_320'] ??
+              json['timelength_high'] ??
+              0,
+        ),
+      ),
+      artworkUri: _resolveArtworkUri(
+        unionCover ?? json['img'] ?? json['imgurl'] ?? json['cover'],
+      ),
+      albumAudioId: _strNull(json['album_audio_id']),
+      albumId: _strNull(json['album_id']),
     );
   }
 }

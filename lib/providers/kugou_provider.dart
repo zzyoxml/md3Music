@@ -106,6 +106,10 @@ class KugouProvider extends ChangeNotifier {
   List<KugouSheetInfo> _sheetExploreList = [];
   List<KugouYouthChannel> _youthChannels = [];
   List<KugouLongAudioAlbum> _longAudioAlbums = [];
+  List<KugouLongAudioAlbum> _longAudioVipAlbums = [];
+  List<KugouLongAudioAlbum> _longAudioWeekAlbums = [];
+  List<KugouLongAudioAudio> _longAudioAudios = [];
+  Map<String, dynamic>? _longAudioAlbumDetail;
   Map<String, dynamic>? _serverNow;
 
   // ==================== Loading counter ====================
@@ -268,6 +272,10 @@ class KugouProvider extends ChangeNotifier {
   List<KugouSheetInfo> get sheetExploreList => _sheetExploreList;
   List<KugouYouthChannel> get youthChannels => _youthChannels;
   List<KugouLongAudioAlbum> get longAudioAlbums => _longAudioAlbums;
+  List<KugouLongAudioAlbum> get longAudioVipAlbums => _longAudioVipAlbums;
+  List<KugouLongAudioAlbum> get longAudioWeekAlbums => _longAudioWeekAlbums;
+  List<KugouLongAudioAudio> get longAudioAudios => _longAudioAudios;
+  Map<String, dynamic>? get longAudioAlbumDetail => _longAudioAlbumDetail;
   Map<String, dynamic>? get serverNow => _serverNow;
 
   List<Song> get recommendSongsAsSongs =>
@@ -1762,10 +1770,83 @@ class KugouProvider extends ChangeNotifier {
     try {
       final r = await _apiClient.getLongaudioRank();
       if (r != null) {
+        // Rank 响应结构：data 为数组，每项含 albums 子数组
+        final data = r['data'];
+        final albums = <dynamic>[];
+        if (data is List) {
+          for (final item in data) {
+            if (item is Map<String, dynamic>) {
+              final sub = item['albums'];
+              if (sub is List) albums.addAll(sub);
+            }
+          }
+        } else if (data is Map<String, dynamic>) {
+          final list = data['list'] ?? data['info'] ?? [];
+          if (list is List) albums.addAll(list);
+        }
+        _longAudioAlbums = albums
+            .whereType<Map<String, dynamic>>()
+            .map(KugouLongAudioAlbum.fromJson)
+            .toList();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> getLongaudioVip() async {
+    try {
+      final r = await _apiClient.getLongaudioVip();
+      if (r != null) {
         final data = r['data'] as Map<String, dynamic>? ?? r;
         final list = data['list'] ?? data['info'] ?? [];
-        _longAudioAlbums = (list as List)
+        _longAudioVipAlbums = (list as List)
             .map((e) => KugouLongAudioAlbum.fromJson(e as Map<String, dynamic>))
+            .toList();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> getLongaudioWeek() async {
+    try {
+      final r = await _apiClient.getLongaudioWeek();
+      if (r != null) {
+        final data = r['data'] as Map<String, dynamic>? ?? r;
+        final list = data['list'] ?? data['info'] ?? [];
+        _longAudioWeekAlbums = (list as List)
+            .map((e) => KugouLongAudioAlbum.fromJson(e as Map<String, dynamic>))
+            .toList();
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> getLongaudioAlbumDetail(String albumId) async {
+    try {
+      final r = await _apiClient.getLongaudioAlbumDetail(albumId);
+      if (r != null) {
+        _longAudioAlbumDetail = r;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> getLongaudioAlbumAudios(String albumId) async {
+    try {
+      final r = await _apiClient.getLongaudioAlbumAudios(albumId);
+      if (r != null) {
+        // Audios 响应结构：data 为顶层数组
+        final data = r['data'];
+        final list = <dynamic>[];
+        if (data is List) {
+          list.addAll(data);
+        } else if (data is Map<String, dynamic>) {
+          final sub = data['audios'] ?? data['list'] ?? data['audio_list'];
+          if (sub is List) list.addAll(sub);
+        }
+        _longAudioAudios = list
+            .whereType<Map<String, dynamic>>()
+            .map(KugouLongAudioAudio.fromJson)
             .toList();
         notifyListeners();
       }

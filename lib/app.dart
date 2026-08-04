@@ -32,6 +32,7 @@ import 'modules/login/login_page.dart';
 import 'modules/onboarding/onboarding_page.dart';
 import 'modules/onboarding/user_agreement_page.dart';
 import 'modules/personal_fm/personal_fm_page.dart';
+import 'modules/audiobook/audiobook_page.dart';
 import 'modules/recognition/song_recognition_page.dart';
 import 'providers/downloads_provider.dart';
 import 'providers/dlna_provider.dart';
@@ -410,6 +411,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return const ChartsPage();
       case 'recognition':
         return const SongRecognitionPage();
+      case 'audiobook':
+        return const AudiobookPage();
       case 'user':
         return const UserCenterPage();
       default:
@@ -466,6 +469,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDestination(
           icon: const Icon(Icons.mic_none_outlined),
           selectedIcon: const Icon(Icons.mic),
+          label: tab.label,
+        );
+      case 'audiobook':
+        return NavigationDestination(
+          icon: const Icon(Icons.auto_stories_outlined),
+          selectedIcon: const Icon(Icons.auto_stories),
           label: tab.label,
         );
       case 'user':
@@ -533,6 +542,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           selectedIcon: const Icon(Icons.mic),
           label: Text(tab.label),
         );
+      case 'audiobook':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.auto_stories_outlined),
+          selectedIcon: const Icon(Icons.auto_stories),
+          label: Text(tab.label),
+        );
       case 'user':
         return NavigationRailDestination(
           icon: const Icon(Icons.person_outlined),
@@ -596,6 +611,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDrawerDestination(
           icon: const Icon(Icons.mic_none_outlined),
           selectedIcon: const Icon(Icons.mic),
+          label: Text(tab.label),
+        );
+      case 'audiobook':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.auto_stories_outlined),
+          selectedIcon: const Icon(Icons.auto_stories),
           label: Text(tab.label),
         );
       case 'user':
