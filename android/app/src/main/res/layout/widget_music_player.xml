@@ -47,7 +47,7 @@
                 android:id="@+id/widget_title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="MD3Music"
+                android:text="MD3MusicPro"
                 android:textSize="14sp"
                 android:textColor="#FF1C1B1F"
                 android:maxLines="1"

@@ -184,7 +184,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
 
     return Scaffold(
       appBar: ScrollAwareAppBar(
-        title: 'MD3Music',
+        title: 'MD3MusicPro',
         scrollController: _scrollController,
         actions: [
           IconButton(
