@@ -7,6 +7,7 @@ import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/song_list_item.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
@@ -352,20 +353,17 @@ class _IpDetailPageState extends State<IpDetailPage>
     );
   }
 
-  /// 专辑 tab：两列网格
+  /// 专辑 tab：可捏合网格（与搜索页专辑 tab 一致）。
+  /// Pad 模式默认 4 列，支持双指捏合调整列数（持久化）；非 Pad 固定 2 列。
   Widget _buildAlbumsTab() {
     return _wrapTab(1, () {
       final albums = _albums;
       if (albums.isEmpty) return _empty('暂无专辑');
       final cs = Theme.of(context).colorScheme;
-      return GridView.builder(
+      return PinchableGridView(
         padding: const EdgeInsets.all(12),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          crossAxisSpacing: 12,
-          mainAxisSpacing: 12,
-          childAspectRatio: 0.78,
-        ),
+        spacing: 12.0,
+        childAspectRatio: 0.78,
         itemCount: albums.length,
         itemBuilder: (context, i) {
           final album = albums[i];

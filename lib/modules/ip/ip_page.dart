@@ -15,7 +15,7 @@ import 'ip_detail_page.dart';
 ///
 /// 展示两块内容：
 /// 1. 编辑精选（/top/ip → musicadservice 每日推荐）：两列网格卡片；
-/// 2. 编辑精选专区（/ip/zone）：横向滚动卡片。
+/// 2. 编辑精选专区（/ip/zone）：纵向网格卡片（Pad 可捏合调整列数）。
 /// 点击任意卡片进入 [IpDetailPage]。
 class IpPage extends StatefulWidget {
   const IpPage({super.key});
@@ -170,7 +170,9 @@ class _IpPageState extends State<IpPage> {
     );
   }
 
-  /// 区块 2：编辑精选专区（/ip/zone）横向滚动
+  /// 区块 2：编辑精选专区（/ip/zone）纵向网格。
+  /// 与区块 1 同为可捏合网格（Pad 默认 4 列、双指调整列数），
+  /// 不再单行横滑，随页面整体上下滚动。
   Widget _buildZoneSection(
     BuildContext context,
     ColorScheme cs,
@@ -187,25 +189,24 @@ class _IpPageState extends State<IpPage> {
             style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
           ),
         ),
-        SizedBox(
-          height: 120,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: items.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 12),
-            itemBuilder: (context, i) {
-              final item = items[i];
-              if (item is! Map<String, dynamic>) {
-                return const SizedBox.shrink();
-              }
-              return _ZoneCard(
-                title: _stringOf(item, 'title', fallback: 'name'),
-                coverUrl: _pickCover(item),
-                onTap: () => _openZoneItem(item),
-              );
-            },
-          ),
+        PinchableGridView(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          spacing: 12.0,
+          childAspectRatio: 0.78,
+          itemCount: items.length,
+          itemBuilder: (context, i) {
+            final item = items[i];
+            if (item is! Map<String, dynamic>) {
+              return const SizedBox.shrink();
+            }
+            return _PicksCard(
+              title: _stringOf(item, 'title', fallback: 'name'),
+              coverUrl: _pickCover(item),
+              onTap: () => _openZoneItem(item),
+            );
+          },
         ),
       ],
     );
@@ -430,76 +431,6 @@ class _PicksCard extends StatelessWidget {
       color: cs.surfaceContainerHighest,
       child: Center(
         child: Icon(Icons.edit_note, color: cs.onSurfaceVariant, size: 32),
-      ),
-    );
-  }
-}
-
-/// 专区横向卡片：左侧封面 + 右侧标题
-class _ZoneCard extends StatelessWidget {
-  final String title;
-  final String? coverUrl;
-  final VoidCallback? onTap;
-
-  const _ZoneCard({required this.title, this.coverUrl, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(12),
-      clipBehavior: Clip.antiAlias,
-      child: Material(
-        color: cs.surfaceContainerLow,
-        child: InkWell(
-          onTap: onTap,
-          child: SizedBox(
-            width: 200,
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 96,
-                  height: 120,
-                  child: coverUrl != null
-                      ? CachedNetworkImage(
-                          imageUrl: coverUrl!,
-                          fit: BoxFit.cover,
-                          placeholder: (_, _) => _coverPlaceholder(cs),
-                          errorWidget: (_, _, _) => _coverPlaceholder(cs),
-                        )
-                      : _coverPlaceholder(cs),
-                ),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    child: Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: cs.onSurface,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _coverPlaceholder(ColorScheme cs) {
-    return Container(
-      color: cs.surfaceContainerHighest,
-      child: Center(
-        child: Icon(
-          Icons.grid_view_rounded,
-          color: cs.onSurfaceVariant,
-          size: 28,
-        ),
       ),
     );
   }
