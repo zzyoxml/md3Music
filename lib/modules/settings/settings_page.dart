@@ -1889,6 +1889,9 @@ class _TabManagementPanel extends StatelessWidget {
       case 'scene':
         // 与主页 tab 图标保持一致（见 app.dart 的 scene case）
         return Icons.landscape;
+      case 'channel':
+        // 与主页 tab 图标保持一致（见 app.dart 的 channel case）
+        return Icons.dynamic_feed;
       case 'user':
         return Icons.person;
       default:

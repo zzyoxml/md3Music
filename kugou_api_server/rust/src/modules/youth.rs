@@ -107,6 +107,26 @@ pub fn handle_channel_song_detail(q: &Value, ctx: &Ctx) -> Result<ModuleResponse
     )
 }
 
+/// youth_channel_sub.js → /youth/channel/sub（t=0 取消订阅，默认订阅）。
+pub fn handle_channel_sub(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
+    let t = if q_num(q, "t", 1) == 0 { 0 } else { 1 };
+    let pm = json!({
+        "global_collection_id": q_str(q, "global_collection_id", ""),
+        "source": 1,
+    });
+    if t == 0 {
+        forward(
+            q, ctx, "delete", "/youth/v1/channel_un_subscribe", None,
+            Some(pm), None, "android", &[], false, false,
+        )
+    } else {
+        forward(
+            q, ctx, "post", "/youth/v1/channel_subscribe", None,
+            Some(pm), None, "android", &[], false, false,
+        )
+    }
+}
+
 /// youth_day_vip.js → /youth/day/vip（领取一天 VIP）。
 pub fn handle_day_vip(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
     let receive_day = body_or_param(q, "receive_day");

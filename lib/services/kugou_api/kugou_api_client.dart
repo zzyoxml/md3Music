@@ -2607,41 +2607,56 @@ class KugouApiClient {
   Future<Map<String, dynamic>?> getYouthChannelDetail(String channelId) async {
     return await _get(
       KugouEndpoints.youthChannelDetail,
-      queryParameters: {'id': channelId},
+      queryParameters: {'global_collection_id': channelId},
     );
   }
 
-  Future<Map<String, dynamic>?> getYouthChannelAmway() async {
-    return await _get(KugouEndpoints.youthChannelAmway);
+  Future<Map<String, dynamic>?> getYouthChannelAmway(String channelId) async {
+    return await _get(
+      KugouEndpoints.youthChannelAmway,
+      queryParameters: {'global_collection_id': channelId},
+    );
   }
 
   Future<Map<String, dynamic>?> getYouthChannelSimilar(String channelId) async {
     return await _get(
       KugouEndpoints.youthChannelSimilar,
-      queryParameters: {'channelid': channelId},
+      queryParameters: {'channel_id': channelId},
     );
   }
 
-  Future<Map<String, dynamic>?> subscribeYouthChannel(String channelId) async {
+  Future<Map<String, dynamic>?> subscribeYouthChannel(
+    String channelId, {
+    int t = 1,
+  }) async {
     return await _get(
       KugouEndpoints.youthChannelSub,
-      queryParameters: {'channelid': channelId},
+      queryParameters: {'global_collection_id': channelId, 't': t},
     );
   }
 
-  Future<Map<String, dynamic>?> getYouthChannelSong(String channelId) async {
+  Future<Map<String, dynamic>?> getYouthChannelSong(
+    String channelId, {
+    int page = 1,
+    int pagesize = 30,
+  }) async {
     return await _get(
       KugouEndpoints.youthChannelSong,
-      queryParameters: {'channelid': channelId},
+      queryParameters: {
+        'global_collection_id': channelId,
+        'page': page,
+        'pagesize': pagesize,
+      },
     );
   }
 
   Future<Map<String, dynamic>?> getYouthChannelSongDetail(
     String channelId,
+    String fileid,
   ) async {
     return await _get(
       KugouEndpoints.youthChannelSongDetail,
-      queryParameters: {'id': channelId},
+      queryParameters: {'global_collection_id': channelId, 'fileid': fileid},
     );
   }
 
