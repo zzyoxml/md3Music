@@ -1275,6 +1275,24 @@ int _parseInt(dynamic v) {
   return int.tryParse(v.toString()) ?? 0;
 }
 
+/// 与 [_parseInt] 相同，但解析失败/缺失时返回 null（用于可选数字字段）。
+int? _parseIntOrNull(dynamic v) {
+  if (v == null) return null;
+  if (v is int) return v;
+  if (v is double) return v.toInt();
+  return int.tryParse(v.toString());
+}
+
+/// 依次取第一个非空候选作为封面图（上游常返回空串 pic + 有效 bg_pic）。
+String? _resolveFirstArtwork(List<dynamic> candidates) {
+  for (final c in candidates) {
+    if (c != null && c.toString().isNotEmpty) {
+      return _resolveArtworkUri(c);
+    }
+  }
+  return null;
+}
+
 String? _resolveArtworkUri(dynamic v) {
   if (v == null) return null;
   final s = v.toString();
@@ -1559,9 +1577,172 @@ class KugouSceneInfo {
   factory KugouSceneInfo.fromJson(Map<String, dynamic> json) {
     return KugouSceneInfo(
       id: _str(json['id'] ?? json['scene_id'] ?? ''),
-      name: _str(json['name'] ?? json['scene_name'] ?? ''),
-      coverUrl: _resolveArtworkUri(
-        json['img'] ?? json['imgurl'] ?? json['cover'],
+      name: _str(json['title'] ?? json['name'] ?? json['scene_name'] ?? ''),
+      coverUrl: _resolveFirstArtwork([
+        json['pic'],
+        json['bg_pic'],
+        json['img'],
+        json['imgurl'],
+        json['cover'],
+      ]),
+    );
+  }
+}
+
+/// 场景模块下的 Tag（/scene/module 模块的 extra[] 项）。
+///
+/// [contentType] 决定进入的列表接口：
+/// 6=音乐（/scene/audio/list）、1=歌单（/scene/collection/list）、
+/// 2=视频（/scene/video/list）、5=听书（暂不支持）。
+class KugouSceneTag {
+  final String tagId;
+  final String name;
+  final int? contentType;
+  final String? picUrl;
+
+  const KugouSceneTag({
+    required this.tagId,
+    required this.name,
+    this.contentType,
+    this.picUrl,
+  });
+
+  factory KugouSceneTag.fromJson(Map<String, dynamic> json) {
+    return KugouSceneTag(
+      tagId: _str(json['tag_id'] ?? json['id'] ?? ''),
+      name: _str(json['tag_name'] ?? json['name'] ?? json['title'] ?? ''),
+      contentType: _parseIntOrNull(json['content_type'] ?? json['types']),
+      picUrl: _resolveArtworkUri(
+        json['pic'] ?? json['imgurl'] ?? json['img'] ?? json['cover'],
+      ),
+    );
+  }
+}
+
+/// 场景详情中的模块（/scene/module 的 data.content 下数组项）。
+///
+/// [type]：2=音乐模块、3=视频模块、4=讨论模块（extra 为 discuss_param，无 tag）。
+/// [tags] 直接取自模块的 extra[]，无需再请求 /scene/module/info。
+class KugouSceneModule {
+  final String moduleId;
+  final String name;
+  final int type;
+  final List<KugouSceneTag> tags;
+
+  const KugouSceneModule({
+    required this.moduleId,
+    required this.name,
+    this.type = 0,
+    this.tags = const [],
+  });
+
+  factory KugouSceneModule.fromJson(Map<String, dynamic> json) {
+    final tags = <KugouSceneTag>[];
+    final extra = json['extra'];
+    if (extra is List) {
+      for (final e in extra) {
+        if (e is Map<String, dynamic>) {
+          final t = KugouSceneTag.fromJson(e);
+          if (t.tagId.isNotEmpty) tags.add(t);
+        }
+      }
+    }
+    return KugouSceneModule(
+      moduleId: _str(json['module_id'] ?? json['id'] ?? ''),
+      name: _str(
+        json['module_title'] ?? json['title'] ?? json['module_name'] ?? '',
+      ),
+      type: _parseInt(json['module_type'] ?? 0),
+      tags: tags,
+    );
+  }
+}
+
+/// 场景讨论区动态（/scene/lists/v2 的 data.list 项）。
+class KugouSceneDiscuss {
+  final String id;
+  final String content;
+  final String nickname;
+  final String? avatar;
+  final int likeTotal;
+  final int commentTotal;
+  final String? topicTitle;
+  final KugouSongDetail? song;
+  final KugouPlaylistBrief? collection;
+
+  const KugouSceneDiscuss({
+    required this.id,
+    required this.content,
+    required this.nickname,
+    this.avatar,
+    this.likeTotal = 0,
+    this.commentTotal = 0,
+    this.topicTitle,
+    this.song,
+    this.collection,
+  });
+
+  factory KugouSceneDiscuss.fromJson(Map<String, dynamic> json) {
+    final user = json['g_user'];
+    final userMap = user is Map<String, dynamic> ? user : null;
+    final songJson = json['song'];
+    final topicJson = json['topic'];
+    final collectionJson = json['collection'];
+    return KugouSceneDiscuss(
+      id: _str(json['id'] ?? ''),
+      content: _str(json['content'] ?? ''),
+      nickname: _str(userMap?['nickname'] ?? ''),
+      avatar: _resolveArtworkUri(userMap?['avatar']),
+      likeTotal: _parseInt(json['like_total'] ?? 0),
+      commentTotal: _parseInt(json['comment_total'] ?? 0),
+      topicTitle: _strNull(
+        topicJson is Map<String, dynamic> ? topicJson['title'] : null,
+      ),
+      song: songJson is Map<String, dynamic>
+          ? KugouSongDetail.fromJson(songJson)
+          : null,
+      collection: collectionJson is Map<String, dynamic>
+          ? KugouPlaylistBrief.fromJson(collectionJson)
+          : null,
+    );
+  }
+}
+
+/// 场景音乐视频项（/scene/video/list 响应项）。
+class KugouSceneVideo {
+  final String id;
+  final String title;
+  final String? coverUrl;
+  final String? hash;
+  final String? authorName;
+
+  const KugouSceneVideo({
+    required this.id,
+    required this.title,
+    this.coverUrl,
+    this.hash,
+    this.authorName,
+  });
+
+  factory KugouSceneVideo.fromJson(Map<String, dynamic> json) {
+    // 视频 hash：sd_hash（标清）/ qhd_hash（高清），用于 /video/url 取播放地址
+    final authorInfo = json['author_info'];
+    return KugouSceneVideo(
+      id: _str(json['video_id'] ?? json['id'] ?? json['content_id'] ?? ''),
+      title: _str(json['title'] ?? json['name'] ?? json['video_name'] ?? ''),
+      coverUrl: _resolveFirstArtwork([
+        json['cover'],
+        json['img'],
+        json['imgurl'],
+        json['pic'],
+      ]),
+      hash: _strNull(
+        json['sd_hash'] ?? json['qhd_hash'] ?? json['hash'] ?? json['video_hash'],
+      ),
+      authorName: _strNull(
+        (authorInfo is Map<String, dynamic> ? authorInfo['user_name'] : null) ??
+            json['author_name'] ??
+            json['singer_name'],
       ),
     );
   }

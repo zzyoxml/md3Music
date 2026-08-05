@@ -50,6 +50,7 @@ const List<TabItem> kOptionalTabs = [
   TabItem(id: 'ip', label: '编辑精选'),
   TabItem(id: 'recognition', label: '听歌识曲'),
   TabItem(id: 'audiobook', label: '听书'),
+  TabItem(id: 'scene', label: '场景音乐'),
 ];
 
 /// 所有可用 Tab（默认显示 + 可选）。
@@ -91,16 +92,14 @@ class TabConfigProvider extends ChangeNotifier {
           final tab = kAllAvailableTabs.where((t) => t.id == id).firstOrNull;
           if (tab != null) ordered.add(tab);
         }
-        // 补充新增的 tab（版本更新可能新增 tab）
-        // 新增的 tab 默认隐藏，避免老用户升级后突然多出 Tab；
-        // 但若用户此前已主动打开过（不在持久化 hidden 中），保持可见，
-        // 避免每次启动都把开关状态重置回隐藏。
+        // 补充新增的 tab（版本更新可能新增 tab）。
+        // 新增 tab 一律默认隐藏，避免老用户升级后突然多出 Tab；
+        // 若用户此前主动打开过（toggleTabVisibility 会写 order 使其
+        // 包含该 tab，从而不会走到这个分支），则保持可见。
         for (final tab in kAllAvailableTabs) {
           if (!ordered.any((t) => t.id == tab.id)) {
             ordered.add(tab);
-            if (hidden.contains(tab.id)) {
-              _hiddenTabs.add(tab.id);
-            }
+            _hiddenTabs.add(tab.id);
           }
         }
         _allTabs = ordered;

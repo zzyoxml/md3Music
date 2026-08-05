@@ -1773,7 +1773,7 @@ class _TabManagementPanel extends StatelessWidget {
 
     return SafeArea(
       child: SizedBox(
-        height: MediaQuery.sizeOf(context).height * 0.6,
+        height: MediaQuery.sizeOf(context).height * 0.85,
         child: Column(
           children: [
             Padding(
@@ -1886,6 +1886,9 @@ class _TabManagementPanel extends StatelessWidget {
         return Icons.mic;
       case 'audiobook':
         return Icons.auto_stories;
+      case 'scene':
+        // 与主页 tab 图标保持一致（见 app.dart 的 scene case）
+        return Icons.landscape;
       case 'user':
         return Icons.person;
       default:
