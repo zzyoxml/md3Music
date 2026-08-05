@@ -111,7 +111,7 @@ class _CoverFlowPageState extends State<CoverFlowPage> {
 /// CoverFlow 3D 封面流控件（参考 iOS CoverFlow 视觉：中间正面、两侧绕 Y 轴旋转）。
 ///
 /// 自绘布局（非 PageView，修复两个固有缺陷）：
-/// - **z 顺序**：卡片按「离中心距离」升序绘制（远处在下、近处在上），
+/// - **z 顺序**：卡片按「离中心距离」降序绘制（远处在下、近处在上），
 ///   中央卡片永远最上层，两侧近者盖远者，避免 PageView 按 index 绘制导致
 ///   右侧卡片盖住中央卡片；
 /// - **超界消失**：外层 Stack 以视口为界裁剪，卡片部分滑出视口时仅被视口
@@ -296,11 +296,13 @@ class _CoverFlowViewState extends State<_CoverFlowView>
                   }
                   visible.add(i);
                 }
-                // z 顺序：离中心越远越先画（在下层），中心最后画（最上层）
+                // z 顺序：按「离中心距离」降序绘制——远处先画（在下层）、
+                // 中央最后画（最上层），保证当前专辑不被左右两侧卡片遮挡
+                // （横屏时两侧卡片绕 Y 轴旋转，会与中央区域视觉重叠）。
                 visible.sort((a, b) {
                   final da = (a - _page).abs();
                   final db = (b - _page).abs();
-                  return da.compareTo(db);
+                  return db.compareTo(da);
                 });
                 // 卡片定位：交叉轴居中、主轴中心对齐视口中心。
                 // 注意横屏时主轴=宽、交叉轴=高，left/top 需按方向取对应轴。
