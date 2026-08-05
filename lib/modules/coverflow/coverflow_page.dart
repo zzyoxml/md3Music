@@ -18,6 +18,12 @@ final ValueNotifier<bool> kCoverFlowImmersive = ValueNotifier<bool>(false);
 /// 为 true，由 _MainLayout 同步，_SystemUiUpdater 据此跳过系统栏模式覆盖。
 final ValueNotifier<bool> kCoverFlowImmersiveActive = ValueNotifier<bool>(false);
 
+/// 封面流当前居中歌曲的下标。
+/// 横竖屏切换时 _MainLayout 会在 ResponsiveScaffold 的 compact/medium 槽位间
+/// 切换，整棵子树会被卸载重建（State 丢失、回到第一张封面）。
+/// 用模块级变量在重建间保留当前位置，避免旋转后回到第一张。
+int kCoverFlowIndex = 0;
+
 /// 封面流 Tab 页：以 CoverFlow 3D 封面流展示每日推荐。
 ///
 /// 数据复用 [KugouProvider.recommendSongs]（与发现页「每日推荐」同一数据源），
@@ -31,7 +37,8 @@ class CoverFlowPage extends StatefulWidget {
 
 class _CoverFlowPageState extends State<CoverFlowPage> {
   /// 当前居中的歌曲下标（横竖屏切换重建封面流时保留位置）。
-  int _currentIndex = 0;
+  /// 初始值取模块级 [kCoverFlowIndex]，重建后继续上次的位置。
+  int _currentIndex = kCoverFlowIndex;
 
   @override
   void initState() {
@@ -66,8 +73,11 @@ class _CoverFlowPageState extends State<CoverFlowPage> {
                 child: _CoverFlowView(
                   songs: songs,
                   initialIndex: _currentIndex,
-                  onPageChanged: (index) =>
-                      setState(() => _currentIndex = index),
+                  onPageChanged: (index) {
+                    // 同步回模块级变量，供横竖屏切换重建页面时恢复位置
+                    kCoverFlowIndex = index;
+                    setState(() => _currentIndex = index);
+                  },
                   onRefresh: _refresh,
                 ),
               ),

@@ -29,6 +29,7 @@ import 'modules/playlist/playlist_page.dart';
 import 'modules/search/search_page.dart';
 import 'modules/settings/settings_page.dart';
 import 'modules/library/library_page.dart';
+import 'modules/launchpad/launchpad_page.dart';
 import 'modules/login/login_page.dart';
 import 'modules/onboarding/onboarding_page.dart';
 import 'modules/onboarding/user_agreement_page.dart';
@@ -386,6 +387,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   /// 根据 tab id 构建对应页面 Widget。
   Widget _buildPageForTab(String tabId) {
     switch (tabId) {
+      case 'launchpad':
+        return LaunchPadPage(
+          onTabSelected: _switchToTab,
+          onTabEnabled: _enableAndSwitchToTab,
+          onTabOpened: _openTabAsPage,
+        );
       case 'discover':
         return DiscoverPage(
           onAvatarTap: () {
@@ -422,6 +429,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return const ScenePage();
       case 'channel':
         return const ChannelPage();
+      case 'settings':
+        return const SettingsPage();
       case 'user':
         return const UserCenterPage();
       default:
@@ -432,6 +441,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   /// 根据 tab id 获取对应的 NavigationDestination 图标。
   NavigationDestination _buildDestination(TabItem tab) {
     switch (tab.id) {
+      case 'launchpad':
+        return NavigationDestination(
+          icon: const Icon(Icons.grid_view_outlined),
+          selectedIcon: const Icon(Icons.grid_view),
+          label: tab.label,
+        );
       case 'discover':
         return NavigationDestination(
           icon: const Icon(Icons.explore_outlined),
@@ -502,6 +517,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDestination(
           icon: const Icon(Icons.dynamic_feed_outlined),
           selectedIcon: const Icon(Icons.dynamic_feed),
+          label: tab.label,
+        );
+      case 'settings':
+        return NavigationDestination(
+          icon: const Icon(Icons.settings_outlined),
+          selectedIcon: const Icon(Icons.settings),
           label: tab.label,
         );
       case 'user':
@@ -521,6 +542,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
 
   NavigationRailDestination _buildRailDestination(TabItem tab) {
     switch (tab.id) {
+      case 'launchpad':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.grid_view_outlined),
+          selectedIcon: const Icon(Icons.grid_view),
+          label: Text(tab.label),
+        );
       case 'discover':
         return NavigationRailDestination(
           icon: const Icon(Icons.explore_outlined),
@@ -591,6 +618,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationRailDestination(
           icon: const Icon(Icons.dynamic_feed_outlined),
           selectedIcon: const Icon(Icons.dynamic_feed),
+          label: Text(tab.label),
+        );
+      case 'settings':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.settings_outlined),
+          selectedIcon: const Icon(Icons.settings),
           label: Text(tab.label),
         );
       case 'user':
@@ -610,6 +643,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
 
   NavigationDrawerDestination _buildDrawerDestination(TabItem tab) {
     switch (tab.id) {
+      case 'launchpad':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.grid_view_outlined),
+          selectedIcon: const Icon(Icons.grid_view),
+          label: Text(tab.label),
+        );
       case 'discover':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.explore_outlined),
@@ -680,6 +719,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDrawerDestination(
           icon: const Icon(Icons.dynamic_feed_outlined),
           selectedIcon: const Icon(Icons.dynamic_feed),
+          label: Text(tab.label),
+        );
+      case 'settings':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.settings_outlined),
+          selectedIcon: const Icon(Icons.settings),
           label: Text(tab.label),
         );
       case 'user':
@@ -739,6 +784,74 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     if (index == null) return;
     shortcutTabRequest.value = null;
     setState(() => _selectedIndex = index);
+  }
+
+  /// LaunchPad 导航：切换到指定 tab（仅对已可见的 tab 生效）。
+  /// 与 onDestinationSelected 相同的守卫：FullPlayer 在栈顶时忽略。
+  void _switchToTab(String tabId) {
+    if (isFullPlayerOnTop) return;
+    final index = context.read<TabConfigProvider>().visibleIndexOf(tabId);
+    if (index < 0) return;
+    setState(() {
+      _previousSelectedIndex = _selectedIndex;
+      _selectedIndex = index;
+    });
+  }
+
+  /// LaunchPad 长按启用：先启用隐藏的 tab，再切换到该 tab。
+  /// 与 [toggleTabVisibility] 的差异：这是 LaunchPad 专属入口，
+  /// 隐藏 tab 只有在 LaunchPad 中长按才会被启用（点击不启用）。
+  void _enableAndSwitchToTab(String tabId) {
+    if (isFullPlayerOnTop) return;
+    final tabConfig = context.read<TabConfigProvider>();
+    if (tabConfig.hiddenTabs.contains(tabId)) {
+      // toggleTabVisibility 内部先同步更新 hiddenTabs 再异步持久化，
+      // 调用返回后 visibleIndexOf 即可拿到正确索引，无需等待
+      // ignore: discarded_futures
+      tabConfig.toggleTabVisibility(tabId);
+    }
+    _switchToTab(tabId);
+  }
+
+  /// LaunchPad 点击隐藏 tab：以二级页面路由打开对应功能页（不切换主 tab）。
+  void _openTabAsPage(String tabId) {
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => _pageForTabAsRoute(tabId)),
+    );
+  }
+
+  /// tabId → 可作为二级路由打开的页面（复用主 tab 页面，去掉主 tab 专属参数）。
+  Widget _pageForTabAsRoute(String tabId) {
+    switch (tabId) {
+      case 'discover':
+        return const DiscoverPage();
+      case 'coverflow':
+        return const CoverFlowPage();
+      case 'library':
+        return const LibraryPage();
+      case 'favorites':
+        return const FavoritesPage();
+      case 'fm':
+        return const PersonalFmPage();
+      case 'search':
+        return const SearchPage();
+      case 'charts':
+        return const ChartsPage();
+      case 'ip':
+        return const IpPage();
+      case 'recognition':
+        return const SongRecognitionPage();
+      case 'audiobook':
+        return const AudiobookPage();
+      case 'scene':
+        return const ScenePage();
+      case 'channel':
+        return const ChannelPage();
+      case 'settings':
+        return const SettingsPage();
+      default:
+        return const SizedBox.shrink();
+    }
   }
 
   @override

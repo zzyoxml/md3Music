@@ -1865,6 +1865,9 @@ class _TabManagementPanel extends StatelessWidget {
 
   IconData _getTabIcon(String tabId) {
     switch (tabId) {
+      case 'launchpad':
+        // 与主页 tab 图标保持一致（见 app.dart 的 launchpad case）
+        return Icons.grid_view;
       case 'discover':
         return Icons.explore;
       case 'coverflow':
@@ -1892,6 +1895,9 @@ class _TabManagementPanel extends StatelessWidget {
       case 'channel':
         // 与主页 tab 图标保持一致（见 app.dart 的 channel case）
         return Icons.dynamic_feed;
+      case 'settings':
+        // 与主页 tab 图标保持一致（见 app.dart 的 settings case）
+        return Icons.settings;
       case 'user':
         return Icons.person;
       default:
