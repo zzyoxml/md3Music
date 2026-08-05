@@ -36,6 +36,7 @@ import 'modules/personal_fm/personal_fm_page.dart';
 import 'modules/audiobook/audiobook_page.dart';
 import 'modules/recognition/song_recognition_page.dart';
 import 'modules/scene/scene_page.dart';
+import 'modules/channel/channel_page.dart';
 import 'providers/downloads_provider.dart';
 import 'providers/dlna_provider.dart';
 import 'providers/favorites_provider.dart';
@@ -419,6 +420,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return const AudiobookPage();
       case 'scene':
         return const ScenePage();
+      case 'channel':
+        return const ChannelPage();
       case 'user':
         return const UserCenterPage();
       default:
@@ -493,6 +496,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDestination(
           icon: const Icon(Icons.landscape_outlined),
           selectedIcon: const Icon(Icons.landscape),
+          label: tab.label,
+        );
+      case 'channel':
+        return NavigationDestination(
+          icon: const Icon(Icons.dynamic_feed_outlined),
+          selectedIcon: const Icon(Icons.dynamic_feed),
           label: tab.label,
         );
       case 'user':
@@ -578,6 +587,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           selectedIcon: const Icon(Icons.landscape),
           label: Text(tab.label),
         );
+      case 'channel':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.dynamic_feed_outlined),
+          selectedIcon: const Icon(Icons.dynamic_feed),
+          label: Text(tab.label),
+        );
       case 'user':
         return NavigationRailDestination(
           icon: const Icon(Icons.person_outlined),
@@ -659,6 +674,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDrawerDestination(
           icon: const Icon(Icons.landscape_outlined),
           selectedIcon: const Icon(Icons.landscape),
+          label: Text(tab.label),
+        );
+      case 'channel':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.dynamic_feed_outlined),
+          selectedIcon: const Icon(Icons.dynamic_feed),
           label: Text(tab.label),
         );
       case 'user':

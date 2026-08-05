@@ -106,6 +106,7 @@ pub fn register(routes: &mut Vec<(&'static str, ModuleFn)>) {
     routes.push(("/youth/channel/similar", youth::handle_channel_similar));
     routes.push(("/youth/channel/detail", youth::handle_channel_detail));
     routes.push(("/youth/channel/amway", youth::handle_channel_amway));
+    routes.push(("/youth/channel/sub", youth::handle_channel_sub));
     routes.push(("/youth/channel/all", youth::handle_channel_all));
     routes.push(("/youth/day/vip/upgrade", youth::handle_day_vip_upgrade));
     routes.push(("/youth/day/vip", youth::handle_day_vip));

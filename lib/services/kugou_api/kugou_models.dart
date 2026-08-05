@@ -413,6 +413,7 @@ class KugouSongDetail {
             json['Hash128'] ??
             json['SQFileHash'] ??
             json['HQFileHash'] ??
+            json['sd_hash'] ??
             json['trans_param']?['ogg_128_hash'] ??
             json['audio_info']?['hash'] ??
             '',
@@ -472,6 +473,15 @@ class KugouSongDetail {
                 if (tl != null) return (tl as int) ~/ 1000;
                 final ai = json['audio_info'] as Map<String, dynamic>?;
                 if (ai != null) {
+                  // 频道音乐故事接口：audio_info 内时长字段为 timelength（毫秒，
+                  // 可能为字符串类型）
+                  final atl =
+                      ai['timelength'] ??
+                      ai['timelength_128'] ??
+                      ai['timelength_320'] ??
+                      ai['timelength_flac'];
+                  final atlInt = _parseInt(atl);
+                  if (atlInt > 0) return atlInt ~/ 1000;
                   final d =
                       ai['duration_flac'] as int? ??
                       ai['duration_320'] as int? ??
@@ -1815,14 +1825,25 @@ class KugouYouthChannel {
 
   factory KugouYouthChannel.fromJson(Map<String, dynamic> json) {
     return KugouYouthChannel(
-      id: _str(json['id'] ?? json['channel_id'] ?? json['channelid'] ?? ''),
+      id: _str(
+        json['global_collection_id'] ??
+            json['id'] ??
+            json['channel_id'] ??
+            json['channelid'] ??
+            '',
+      ),
       name: _str(
         json['name'] ?? json['channel_name'] ?? json['channelname'] ?? '',
       ),
       coverUrl: _resolveArtworkUri(
-        json['img'] ?? json['imgurl'] ?? json['cover'],
+        json['channel_avatar'] ??
+            json['channel_cover'] ??
+            json['img'] ??
+            json['imgurl'] ??
+            json['cover'] ??
+            json['pic'],
       ),
-      desc: _strNull(json['desc'] ?? json['description']),
+      desc: _strNull(json['intro'] ?? json['desc'] ?? json['description']),
     );
   }
 }
