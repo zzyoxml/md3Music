@@ -1729,26 +1729,58 @@ class KugouApiClient {
 
   // ==================== IP (Edit Picks) ====================
 
+  /// 编辑精选主列表（/top/ip → musicadservice 每日推荐）。
   Future<Map<String, dynamic>?> getIpHome() async {
-    return await _get(KugouEndpoints.ipHome);
+    return await _get(KugouEndpoints.topIp);
+  }
+
+  /// 编辑精选数据（/ip → /openapi/v1/ip/{type}）。
+  /// [type] 支持 audios / albums / videos / author_list，非法值回退 audios。
+  Future<Map<String, dynamic>?> getIpData(
+    String id, {
+    String type = 'audios',
+    int page = 1,
+    int pagesize = 30,
+  }) async {
+    final safeType = ['audios', 'albums', 'videos', 'author_list'].contains(type)
+        ? type
+        : 'audios';
+    return await _get(
+      KugouEndpoints.ip,
+      queryParameters: {
+        'id': id,
+        'type': safeType,
+        'page': page,
+        'pagesize': pagesize,
+      },
+    );
   }
 
   Future<Map<String, dynamic>?> getIpDateil() async {
     return await _get(KugouEndpoints.ipDateil);
   }
 
-  Future<Map<String, dynamic>?> getIpPlaylist() async {
-    return await _get(KugouEndpoints.ipPlaylist);
+  /// 编辑精选歌单（/ip/playlist → /ocean/v6/pubsongs/list_info_for_ip）。
+  Future<Map<String, dynamic>?> getIpPlaylist(
+    String id, {
+    int page = 1,
+    int pagesize = 30,
+  }) async {
+    return await _get(
+      KugouEndpoints.ipPlaylist,
+      queryParameters: {'id': id, 'page': page, 'pagesize': pagesize},
+    );
   }
 
   Future<Map<String, dynamic>?> getIpZone() async {
     return await _get(KugouEndpoints.ipZone);
   }
 
-  Future<Map<String, dynamic>?> getIpZoneHome(String zoneId) async {
+  /// 编辑精选专区详情（/ip/zone/home），query 参数名 `id` 与服务端一致。
+  Future<Map<String, dynamic>?> getIpZoneHome(String id) async {
     return await _get(
       KugouEndpoints.ipZoneHome,
-      queryParameters: {'zone_id': zoneId},
+      queryParameters: {'id': id},
     );
   }
 
@@ -1806,49 +1838,97 @@ class KugouApiClient {
 
   // ==================== Scene ====================
 
+  /// 场景音乐列表（/scene/lists → GET /scene/v1/scene/list）。
   Future<Map<String, dynamic>?> getSceneLists() async {
     return await _get(KugouEndpoints.sceneLists);
   }
 
+  /// 场景音乐推荐（/scene/music → POST /genesisapi/v1/scene_music/rec_music）。
+  /// 仅供发现页「场景音乐」横滑区块使用。
   Future<Map<String, dynamic>?> getSceneMusic() async {
     return await _get(KugouEndpoints.sceneMusic);
   }
 
-  Future<Map<String, dynamic>?> getSceneModule(String moduleId) async {
+  /// 场景音乐详情：场景下的模块列表（/scene/module?id=scene_id）。
+  Future<Map<String, dynamic>?> getSceneModule(String sceneId) async {
     return await _get(
       KugouEndpoints.sceneModule,
-      queryParameters: {'id': moduleId},
+      queryParameters: {'id': sceneId},
     );
   }
 
-  Future<Map<String, dynamic>?> getSceneModuleInfo(String moduleId) async {
+  /// 场景音乐讨论区（/scene/lists/v2?id=scene_id）。
+  /// [sort] 支持 rec（推荐）/ hot（热门）/ new（最新）。
+  Future<Map<String, dynamic>?> getSceneListsV2(
+    String sceneId, {
+    int page = 1,
+    int pagesize = 30,
+    String sort = 'rec',
+  }) async {
+    return await _get(
+      KugouEndpoints.sceneListsV2,
+      queryParameters: {
+        'id': sceneId,
+        'page': page,
+        'pagesize': pagesize,
+        'sort': sort,
+      },
+    );
+  }
+
+  /// 场景音乐模块 Tag（/scene/module/info?id=scene_id&module_id=module_id）。
+  Future<Map<String, dynamic>?> getSceneModuleInfo({
+    required String sceneId,
+    required String moduleId,
+  }) async {
     return await _get(
       KugouEndpoints.sceneModuleInfo,
-      queryParameters: {'id': moduleId},
+      queryParameters: {'id': sceneId, 'module_id': moduleId},
     );
   }
 
-  Future<Map<String, dynamic>?> getSceneCollectionList(String moduleId) async {
+  /// 场景音乐歌单列表（/scene/collection/list?tag_id=tag_id）。
+  Future<Map<String, dynamic>?> getSceneCollectionList(
+    String tagId, {
+    int page = 1,
+    int pagesize = 30,
+  }) async {
     return await _get(
       KugouEndpoints.sceneCollectionList,
-      queryParameters: {'id': moduleId},
+      queryParameters: {'tag_id': tagId, 'page': page, 'pagesize': pagesize},
     );
   }
 
-  Future<Map<String, dynamic>?> getSceneVideoList(String moduleId) async {
+  /// 场景音乐视频列表（/scene/video/list?tag_id=tag_id）。
+  Future<Map<String, dynamic>?> getSceneVideoList(
+    String tagId, {
+    int page = 1,
+    int pagesize = 30,
+  }) async {
     return await _get(
       KugouEndpoints.sceneVideoList,
-      queryParameters: {'id': moduleId},
+      queryParameters: {'tag_id': tagId, 'page': page, 'pagesize': pagesize},
     );
   }
 
-  Future<Map<String, dynamic>?> getSceneAudioList(
-    String moduleId, {
-    String? collectionId,
+  /// 场景音乐音乐列表（/scene/audio/list?id=scene_id&module_id=module_id&tag=tag_id）。
+  Future<Map<String, dynamic>?> getSceneAudioList({
+    required String sceneId,
+    required String moduleId,
+    required String tag,
+    int page = 1,
+    int pagesize = 30,
   }) async {
-    final params = <String, dynamic>{'id': moduleId};
-    if (collectionId != null) params['collection_id'] = collectionId;
-    return await _get(KugouEndpoints.sceneAudioList, queryParameters: params);
+    return await _get(
+      KugouEndpoints.sceneAudioList,
+      queryParameters: {
+        'id': sceneId,
+        'module_id': moduleId,
+        'tag': tag,
+        'page': page,
+        'pagesize': pagesize,
+      },
+    );
   }
 
   // ==================== Artist ====================
@@ -2603,8 +2683,35 @@ class KugouApiClient {
     return await _get(KugouEndpoints.brush);
   }
 
-  Future<Map<String, dynamic>?> getAiRecommend() async {
-    return await _get(KugouEndpoints.aiRecommend);
+  /// 根据专辑音乐 id（album_audio_id/MixSongID，可多个逗号分隔）获取 AI 推荐歌曲。
+  ///
+  /// 服务端 `/ai/recommend` 从 query 读取 `album_audio_id`（见 rust extras.rs::handle_ai_recommend）。
+  Future<List<KugouSongDetail>?> getAiRecommend(String albumAudioId) async {
+    final json = await _get(
+      KugouEndpoints.aiRecommend,
+      queryParameters: {'album_audio_id': albumAudioId},
+    );
+    if (json == null) return null;
+    try {
+      // /recommend 返回 data 可能是歌曲数组，也可能是嵌套列表字段，防御性解析
+      final data = json['data'];
+      List<dynamic> list;
+      if (data is List) {
+        list = data;
+      } else if (data is Map<String, dynamic>) {
+        list =
+            (data['song_list'] ?? data['songs'] ?? data['list'] ?? data['info'] ?? [])
+                as List<dynamic>;
+      } else {
+        list = [];
+      }
+      return list
+          .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('[API getAiRecommend] parse error: $e');
+      return null;
+    }
   }
 
   Future<Map<String, dynamic>?> getServerNow() async {

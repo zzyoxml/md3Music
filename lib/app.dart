@@ -18,6 +18,7 @@ import 'main.dart'
 import 'modules/discover/discover_page.dart';
 import 'modules/coverflow/coverflow_page.dart';
 import 'modules/charts/charts_page.dart';
+import 'modules/ip/ip_page.dart';
 import 'modules/user/user_center_page.dart';
 import 'modules/user/favorites_page.dart';
 
@@ -32,7 +33,9 @@ import 'modules/login/login_page.dart';
 import 'modules/onboarding/onboarding_page.dart';
 import 'modules/onboarding/user_agreement_page.dart';
 import 'modules/personal_fm/personal_fm_page.dart';
+import 'modules/audiobook/audiobook_page.dart';
 import 'modules/recognition/song_recognition_page.dart';
+import 'modules/scene/scene_page.dart';
 import 'providers/downloads_provider.dart';
 import 'providers/dlna_provider.dart';
 import 'providers/favorites_provider.dart';
@@ -408,8 +411,14 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return const SearchPage(showMiniPlayer: false);
       case 'charts':
         return const ChartsPage();
+      case 'ip':
+        return const IpPage();
       case 'recognition':
         return const SongRecognitionPage();
+      case 'audiobook':
+        return const AudiobookPage();
+      case 'scene':
+        return const ScenePage();
       case 'user':
         return const UserCenterPage();
       default:
@@ -462,10 +471,28 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           selectedIcon: const Icon(Icons.leaderboard),
           label: tab.label,
         );
+      case 'ip':
+        return NavigationDestination(
+          icon: const Icon(Icons.edit_note_outlined),
+          selectedIcon: const Icon(Icons.edit_note),
+          label: tab.label,
+        );
       case 'recognition':
         return NavigationDestination(
           icon: const Icon(Icons.mic_none_outlined),
           selectedIcon: const Icon(Icons.mic),
+          label: tab.label,
+        );
+      case 'audiobook':
+        return NavigationDestination(
+          icon: const Icon(Icons.auto_stories_outlined),
+          selectedIcon: const Icon(Icons.auto_stories),
+          label: tab.label,
+        );
+      case 'scene':
+        return NavigationDestination(
+          icon: const Icon(Icons.landscape_outlined),
+          selectedIcon: const Icon(Icons.landscape),
           label: tab.label,
         );
       case 'user':
@@ -527,10 +554,28 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           selectedIcon: const Icon(Icons.leaderboard),
           label: Text(tab.label),
         );
+      case 'ip':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.edit_note_outlined),
+          selectedIcon: const Icon(Icons.edit_note),
+          label: Text(tab.label),
+        );
       case 'recognition':
         return NavigationRailDestination(
           icon: const Icon(Icons.mic_none_outlined),
           selectedIcon: const Icon(Icons.mic),
+          label: Text(tab.label),
+        );
+      case 'audiobook':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.auto_stories_outlined),
+          selectedIcon: const Icon(Icons.auto_stories),
+          label: Text(tab.label),
+        );
+      case 'scene':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.landscape_outlined),
+          selectedIcon: const Icon(Icons.landscape),
           label: Text(tab.label),
         );
       case 'user':
@@ -592,10 +637,28 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           selectedIcon: const Icon(Icons.leaderboard),
           label: Text(tab.label),
         );
+      case 'ip':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.edit_note_outlined),
+          selectedIcon: const Icon(Icons.edit_note),
+          label: Text(tab.label),
+        );
       case 'recognition':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.mic_none_outlined),
           selectedIcon: const Icon(Icons.mic),
+          label: Text(tab.label),
+        );
+      case 'audiobook':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.auto_stories_outlined),
+          selectedIcon: const Icon(Icons.auto_stories),
+          label: Text(tab.label),
+        );
+      case 'scene':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.landscape_outlined),
+          selectedIcon: const Icon(Icons.landscape),
           label: Text(tab.label),
         );
       case 'user':

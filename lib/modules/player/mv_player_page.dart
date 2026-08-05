@@ -20,7 +20,11 @@ enum _MvLoadState { loading, ready, noMv, error }
 class MvPlayerPage extends StatefulWidget {
   final Song song;
 
-  const MvPlayerPage({super.key, required this.song});
+  /// 直接播放地址模式：场景音乐视频等已有播放地址的场景使用。
+  /// 非空时跳过 /kmr/audio/mv → /video/detail → /video/url 查询链，直接播放。
+  final String? directVideoUrl;
+
+  const MvPlayerPage({super.key, required this.song, this.directVideoUrl});
 
   @override
   State<MvPlayerPage> createState() => _MvPlayerPageState();
@@ -107,6 +111,13 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
   }
 
   Future<void> _loadMv() async {
+    // 直接播放模式：已有播放地址（场景音乐视频等），无需 MV 查询链
+    final direct = widget.directVideoUrl;
+    if (direct != null && direct.isNotEmpty) {
+      await _initVideoController(direct, autoPlay: true);
+      return;
+    }
+
     final song = widget.song;
     final albumAudioId = song.albumAudioId;
     if (albumAudioId == null || albumAudioId.isEmpty) {
@@ -545,7 +556,8 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
                 _infoChip(Icons.timer_outlined, _formatDuration(detail!.duration!)),
               if (detail?.playCountLabel.isNotEmpty == true)
                 _infoChip(Icons.play_circle_outline, '播放 ${detail!.playCountLabel}'),
-              _infoChip(Icons.album_outlined, song.album),
+              if (song.album.isNotEmpty)
+                _infoChip(Icons.album_outlined, song.album),
             ],
           ),
           if (detail?.desc != null && detail!.desc!.isNotEmpty) ...[

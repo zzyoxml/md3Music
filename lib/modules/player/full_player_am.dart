@@ -35,6 +35,7 @@ import '../../widgets/flowing_background.dart';
 import '../../widgets/apple_lyrics/models/lyric_line.dart';
 import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import '../../widgets/md3e_loading_indicator.dart';
+import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/player_artwork_image.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/player_playlist_dialog.dart';
@@ -2212,6 +2213,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 .toggleFavorite(song.id);
                           }
                         }
+                      : null,
+                  // 长按：在线歌曲弹出 AI 推荐歌曲面板
+                  onLongPress: song != null && isOnline
+                      ? () => showAiRecommendSheet(context, song)
                       : null,
                   child: Center(
                     child: Icon(

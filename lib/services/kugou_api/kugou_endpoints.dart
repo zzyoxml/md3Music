@@ -120,6 +120,7 @@ class KugouEndpoints {
 
   // Scene
   static const String sceneLists = '/scene/lists';
+  static const String sceneListsV2 = '/scene/lists/v2';
   static const String sceneMusic = '/scene/music';
   static const String sceneModule = '/scene/module';
   static const String sceneModuleInfo = '/scene/module/info';
