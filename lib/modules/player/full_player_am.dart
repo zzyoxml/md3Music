@@ -38,7 +38,7 @@ import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/player_artwork_image.dart';
 import '../../utils/landscape_immersive.dart';
-import '../../widgets/player_playlist_dialog.dart';
+import '../../widgets/player_playlist_view.dart';
 import 'comments_view.dart';
 import 'dlna_cast_sheet.dart';
 import 'full_player_route.dart';
@@ -99,7 +99,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
   // Pad 模式：左侧已有封面，隐藏"封面"Tab，只保留 2 个 Tab
   bool _isPadMode = false;
-  int _currentTabLength = 3;
+  int _currentTabLength = 4;
   // 手机横屏模式：保留封面Tab，但隐藏左侧歌曲信息
   bool _isPhoneLandscape = false;
 
@@ -128,7 +128,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabController = TabController(length: 3, vsync: this);
+    // 默认停在专辑 tab（index 1，播放列表 tab 在左侧）
+    _tabController = TabController(length: 4, vsync: this, initialIndex: 1);
     // 桌面歌词状态变化时刷新 UI（同步歌词按钮 icon）
     _onDesktopLyricChanged = () {
       if (mounted) setState(() {});
@@ -174,15 +175,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final shouldBePadMode = deviceIsPad || width >= 600;
     // 手机横屏：宽度 >= 600 但设备不是 Pad
     final shouldBePhoneLandscape = !deviceIsPad && width >= 600;
-    // 与手机端统一：3 个 tab（封面 / 歌词 / 评论），ActionBar 按钮索引对齐
-    const newTabLength = 3;
+    // 与手机端统一：4 个 tab（播放列表 / 封面 / 歌词 / 评论），ActionBar 按钮索引对齐
+    const newTabLength = 4;
 
-    // Pad 模式首次进入（从非 pad → pad 且当前停在默认封面 index 0）
-    // 时直接跳到歌词（index 1），无需重建 TabController。
-    // 避免每次从 miniplayer 点开都停在封面 tab。
+    // Pad 模式首次进入（从非 pad → pad 且当前停在默认专辑 index 1）
+    // 时直接跳到歌词（index 2），无需重建 TabController。
+    // 避免每次从 miniplayer 点开都停在专辑 tab。
     // 后续用户手动切换 tab 后保留用户当前选择。
-    if (shouldBePadMode && !_isPadMode && _tabController.index == 0) {
-      _tabController.index = 1;
+    if (shouldBePadMode && !_isPadMode && _tabController.index == 1) {
+      _tabController.index = 2;
     }
 
     if (_currentTabLength != newTabLength) {
@@ -331,26 +332,30 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   }
 
   /// Zen 模式长按退出提示层：覆盖在封面上，半透明黑色背景 + 文字提示。
-  /// 仅在长按激活时显示，IgnorePointer 避免拦截指针事件。
+  /// 通过 AnimatedOpacity 淡入淡出（200ms），IgnorePointer 避免拦截指针事件。
   Widget _buildZenLongPressHint() {
-    if (!_zenLongPressActive) return const SizedBox.shrink();
     return Positioned.fill(
       child: IgnorePointer(
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            color: Colors.black.withValues(alpha: 0.6),
-            alignment: Alignment.center,
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.exit_to_app, color: Colors.white, size: 32),
-                SizedBox(height: 8),
-                Text(
-                  '继续长按退出 Zen 模式',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
-                ),
-              ],
+        child: AnimatedOpacity(
+          opacity: _zenLongPressActive ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.6),
+              alignment: Alignment.center,
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.exit_to_app, color: Colors.white, size: 32),
+                  SizedBox(height: 8),
+                  Text(
+                    '继续长按退出 Zen 模式',
+                    style: TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -914,8 +919,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             child: TabBarView(
               controller: _tabController,
               children: [
+                // 播放列表面板（index 0，专辑封面 tab 左侧）
+                const PlayerPlaylistView(useDisplayName: true),
                 GestureDetector(
-                  onTap: () => _tabController.animateTo(1),
+                  onTap: () => _tabController.animateTo(2),
                   behavior: HitTestBehavior.opaque,
                   // Selector 让 _buildArtworkView 仅在 currentSong / isPlaying 变化时重建，
                   // 不再每 200ms 因 position 变化重建（封面 AnimatedScale 是隐式动画，需要 isPlaying 触发）
@@ -935,7 +942,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                       ),
                 ),
                 GestureDetector(
-                  onTap: () => _tabController.animateTo(0),
+                  onTap: () => _tabController.animateTo(1),
                   behavior: HitTestBehavior.translucent,
                   // RepaintBoundary 隔离 AppleLyricsView 每帧 setState 的重绘范围，
                   // 避免父级 TabBarView/Column 被牵连重建
@@ -1159,12 +1166,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   flex: 6,
                   child: Column(
                     children: [
-                      // 内容区（歌词 / 评论 / 封面信息）
-                      // 与手机端统一：3 个 tab（封面 / 歌词 / 评论），ActionBar 按钮索引对齐
+                      // 内容区（播放列表 / 封面信息 / 歌词 / 评论）
+                      // 与手机端统一：4 个 tab，ActionBar 按钮索引对齐
                       Expanded(
                         child: TabBarView(
                           controller: _tabController,
                           children: [
+                            // 播放列表面板（index 0，封面信息 tab 左侧）
+                            const PlayerPlaylistView(useDisplayName: true),
                             Selector<PlayerProvider, String?>(
                               selector: (_, p) => p.currentSong?.id,
                               builder: (context, songId, __) {
@@ -1415,7 +1424,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         child: TabBarView(
                           controller: _tabController,
                           children: [
-                            // 与手机端统一：3 个 tab（封面 / 歌词 / 评论），
+                            // 播放列表面板（index 0，封面信息 tab 左侧）
+                            const PlayerPlaylistView(useDisplayName: true),
+                            // 与手机端统一：4 个 tab（播放列表 / 封面 / 歌词 / 评论），
                             // ActionBar 按钮 tab 索引对齐。
                             // Pad 模式左侧已有封面，但 ActionBar 仍依赖标准 tab 顺序。
                             Selector<PlayerProvider, String?>(
@@ -2101,10 +2112,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   ),
                 ),
               ),
-              // 2. 播放列表 — 弹出播放队列
+              // 2. 播放列表 — 切换到播放列表面板（长按进 Zen 模式）
               Expanded(
                 child: InkWell(
-                  onTap: () => _showPlaylist(playerProvider),
+                  onTap: () {
+                    if (_tabController.index != 0) {
+                      _tabController.animateTo(0);
+                    }
+                  },
                   onLongPress: _enterZenMode,
                   child: Center(
                     child: Icon(
@@ -2119,8 +2134,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               Expanded(
                 child: InkWell(
                   onTap: () {
-                    if (_tabController.index != 0) {
-                      _tabController.animateTo(0);
+                    if (_tabController.index != 1) {
+                      _tabController.animateTo(1);
                     }
                   },
                   onLongPress: song != null && isOnline
@@ -2135,8 +2150,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               Expanded(
                 child: InkWell(
                   onTap: () {
-                    if (_tabController.index != 1) {
-                      _tabController.animateTo(1);
+                    if (_tabController.index != 2) {
+                      _tabController.animateTo(2);
                     }
                   },
                   onLongPress: () async {
@@ -2184,8 +2199,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               Expanded(
                 child: InkWell(
                   onTap: () {
-                    if (_tabController.index != 2) {
-                      _tabController.animateTo(2);
+                    if (_tabController.index != 3) {
+                      _tabController.animateTo(3);
                     }
                   },
                   child: Center(
@@ -3407,17 +3422,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         });
   }
 
-  void _showPlaylist(PlayerProvider playerProvider) {
-    // AM 风格播放页：直接复用 PlayerPlaylistDialog（与 MD3 风格统一）
-    // - 圆角 / 背景色 / 拖拽排序 / 左滑删除全部一致
-    // - useDisplayName: true 让标题列显示 displayName（AM 风格习惯）
-    // - playerProvider 参数保留以匹配调用点签名，内部由 Provider.of 获取
-    showDialog(
-      context: context,
-      builder: (dialogContext) =>
-          const PlayerPlaylistDialog(useDisplayName: true),
-    );
-  }
 }
 
 /// Zen 模式淡出/折叠组件。
