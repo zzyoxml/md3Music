@@ -332,26 +332,30 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   }
 
   /// Zen 模式长按退出提示层：覆盖在封面上，半透明黑色背景 + 文字提示。
-  /// 仅在长按激活时显示，IgnorePointer 避免拦截指针事件。
+  /// 通过 AnimatedOpacity 淡入淡出（200ms），IgnorePointer 避免拦截指针事件。
   Widget _buildZenLongPressHint() {
-    if (!_zenLongPressActive) return const SizedBox.shrink();
     return Positioned.fill(
       child: IgnorePointer(
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            color: Colors.black.withValues(alpha: 0.6),
-            alignment: Alignment.center,
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.exit_to_app, color: Colors.white, size: 32),
-                SizedBox(height: 8),
-                Text(
-                  '继续长按退出 Zen 模式',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
-                ),
-              ],
+        child: AnimatedOpacity(
+          opacity: _zenLongPressActive ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.6),
+              alignment: Alignment.center,
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.exit_to_app, color: Colors.white, size: 32),
+                  SizedBox(height: 8),
+                  Text(
+                    '继续长按退出 Zen 模式',
+                    style: TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

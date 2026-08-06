@@ -241,7 +241,7 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
                   TextButton(
                     onPressed: playlist.isEmpty
                         ? null
-                        : () => playerProvider.clearPlaylist(),
+                        : () => _confirmClearPlaylist(playerProvider),
                     child: Text(
                       '清空',
                       style: TextStyle(
@@ -265,30 +265,50 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
                         ),
                       ),
                     )
-                  : ReorderableListView(
-                      scrollController: _scrollController,
-                      buildDefaultDragHandles: false,
-                      // 拖拽中的项只加透明度，不显示默认的底色/阴影
-                      proxyDecorator: (child, index, animation) {
-                        return AnimatedBuilder(
-                          animation: animation,
-                          builder: (context, _) =>
-                              Opacity(opacity: 0.7, child: child),
-                        );
+                  // 与评论区一致的上下边界 alpha 渐变（ShaderMask + 线性渐变淡入淡出）
+                  : ShaderMask(
+                      shaderCallback: (Rect bounds) {
+                        const double fadeHeight = 24.0;
+                        final double fadeRatio =
+                            (fadeHeight / bounds.height).clamp(0.0, 0.5);
+                        return LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: const [
+                            Colors.transparent,
+                            Colors.black,
+                            Colors.black,
+                            Colors.transparent,
+                          ],
+                          stops: [0.0, fadeRatio, 1.0 - fadeRatio, 1.0],
+                        ).createShader(bounds);
                       },
-                      onReorder: (oldIndex, newIndex) {
-                        playerProvider.reorderPlaylist(oldIndex, newIndex);
-                      },
-                      children: [
-                        for (int index = 0; index < playlist.length; index++)
-                          _buildSwipeItem(
-                            key: ValueKey(playlist[index].id),
-                            index: index,
-                            song: playlist[index],
-                            isCurrent: index == data.currentIndex,
-                            playerProvider: playerProvider,
-                          ),
-                      ],
+                      blendMode: BlendMode.dstIn,
+                      child: ReorderableListView(
+                        scrollController: _scrollController,
+                        buildDefaultDragHandles: false,
+                        // 拖拽中的项只加透明度，不显示默认的底色/阴影
+                        proxyDecorator: (child, index, animation) {
+                          return AnimatedBuilder(
+                            animation: animation,
+                            builder: (context, _) =>
+                                Opacity(opacity: 0.7, child: child),
+                          );
+                        },
+                        onReorder: (oldIndex, newIndex) {
+                          playerProvider.reorderPlaylist(oldIndex, newIndex);
+                        },
+                        children: [
+                          for (int index = 0; index < playlist.length; index++)
+                            _buildSwipeItem(
+                              key: ValueKey(playlist[index].id),
+                              index: index,
+                              song: playlist[index],
+                              isCurrent: index == data.currentIndex,
+                              playerProvider: playerProvider,
+                            ),
+                        ],
+                      ),
                     ),
             ),
             // 底部操作提示
@@ -305,6 +325,45 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
         );
       },
     );
+  }
+
+  /// 清空播放列表前弹二次确认（配色跟随主题，确认按钮用错误色）。
+  Future<void> _confirmClearPlaylist(PlayerProvider playerProvider) async {
+    final colorScheme = Theme.of(context).colorScheme;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: colorScheme.surface,
+        surfaceTintColor: colorScheme.surfaceTint,
+        title: Text(
+          '清空播放列表',
+          style: TextStyle(color: colorScheme.onSurface),
+        ),
+        content: Text(
+          '确定要清空播放列表吗？此操作不可撤销。',
+          style: TextStyle(color: colorScheme.onSurfaceVariant),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(
+              '取消',
+              style: TextStyle(color: colorScheme.onSurfaceVariant),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(
+              '清空',
+              style: TextStyle(color: colorScheme.error),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      playerProvider.clearPlaylist();
+    }
   }
 
   /// 删除阈值：滑动约 40% 屏宽触发（与原 Dismissible 的 progress 阈值一致）。
