@@ -158,8 +158,20 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   int _currentTimeMsCache = -1;
   Object? _linesCacheRef;
 
+  // P0: 逐字动画时间平滑。positionStream 默认 ~200ms（5fps）才更新一次，
+  // 直接用 widget.currentTimeMs 驱动上浮/字内渐变会让动画每 200ms 才推进一次
+  // （120Hz 下"动 ~80ms + 冻结 ~120ms"）→ 肉眼卡顿。
+  // 播放中用帧时钟每帧推进 [_smoothPosMs]，收到权威位置时对齐校正；
+  // seek / 暂停恢复 / 切歌等大跳变直接吸附。仅用于逐字动画（maskX/上浮），
+  // 行定位 / 间奏检测仍用权威 widget.currentTimeMs，保证与音频严格同步。
+  double _smoothPosMs = 0;
+  int _lastAuthorityPosMs = -1;
+
   // P0: 间奏点动画降频（30fps）用的帧时间累积器
   double _interludeAccumulator = 0;
+
+  // overscan 视口缓冲行数：pad 端 15、手机端 10。在 build 中根据最短边更新
+  int _overscan = 10;
 
   /// 模糊渐隐系数（1.0=正常模糊，0.0=无模糊）。
   /// 用户滚动时淡出到0，松手等待期间保持0，回弹开始后淡入到1。
@@ -458,7 +470,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 但视口外的弹簧从不被 tick → 永远 isSettled=false →
   /// 收敛检测恒 false → 暂停后 Ticker 永不停止 → 每帧重绘 → 功耗降不下来。
   bool _arePerLineSpringsConverged() {
-    final int overscan = 15;
+    final int overscan = _overscan;
     final int startI = math.max(0, _currentLineIndex);
     final int endI = math.min(widget.lines.length, _currentLineIndex + overscan);
     for (int i = startI; i < endI; i++) {
@@ -475,7 +487,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     if (currentRenderer != null && !currentRenderer.isConverged) {
       return false;
     }
-    final int overscan = 15;
+    final int overscan = _overscan;
     final int startIdx = math.max(0, _currentLineIndex - overscan);
     final int endIdx =
         math.min(widget.lines.length, _currentLineIndex + overscan);
@@ -509,7 +521,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     if (currentWord != null && !currentWord.isConverged) {
       return true;
     }
-    final int overscan = 15;
+    final int overscan = _overscan;
     final int startIdx = math.max(0, _currentLineIndex - overscan);
     final int endIdx =
         math.min(widget.lines.length, _currentLineIndex + overscan);
@@ -642,6 +654,25 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final dt = (elapsed - _lastElapsed).inMicroseconds / 1000000.0;
     _lastElapsed = elapsed;
 
+    // P0: 推进逐字动画平滑时间（上浮/字内渐变的进度来源）。
+    // positionStream 每 ~200ms 才给一个权威位置，播放中若直接用它会
+    // 造成动画"追到旧目标后冻结 ~120ms"的卡顿；这里用帧时钟每帧推进，
+    // 收到新权威位置时对齐校正（偏差一般 <20ms，不可见）。
+    // 暂停时冻结在权威位置；seek/切歌等大跳变随权威位置直接吸附。
+    if (widget.isPlaying) {
+      _smoothPosMs += dt * 1000;
+      if (widget.currentTimeMs != _lastAuthorityPosMs) {
+        _lastAuthorityPosMs = widget.currentTimeMs;
+        _smoothPosMs = widget.currentTimeMs.toDouble();
+      } else if ((_smoothPosMs - _lastAuthorityPosMs).abs() > 300) {
+        // 兜底：权威位置长时间不更新（缓冲等）时防止平滑值漂移过大
+        _smoothPosMs = _lastAuthorityPosMs.toDouble();
+      }
+    } else {
+      _smoothPosMs = widget.currentTimeMs.toDouble();
+      _lastAuthorityPosMs = widget.currentTimeMs;
+    }
+
     // 1. 找当前行
     // 纯文本歌词（无时间轴）不高亮、不滚动、不模糊，直接平铺显示
     // 性能优化：缓存 hasTimestamps 结果，避免每帧 O(N) 遍历所有 lines
@@ -702,7 +733,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 4. 推进每行的 renderer
     // 性能优化：只 tick 视口附近的行（前后各 15 行），避免 200+ 行全量 tick。
     // 当前行用 WordRenderer（逐字 alpha + 上浮），其他行用 LineRenderer。
-    final int overscan = 15;
+    final int overscan = _overscan;
     final int startIdx = math.max(0, _currentLineIndex - overscan);
     final int endIdx = math.min(widget.lines.length, _currentLineIndex + overscan);
     for (int i = startIdx; i < endIdx; i++) {
@@ -721,7 +752,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         final renderer = _wordRendererFor(i);
         renderer.emphasizeEffect = _emphasizeEffect;
         renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade, blurActive: blurActive);
-        renderer.tick(dt, widget.currentTimeMs);
+        // 用平滑时间驱动逐字动画（上浮/字内渐变），避免 positionStream 5fps 卡顿
+        renderer.tick(dt, _smoothPosMs.round());
       } else {
         final renderer = _lineRendererFor(i);
         renderer.setLineState(isActive: isActive, scale: scale, blurFade: _blurFade, blurActive: blurActive);
@@ -1038,6 +1070,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
   @override
   Widget build(BuildContext context) {
+    // 根据屏幕最短边判断设备类型：>= 600dp 视为 pad（平板），更新 overscan 缓冲行数
+    final shortestSide = MediaQuery.of(context).size.shortestSide;
+    _overscan = shortestSide >= 600 ? 15 : 10;
     // 根据主题亮度设置歌词文字颜色：
     // - AM 风格（forceDarkBackground=true）→ 始终白色
     // - 深色主题 → 白色

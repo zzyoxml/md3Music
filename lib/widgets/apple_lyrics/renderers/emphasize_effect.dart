@@ -250,13 +250,17 @@ class EmphasizeEffect {
     // 超出 [0, 1] 范围：字未激活或已结束，返回 idle
     if (t < 0 || t > 1) return EmphasizeState.idle;
 
-    // 计算 transX：前半段用 bezIn(t*2)，后半段用 bezOut((1-t)*2)
-    // 前半段从 0 渐增到 1（bezIn(0)=0, bezIn(1)=1），后半段从 1 渐减回 0
+    // 计算 transX：前 1/4 用 bezIn 渐入，后 1/4 用 bezOut 渐出，中间 1/2 保持满强度
+    // 渐入段 t∈[0, 0.25] → bezIn(t*4)，t=0 时 0，t=0.25 时 1
+    // 满强度段 t∈[0.25, 0.75] → 1
+    // 渐出段 t∈[0.75, 1] → bezOut((1-t)*4)，t=0.75 时 1，t=1 时 0
     final double transX;
-    if (t < 0.5) {
-      transX = cubicBezier(t * 2, _bezInP1, _bezInP2, 0.58, 1.0);
+    if (t < 0.25) {
+      transX = cubicBezier(t * 4, _bezInP1, _bezInP2, 0.58, 1.0);
+    } else if (t > 0.75) {
+      transX = cubicBezier((1 - t) * 4, _bezOutP1, _bezOutP2, 0.58, 1.0);
     } else {
-      transX = cubicBezier((1 - t) * 2, _bezOutP1, _bezOutP2, 0.58, 1.0);
+      transX = 1.0;
     }
 
     // amount 计算（spec.md 公式）

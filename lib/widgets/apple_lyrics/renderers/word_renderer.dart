@@ -585,6 +585,13 @@ class WordRenderer {
           _glowBlurPaint.imageFilter = ImageFilter.blur(
             sigmaX: blurSigma, sigmaY: blurSigma,
           );
+          // 辉光整体透明度随 glowLevel 平滑变化，避免辉光开关式突兀出现/消失
+          _glowBlurPaint.colorFilter = ColorFilter.matrix(<double>[
+            1, 0, 0, 0, 0,
+            0, 1, 0, 0, 0,
+            0, 0, 1, 0, 0,
+            0, 0, 0, emState.glowLevel.clamp(0.0, 1.0), 0,
+          ]);
           canvas.saveLayer(glowRect, _glowBlurPaint);
           painter.paint(canvas, wordPos);
           canvas.restore();
