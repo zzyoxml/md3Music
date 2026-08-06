@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../providers/kugou_provider.dart';
 import '../../widgets/app_animation.dart';
@@ -25,6 +26,9 @@ class UserCenterPage extends StatefulWidget {
 class _UserCenterPageState extends State<UserCenterPage> {
   /// 顶栏渐变 ScrollController：与 ScrollAwareAppBar 共享
   final ScrollController _scrollController = ScrollController();
+
+  /// 防止验证码弹窗被多次触发（pendingVerifyCaptcha 存在期间只弹一次）
+  bool _captchaDialogShowing = false;
 
   @override
   void initState() {
@@ -93,6 +97,14 @@ class _UserCenterPageState extends State<UserCenterPage> {
       ),
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
+          // 监听 20028 二次安全验证请求，弹出腾讯滑块验证码
+          final pending = kugou.pendingVerifyCaptcha;
+          if (pending != null && !_captchaDialogShowing) {
+            _captchaDialogShowing = true;
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              _showVerifyCaptchaDialog(context, kugou, pending);
+            });
+          }
           if (!kugou.isLoggedIn) return _buildNotLoggedIn(cs, tt);
           return MD3ERefreshIndicator(
             onRefresh: () async {
@@ -656,6 +668,101 @@ class _UserCenterPageState extends State<UserCenterPage> {
             : Theme.of(context).colorScheme.errorContainer,
       ),
     );
+  }
+
+  /// 20028 二次安全验证弹窗：WebView 加载本地滑块验证码页面（腾讯 TCaptcha），
+  /// 验证通过后把 verifycode 回传给 provider，由 provider 调 /verify/user/info 并重试签到。
+  Future<void> _showVerifyCaptchaDialog(
+    BuildContext context,
+    KugouProvider kugou,
+    VerifyCaptchaRequest pending,
+  ) async {
+    final controller = WebViewController();
+    controller
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..addJavaScriptChannel(
+        'CaptchaChannel',
+        onMessageReceived: (message) {
+          final data = message.message;
+          print('[CAPTCHA] channel: $data');
+          if (data == '__READY__') {
+            // 页面 JS 就绪信号：注入 txappid 拉起验证码（比 onPageFinished 更可靠）
+            controller.runJavaScript(
+              'window.initCaptcha && initCaptcha(${pending.txappid})',
+            );
+            return;
+          }
+          if (data == '__CANCEL__' || data == '__ERROR__') {
+            kugou.cancelVerifyCaptcha();
+          } else {
+            kugou.completeVerifyCaptcha(data);
+          }
+          if (context.mounted) Navigator.of(context).pop();
+        },
+      )
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            // 页面加载完成后注入 txappid 并拉起腾讯验证码
+            controller.runJavaScript(
+              'window.initCaptcha && initCaptcha(${pending.txappid})',
+            );
+          },
+          onWebResourceError: (_) {
+            // 页面/资源加载失败：取消验证，避免白框卡死
+            kugou.cancelVerifyCaptcha();
+            if (context.mounted) Navigator.of(context).pop();
+          },
+        ),
+      )
+      ..loadFlutterAsset('assets/web/verify_captcha.html');
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => Dialog(
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 标题栏 + 关闭按钮（验证码弹不出时用户可退出，避免白框卡死）
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '安全验证',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: '取消验证',
+                    onPressed: () {
+                      kugou.cancelVerifyCaptcha();
+                      Navigator.of(dialogContext).pop();
+                    },
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            SizedBox(
+              width: 360,
+              height: 400,
+              child: WebViewWidget(controller: controller),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    _captchaDialogShowing = false;
+    // 弹窗关闭但验证仍未完成（流程中断/超时）→ 取消，避免 completer 悬挂
+    if (kugou.pendingVerifyCaptcha != null) {
+      kugou.cancelVerifyCaptcha();
+    }
   }
 
   Widget _buildWeekdayHeader(ColorScheme cs) {

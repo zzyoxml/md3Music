@@ -154,6 +154,10 @@ class KugouEndpoints {
   static const String loginDeviceKick = '/login/device/kick';
   static const String captchaSent = '/captcha/sent';
 
+  // Verify (20028 二次安全验证)
+  static const String getVerifyInfo = '/get/verify/info';
+  static const String verifyUserInfo = '/verify/user/info';
+
   // User
   static const String userDetail = '/user/detail';
   static const String userVipDetail = '/user/vip/detail';
