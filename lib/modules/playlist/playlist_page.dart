@@ -1254,6 +1254,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                             ? CachedNetworkImage(
                                                 imageUrl:
                                                     displayPlaylist.artworkUri!,
+                                                memCacheWidth: 420,
+                                                memCacheHeight: 420,
                                                 fit: BoxFit.cover,
                                                 placeholder: (_, _) => Container(
                                                   color: colorScheme

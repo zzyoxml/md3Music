@@ -90,6 +90,13 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Song? get currentSong => _currentSong;
   bool get isPlaying => _isPlaying;
+
+  /// P0: position 独立通知通道。positionStream 每 ~200ms 触发一次，
+  /// 之前每次都全量 notifyListeners() 导致所有 `Consumer<PlayerProvider>` 重建。
+  /// 现在高频更新只通知 [positionNotifier]，进度条/歌词等高频 UI 订阅它，
+  /// 其它 widget 仅在 currentSong/isPlaying/duration 等低频字段变化时重建。
+  final ValueNotifier<Duration> positionNotifier = ValueNotifier(Duration.zero);
+
   Duration get position => _position;
   Duration? get duration => _duration;
   List<Song> get playlist => _playlist;
@@ -97,6 +104,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   AppLoopMode get loopMode => _loopMode;
   bool get shuffleEnabled => _shuffleEnabled;
   double get volume => _volume;
+
+  /// 更新播放位置并同步到 [positionNotifier]。
+  /// 高频路径（positionStream ~200ms）只通知 positionNotifier，不触发全量 notifyListeners。
+  void _updatePosition(Duration value) {
+    if (_position == value) return;
+    _position = value;
+    positionNotifier.value = value;
+  }
   double get speed => _speed;
   bool get isResolvingUrl => _isResolvingUrl;
   String? get resolveError => _resolveError;
@@ -237,7 +252,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         orElse: () => AppLoopMode.off,
       );
       _shuffleEnabled = state.shuffleEnabled;
-      _position = Duration.zero; // 先置零，等 setUrl 成功后 seek 到目标位置
+      _updatePosition(Duration.zero); // 先置零，等 setUrl 成功后 seek 到目标位置
 
       // 冷启动时清除在线歌曲的旧 URL（酷狗播放链接有时效性，上次会话的 URL 大概率已过期）
       // 强制 _resolveAndPlayCurrentSong 重新通过 API 获取有效链接
@@ -262,7 +277,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       // 构建播放源并 seek 到保存的位置（不自动播放，等用户手动触发）
       final ok = await _resolveAndPlayCurrentSong(seekTo: state.position, play: false);
       if (ok) {
-        _position = state.position;
+        _updatePosition(state.position);
       }
       notifyListeners();
     } catch (e) {}
@@ -295,9 +310,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     try {
       _positionSubscription = _audioService.positionStream.listen((position) {
-        _position = position;
+        // P0: 高频位置更新只同步 positionNotifier，不再全量 notifyListeners，
+        // 避免每 200ms 重建所有依赖 PlayerProvider 的 widget（MiniPlayer/封面等）
+        _updatePosition(position);
         _updateNotificationPosition();
-        notifyListeners();
         // 防抖保存位置（3 秒）
         _scheduleSave();
 
@@ -336,7 +352,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _playingSubscription = _audioService.playingStream.listen((isPlaying) {
         _isPlaying = isPlaying;
         WakelockService.instance.setSongPlaying(isPlaying);
-        _updateNotification();
+        // try-catch：_updateNotification 内部（updateWidget 等）异常不应
+        // 中断后续，否则暂停时 Kotlin 收不到 isPlaying=false，WakeLock 不释放
+        try {
+          _updateNotification();
+        } catch (_) {}
         notifyListeners();
         // 播放/暂停切换时立即推 Lyricon，避免等下一个 positionStream tick
         // state 必须用 PlaybackStateCompat.STATE_PLAYING=3 / STATE_PAUSED=2
@@ -546,7 +566,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _originalPlaylist = [song];
     _currentIndex = 0;
     _resolveError = null;
-    _position = Duration.zero;
+    _updatePosition(Duration.zero);
     _recordHistory(song);
     _updateNotification();
     _saveState();
@@ -596,7 +616,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentIndex = 0;
     _isResolvingUrl = true;
     _resolveError = null;
-    _position = Duration.zero;
+    _updatePosition(Duration.zero);
     _recordHistory(song);
     _updateNotification();
     _saveState();
@@ -692,7 +712,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentIndex = startIndex;
     _currentSong = songs[startIndex];
     _resolveError = null;
-    _position = Duration.zero;
+    _updatePosition(Duration.zero);
     _recordHistory(songs[startIndex]);
     _saveState();
     notifyListeners();
@@ -784,7 +804,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentSong = songs[startIndex];
     _isResolvingUrl = true;
     _resolveError = null;
-    _position = Duration.zero;
+    _updatePosition(Duration.zero);
     _recordHistory(songs[startIndex]);
     _updateNotification();
     notifyListeners();
@@ -908,7 +928,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentSong = songs[startIndex];
     _isResolvingUrl = true;
     _resolveError = null;
-    _position = Duration.zero;
+    _updatePosition(Duration.zero);
     _recordHistory(songs[startIndex]);
     _updateNotification();
     notifyListeners();
@@ -1078,10 +1098,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       final currentVol = _audioService!.player.volume;
       const steps = 10;
       const stepMs = 50; // 10步 x 50ms = 500ms
-      for (int i = steps - 1; i >= 0; i--) {
-        _audioService!.player.setVolume(currentVol * i / steps);
-        await Future.delayed(const Duration(milliseconds: stepMs));
-      }
+      // 淡出循环加 try-catch：若中途被切歌/清列表等竞态打断抛异常，
+      // 仍要确保最终 pause 执行，否则播放器继续播放、playingStream 不发
+      // false，WakeLock 无法释放（暂停后功耗降不下来）
+      try {
+        for (int i = steps - 1; i >= 0; i--) {
+          _audioService!.player.setVolume(currentVol * i / steps);
+          await Future.delayed(const Duration(milliseconds: stepMs));
+        }
+      } catch (_) {}
       await _audioService?.pause();
       // 恢复音量设置（下次播放时使用）
       _audioService!.player.setVolume(_volume);
@@ -1126,7 +1151,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     // 否则要等 just_audio positionStream 触发，会有一帧的滞后，
     // 导致拖动 slider 后歌词不跟随。
     if (_position != position) {
-      _position = position;
+      _updatePosition(position);
       notifyListeners();
     }
     await _audioService?.seek(position);
@@ -1372,7 +1397,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _currentIndex = nextIndex;
       _currentSong = _playlist[nextIndex];
       _resolveError = null;
-      _position = Duration.zero; // 切歌时重置位置，避免恢复时跳到上一首的进度
+      _updatePosition(Duration.zero); // 切歌时重置位置，避免恢复时跳到上一首的进度
       _recordHistory(_currentSong!);
       _updateNotification();
       _saveState();
@@ -1423,7 +1448,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _currentIndex = prevIndex;
       _currentSong = _playlist[prevIndex];
       _resolveError = null;
-      _position = Duration.zero;
+      _updatePosition(Duration.zero);
       _recordHistory(_currentSong!);
 
       if (await _resolveAndPlayCurrentSong(play: autoPlay)) {
@@ -1450,7 +1475,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentIndex = index;
     _currentSong = _playlist[index];
     _resolveError = null;
-    _position = Duration.zero;
+    _updatePosition(Duration.zero);
     _recordHistory(_currentSong!);
     _saveState();
     notifyListeners();
@@ -1477,7 +1502,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentIndex = -1;
     _currentSong = null;
     _isPlaying = false;
-    _position = Duration.zero;
+    _updatePosition(Duration.zero);
     _duration = null;
     _resolveError = null;
     _stateRepo.clearState();
@@ -1642,7 +1667,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _currentIndex = -1;
       _currentSong = null;
       _isPlaying = false;
-      _position = Duration.zero;
+      _updatePosition(Duration.zero);
       _duration = null;
       _resolveError = null;
     } else if (wasCurrent) {
@@ -1915,6 +1940,13 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   DateTime? _lastNotificationUpdate;
 
   void _updateNotificationPosition() {
+    // P0: 暂停时位置不再变化，直接跳过。
+    // 此前暂停时 positionStream 仍每 200ms 回调、这里每 1 秒无条件
+    // updateNotification → Kotlin 每 1 秒 showNotification（封面提取、
+    // startForeground、MediaSession 重建）→ 主线程/raster/binder 持续
+    // 空转（暂停功耗降不下来、GPU raster 占用最高）。暂停瞬间已由
+    // playingStream(false) 触发过最终状态通知，之后无需再更新。
+    if (!_isPlaying) return;
     final now = DateTime.now();
     if (_lastNotificationUpdate != null &&
         now.difference(_lastNotificationUpdate!).inSeconds < 1) {
@@ -2230,6 +2262,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _speedSubscription?.cancel();
     _sleepTimerTicker?.cancel();
     _sleepTimerTicker = null;
+    positionNotifier.dispose();
     super.dispose();
   }
 }

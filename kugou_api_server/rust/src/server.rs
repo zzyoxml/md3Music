@@ -31,6 +31,18 @@ static PORT: AtomicU16 = AtomicU16::new(0);
 /// data_dir（持久化 device_info.json），start() 时写入。
 static DATA_DIR: OnceLock<String> = OnceLock::new();
 
+/// P0: 路由表全局缓存。原先每个请求都重新 `register` 165+ 次 push，
+/// 改为启动后构建一次，全请求共享（路由是静态注册，不会变化）。
+static ROUTES: OnceLock<Vec<(&'static str, ModuleFn)>> = OnceLock::new();
+
+fn routes() -> &'static Vec<(&'static str, ModuleFn)> {
+    ROUTES.get_or_init(|| {
+        let mut routes: Vec<(&'static str, ModuleFn)> = Vec::new();
+        crate::modules::register(&mut routes);
+        routes
+    })
+}
+
 /// guid = cryptoMd5(getGuid()) (server.js module-level const).
 fn session_guid() -> &'static str {
     static G: OnceLock<String> = OnceLock::new();
@@ -110,12 +122,19 @@ fn run_loop(server: Server, data_dir: String) {
                 // 每个请求独立线程处理：云盘上传等耗时请求（分片串行可达数十秒）
                 // 不再阻塞其他请求（如列表刷新、搜索），避免串行排队造成"卡住"。
                 // 全局状态（CACHE/DeviceConfig/session 常量）均持锁或 OnceLock，并发安全。
+                // P0: 减小线程栈（默认 2MB → 256KB），100 并发从 ~200MB 降到 ~25MB。
                 let dd = data_dir.clone();
-                std::thread::spawn(move || {
-                    if let Err(e) = handle_request(request, &dd) {
-                        eprintln!("[server] handler error: {}", e);
-                    }
-                });
+                if let Err(e) = std::thread::Builder::new()
+                    .name("req".into())
+                    .stack_size(256 * 1024)
+                    .spawn(move || {
+                        if let Err(e) = handle_request(request, &dd) {
+                            eprintln!("[server] handler error: {}", e);
+                        }
+                    })
+                {
+                    eprintln!("[server] spawn handler thread failed: {}", e);
+                }
             }
             Ok(None) => {}
             Err(_) => {
@@ -309,10 +328,8 @@ fn handle_request(mut request: Request, _data_dir: &str) -> Result<(), String> {
     let no_cookie = query_truthy(&query, "noCookie");
 
     // ---- module dispatch ----
-    let mut routes: Vec<(&'static str, ModuleFn)> = Vec::new();
-    crate::modules::register(&mut routes);
-
-    for (route, module_fn) in &routes {
+    // P0: 复用全局缓存的路由表（OnceLock 启动时构建一次），避免每请求重建 165+ 项
+    for (route, module_fn) in routes() {
         if prefix_match(route, &path) {
             let ctx = Ctx {
                 ip: String::new(),

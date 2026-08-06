@@ -116,10 +116,6 @@ class _MiniPlayerState extends State<MiniPlayer>
 
     final colorScheme = Theme.of(context).colorScheme;
     final duration = playerProvider.duration ?? Duration.zero;
-    final position = playerProvider.position;
-    final progress = duration.inMilliseconds > 0
-        ? position.inMilliseconds / duration.inMilliseconds
-        : 0.0;
 
     return ValueListenableBuilder<double>(
       valueListenable: playerExpansion,
@@ -139,8 +135,18 @@ class _MiniPlayerState extends State<MiniPlayer>
         onHorizontalDragUpdate: _onHorizontalDragUpdate,
         onHorizontalDragEnd: _onHorizontalDragEnd,
         behavior: HitTestBehavior.opaque,
-        child: _buildContent(
-            context, playerProvider, currentSong, colorScheme, progress),
+        // P0: 进度只订阅 positionNotifier（高频 200ms），
+        // 不再因 positionStream 触发整个 MiniPlayer 重建（封面/标题不变）
+        child: ValueListenableBuilder<Duration>(
+          valueListenable: playerProvider.positionNotifier,
+          builder: (context, position, _) {
+            final progress = duration.inMilliseconds > 0
+                ? position.inMilliseconds / duration.inMilliseconds
+                : 0.0;
+            return _buildContent(
+                context, playerProvider, currentSong, colorScheme, progress);
+          },
+        ),
       ),
     );
   }

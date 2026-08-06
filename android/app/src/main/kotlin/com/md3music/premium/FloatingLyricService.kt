@@ -707,14 +707,25 @@ class GradientTextView(context: Context) : TextView(context) {
     // 当前行已唱字数；-1 表示无逐字（整行渐变色）
     private var sungCharCount = -1
 
+    // P0: 缓存 LinearGradient shader，避免 onDraw 每帧新建对象引发 GC 卡顿。
+    // shader 只与颜色和宽度相关，仅在它们变化时重建
+    private var gradientShader: LinearGradient? = null
+    private var shaderWidth = 0f
+    private var shaderStartColor = 0
+    private var shaderEndColor = 0
+
     init {
         setTextColor(Color.WHITE)
     }
 
     fun setGradient(start: Int, end: Int) {
-        startColor = start
-        endColor = end
-        invalidate()
+        if (startColor != start || endColor != end) {
+            startColor = start
+            endColor = end
+            // 使 shader 缓存失效，下次 onDraw 重建
+            gradientShader = null
+            invalidate()
+        }
     }
 
     fun setUnplayedColor(color: Int) {
@@ -725,6 +736,25 @@ class GradientTextView(context: Context) : TextView(context) {
     fun setOpacityForContrast(opacity: Int) {
         bgOpacity = opacity
         invalidate()
+    }
+
+    /// 获取（按需重建）整行渐变 shader。宽度未变化时复用上一帧实例
+    private fun ensureGradientShader(): LinearGradient? {
+        if (width <= 0) return null
+        if (gradientShader == null ||
+            shaderWidth != width.toFloat() ||
+            shaderStartColor != startColor ||
+            shaderEndColor != endColor
+        ) {
+            shaderWidth = width.toFloat()
+            shaderStartColor = startColor
+            shaderEndColor = endColor
+            gradientShader = LinearGradient(
+                0f, 0f, shaderWidth, 0f,
+                startColor, endColor, Shader.TileMode.CLAMP
+            )
+        }
+        return gradientShader
     }
 
     /// 设置已唱字数（KRC 逐字模式）。
@@ -793,10 +823,8 @@ class GradientTextView(context: Context) : TextView(context) {
             if (sungWidth > 0 && width > 0) {
                 canvas.save()
                 canvas.clipRect(0f, 0f, sungWidth, height.toFloat())
-                paint.shader = LinearGradient(
-                    0f, 0f, width, 0f,
-                    startColor, endColor, Shader.TileMode.CLAMP
-                )
+                // P0: 复用缓存的 shader，避免每帧新建 LinearGradient
+                paint.shader = ensureGradientShader()
                 // 已唱部分不要 shadow（避免双重 shadow），清掉再画
                 paint.clearShadowLayer()
                 super.onDraw(canvas)
@@ -808,10 +836,8 @@ class GradientTextView(context: Context) : TextView(context) {
         } else {
             // LRC/纯文本：整行渐变色（原行为）
             if (width > 0) {
-                paint.shader = LinearGradient(
-                    0f, 0f, width, 0f,
-                    startColor, endColor, Shader.TileMode.CLAMP
-                )
+                // P0: 复用缓存的 shader，避免每帧新建 LinearGradient
+                paint.shader = ensureGradientShader()
             }
             super.onDraw(canvas)
         }

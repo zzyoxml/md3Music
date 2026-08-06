@@ -1,5 +1,7 @@
 package com.md3music.premium
 
+import android.os.Handler
+import android.os.Looper
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import org.jaudiotagger.audio.AudioFileIO
@@ -82,59 +84,67 @@ class MetadataWriterPlugin {
             return
         }
 
-        try {
-            // 静音 JAudioTagger 内部日志，避免污染 logcat
+        // P0: AudioFileIO.read/commit 是重 IO（读取整个音频文件 + 解析标签），
+        // 大文件（几十 MB FLAC）会阻塞主线程数秒，移到子线程执行，
+        // 结果通过 Handler 回主线程回调 Flutter
+        val mainHandler = Handler(Looper.getMainLooper())
+        Thread {
             try {
-                Logger.getLogger("org.jaudiotagger").level = Level.OFF
-            } catch (_: Throwable) {
-                // 不同版本 API 略有差异，吞掉
-            }
+                // 静音 JAudioTagger 内部日志，避免污染 logcat
+                try {
+                    Logger.getLogger("org.jaudiotagger").level = Level.OFF
+                } catch (_: Throwable) {
+                    // 不同版本 API 略有差异，吞掉
+                }
 
-            android.util.Log.d("MetadataWriter", "  reading audio file...")
-            val audioFile = AudioFileIO.read(file)
-            android.util.Log.d("MetadataWriter", "  audioFile type=${audioFile.javaClass.simpleName} audioHeader=${audioFile.audioHeader}")
-            val tag = audioFile.tagOrCreateAndSetDefault
-            android.util.Log.d("MetadataWriter", "  tag type=${tag.javaClass.simpleName}")
+                android.util.Log.d("MetadataWriter", "  reading audio file...")
+                val audioFile = AudioFileIO.read(file)
+                android.util.Log.d("MetadataWriter", "  audioFile type=${audioFile.javaClass.simpleName} audioHeader=${audioFile.audioHeader}")
+                val tag = audioFile.tagOrCreateAndSetDefault
+                android.util.Log.d("MetadataWriter", "  tag type=${tag.javaClass.simpleName}")
 
-            if (title.isNotEmpty()) {
-                tag.setField(FieldKey.TITLE, title)
-            }
-            if (artist.isNotEmpty()) {
-                tag.setField(FieldKey.ARTIST, artist)
-            }
-            if (album.isNotEmpty()) {
-                tag.setField(FieldKey.ALBUM, album)
-            }
+                if (title.isNotEmpty()) {
+                    tag.setField(FieldKey.TITLE, title)
+                }
+                if (artist.isNotEmpty()) {
+                    tag.setField(FieldKey.ARTIST, artist)
+                }
+                if (album.isNotEmpty()) {
+                    tag.setField(FieldKey.ALBUM, album)
+                }
 
-            // 写入专辑封面（MP3 → APIC，FLAC → METADATA_BLOCK_PICTURE）
-            if (!artworkPath.isNullOrEmpty()) {
-                val artFile = File(artworkPath)
-                android.util.Log.d("MetadataWriter", "  artwork exists=${artFile.exists()} size=${artFile.length()}")
-                if (artFile.exists()) {
-                    // 使用 FixedAndroidArtwork 绕过 AndroidArtwork.setImageFromData()
-                    // 中的 UnsupportedOperationException（Android 缺少 ImageIO）
-                    val artwork = FixedAndroidArtwork.createFromFile(artFile)
-                    // 先删除旧封面避免重复（部分格式 createField 会叠加）
-                    try { tag.deleteArtworkField() } catch (_: Throwable) {}
-                    tag.setField(artwork)
-                    android.util.Log.d("MetadataWriter", "  artwork set OK")
+                // 写入专辑封面（MP3 → APIC，FLAC → METADATA_BLOCK_PICTURE）
+                if (!artworkPath.isNullOrEmpty()) {
+                    val artFile = File(artworkPath)
+                    android.util.Log.d("MetadataWriter", "  artwork exists=${artFile.exists()} size=${artFile.length()}")
+                    if (artFile.exists()) {
+                        // 使用 FixedAndroidArtwork 绕过 AndroidArtwork.setImageFromData()
+                        // 中的 UnsupportedOperationException（Android 缺少 ImageIO）
+                        val artwork = FixedAndroidArtwork.createFromFile(artFile)
+                        // 先删除旧封面避免重复（部分格式 createField 会叠加）
+                        try { tag.deleteArtworkField() } catch (_: Throwable) {}
+                        tag.setField(artwork)
+                        android.util.Log.d("MetadataWriter", "  artwork set OK")
+                    }
+                }
+
+                // 写入歌词（MP3 → USLT，FLAC → LYRICS）
+                if (!lyrics.isNullOrEmpty()) {
+                    tag.setField(FieldKey.LYRICS, lyrics)
+                    android.util.Log.d("MetadataWriter", "  lyrics set OK")
+                }
+
+                android.util.Log.d("MetadataWriter", "  committing...")
+                audioFile.commit()
+                android.util.Log.d("MetadataWriter", "✅ commit success")
+                mainHandler.post { result.success(true) }
+            } catch (e: Exception) {
+                android.util.Log.e("MetadataWriter", "❌ WRITE_FAILED", e)
+                // 写入失败不阻断下载流程，Dart 端 fallback 处理
+                mainHandler.post {
+                    result.error("WRITE_FAILED", "${e.javaClass.simpleName}: ${e.message}", e.stackTraceToString())
                 }
             }
-
-            // 写入歌词（MP3 → USLT，FLAC → LYRICS）
-            if (!lyrics.isNullOrEmpty()) {
-                tag.setField(FieldKey.LYRICS, lyrics)
-                android.util.Log.d("MetadataWriter", "  lyrics set OK")
-            }
-
-            android.util.Log.d("MetadataWriter", "  committing...")
-            audioFile.commit()
-            android.util.Log.d("MetadataWriter", "✅ commit success")
-            result.success(true)
-        } catch (e: Exception) {
-            android.util.Log.e("MetadataWriter", "❌ WRITE_FAILED", e)
-            // 写入失败不阻断下载流程，Dart 端 fallback 处理
-            result.error("WRITE_FAILED", "${e.javaClass.simpleName}: ${e.message}", e.stackTraceToString())
-        }
+        }.start()
     }
 }

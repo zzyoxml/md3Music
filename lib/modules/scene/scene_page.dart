@@ -152,6 +152,8 @@ class _SceneCard extends StatelessWidget {
                 child: scene.coverUrl != null
                     ? CachedNetworkImage(
                         imageUrl: scene.coverUrl!,
+                        memCacheWidth: 540,
+                        memCacheHeight: 540,
                         fit: BoxFit.cover,
                         errorWidget: (_, _, _) => ColoredBox(
                           color: Colors.transparent,

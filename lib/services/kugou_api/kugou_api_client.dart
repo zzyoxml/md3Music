@@ -82,6 +82,25 @@ class KugouApiClient {
   bool _isInitialized = false;
   Completer<void>? _initCompleter;
 
+  /// 本地 API 服务器（Rust）就绪信号。
+  ///
+  /// P0: main.dart 已改为「runApp 不等待服务器启动」——so 加载与 UI 首帧并行。
+  /// 首屏请求（发现页等）在服务器就绪前发出会连接拒绝失败，因此
+  /// 拦截器在 `_serverReady` 完成前 await 它，就绪后自动放行。
+  /// 由 [KugouApiServer] 在 TCP 探测成功（_waitForReady）后调用 [markServerReady]。
+  static final Completer<void> _serverReady = Completer<void>();
+  static bool _serverReadyMarked = false;
+
+  /// 标记本地 API 服务器已就绪（幂等，可重复调用）。
+  static void markServerReady() {
+    if (_serverReadyMarked) return;
+    _serverReadyMarked = true;
+    _serverReady.complete();
+  }
+
+  /// 服务器就绪 Future（带超时保护：启动失败时请求不会永久挂起）。
+  static Future<void> get serverReady => _serverReady.future;
+
   void _onRequest(
     RequestOptions options,
     RequestInterceptorHandler handler,
@@ -89,6 +108,12 @@ class KugouApiClient {
     if (!_isInitialized) {
       await _initCompleter?.future;
     }
+
+    // P0: 等待本地 API 服务器就绪。带 8s 超时：
+    // 服务器异常时继续请求（失败由调用方处理），避免首屏永久转圈。
+    try {
+      await serverReady.timeout(const Duration(seconds: 8));
+    } catch (_) {}
 
     // 登录等全部请求统一走本地 API 服务器（Rust），不再依赖第三方云端
     options.baseUrl = KugouEndpoints.baseUrl;

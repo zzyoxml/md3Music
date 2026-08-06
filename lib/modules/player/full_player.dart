@@ -794,13 +794,18 @@ class _FullPlayerState extends State<FullPlayer>
                   behavior: HitTestBehavior.translucent,
                   child: _isLoadingLyrics
                       ? const Center(child: MD3ELoadingIndicator())
-                      : LyricsView(
-                          lyrics: _lyrics,
-                          position: playerProvider.position,
-                          doubleTapToJump: lyricDoubleTap,
-                          onSeek: (duration) {
-                            playerProvider.seek(duration);
-                          },
+                      // P0: 歌词时间只订阅 positionNotifier（高频 200ms），
+                      // 不再因 positionStream 触发整页重建
+                      : ValueListenableBuilder<Duration>(
+                          valueListenable: playerProvider.positionNotifier,
+                          builder: (context, position, _) => LyricsView(
+                            lyrics: _lyrics,
+                            position: position,
+                            doubleTapToJump: lyricDoubleTap,
+                            onSeek: (duration) {
+                              playerProvider.seek(duration);
+                            },
+                          ),
                         ),
                 ),
                 CommentsView(
@@ -1015,13 +1020,19 @@ class _FullPlayerState extends State<FullPlayer>
                               ),
                             _isLoadingLyrics
                                 ? const Center(child: MD3ELoadingIndicator())
-                                : LyricsView(
-                                    lyrics: _lyrics,
-                                    position: playerProvider.position,
-                                    doubleTapToJump: lyricDoubleTap,
-                                    onSeek: (duration) {
-                                      playerProvider.seek(duration);
-                                    },
+                                // P0: 歌词时间只订阅 positionNotifier（高频 200ms）
+                                : ValueListenableBuilder<Duration>(
+                                    valueListenable:
+                                        playerProvider.positionNotifier,
+                                    builder: (context, position, _) =>
+                                        LyricsView(
+                                          lyrics: _lyrics,
+                                          position: position,
+                                          doubleTapToJump: lyricDoubleTap,
+                                          onSeek: (duration) {
+                                            playerProvider.seek(duration);
+                                          },
+                                        ),
                                   ),
                             CommentsView(
                               songHash: currentSong.id,
@@ -1238,13 +1249,19 @@ class _FullPlayerState extends State<FullPlayer>
                               ),
                             _isLoadingLyrics
                                 ? const Center(child: MD3ELoadingIndicator())
-                                : LyricsView(
-                                    lyrics: _lyrics,
-                                    position: playerProvider.position,
-                                    doubleTapToJump: lyricDoubleTap,
-                                    onSeek: (duration) {
-                                      playerProvider.seek(duration);
-                                    },
+                                // P0: 歌词时间只订阅 positionNotifier（高频 200ms）
+                                : ValueListenableBuilder<Duration>(
+                                    valueListenable:
+                                        playerProvider.positionNotifier,
+                                    builder: (context, position, _) =>
+                                        LyricsView(
+                                          lyrics: _lyrics,
+                                          position: position,
+                                          doubleTapToJump: lyricDoubleTap,
+                                          onSeek: (duration) {
+                                            playerProvider.seek(duration);
+                                          },
+                                        ),
                                   ),
                             CommentsView(
                               songHash: currentSong.id,
@@ -1576,7 +1593,6 @@ class _FullPlayerState extends State<FullPlayer>
     bool isExpanded = false,
   }) {
     final duration = playerProvider.duration ?? Duration.zero;
-    final position = playerProvider.position;
     final horizontalPadding = isExpanded ? 16.0 : 24.0;
     final verticalSpacing = isExpanded ? 4.0 : 8.0;
 
@@ -1585,7 +1601,19 @@ class _FullPlayerState extends State<FullPlayer>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildProgressBar(playerProvider, position, duration, colorScheme),
+          // P0: 进度条监听 positionNotifier（高频 200ms）+ provider（duration 等低频），
+          // 不再因 positionStream 触发 _buildControls 整体重建
+          ListenableBuilder(
+            listenable: Listenable.merge(
+              [playerProvider.positionNotifier, playerProvider],
+            ),
+            builder: (context, _) => _buildProgressBar(
+              playerProvider,
+              playerProvider.position,
+              duration,
+              colorScheme,
+            ),
+          ),
           SizedBox(height: verticalSpacing),
           _buildMainControls(
             playerProvider,

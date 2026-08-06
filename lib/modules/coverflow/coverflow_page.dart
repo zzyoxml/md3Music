@@ -555,6 +555,8 @@ class _CoverFlowViewState extends State<_CoverFlowView>
     final artwork = song.artworkUri != null && song.artworkUri!.isNotEmpty
         ? CachedNetworkImage(
             imageUrl: song.artworkUri!,
+            memCacheWidth: 750,
+            memCacheHeight: 750,
             width: cardWidth,
             height: cardWidth,
             fit: BoxFit.cover,

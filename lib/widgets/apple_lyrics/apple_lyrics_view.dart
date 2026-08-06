@@ -153,6 +153,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   int _currentLineIndex = -1;
   Offset? _tapDownPosition;
 
+  // P0: 当前行查找结果缓存：currentTimeMs 与 lines 引用都未变化时，
+  // _onTick 每帧跳过 findCurrentLineIndex 二分查找（O(log N) → 0 次）
+  int _currentTimeMsCache = -1;
+  Object? _linesCacheRef;
+
+  // P0: 间奏点动画降频（30fps）用的帧时间累积器
+  double _interludeAccumulator = 0;
+
   /// 模糊渐隐系数（1.0=正常模糊，0.0=无模糊）。
   /// 用户滚动时淡出到0，松手等待期间保持0，回弹开始后淡入到1。
   double _blurFade = 1.0;
@@ -445,9 +453,17 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   }
 
   /// v3 优化：检测所有 perLine 偏移弹簧是否已收敛。
+  /// P0 修复：只检查视口范围内的弹簧（与 _onTick 的 tick 范围一致，±15 行）。
+  /// 此前遍历所有 _perLineSprings：行切换时为当前行下方所有行创建弹簧，
+  /// 但视口外的弹簧从不被 tick → 永远 isSettled=false →
+  /// 收敛检测恒 false → 暂停后 Ticker 永不停止 → 每帧重绘 → 功耗降不下来。
   bool _arePerLineSpringsConverged() {
-    for (final spring in _perLineSprings.values) {
-      if (!spring.isSettled) return false;
+    final int overscan = 15;
+    final int startI = math.max(0, _currentLineIndex);
+    final int endI = math.min(widget.lines.length, _currentLineIndex + overscan);
+    for (int i = startI; i < endI; i++) {
+      final spring = _perLineSprings[i];
+      if (spring != null && !spring.isSettled) return false;
     }
     return true;
   }
@@ -630,9 +646,16 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 纯文本歌词（无时间轴）不高亮、不滚动、不模糊，直接平铺显示
     // 性能优化：缓存 hasTimestamps 结果，避免每帧 O(N) 遍历所有 lines
     final bool hasTimestamps = _cachedHasTimestamps;
-    _currentLineIndex = hasTimestamps
-        ? AppleLyricsView.findCurrentLineIndex(widget.lines, widget.currentTimeMs)
-        : -1;
+    // P0: 缓存行查找结果：currentTimeMs 与 lines 引用都未变化时跳过二分查找。
+    // （暂停时 currentTimeMs 不变，播放中每帧 200ms 才有一次变化，绝大多数帧直接命中）
+    if (_currentTimeMsCache != widget.currentTimeMs ||
+        !identical(_linesCacheRef, widget.lines)) {
+      _currentTimeMsCache = widget.currentTimeMs;
+      _linesCacheRef = widget.lines;
+      _currentLineIndex = hasTimestamps
+          ? AppleLyricsView.findCurrentLineIndex(widget.lines, widget.currentTimeMs)
+          : -1;
+    }
 
     // 2. 推进滚动控制器（需要 lineHeight 与 intervalMs 计算目标 posY）
     if (_currentLineIndex >= 0) {
@@ -711,8 +734,13 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
     // 6. 推进间奏点动画时钟（基于帧 dt，60fps 流畅，不受 positionStream 5fps 限制）
     // 暂停时不推进动画时钟，让间奏点随播放器一起暂停
+    // P0: 降到 30fps 推进（累积帧时间，33ms 才 tick 一次），视觉无感但减半推进开销
     if (widget.isPlaying) {
-      _interludeDots.tick(dt);
+      _interludeAccumulator += dt;
+      if (_interludeAccumulator >= 1.0 / 30.0) {
+        _interludeDots.tick(_interludeAccumulator);
+        _interludeAccumulator = 0;
+      }
     }
 
     // 7. 推进间奏占位 spring（_interludeExpandProgress）
@@ -722,8 +750,16 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final double interludeTarget = _activeInterludeIdx >= 0 ? 1.0 : 0.0;
     // 展开用 18.0（~300ms 快速展开），收起用 9.0（~767ms 平滑收起，匹配间奏点消失动画 750ms）
     final double interludeSpeed = _activeInterludeIdx >= 0 ? 18.0 : 9.0;
-    _interludeExpandProgress += (interludeTarget - _interludeExpandProgress) *
-        (1 - math.exp(-interludeSpeed * dt));
+    // P0: 暂停时直接吸附到目标，不再指数逼近。
+    // 指数衰减永不精确到达 target，且暂停时动画应冻结；
+    // 此前暂停时 progress 缓慢逼近，收敛检测 |progress-target|<0.001 依赖它，
+    // 有间奏点的歌曲暂停后 Ticker 迟迟不收敛 → 每帧重绘（间奏点+辉光 shader）→ 120fps。
+    if (widget.isPlaying) {
+      _interludeExpandProgress += (interludeTarget - _interludeExpandProgress) *
+          (1 - math.exp(-interludeSpeed * dt));
+    } else {
+      _interludeExpandProgress = interludeTarget;
+    }
     // 收起到接近 0 时直接归零，避免无限逼近占着微小高度
     if (_activeInterludeIdx < 0 && _interludeExpandProgress < 0.001) {
       _interludeExpandProgress = 0;
@@ -758,8 +794,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 推进每行偏移弹簧
     // 性能优化：只遍历当前行到末尾，跳过上方行（上方行永远 0，无需 setPosition）。
     // 之前遍历所有 _perLineSprings（含上方 100+ 行），每帧 100+ 次无意义 setPosition(0,0)。
+    // P0: 进一步限制到视口附近（与 renderer tick 一致的 overscan），
+    // 视口外的行弹簧偏移对渲染不可见，无需每帧推进。
     final int springStartI = math.max(0, _currentLineIndex);
-    for (int i = springStartI; i < widget.lines.length; i++) {
+    final int springEndI = math.min(widget.lines.length, _currentLineIndex + overscan);
+    for (int i = springStartI; i < springEndI; i++) {
       final spring = _perLineSprings[i];
       if (spring == null) continue;
       final delayStart = _delayStartTimes[i];
@@ -824,7 +863,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
                 0.001 ||
             _hasPerLineOffsetChanged() ||
             _hasRendererAlphaChanged() ||
-            _interludeDots.shouldRender;
+            // P0: 暂停时间奏点动画已冻结（tick 跳过、画面静止），
+            // shouldRender 仅表示"处于间奏时段"，不应再驱动每帧重绘
+            (widget.isPlaying && _interludeDots.shouldRender);
 
     if (hasVisualChange) {
       _lastRepaintCurrentLineIndex = _currentLineIndex;

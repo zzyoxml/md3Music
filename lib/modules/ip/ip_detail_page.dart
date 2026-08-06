@@ -312,6 +312,8 @@ class _IpDetailPageState extends State<IpDetailPage>
                 height: 72,
                 child: CachedNetworkImage(
                   imageUrl: cover,
+                  memCacheWidth: 216,
+                  memCacheHeight: 216,
                   fit: BoxFit.cover,
                   errorWidget: (_, _, _) => Container(
                     color: cs.surfaceContainerHighest,
@@ -385,6 +387,8 @@ class _IpDetailPageState extends State<IpDetailPage>
                       child: album.coverUrl != null
                           ? CachedNetworkImage(
                               imageUrl: album.coverUrl!,
+                              memCacheWidth: 540,
+                              memCacheHeight: 540,
                               fit: BoxFit.cover,
                               width: double.infinity,
                               errorWidget: (_, _, _) => _coverPlaceholder(cs),
@@ -445,6 +449,8 @@ class _IpDetailPageState extends State<IpDetailPage>
                     child: cover != null
                         ? CachedNetworkImage(
                             imageUrl: cover,
+                            memCacheWidth: 216,
+                            memCacheHeight: 144,
                             fit: BoxFit.cover,
                             errorWidget: (_, _, _) =>
                                 _coverPlaceholder(cs, radius: 0),
@@ -524,6 +530,8 @@ class _IpDetailPageState extends State<IpDetailPage>
                 child: artist.avatarUrl != null
                     ? CachedNetworkImage(
                         imageUrl: artist.avatarUrl!,
+                        memCacheWidth: 144,
+                        memCacheHeight: 144,
                         fit: BoxFit.cover,
                         errorWidget: (_, _, _) => Container(
                           color: Theme.of(context).colorScheme.surfaceContainerHighest,
@@ -604,6 +612,8 @@ class _IpDetailPageState extends State<IpDetailPage>
                         child: p.coverUrl != null
                             ? CachedNetworkImage(
                                 imageUrl: p.coverUrl!,
+                                memCacheWidth: 168,
+                                memCacheHeight: 168,
                                 fit: BoxFit.cover,
                                 errorWidget: (_, _, _) =>
                                     _coverPlaceholder(cs, radius: 0),

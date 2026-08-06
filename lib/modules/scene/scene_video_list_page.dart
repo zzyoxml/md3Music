@@ -238,6 +238,8 @@ class _VideoCard extends StatelessWidget {
                     if (video.coverUrl != null)
                       CachedNetworkImage(
                         imageUrl: video.coverUrl!,
+                        memCacheWidth: 540,
+                        memCacheHeight: 540,
                         fit: BoxFit.cover,
                         errorWidget: (_, _, _) => _placeholder(cs),
                       )

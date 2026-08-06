@@ -230,6 +230,8 @@ class _ChannelCard extends StatelessWidget {
                 child: channel.coverUrl != null
                     ? CachedNetworkImage(
                         imageUrl: channel.coverUrl!,
+                        memCacheWidth: 540,
+                        memCacheHeight: 540,
                         fit: BoxFit.cover,
                         errorWidget: (_, _, _) => ColoredBox(
                           color: Colors.transparent,

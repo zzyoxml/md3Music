@@ -199,6 +199,8 @@ class _HomePageState extends State<HomePage> {
       child: ClipOval(
         child: CachedNetworkImage(
           imageUrl: avatarUrl,
+          memCacheWidth: 120,
+          memCacheHeight: 120,
           cacheKey: 'avatar_$userId',
           width: 40,
           height: 40,
@@ -463,6 +465,8 @@ class _PlaylistHorizontalCard extends StatelessWidget {
                   child: artworkUri != null
                       ? CachedNetworkImage(
                           imageUrl: artworkUri!,
+                          memCacheWidth: 480,
+                          memCacheHeight: 480,
                           fit: BoxFit.cover,
                           width: double.infinity,
                           placeholder: (_, _) => Container(

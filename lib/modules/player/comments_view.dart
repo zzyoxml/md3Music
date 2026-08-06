@@ -880,6 +880,8 @@ class _CommentsViewState extends State<CommentsView> {
         child: ClipOval(
           child: CachedNetworkImage(
             imageUrl: avatarUrl,
+            memCacheWidth: 108,
+            memCacheHeight: 108,
             width: 36,
             height: 36,
             fit: BoxFit.cover,
@@ -901,6 +903,8 @@ class _CommentsViewState extends State<CommentsView> {
         child: ClipOval(
           child: CachedNetworkImage(
             imageUrl: avatarUrl,
+            memCacheWidth: 72,
+            memCacheHeight: 72,
             width: 24,
             height: 24,
             fit: BoxFit.cover,

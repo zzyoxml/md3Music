@@ -7,6 +7,8 @@ use rsa::Oaep;
 use rsa::RsaPublicKey;
 use sha1::Sha1;
 use sha2::Sha256;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub fn md5_hex(data: &[u8]) -> String {
     let mut hasher = Md5::new();
@@ -133,12 +135,28 @@ pub fn aes_cbc_decrypt(key: &[u8], iv: &[u8], data: &[u8]) -> Vec<u8> {
     }
 }
 
+/// P0: RSA 公钥解析结果缓存（pem 字符串 → RsaPublicKey）。
+/// 原实现每次加密都重新 normalize_pem（字符串分配）+ from_public_key_pem（PEM 解析），
+/// 公钥是编译期常量，首次解析后即可复用，登录/注册 RSA 热路径大幅减负。
+fn cached_rsa_key(pem: &str) -> Arc<RsaPublicKey> {
+    static CACHE: OnceLock<Mutex<HashMap<String, Arc<RsaPublicKey>>>> = OnceLock::new();
+    let mut map = CACHE
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap();
+    map.entry(pem.to_string())
+        .or_insert_with(|| {
+            Arc::new(RsaPublicKey::from_public_key_pem(&normalize_pem(pem)).expect("pem"))
+        })
+        .clone()
+}
+
 /// Raw RSA (no padding), like CryptoJS's plain modPow.
 /// Replicates JS `cryptoRSAEncrypt`: input shorter than the modulus is
 /// zero-padded to the RIGHT (Uint8Array of keyLength, data copied at offset 0),
 /// then treated as a big-endian integer. Output is left-padded to modulus length.
 pub fn rsa_raw_encrypt(pem: &str, data: &[u8]) -> Vec<u8> {
-    let key = RsaPublicKey::from_public_key_pem(&normalize_pem(pem)).expect("pem");
+    let key = cached_rsa_key(pem);
     let n = key.n();
     let e = key.e();
     let mod_len = n.to_bytes_be().len();
@@ -159,17 +177,18 @@ pub fn rsa_raw_encrypt(pem: &str, data: &[u8]) -> Vec<u8> {
 /// RSA PKCS#1 v1.5 encrypt.
 pub fn rsa_pkcs1v15_encrypt(pem: &str, data: &[u8]) -> Vec<u8> {
     use rsa::pkcs1v15::EncryptingKey;
-    let key = RsaPublicKey::from_public_key_pem(&normalize_pem(pem)).expect("pem");
-    let ep = EncryptingKey::new(key);
+    let key = cached_rsa_key(pem);
+    let ep = EncryptingKey::new((*key).clone());
     let mut rng = rand::thread_rng();
     ep.encrypt_with_rng(&mut rng, data).expect("pkcs1v15")
 }
 
 /// RSA OAEP SHA256 encrypt.
 pub fn rsa_oaep_sha256_encrypt(pem: &str, data: &[u8]) -> Vec<u8> {
-    let key = RsaPublicKey::from_public_key_pem(&normalize_pem(pem)).expect("pem");
+    let key = cached_rsa_key(pem);
     let mut rng = rand::thread_rng();
-    key.encrypt(&mut rng, Oaep::new::<Sha256>(), data).expect("oaep sha256")
+    key.encrypt(&mut rng, Oaep::new::<Sha256>(), data)
+        .expect("oaep sha256")
 }
 
 /// pem-rfc7468 要求 base64 每行不超过 64 字符；本项目常量是单行长串。

@@ -520,6 +520,8 @@ class _ChannelDetailPageState extends State<ChannelDetailPage> {
             child: _coverUrl != null
                 ? CachedNetworkImage(
                     imageUrl: _coverUrl!,
+                    memCacheWidth: 330,
+                    memCacheHeight: 330,
                     width: 110,
                     height: 110,
                     fit: BoxFit.cover,
@@ -611,6 +613,8 @@ class _ChannelDetailPageState extends State<ChannelDetailPage> {
                         borderRadius: BorderRadius.circular(12),
                         child: CachedNetworkImage(
                           imageUrl: _amway.coverUrl!,
+                          memCacheWidth: 1080,
+                          memCacheHeight: 420,
                           height: 140,
                           width: double.infinity,
                           fit: BoxFit.cover,
@@ -674,6 +678,8 @@ class _ChannelDetailPageState extends State<ChannelDetailPage> {
         child: story.coverUrl != null
             ? CachedNetworkImage(
                 imageUrl: story.coverUrl!,
+                memCacheWidth: 132,
+                memCacheHeight: 132,
                 width: 44,
                 height: 44,
                 fit: BoxFit.cover,
@@ -789,6 +795,8 @@ class _SimilarChannelCard extends StatelessWidget {
               child: channel.coverUrl != null
                   ? CachedNetworkImage(
                       imageUrl: channel.coverUrl!,
+                      memCacheWidth: 330,
+                      memCacheHeight: 330,
                       width: 110,
                       height: 110,
                       fit: BoxFit.cover,

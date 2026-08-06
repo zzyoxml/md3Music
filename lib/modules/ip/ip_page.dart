@@ -400,6 +400,8 @@ class _PicksCard extends StatelessWidget {
                 child: coverUrl != null
                     ? CachedNetworkImage(
                         imageUrl: coverUrl!,
+                        memCacheWidth: 540,
+                        memCacheHeight: 540,
                         fit: BoxFit.cover,
                         width: double.infinity,
                         placeholder: (_, _) => _coverPlaceholder(cs),

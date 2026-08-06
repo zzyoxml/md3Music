@@ -278,6 +278,8 @@ class _DiscoverPageState extends State<DiscoverPage> {
       child: ClipOval(
         child: CachedNetworkImage(
           imageUrl: avatarUrl,
+          memCacheWidth: 96,
+          memCacheHeight: 96,
           cacheKey: 'avatar_$userId',
           width: 32,
           height: 32,
@@ -494,6 +496,8 @@ class _DiscoverPageState extends State<DiscoverPage> {
                                   borderRadius: BorderRadius.circular(16),
                                   child: CachedNetworkImage(
                                     imageUrl: themes[i].coverUrl ?? '',
+                                    memCacheWidth: 450,
+                                    memCacheHeight: 450,
                                     fit: BoxFit.cover,
                                     width: double.infinity,
                                     placeholder: (_, _) => Container(

@@ -549,6 +549,8 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                       ? ClipOval(
                                           child: CachedNetworkImage(
                                             imageUrl: avatarUrl,
+                                            memCacheWidth: 300,
+                                            memCacheHeight: 300,
                                             width: 100,
                                             height: 100,
                                             fit: BoxFit.cover,

@@ -176,6 +176,8 @@ class _SceneDetailPageState extends State<SceneDetailPage> {
               child: widget.scene.coverUrl != null
                   ? CachedNetworkImage(
                       imageUrl: widget.scene.coverUrl!,
+                      memCacheWidth: 360,
+                      memCacheHeight: 360,
                       fit: BoxFit.cover,
                       errorWidget: (_, _, _) => Container(
                         color: cs.surfaceContainerHighest,
@@ -368,6 +370,8 @@ class _TagCard extends StatelessWidget {
                   child: tag.picUrl != null
                       ? CachedNetworkImage(
                           imageUrl: tag.picUrl!,
+                          memCacheWidth: 330,
+                          memCacheHeight: 330,
                           fit: BoxFit.cover,
                           errorWidget: (_, _, _) => _fallback(cs),
                         )
@@ -488,6 +492,8 @@ class _DiscussCard extends StatelessWidget {
                           child: song.artworkUri != null
                               ? CachedNetworkImage(
                                   imageUrl: song.artworkUri!,
+                                  memCacheWidth: 120,
+                                  memCacheHeight: 120,
                                   fit: BoxFit.cover,
                                   errorWidget: (_, _, _) => Icon(
                                     Icons.music_note,
@@ -549,6 +555,8 @@ class _DiscussCard extends StatelessWidget {
                           child: collection.coverUrl != null
                               ? CachedNetworkImage(
                                   imageUrl: collection.coverUrl!,
+                                  memCacheWidth: 120,
+                                  memCacheHeight: 120,
                                   fit: BoxFit.cover,
                                   errorWidget: (_, _, _) => Icon(
                                     Icons.queue_music,
