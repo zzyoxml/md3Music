@@ -142,6 +142,8 @@ fn server_responds_404_and_cors() {
         "GET /youth/union/vip HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         "GET /youth/user/song?userid=1 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         "GET /youth/vip HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        "GET /get/verify/info?eventid=gz_tx_event_xxx HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        "GET /verify/user/info?eventid=gz_tx_event_xxx&v_type=23 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         "GET /song/url?hash=abc HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         "GET /song/url?hash=abc&quality=flac HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
         "GET /song/url/new?hash=abc HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",

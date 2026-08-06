@@ -38,6 +38,7 @@ dependencies:
   video_player: ^2.9.2
   chewie: ^1.8.5
   dlna_dart: ^0.1.0
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:
@@ -49,6 +50,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/web/
   fonts:
     - family: SimHei
       fonts:

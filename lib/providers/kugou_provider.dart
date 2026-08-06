@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
@@ -9,6 +11,23 @@ import '../data/repositories/settings_repository.dart';
 import '../services/stream_cache_manager.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import '../services/kugou_api/kugou_models.dart';
+
+/// 待处理的二次安全验证请求（签到/登录遇 error_code=20028 时产生）。
+/// UI 层监听 [KugouProvider.pendingVerifyCaptcha]，弹出腾讯滑块验证码，
+/// 验证通过后调用 [KugouProvider.completeVerifyCaptcha] 回填结果。
+class VerifyCaptchaRequest {
+  final String eventid;
+  final int vType;
+  final String txappid;
+  final Completer<String?> completer;
+
+  VerifyCaptchaRequest({
+    required this.eventid,
+    required this.vType,
+    required this.txappid,
+    required this.completer,
+  });
+}
 
 class KugouProvider extends ChangeNotifier {
   final KugouApiClient _apiClient = KugouApiClient();
@@ -1191,94 +1210,21 @@ class KugouProvider extends ChangeNotifier {
 
       // 手动签到：始终发送请求，不做本地已签拦截
       // （服务端会正确返回"今日已领取"，由前端统一提示）
-
-      // 1. 领取畅听VIP（基础签到）
-      //    与 EchoMusic 一致：必传 receive_day，否则后端可能判定为无效签到。
-      final claim = await _apiClient.claimDayVip(receiveDay);
-      print('[SIGN_IN] claim 完整响应: $claim');
-
-      if (claim == null) {
-        return (false, '签到请求无响应，请稍后重试');
-      }
-
-      final claimStatus = claim['status'];
-      final claimErrorCode = claim['error_code'];
-      final claimErrorMsg =
-          claim['error_msg']?.toString() ?? claim['msg']?.toString() ?? '';
-
-      // status=1 成功，或 error_code=0 也视为成功
-      final claimOk = (claimStatus == 1 || claimErrorCode == 0);
-      // 131001 = 今日已领取畅听VIP（之前已签过），不阻断 upgrade
-      final claimAlreadyDone = (claimErrorCode == 131001);
-      if (!claimOk && !claimAlreadyDone) {
-        // 第一步领取就失败（非"已领取"），直接返回，不继续 upgrade
-        if (claimErrorMsg.isNotEmpty) {
-          return (false, _ensureChineseOrFallback(claimErrorMsg));
+      //
+      // 20028（需二次安全验证）处理：响应携带 ssaCode 时，先弹验证码，
+      // 验证通过后重试一次签到（claim 可能已成功，重试会命中 131001 已领取，不阻断）。
+      var verifyAttempted = false;
+      while (true) {
+        final (ok, msg, ssaCode) = await _signInOnce(receiveDay);
+        if (ok) return (true, msg);
+        if (ssaCode != null && !verifyAttempted) {
+          verifyAttempted = true;
+          final verified = await _handleVerifyCaptcha(ssaCode);
+          if (!verified) return (false, '签到需要安全验证，验证未完成');
+          continue; // 验证通过，重试签到
         }
-        return (false, _mapYouthVipError(claimErrorCode, claimStatus));
+        return (false, msg);
       }
-
-      // 2. 升级为概念版（完整）会员 —— 概念版双签到第二步
-      //    关键：必须严格判断 upgrade 响应，**不能**静默吞失败。
-      //    之前静默吞掉导致软件显示 "概念版会员" 但官方仍只显示 "畅听VIP+1天"。
-      Map<String, dynamic>? upgrade;
-      try {
-        upgrade = await _apiClient.upgradeDayVip();
-        print('[SIGN_IN] upgrade 响应: $upgrade');
-      } catch (e) {
-        print('[SIGN_IN] upgrade 异常: $e');
-        // 网络层异常：不标记成功，等下统一走升级失败分支
-      }
-
-      // 解析 upgrade 结果
-      int? upgradeStatus;
-      int? upgradeErrorCode;
-      String? upgradeMsg;
-      if (upgrade != null) {
-        upgradeStatus = upgrade['status'] as int?;
-        upgradeErrorCode = upgrade['error_code'] as int?;
-        upgradeMsg =
-            upgrade['error_msg']?.toString() ??
-            upgrade['msg']?.toString() ??
-            '';
-      }
-
-      // 某些后端实现：upgrade 接口会返回 "已升级过" / "今日已升级" 等，
-      // 这种属于正常状态（之前已经成功升级），应视为本次签到仍成功。
-      // 这里通过 error_code 文案识别（20030 = 已升级过概念版）。
-      final upgradeAlreadyDone =
-          upgradeErrorCode == 20030 ||
-          upgradeErrorCode == 131001 ||
-          (upgradeMsg != null && _containsUpgradeDoneHint(upgradeMsg));
-      final upgradeOk =
-          upgrade != null &&
-          (upgradeStatus == 1 || upgradeErrorCode == 0 || upgradeAlreadyDone);
-
-      if (!upgradeOk) {
-        // 升级失败：给用户如实提示，**不要**标记成功
-        // 注意此时第一步已成功（用户已领到畅听VIP），文案要明确说明：
-        // "已领取畅听VIP，但升级概念版失败：xxxx"
-        final tail = upgradeMsg != null && upgradeMsg.isNotEmpty
-            ? _ensureChineseOrFallback(upgradeMsg)
-            : _mapYouthVipError(upgradeErrorCode, upgradeStatus);
-        return (false, '畅听VIP已领取，但升级概念版失败：$tail');
-      }
-
-      // 两步都成功 —— 标记今天已签并刷新信息
-      try {
-        await _fetchUserInfo();
-      } catch (e) {
-        print('[SIGN_IN] 刷新用户信息异常: $e');
-      }
-      try {
-        await getVipMonthRecord();
-      } catch (e) {
-        print('[SIGN_IN] 刷新打卡记录异常: $e');
-      }
-
-      await _markSignedToday();
-      _todayUpgradedToConcept = true;
-      return (true, '签到成功（概念版会员）');
     } catch (e) {
       print('[SIGN_IN] 异常: $e');
       return (false, _friendlyNetworkError(e));
@@ -1286,6 +1232,176 @@ class KugouProvider extends ChangeNotifier {
       _manualSignInRunning = false;
       notifyListeners();
     }
+  }
+
+  /// 单次签到流程：领取畅听VIP（claim）→ 升级概念版（upgrade）。
+  /// 返回 (success, message, ssaCode)；遇 20028 且响应带 ssaCode 时，
+  /// message 为空、由外层走验证码后重试。
+  Future<(bool, String, String?)> _signInOnce(String receiveDay) async {
+    // 1. 领取畅听VIP（基础签到）
+    //    与 EchoMusic 一致：必传 receive_day，否则后端可能判定为无效签到。
+    final claim = await _apiClient.claimDayVip(receiveDay);
+    print('[SIGN_IN] claim 完整响应: $claim');
+
+    if (claim == null) {
+      return (false, '签到请求无响应，请稍后重试', null);
+    }
+
+    final claimStatus = claim['status'];
+    final claimErrorCode = claim['error_code'];
+    final claimErrorMsg =
+        claim['error_msg']?.toString() ?? claim['msg']?.toString() ?? '';
+    final claimSsaCode = claim['ssaCode']?.toString() ?? '';
+
+    // status=1 成功，或 error_code=0 也视为成功
+    final claimOk = (claimStatus == 1 || claimErrorCode == 0);
+    // 131001 = 今日已领取畅听VIP（之前已签过），不阻断 upgrade
+    final claimAlreadyDone = (claimErrorCode == 131001);
+    if (!claimOk && !claimAlreadyDone) {
+      // 第一步领取就失败（非"已领取"），直接返回，不继续 upgrade
+      if (claimErrorCode == 20028 && claimSsaCode.isNotEmpty) {
+        return (false, '', claimSsaCode);
+      }
+      if (claimErrorMsg.isNotEmpty) {
+        return (false, _ensureChineseOrFallback(claimErrorMsg), null);
+      }
+      return (false, _mapYouthVipError(claimErrorCode, claimStatus), null);
+    }
+
+    // 2. 升级为概念版（完整）会员 —— 概念版双签到第二步
+    //    关键：必须严格判断 upgrade 响应，**不能**静默吞失败。
+    //    之前静默吞掉导致软件显示 "概念版会员" 但官方仍只显示 "畅听VIP+1天"。
+    Map<String, dynamic>? upgrade;
+    try {
+      upgrade = await _apiClient.upgradeDayVip();
+      print('[SIGN_IN] upgrade 响应: $upgrade');
+    } catch (e) {
+      print('[SIGN_IN] upgrade 异常: $e');
+      // 网络层异常：不标记成功，等下统一走升级失败分支
+    }
+
+    // 解析 upgrade 结果
+    int? upgradeStatus;
+    int? upgradeErrorCode;
+    String? upgradeMsg;
+    String upgradeSsaCode = '';
+    if (upgrade != null) {
+      upgradeStatus = upgrade['status'] as int?;
+      upgradeErrorCode = upgrade['error_code'] as int?;
+      upgradeMsg =
+          upgrade['error_msg']?.toString() ??
+          upgrade['msg']?.toString() ??
+          '';
+      upgradeSsaCode = upgrade['ssaCode']?.toString() ?? '';
+    }
+
+    // 某些后端实现：upgrade 接口会返回 "已升级过" / "今日已升级" 等，
+    // 这种属于正常状态（之前已经成功升级），应视为本次签到仍成功。
+    // 这里通过 error_code 文案识别（20030 = 已升级过概念版）。
+    final upgradeAlreadyDone =
+        upgradeErrorCode == 20030 ||
+        upgradeErrorCode == 131001 ||
+        (upgradeMsg != null && _containsUpgradeDoneHint(upgradeMsg));
+    final upgradeOk =
+        upgrade != null &&
+        (upgradeStatus == 1 || upgradeErrorCode == 0 || upgradeAlreadyDone);
+
+    if (!upgradeOk) {
+      // 升级失败：给用户如实提示，**不要**标记成功
+      // 注意此时第一步已成功（用户已领到畅听VIP），文案要明确说明：
+      // "已领取畅听VIP，但升级概念版失败：xxxx"
+      if (upgradeErrorCode == 20028 && upgradeSsaCode.isNotEmpty) {
+        return (false, '', upgradeSsaCode);
+      }
+      final tail = upgradeMsg != null && upgradeMsg.isNotEmpty
+          ? _ensureChineseOrFallback(upgradeMsg)
+          : _mapYouthVipError(upgradeErrorCode, upgradeStatus);
+      return (false, '畅听VIP已领取，但升级概念版失败：$tail', null);
+    }
+
+    // 两步都成功 —— 标记今天已签并刷新信息
+    try {
+      await _fetchUserInfo();
+    } catch (e) {
+      print('[SIGN_IN] 刷新用户信息异常: $e');
+    }
+    try {
+      await getVipMonthRecord();
+    } catch (e) {
+      print('[SIGN_IN] 刷新打卡记录异常: $e');
+    }
+
+    await _markSignedToday();
+    _todayUpgradedToConcept = true;
+    return (true, '签到成功（概念版会员）', null);
+  }
+
+  // ── 20028 二次安全验证 ──────────────────────────────────────────
+  VerifyCaptchaRequest? _pendingVerifyCaptcha;
+
+  /// UI 层监听的待处理验证码请求；非 null 时应弹出验证码弹窗。
+  VerifyCaptchaRequest? get pendingVerifyCaptcha => _pendingVerifyCaptcha;
+
+  /// 20028 处理：获取验证码格式 → 交由 UI 弹腾讯滑块验证码 → 提交验证。
+  /// 返回 true 表示验证通过（可重试原请求）；false 表示取消/失败/类型不支持。
+  Future<bool> _handleVerifyCaptcha(String eventid) async {
+    // 1. 获取验证码格式（v_type / txappid）
+    final info = await _apiClient.getVerifyInfo(eventid);
+    if (info == null) return false;
+    final data = info['data'];
+    if (data is! Map) return false;
+    final vType = (data['v_type'] is num) ? (data['v_type'] as num).toInt() : 23;
+    final txappid = data['txappid']?.toString() ?? '';
+    if (txappid.isEmpty) return false;
+
+    // 目前仅实现腾讯滑块验证码（v_type=23），其他类型暂不支持
+    if (vType != 23) return false;
+
+    // 2. 挂起请求，等待 UI 弹窗完成滑块验证
+    final completer = Completer<String?>();
+    _pendingVerifyCaptcha = VerifyCaptchaRequest(
+      eventid: eventid,
+      vType: vType,
+      txappid: txappid,
+      completer: completer,
+    );
+    notifyListeners();
+
+    final verifycode = await completer.future.timeout(
+      const Duration(minutes: 3),
+      onTimeout: () {
+        _pendingVerifyCaptcha = null;
+        notifyListeners();
+        return null;
+      },
+    );
+
+    _pendingVerifyCaptcha = null;
+    notifyListeners();
+
+    if (verifycode == null) return false;
+
+    // 3. 提交验证码完成二次验证
+    final result = await _apiClient.verifyUserInfo(
+      eventid: eventid,
+      vType: vType,
+      verifycode: verifycode,
+    );
+    final ok = result != null &&
+        (result['status'] == 1 || result['error_code'] == 0);
+    return ok;
+  }
+
+  /// UI 回调：滑块验证通过，回填 verifycode。
+  void completeVerifyCaptcha(String verifycode) {
+    final c = _pendingVerifyCaptcha?.completer;
+    if (c != null && !c.isCompleted) c.complete(verifycode);
+  }
+
+  /// UI 回调：用户取消 / 组件加载失败。
+  void cancelVerifyCaptcha() {
+    final c = _pendingVerifyCaptcha?.completer;
+    if (c != null && !c.isCompleted) c.complete(null);
   }
 
   /// 优先返回中文 errorMsg；如果不含中文则用错误码映射兜底

@@ -2997,6 +2997,35 @@ class KugouApiClient {
     return await _post(KugouEndpoints.youthDayVipUpgrade);
   }
 
+  /// 获取验证码格式（/get/verify/info）。
+  /// 签到/登录等接口返回 error_code=20028 时，响应中一般带 eventid（ssaCode），
+  /// 用该 eventid 查询验证类型（v_type=23 腾讯滑块 / 32 短信）与 txappid。
+  Future<Map<String, dynamic>?> getVerifyInfo(String eventid) async {
+    return await _get(
+      KugouEndpoints.getVerifyInfo,
+      queryParameters: {'eventid': eventid},
+      noCache: true,
+    );
+  }
+
+  /// 提交验证码完成二次验证（/verify/user/info）。
+  /// sid/edt 由本地 Rust 服务器自动生成（行为指纹模拟），前端无需传。
+  Future<Map<String, dynamic>?> verifyUserInfo({
+    required String eventid,
+    required int vType,
+    required String verifycode,
+  }) async {
+    return await _get(
+      KugouEndpoints.verifyUserInfo,
+      queryParameters: {
+        'eventid': eventid,
+        'v_type': vType,
+        'verifycode': verifycode,
+      },
+      noCache: true,
+    );
+  }
+
   Future<Map<String, dynamic>?> getYouthMonthVipRecord({String? month}) async {
     final query = <String, dynamic>{};
     if (month != null && month.isNotEmpty) {

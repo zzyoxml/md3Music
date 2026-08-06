@@ -38,6 +38,7 @@ pub mod song_url_new;
 pub mod theme;
 pub mod top;
 pub mod user;
+pub mod verify;
 pub mod video;
 pub mod youth;
 pub mod yueku;
@@ -77,6 +78,8 @@ pub fn register(routes: &mut Vec<(&'static str, ModuleFn)>) {
     routes.push(("/login/openplat", login::handle_openplat));
     routes.push(("/login/cellphone", login::handle_cellphone));
     routes.push(("/login", login::handle_login));
+    routes.push(("/get/verify/info", verify::handle_get_verify_info));
+    routes.push(("/verify/user/info", verify::handle_verify_user_info));
     routes.push(("/ai/recommend", extras::handle_ai_recommend));
     routes.push(("/playlist/track/all/new", playlist::handle_track_all_new));
     routes.push(("/playlist/track/all", playlist::handle_track_all));
