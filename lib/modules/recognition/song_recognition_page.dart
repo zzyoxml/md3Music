@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:audio_session/audio_session.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -13,9 +14,17 @@ import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
+import '../player/full_player_route.dart';
+import '../player/mini_player.dart';
 
 class SongRecognitionPage extends StatefulWidget {
-  const SongRecognitionPage({super.key});
+  /// 是否在页面底部显示 MiniPlayer。
+  /// 作为独立路由打开时为 true（页面自带 MiniPlayer）；
+  /// 作为主页 Tab / LaunchPad 二级页面时为 false（由 _MainLayout 统一提供，
+  /// 避免重复）。
+  final bool showMiniPlayer;
+
+  const SongRecognitionPage({super.key, this.showMiniPlayer = true});
 
   @override
   State<SongRecognitionPage> createState() => _SongRecognitionPageState();
@@ -390,28 +399,38 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       appBar: AppBar(
         title: const Text('听歌识曲'),
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight - 48),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 32),
-                  _buildPulseCircle(colorScheme),
-                  const SizedBox(height: 32),
-                  _buildStatusText(textTheme, colorScheme),
-                  const SizedBox(height: 32),
-                  if (_result != null) _buildResult(colorScheme, textTheme),
-                  if (_error != null) _buildError(colorScheme, textTheme),
-                ],
-              ),
+      body: Column(
+        children: [
+          Expanded(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      minHeight: constraints.maxHeight - 48,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 32),
+                        _buildPulseCircle(colorScheme),
+                        const SizedBox(height: 32),
+                        _buildStatusText(textTheme, colorScheme),
+                        const SizedBox(height: 32),
+                        if (_result != null)
+                          _buildResult(colorScheme, textTheme),
+                        if (_error != null) _buildError(colorScheme, textTheme),
+                      ],
+                    ),
+                  ),
+                );
+              },
             ),
-          );
-        },
+          ),
+          if (widget.showMiniPlayer) const MiniPlayer(),
+        ],
       ),
     );
   }
@@ -499,6 +518,33 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
     final artist = _extractField(audioInfo, ['singername', 'singer_name', 'artist', 'SingerName']) ?? '未知歌手';
     final albumName = _extractField(audioInfo, ['album_name', 'AlbumName', 'albumname']) ?? '';
     final score = audioInfo?['score']?.toString() ?? '';
+    // 封面 URL（与播放逻辑中的字段一致），union_cover 可能带 {size} 占位符
+    final coverUrl = _extractCoverUrl(audioInfo);
+
+    // 歌曲信息列（歌名/歌手/专辑）
+    final infoColumn = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          songName,
+          style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          artist,
+          style: textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
+        ),
+        if (albumName.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            albumName,
+            style: textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
+          ),
+        ],
+      ],
+    );
 
     return Container(
       width: double.infinity,
@@ -538,24 +584,18 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
             ],
           ),
           const SizedBox(height: 16),
-          Text(
-            songName,
-            style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            artist,
-            style: textTheme.bodyMedium?.copyWith(color: colorScheme.onSurfaceVariant),
-          ),
-          if (albumName.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(
-              albumName,
-              style: textTheme.bodySmall?.copyWith(color: colorScheme.onSurfaceVariant),
-            ),
-          ],
+          // 有封面时：左侧封面 + 右侧信息；无封面时保持原有纯文本布局
+          if (coverUrl != null && coverUrl.isNotEmpty)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildCover(coverUrl, colorScheme),
+                const SizedBox(width: 16),
+                Expanded(child: infoColumn),
+              ],
+            )
+          else
+            infoColumn,
           const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
@@ -566,6 +606,42 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  /// 从识别结果中提取歌曲封面 URL（与播放逻辑中的字段顺序一致）。
+  /// union_cover 可能带 {size} 占位符，统一替换为 480。
+  String? _extractCoverUrl(Map<String, dynamic>? map) {
+    if (map == null) return null;
+    for (final key in ['imgurl', 'sizable_cover', 'union_cover']) {
+      final value = map[key];
+      if (value != null && value.toString().isNotEmpty) {
+        return value.toString().replaceAll('{size}', '480');
+      }
+    }
+    return null;
+  }
+
+  /// 识别结果卡片左侧的歌曲封面（96x96 圆角，带加载中/失败占位）。
+  Widget _buildCover(String coverUrl, ColorScheme colorScheme) {
+    Widget placeholder() => Container(
+      width: 96,
+      height: 96,
+      color: colorScheme.surfaceContainerHighest,
+      child: Icon(Icons.music_note, color: colorScheme.onSurfaceVariant, size: 32),
+    );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: CachedNetworkImage(
+        imageUrl: coverUrl,
+        width: 96,
+        height: 96,
+        fit: BoxFit.cover,
+        memCacheWidth: 288,
+        memCacheHeight: 288,
+        placeholder: (_, _) => placeholder(),
+        errorWidget: (_, _, _) => placeholder(),
       ),
     );
   }
@@ -664,6 +740,10 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       isOnline: true,
     );
     context.read<PlayerProvider>().playOnlinePlaylist([song], 0);
+    // 直接打开全屏播放页
+    if (mounted) {
+      Navigator.of(context).push(fullPlayerRoute(context));
+    }
   }
 
   Future<void> _playBySearchingHash(String songName, String singerName,
@@ -712,6 +792,8 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       if (!mounted) return;
       setState(() => _isRecognizing = false);
       context.read<PlayerProvider>().playOnlinePlaylist([song], 0);
+      // 直接打开全屏播放页
+      Navigator.of(context).push(fullPlayerRoute(context));
     } catch (e) {
       print('[SongRecognition] 搜索播放失败: $e');
       if (!mounted) return;

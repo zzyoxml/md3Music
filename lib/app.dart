@@ -437,7 +437,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         page = const IpPage();
         break;
       case 'recognition':
-        page = const SongRecognitionPage();
+        // Tab 模式：由 _MainLayout 统一提供全局 MiniPlayer，页面不自带
+        page = const SongRecognitionPage(showMiniPlayer: false);
         break;
       case 'audiobook':
         page = const AudiobookPage();
@@ -930,7 +931,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         page = const IpPage();
         break;
       case 'recognition':
-        page = const SongRecognitionPage();
+        // 路由模式的 MiniPlayer 由本方法统一提供，关闭页面自带的以免重复
+        page = const SongRecognitionPage(showMiniPlayer: false);
         break;
       case 'audiobook':
         page = const AudiobookPage();
