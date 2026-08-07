@@ -313,10 +313,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   void _onArtworkLongPressStart() {
     if (!_zenMode) return;
     _zenLongPressActive = true;
+    // 轻震：提示用户已开始长按倒计时
+    HapticFeedback.lightImpact();
     setState(() {}); // 触发文字提示显示
     _zenLongPressTimer = Timer(const Duration(milliseconds: 2000), () {
       if (_zenLongPressActive && _zenMode) {
         _zenLongPressActive = false;
+        // 中震：确认长按达到 2000ms，Zen 模式退出
+        HapticFeedback.mediumImpact();
         _exitZenMode();
       }
     });

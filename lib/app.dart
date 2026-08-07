@@ -31,6 +31,7 @@ import 'modules/settings/settings_page.dart';
 import 'modules/library/library_page.dart';
 import 'modules/launchpad/launchpad_page.dart';
 import 'modules/login/login_page.dart';
+import 'widgets/app_animation.dart';
 import 'modules/onboarding/onboarding_page.dart';
 import 'modules/onboarding/user_agreement_page.dart';
 import 'modules/personal_fm/personal_fm_page.dart';
@@ -386,15 +387,21 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
 
   /// 根据 tab id 构建对应页面 Widget。
   Widget _buildPageForTab(String tabId) {
+    // 统一在 tab 页外层包 ContentEntrance：向上淡入滑动（400ms, easeOutCubic），
+    // 与本地音乐 SongsPage 的入场动画一致。
+    // ContentEntrance 只在首次构建时播放，父组件 rebuild 不会重播。
+    // 与外层 AnimatedSwitcher 的左右滑动叠加，形成"内容上浮 → 页面滑入"的层次感。
+    Widget page;
     switch (tabId) {
       case 'launchpad':
-        return LaunchPadPage(
+        page = LaunchPadPage(
           onTabSelected: _switchToTab,
           onTabEnabled: _enableAndSwitchToTab,
           onTabOpened: _openTabAsPage,
         );
+        break;
       case 'discover':
-        return DiscoverPage(
+        page = DiscoverPage(
           onAvatarTap: () {
             final tabConfig = context.read<TabConfigProvider>();
             final userIdx = tabConfig.visibleIndexOf('user');
@@ -406,36 +413,51 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
             }
           },
         );
+        break;
       case 'coverflow':
-        return const CoverFlowPage();
+        page = const CoverFlowPage();
+        break;
       case 'library':
-        return const LibraryPage();
+        page = const LibraryPage();
+        break;
       case 'favorites':
-        return const FavoritesPage();
+        page = const FavoritesPage();
+        break;
       case 'fm':
-        return const PersonalFmPage();
+        page = const PersonalFmPage();
+        break;
       case 'search':
         // Tab 模式：隐藏页面自带 MiniPlayer，由 _MainLayout 统一提供全局 MiniPlayer
-        return const SearchPage(showMiniPlayer: false);
+        page = const SearchPage(showMiniPlayer: false);
+        break;
       case 'charts':
-        return const ChartsPage();
+        page = const ChartsPage();
+        break;
       case 'ip':
-        return const IpPage();
+        page = const IpPage();
+        break;
       case 'recognition':
-        return const SongRecognitionPage();
+        page = const SongRecognitionPage();
+        break;
       case 'audiobook':
-        return const AudiobookPage();
+        page = const AudiobookPage();
+        break;
       case 'scene':
-        return const ScenePage();
+        page = const ScenePage();
+        break;
       case 'channel':
-        return const ChannelPage();
+        page = const ChannelPage();
+        break;
       case 'settings':
-        return const SettingsPage();
+        page = const SettingsPage();
+        break;
       case 'user':
-        return const UserCenterPage();
+        page = const UserCenterPage();
+        break;
       default:
-        return const SizedBox.shrink();
+        page = const SizedBox.shrink();
     }
+    return ContentEntrance(child: page);
   }
 
   /// 根据 tab id 获取对应的 NavigationDestination 图标。

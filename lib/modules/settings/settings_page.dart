@@ -1697,6 +1697,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: 'Material 3 风格',
           isSelected: !_useAmStylePlayer,
           onTap: () {
+            HapticFeedback.lightImpact();
             setState(() => _useAmStylePlayer = false);
             context.read<ThemeProvider>().setUseAmStylePlayer(false);
           },
@@ -1709,6 +1710,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: '模糊封面 + 逐字歌词',
           isSelected: _useAmStylePlayer,
           onTap: () {
+            HapticFeedback.lightImpact();
             setState(() => _useAmStylePlayer = true);
             context.read<ThemeProvider>().setUseAmStylePlayer(true);
           },
