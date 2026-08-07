@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/app_animation.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/pinchable_grid_view.dart';
@@ -108,97 +107,94 @@ class _ChartsPageState extends State<ChartsPage> {
             itemCount: ranks.ranks.length,
             itemBuilder: (context, i) {
               final rank = ranks.ranks[i];
-              return FadeInUp(
-                delayMs: i * 30,
-                child: Container(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  decoration: BoxDecoration(
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  color: cs.surfaceContainerLow,
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
                     borderRadius: BorderRadius.circular(16),
-                    color: cs.surfaceContainerLow,
-                  ),
-                  child: Material(
-                    color: Colors.transparent,
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(16),
-                      onTap: () => Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => _RankSongPage(
-                            rankId: rank.id,
-                            rankName: rank.name,
-                          ),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => _RankSongPage(
+                          rankId: rank.id,
+                          rankName: rank.name,
                         ),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 12,
-                        ),
-                        child: Row(
-                          children: [
-                            // 排名徽章
-                            Container(
-                              width: 28,
-                              height: 28,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
+                      child: Row(
+                        children: [
+                          // 排名徽章
+                          Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: i < 3
+                                  ? cs.primary.withValues(alpha: 0.12)
+                                  : cs.surfaceContainerHighest,
+                            ),
+                            alignment: Alignment.center,
+                            child: Text(
+                              '${i + 1}',
+                              style: tt.labelMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
                                 color: i < 3
-                                    ? cs.primary.withValues(alpha: 0.12)
-                                    : cs.surfaceContainerHighest,
-                              ),
-                              alignment: Alignment.center,
-                              child: Text(
-                                '${i + 1}',
-                                style: tt.labelMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                  color: i < 3
-                                      ? cs.primary
-                                      : cs.onSurfaceVariant,
-                                ),
+                                    ? cs.primary
+                                    : cs.onSurfaceVariant,
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            // 封面
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(12),
-                              child: SizedBox(
-                                width: 52,
-                                height: 52,
-                                child: rank.coverUrl != null
-                                    ? CachedNetworkImage(
-                                        imageUrl: rank.coverUrl!,
-                                        memCacheWidth: 156,
-                                        memCacheHeight: 156,
-                                        fit: BoxFit.cover,
-                                      )
-                                    : Container(
-                                        color: cs.surfaceContainerHighest,
-                                        child: Icon(
-                                          Icons.album,
-                                          color: cs.onSurfaceVariant,
-                                          size: 24,
-                                        ),
+                          ),
+                          const SizedBox(width: 12),
+                          // 封面
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: SizedBox(
+                              width: 52,
+                              height: 52,
+                              child: rank.coverUrl != null
+                                  ? CachedNetworkImage(
+                                      imageUrl: rank.coverUrl!,
+                                      memCacheWidth: 156,
+                                      memCacheHeight: 156,
+                                      fit: BoxFit.cover,
+                                    )
+                                  : Container(
+                                      color: cs.surfaceContainerHighest,
+                                      child: Icon(
+                                        Icons.album,
+                                        color: cs.onSurfaceVariant,
+                                        size: 24,
                                       ),
+                                    ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          // 标题
+                          Expanded(
+                            child: Text(
+                              rank.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: tt.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w600,
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            // 标题
-                            Expanded(
-                              child: Text(
-                                rank.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: tt.titleSmall?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            Icon(
-                              Icons.chevron_right,
-                              color: cs.onSurfaceVariant.withValues(alpha: 0.5),
-                              size: 22,
-                            ),
-                          ],
-                        ),
+                          ),
+                          Icon(
+                            Icons.chevron_right,
+                            color: cs.onSurfaceVariant.withValues(alpha: 0.5),
+                            size: 22,
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -257,17 +253,14 @@ class _ChartsPageState extends State<ChartsPage> {
             itemCount: ranks.ranks.length,
             itemBuilder: (context, i) {
               final rank = ranks.ranks[i];
-              return FadeInUp(
-                delayMs: i * 30,
-                child: _RankGridCard(
-                  name: rank.name,
-                  coverUrl: rank.coverUrl,
-                  songCount: rank.songCount,
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) =>
-                          _RankSongPage(rankId: rank.id, rankName: rank.name),
-                    ),
+              return _RankGridCard(
+                name: rank.name,
+                coverUrl: rank.coverUrl,
+                songCount: rank.songCount,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        _RankSongPage(rankId: rank.id, rankName: rank.name),
                   ),
                 ),
               );
@@ -444,17 +437,14 @@ class _RankSongPageState extends State<_RankSongPage> {
                   itemCount: songs.length,
                   itemBuilder: (context, i) {
                     final song = songs[i].toSong();
-                    return FadeInUp(
-                      delayMs: i * 30,
-                      child: SongListItem(
-                        song: song,
-                        onTap: () =>
-                            context.read<PlayerProvider>().playOnlinePlaylist(
-                              songs.map((e) => e.toSong()).toList(),
-                              i,
-                            ),
-                        onMoreTap: () {},
-                      ),
+                    return SongListItem(
+                      song: song,
+                      onTap: () =>
+                          context.read<PlayerProvider>().playOnlinePlaylist(
+                            songs.map((e) => e.toSong()).toList(),
+                            i,
+                          ),
+                      onMoreTap: () {},
                     );
                   },
                 );

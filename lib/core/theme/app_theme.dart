@@ -161,10 +161,14 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         height: 80,
         backgroundColor: colorScheme.surface,
-        indicatorColor: colorScheme.secondaryContainer,
+        // 关掉 Flutter 原生 NavigationIndicator：改由 _AnimatedTabIcon 自己画
+        // 带 M3E Expressive 风格的弹簧胶囊（单轴 X 拉伸 + 过冲）
+        indicatorColor: Colors.transparent,
         surfaceTintColor: colorScheme.surfaceTint,
         elevation: 0,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        // 只有选中 tab 显示文字：原生会自动上移 icon 让位 + 淡入 label
+        // （见 navigation_bar.dart _NavigationDestinationLayoutDelegate）
+        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return IconThemeData(color: colorScheme.onSecondaryContainer);
