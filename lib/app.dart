@@ -439,102 +439,153 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   }
 
   /// 根据 tab id 获取对应的 NavigationDestination 图标。
-  NavigationDestination _buildDestination(TabItem tab) {
+  /// 不使用 selectedIcon（Flutter 原生内部为硬切，无过渡动画），
+  /// 改由 _AnimatedTabIcon 在选中变化时做缩放弹跳，使切换更生动。
+  NavigationDestination _buildDestination(TabItem tab, int index) {
+    final isSelected = index == _selectedIndex;
     switch (tab.id) {
       case 'launchpad':
         return NavigationDestination(
-          icon: const Icon(Icons.grid_view_outlined),
-          selectedIcon: const Icon(Icons.grid_view),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.grid_view_outlined,
+            filledIcon: Icons.grid_view,
+          ),
           label: tab.label,
         );
       case 'discover':
         return NavigationDestination(
-          icon: const Icon(Icons.explore_outlined),
-          selectedIcon: const Icon(Icons.explore),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.explore_outlined,
+            filledIcon: Icons.explore,
+          ),
           label: tab.label,
         );
       case 'coverflow':
         return NavigationDestination(
-          icon: const Icon(Icons.album_outlined),
-          selectedIcon: const Icon(Icons.album),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.album_outlined,
+            filledIcon: Icons.album,
+          ),
           label: tab.label,
         );
       case 'library':
         return NavigationDestination(
-          icon: const Icon(Icons.library_music_outlined),
-          selectedIcon: const Icon(Icons.library_music),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.library_music_outlined,
+            filledIcon: Icons.library_music,
+          ),
           label: tab.label,
         );
       case 'favorites':
         return NavigationDestination(
-          icon: const Icon(Icons.favorite_outline),
-          selectedIcon: const Icon(Icons.favorite),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.favorite_outline,
+            filledIcon: Icons.favorite,
+          ),
           label: tab.label,
         );
       case 'fm':
         return NavigationDestination(
-          icon: const Icon(Icons.radio_outlined),
-          selectedIcon: const Icon(Icons.radio),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.radio_outlined,
+            filledIcon: Icons.radio,
+          ),
           label: tab.label,
         );
       case 'search':
         return NavigationDestination(
-          icon: const Icon(Icons.search_outlined),
-          selectedIcon: const Icon(Icons.search),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.search_outlined,
+            filledIcon: Icons.search,
+          ),
           label: tab.label,
         );
       case 'charts':
         return NavigationDestination(
-          icon: const Icon(Icons.leaderboard_outlined),
-          selectedIcon: const Icon(Icons.leaderboard),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.leaderboard_outlined,
+            filledIcon: Icons.leaderboard,
+          ),
           label: tab.label,
         );
       case 'ip':
         return NavigationDestination(
-          icon: const Icon(Icons.edit_note_outlined),
-          selectedIcon: const Icon(Icons.edit_note),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.edit_note_outlined,
+            filledIcon: Icons.edit_note,
+          ),
           label: tab.label,
         );
       case 'recognition':
         return NavigationDestination(
-          icon: const Icon(Icons.mic_none_outlined),
-          selectedIcon: const Icon(Icons.mic),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.mic_none_outlined,
+            filledIcon: Icons.mic,
+          ),
           label: tab.label,
         );
       case 'audiobook':
         return NavigationDestination(
-          icon: const Icon(Icons.auto_stories_outlined),
-          selectedIcon: const Icon(Icons.auto_stories),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.auto_stories_outlined,
+            filledIcon: Icons.auto_stories,
+          ),
           label: tab.label,
         );
       case 'scene':
         return NavigationDestination(
-          icon: const Icon(Icons.landscape_outlined),
-          selectedIcon: const Icon(Icons.landscape),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.landscape_outlined,
+            filledIcon: Icons.landscape,
+          ),
           label: tab.label,
         );
       case 'channel':
         return NavigationDestination(
-          icon: const Icon(Icons.dynamic_feed_outlined),
-          selectedIcon: const Icon(Icons.dynamic_feed),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.dynamic_feed_outlined,
+            filledIcon: Icons.dynamic_feed,
+          ),
           label: tab.label,
         );
       case 'settings':
         return NavigationDestination(
-          icon: const Icon(Icons.settings_outlined),
-          selectedIcon: const Icon(Icons.settings),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.settings_outlined,
+            filledIcon: Icons.settings,
+          ),
           label: tab.label,
         );
       case 'user':
         return NavigationDestination(
-          icon: const Icon(Icons.person_outlined),
-          selectedIcon: const Icon(Icons.person),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.person_outlined,
+            filledIcon: Icons.person,
+          ),
           label: tab.label,
         );
       default:
         return NavigationDestination(
-          icon: const Icon(Icons.circle_outlined),
-          selectedIcon: const Icon(Icons.circle),
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.circle_outlined,
+            filledIcon: Icons.circle,
+          ),
           label: tab.label,
         );
     }
@@ -904,7 +955,10 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     }
 
     // 动态生成导航目标
-    final destinations = visibleTabs.map(_buildDestination).toList();
+    final destinations = <NavigationDestination>[];
+    for (var i = 0; i < visibleTabs.length; i++) {
+      destinations.add(_buildDestination(visibleTabs[i], i));
+    }
     final railDestinations = visibleTabs.map(_buildRailDestination).toList();
     final drawerDestinations = visibleTabs
         .map(_buildDrawerDestination)
@@ -1102,6 +1156,124 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 底部 NavigationBar 的 tab 图标 + 自定义 M3E Expressive 胶囊 indicator。
+///
+/// **设计思路**（对齐 MD3E MotionScheme.expressive()）：
+/// - 关掉 Flutter 原生 NavigationIndicator 的硬切横向拉伸
+///   （见 navigation_bar.dart 第 845-849 行，用 easeInOutCubicEmphasized 单轴缩放）
+/// - 自己在图标背后画一个 secondaryContainer 色的圆角胶囊
+/// - 胶囊出现/消失用 **带过冲的曲线**（easeOutBack，过冲约 10%），
+///   对应 MD3E `defaultSpatialSpec` 的"轻微过冲"原则
+/// - 胶囊做 **单轴 X 拉伸**（0.4 → 1.0），对齐 Flutter 原生 NavigationIndicator 的形变方式
+/// - 图标在胶囊弹起过程中完成 outlined → filled 切换，被弹跳掩盖
+///
+/// **文字行为**：由 `NavigationBarThemeData.labelBehavior = onlyShowSelected` 控制，
+/// Flutter 原生 `_NavigationDestinationLayoutDelegate` 会自动处理：
+/// - 未选中：label 隐藏，icon 垂直居中
+/// - 选中：label 淡入 + icon 上移让位（见 navigation_bar.dart 第 1103-1130 行）
+///
+/// 不使用 NavigationDestination.selectedIcon（Flutter 原生内部是硬切）。
+class _AnimatedTabIcon extends StatefulWidget {
+  final bool selected;
+  final IconData outlinedIcon;
+  final IconData filledIcon;
+
+  const _AnimatedTabIcon({
+    required this.selected,
+    required this.outlinedIcon,
+    required this.filledIcon,
+  });
+
+  @override
+  State<_AnimatedTabIcon> createState() => _AnimatedTabIconState();
+}
+
+class _AnimatedTabIconState extends State<_AnimatedTabIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  // 胶囊的弹簧进度（0 = 隐藏，1 = 完全展开）
+  // 用 easeOutBack 曲线产生轻微过冲，对齐 MD3E Expressive 风格
+  late final Animation<double> _progress;
+
+  // MD3E 胶囊尺寸（对齐 Flutter 原生 _kIndicatorWidth/Height）
+  static const double _indicatorWidth = 64.0;
+  static const double _indicatorHeight = 32.0;
+  static const double _indicatorRadius = 16.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: M3ExpressiveMotion.defaultDuration,
+      vsync: this,
+    );
+    // 初始状态：选中则胶囊已展开
+    _controller.value = widget.selected ? 1.0 : 0.0;
+    _progress = Tween<double>(begin: 0.0, end: 1.0)
+        .animate(CurveTween(curve: Curves.easeOutBack).animate(_controller));
+  }
+
+  @override
+  void didUpdateWidget(_AnimatedTabIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected != widget.selected) {
+      if (widget.selected) {
+        _controller.forward(from: 0);
+      } else {
+        _controller.reverse(from: 1);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: _progress,
+      builder: (context, child) {
+        // easeOutBack 在 [0,1] 内会有过冲（峰值约 1.1），clamp 到 [0, 1.1]
+        final t = _progress.value;
+        final tClamped = t.clamp(0.0, 1.1);
+        // 胶囊单轴 X 拉伸：从 0.4 → 1.0，带过冲
+        // 对齐 Flutter 原生 NavigationIndicator 的单轴形变方式
+        final scaleX = Tween<double>(begin: 0.4, end: 1.0).transform(tClamped);
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            // 底层：自定义 expressive 胶囊 indicator（单轴拉伸 + 过冲）
+            Transform(
+              alignment: Alignment.center,
+              transform: Matrix4.diagonal3Values(scaleX, 1.0, 1.0),
+              child: Opacity(
+                opacity: t.clamp(0.0, 1.0),
+                child: Container(
+                  width: _indicatorWidth,
+                  height: _indicatorHeight,
+                  decoration: BoxDecoration(
+                    color: colorScheme.secondaryContainer,
+                    borderRadius:
+                        BorderRadius.circular(_indicatorRadius),
+                  ),
+                ),
+              ),
+            ),
+            // 上层：图标（选中用 filled，未选中用 outlined）
+            Icon(
+              widget.selected ? widget.filledIcon : widget.outlinedIcon,
+            ),
+          ],
+        );
+      },
     );
   }
 }
