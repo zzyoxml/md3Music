@@ -140,6 +140,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       if (mounted) setState(() {});
     };
     DesktopLyricService.instance.addListener(_onDesktopLyricChanged);
+    // 动态字体颜色开关变化（设置页）时补提取封面主色
+    LyricPreferences.instance.addListener(_onLyricPrefsChanged);
     _artworkFadeController = AnimationController(
       duration: const Duration(milliseconds: 1000),
       vsync: this,
@@ -281,6 +283,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       context.read<PlayerProvider>().removeListener(_onPlayerSongChanged);
     } catch (_) {}
     DesktopLyricService.instance.removeListener(_onDesktopLyricChanged);
+    LyricPreferences.instance.removeListener(_onLyricPrefsChanged);
     WidgetsBinding.instance.removeObserver(this);
     _artworkFadeController.dispose();
     _zenController.dispose();
@@ -377,11 +380,26 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   /// 复用流光背景的提取思路（PaletteGenerator + 过滤 + 饱和度归一化）。
   /// 提取完成后若已切到别的歌（url 变化）则丢弃结果。
   Future<void> _updateLyricAccent(String? url) async {
+    // 仅动态字体颜色开关开启时才需要提取（默认关闭，避免每次进播放器
+    // 都多一次封面下载 + 解码 + PaletteGenerator 分析的无谓开销）
+    if (!LyricPreferences.instance.useDynamicLyricColor) return;
     if (url == _lastAccentUrl) return;
     _lastAccentUrl = url;
     final color = await ArtworkColorExtractor.extract(url);
     if (!mounted || _lastAccentUrl != url) return;
     setState(() => _lyricAccentColor = color);
+  }
+
+  /// LyricPreferences 变化回调：播放器存活期间在设置页打开「歌词动态颜色」
+  /// 开关时，立即为当前歌曲补提取封面主色（首次打开时 _fetchLyrics 的提取
+  /// 因开关关闭已被跳过）。
+  void _onLyricPrefsChanged() {
+    if (LyricPreferences.instance.useDynamicLyricColor &&
+        _lyricAccentColor == null &&
+        mounted) {
+      final song = context.read<PlayerProvider>().currentSong;
+      if (song != null) _updateLyricAccent(song.artworkUri);
+    }
   }
 
   Future<void> _fetchLyrics(dynamic song) async {
@@ -557,7 +575,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 child: Opacity(
                   opacity: oldOpacity,
                   child: ImageFiltered(
-                    imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
+                    // sigma 30：全屏大图模糊的计算量随 sigma 近似平方增长，
+                    // 50→30 显著降低进入播放器时的 GPU 峰值，视觉上同为"重度背景模糊"
+                    imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
                     child: PlayerArtworkImage(
                       artworkUri: _previousArtworkUrl,
                       fallbackFilePath: fallbackFilePath,
@@ -573,7 +593,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               child: Opacity(
                 opacity: newOpacity,
                 child: ImageFiltered(
-                  imageFilter: ImageFilter.blur(sigmaX: 50, sigmaY: 50),
+                  imageFilter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
                   child: PlayerArtworkImage(
                     artworkUri: artworkUrl,
                     fallbackFilePath: fallbackFilePath,
