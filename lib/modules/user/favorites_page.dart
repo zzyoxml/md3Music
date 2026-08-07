@@ -822,6 +822,8 @@ class _FavoritesPageState extends State<FavoritesPage>
                   child: playlist.coverUrl != null
                       ? CachedNetworkImage(
                           imageUrl: playlist.coverUrl!,
+                          memCacheWidth: 156,
+                          memCacheHeight: 156,
                           fit: BoxFit.cover,
                           placeholder: (_, _) => Container(
                             color: colorScheme.surfaceContainerHighest,
@@ -967,6 +969,8 @@ class _FavoritesPageState extends State<FavoritesPage>
                 child: album.coverUrl != null
                     ? CachedNetworkImage(
                         imageUrl: album.coverUrl!,
+                        memCacheWidth: 156,
+                        memCacheHeight: 156,
                         fit: BoxFit.cover,
                         placeholder: (_, _) => Container(
                           color: colorScheme.surfaceContainerHighest,

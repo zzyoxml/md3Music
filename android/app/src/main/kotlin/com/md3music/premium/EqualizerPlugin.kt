@@ -1,9 +1,12 @@
 package com.md3music.premium
 
 import android.media.audiofx.Equalizer
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -91,8 +94,9 @@ class EqualizerPlugin {
     }
 
     /**
-     * 在子线程初始化 Equalizer，4 秒超时保护。
+     * 在子线程初始化 Equalizer，异步回调结果，4 秒超时保护。
      * 部分设备 Equalizer 构造函数会无限阻塞，超时后安全返回 error。
+     * P0: 不再在主线程 join 等待，避免阻塞 UI 导致 ANR。
      */
     private fun initEqualizer(audioSessionId: Int, result: MethodChannel.Result) {
         // 先释放旧的
@@ -100,6 +104,10 @@ class EqualizerPlugin {
 
         val ref = AtomicReference<Equalizer?>(null)
         val errorRef = AtomicReference<Exception?>(null)
+        val mainHandler = Handler(Looper.getMainLooper())
+        // 保证 result 只回调一次（构造完成回调与超时回调存在竞态）
+        val resultDone = AtomicBoolean(false)
+
         val initThread = Thread {
             try {
                 val eq = Equalizer(0, audioSessionId)
@@ -107,37 +115,40 @@ class EqualizerPlugin {
             } catch (e: Exception) {
                 errorRef.set(e)
             }
+            // 构造完成（成功或失败）后回主线程回调 Flutter result
+            mainHandler.post {
+                if (resultDone.compareAndSet(false, true)) {
+                    finishInit(ref.get(), errorRef.get(), result)
+                } else {
+                    // 超时回调已返回：释放迟到的 Equalizer，避免 native 资源泄漏
+                    ref.get()?.let { eq ->
+                        try { eq.release() } catch (_: Exception) {}
+                    }
+                }
+            }
         }
         initThread.isDaemon = true
         initThread.start()
 
-        try {
-            initThread.join(INIT_TIMEOUT_MS)
-        } catch (_: InterruptedException) {
-            // 忽略
-        }
+        // 超时保护：若构造函数永久阻塞，通知 Dart 超时（不阻塞主线程）
+        mainHandler.postDelayed({
+            if (initThread.isAlive && resultDone.compareAndSet(false, true)) {
+                Log.e(TAG, "Equalizer init timed out after ${INIT_TIMEOUT_MS}ms")
+                result.error("INIT_TIMEOUT", "均衡器初始化超时，请先播放一首歌曲后重试", null)
+            }
+        }, INIT_TIMEOUT_MS)
+    }
 
-        if (initThread.isAlive) {
-            // 超时：线程仍在运行，Equalizer 构造函数阻塞
-            // 无法安全中断（native 调用），标记为 null 让 GC 回收
-            Log.e(TAG, "Equalizer init timed out after ${INIT_TIMEOUT_MS}ms")
-            result.error("INIT_TIMEOUT", "均衡器初始化超时，请先播放一首歌曲后重试", null)
-            return
-        }
-
-        val error = errorRef.get()
+    private fun finishInit(eq: Equalizer?, error: Exception?, result: MethodChannel.Result) {
         if (error != null) {
             Log.e(TAG, "Equalizer init failed", error)
             result.error("INIT_FAILED", error.message, null)
             return
         }
-
-        val eq = ref.get()
         if (eq == null) {
             result.error("INIT_FAILED", "均衡器创建返回 null", null)
             return
         }
-
         equalizer.set(eq)
         result.success(getBandInfo())
     }

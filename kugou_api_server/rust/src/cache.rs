@@ -1,6 +1,10 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::RwLock;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+/// 缓存最大条目数。P0: 原实现无上限，客户端请求大量不同 URL 时
+/// 过期 entry 仅在 get 命中时惰性删除，内存持续增长；改为有界缓存。
+const MAX_ENTRIES: usize = 512;
 
 /// Cached HTTP response entry (apicache `createCacheObject`).
 #[derive(Debug, Clone)]
@@ -13,37 +17,53 @@ pub struct CacheEntry {
     pub expire: Instant,
 }
 
+/// P0: 全局 Mutex → RwLock。缓存读多写少（get 远多于 put），
+/// 读读并发不再互斥，高并发下不再把缓存读写完全串行化。
 pub struct Cache {
-    map: Mutex<HashMap<String, CacheEntry>>,
+    map: RwLock<HashMap<String, CacheEntry>>,
 }
 
 impl Cache {
     pub fn new() -> Self {
         Cache {
-            map: Mutex::new(HashMap::new()),
+            map: RwLock::new(HashMap::new()),
         }
     }
 
     pub fn get(&self, key: &str) -> Option<CacheEntry> {
-        let mut map = self.map.lock().unwrap();
+        let map = self.map.read().unwrap();
         let now = Instant::now();
         match map.get(key) {
             Some(e) if e.expire > now => Some(e.clone()),
-            Some(_) => {
-                map.remove(key);
-                None
-            }
-            None => None,
+            // 过期项延迟到 put 路径统一清理（读锁内不可修改）
+            _ => None,
         }
     }
 
     pub fn put(&self, key: String, entry: CacheEntry) {
-        let mut map = self.map.lock().unwrap();
+        let mut map = self.map.write().unwrap();
         map.insert(key, entry);
+        // P0: 容量上限 + 顺带清理过期项，避免缓存无界增长
+        if map.len() > MAX_ENTRIES {
+            let now = Instant::now();
+            map.retain(|_, e| e.expire > now);
+            if map.len() > MAX_ENTRIES {
+                // 清理过期项后仍超限：驱逐时间戳最旧的多余条目
+                let mut oldest: Vec<(String, f64)> = map
+                    .iter()
+                    .map(|(k, e)| (k.clone(), e.timestamp))
+                    .collect();
+                oldest.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+                let excess = map.len() - MAX_ENTRIES;
+                for (k, _) in oldest.into_iter().take(excess) {
+                    map.remove(&k);
+                }
+            }
+        }
     }
 
     pub fn clear(&self) {
-        let mut map = self.map.lock().unwrap();
+        let mut map = self.map.write().unwrap();
         map.clear();
     }
 }

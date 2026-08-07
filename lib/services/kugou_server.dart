@@ -25,6 +25,8 @@ typedef StopServer = void Function();
 class KugouApiServer {
   static const _channel = MethodChannel('com.md3music.premium/kugou_api');
   static bool _started = false;
+  /// P0: 启动中/已完成 Future，供并发调用去重（main() 与播放前兜底）。
+  static Future<void>? _startFuture;
   static DynamicLibrary? _lib;
   static StopServer? _stopServerFn;
   static IsRunning? _isRunningFn;
@@ -32,31 +34,47 @@ class KugouApiServer {
   static Future<void> start() async {
     if (_started || kIsWeb || !Platform.isAndroid) return;
 
-    // 优先走 dart:ffi（纯 C 函数名不含包名，JNI 符号不匹配时也能用）
-    try {
-      await _startViaFfi();
-      _started = true;
-      return;
-    } catch (e) {
-      print('dart:ffi start failed, falling back to MethodChannel: $e');
-    }
+    // P0: 并发调用去重。main() 后台启动与 player_provider 播放前兜底
+    // 可能同时触发 start()；此前 await getApplicationSupportDirectory()
+    // 期间 _started 仍为 false，二次进入会重复 dlopen libkugou_server.so
+    // + startServer（实测日志出现两次 start_server 调用），浪费启动时间。
+    return _startFuture ??= _doStart();
+  }
 
-    // FFI 失败再尝试 MethodChannel（JNI 方式）
-    for (int attempt = 0; attempt < 2; attempt++) {
+  static Future<void> _doStart() async {
+    // 最外层兜底：启动失败时允许下次调用重试，且不向调用方抛未处理异常
+    // （main() 与播放兜底都依赖 start() 不抛）
+    try {
+      // 优先走 dart:ffi（纯 C 函数名不含包名，JNI 符号不匹配时也能用）
       try {
-        final port = await _channel.invokeMethod<int>('startServer');
-        if (port != null && port > 0) {
-          _applyPort(port);
-          _started = true;
-          await _waitForReady(port);
-          return;
-        }
-        print('MethodChannel start returned invalid port: $port');
+        await _startViaFfi();
+        _started = true;
+        return;
       } catch (e) {
-        print('MethodChannel start failed (attempt ${attempt + 1}): $e');
-        await Future.delayed(const Duration(seconds: 1));
+        print('dart:ffi start failed, falling back to MethodChannel: $e');
       }
+
+      // FFI 失败再尝试 MethodChannel（JNI 方式）
+      for (int attempt = 0; attempt < 2; attempt++) {
+        try {
+          final port = await _channel.invokeMethod<int>('startServer');
+          if (port != null && port > 0) {
+            _applyPort(port);
+            _started = true;
+            await _waitForReady(port);
+            return;
+          }
+          print('MethodChannel start returned invalid port: $port');
+        } catch (e) {
+          print('MethodChannel start failed (attempt ${attempt + 1}): $e');
+          await Future.delayed(const Duration(seconds: 1));
+        }
+      }
+    } catch (e) {
+      print('KugouApiServer start failed: $e');
     }
+    // 启动失败：重置去重 Future，允许后续调用重试（如播放前兜底）
+    _startFuture = null;
   }
 
   static DynamicLibrary _loadLib() {
@@ -112,9 +130,14 @@ class KugouApiServer {
             timeout: const Duration(seconds: 1));
         await socket.close();
         print('Local API server is ready on port $port');
+        // P0: 通知 KugouApiClient 服务器已就绪（runApp 不等待服务器启动，
+        // 首屏请求依赖此信号放行）
+        KugouApiClient.markServerReady();
         return;
       } catch (_) {
-        await Future.delayed(const Duration(seconds: 1));
+        // P0: 重试间隔 1s → 200ms。start_server 返回端口即已 bind，
+        // 就绪通常 <100ms，1s 轮询会在端口/线程调度抖动时白白多等 1s。
+        await Future.delayed(const Duration(milliseconds: 200));
       }
     }
     print('Local API server did not become ready within 30 seconds');
@@ -171,6 +194,8 @@ class KugouApiServer {
     await stop();
     await Future.delayed(const Duration(milliseconds: 300));
     _started = false;
+    // P0: 清空启动去重 Future，否则 start() 直接返回已完成旧 Future 不重启
+    _startFuture = null;
     await start();
     return await isRunning();
   }

@@ -571,6 +571,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                             child: displayAlbum.artworkUri != null
                                                 ? CachedNetworkImage(
                                                     imageUrl: displayAlbum.artworkUri!,
+                                                    memCacheWidth: 420,
+                                                    memCacheHeight: 420,
                                                     fit: BoxFit.cover,
                                                     placeholder: (_, _) => Container(
                                                       color: colorScheme.surfaceContainerHighest,

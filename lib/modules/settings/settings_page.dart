@@ -239,34 +239,25 @@ class _SettingsPageState extends State<SettingsPage> {
       body: ListView(
         children: [
           _buildSectionHeader('外观'),
-          _buildAppearanceSection(colorScheme),
-          const Divider(),
+          _buildSettingsCard(_buildAppearanceSection(colorScheme)),
           _buildSectionHeader('播放页样式'),
-          _buildPlayerStyleSection(colorScheme),
-          const Divider(),
+          _buildSettingsCard(_buildPlayerStyleSection(colorScheme)),
           _buildSectionHeader('歌词'),
-          _buildLyricSection(colorScheme),
-          const Divider(),
+          _buildSettingsCard(_buildLyricSection(colorScheme)),
           _buildSectionHeader('播放'),
-          _buildPlaybackSection(colorScheme),
-          const Divider(),
+          _buildSettingsCard(_buildPlaybackSection(colorScheme)),
           _buildSectionHeader('主页管理'),
-          _buildTabManagementSection(colorScheme),
-          const Divider(),
+          _buildSettingsCard(_buildTabManagementSection(colorScheme)),
           _buildSectionHeader('边听边存'),
-          _buildStreamCacheSection(colorScheme),
-          const Divider(),
+          _buildSettingsCard(_buildStreamCacheSection(colorScheme)),
           _buildSectionHeader('下载'),
-          _buildDownloadSection(colorScheme),
-          const Divider(),
+          _buildSettingsCard(_buildDownloadSection(colorScheme)),
           _buildSectionHeader('在线音乐'),
-          _buildOnlineMusicSection(colorScheme),
-          const Divider(),
+          _buildSettingsCard(_buildOnlineMusicSection(colorScheme)),
           _buildSectionHeader('缓存与数据'),
-          _buildCacheSection(colorScheme),
-          const Divider(),
+          _buildSettingsCard(_buildCacheSection(colorScheme)),
           _buildSectionHeader('关于'),
-          _buildAboutSection(colorScheme),
+          _buildSettingsCard(_buildAboutSection(colorScheme)),
           const SizedBox(height: 32),
         ],
       ),
@@ -285,6 +276,20 @@ class _SettingsPageState extends State<SettingsPage> {
     );
   }
 
+  /// 将 section 内容包裹在圆角矩形卡片内，提升视觉分组。
+  /// 卡片背景使用 surfaceContainerLow，与播放器风格卡片保持一致。
+  Widget _buildSettingsCard(Widget child) {
+    final colorScheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: child,
+    );
+  }
+
   /// 歌词设置 section：MD3 与 Apple Music 两种风格播放页的歌词
   /// （字号/行间距/字体）均已移入播放页右上角菜单的"歌词显示设置"入口，
   /// 设置页不再保留独立入口。
@@ -297,6 +302,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: const Text('向 Lyricon 提供方实时推送歌词'),
           value: _lyriconEnabled,
           onChanged: (value) {
+            HapticFeedback.lightImpact();
             setState(() {
               _lyriconEnabled = value;
             });
@@ -324,6 +330,7 @@ class _SettingsPageState extends State<SettingsPage> {
           value: _lyriconDisplayTranslation,
           onChanged: _lyriconEnabled
               ? (value) {
+                  HapticFeedback.lightImpact();
                   setState(() {
                     _lyriconDisplayTranslation = value;
                   });
@@ -339,6 +346,7 @@ class _SettingsPageState extends State<SettingsPage> {
           value: _lyriconDisplayRoma,
           onChanged: _lyriconEnabled
               ? (value) {
+                  HapticFeedback.lightImpact();
                   setState(() {
                     _lyriconDisplayRoma = value;
                   });
@@ -357,6 +365,7 @@ class _SettingsPageState extends State<SettingsPage> {
           value: _lyriconPreferTranslation,
           onChanged: _lyriconEnabled
               ? (value) async {
+                  HapticFeedback.lightImpact();
                   setState(() {
                     _lyriconPreferTranslation = value;
                   });
@@ -379,6 +388,7 @@ class _SettingsPageState extends State<SettingsPage> {
           ),
           value: DesktopLyricService.instance.locked,
           onChanged: (_) async {
+            HapticFeedback.lightImpact();
             await DesktopLyricService.instance.unlock();
           },
         ),
@@ -388,6 +398,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: const Text('通过蓝牙在汽车主机等设备显示当前歌词（标题显示歌词，作者显示「作者 - 标题」）'),
           value: _bluetoothLyricEnabled,
           onChanged: (value) async {
+            HapticFeedback.lightImpact();
             setState(() => _bluetoothLyricEnabled = value);
             await _settingsRepository.setBluetoothLyricEnabled(value);
             // 同步到歌词服务（启停定时器）和原生端（元数据替换开关）
@@ -607,6 +618,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: const Text('跟随系统壁纸取色（Android 12+ 莫奈色，HCT 多点量化）'),
           value: _useDynamicColor,
           onChanged: (v) {
+            HapticFeedback.lightImpact();
             setState(() => _useDynamicColor = v);
             context.read<ThemeProvider>().setUseDynamicColor(v);
           },
@@ -618,7 +630,10 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: const Text('将深色背景改为纯黑（仅深色模式生效，节省 OLED 电量）'),
           value: themeProvider.useOledBlack,
           onChanged: canToggleOled
-              ? (v) => themeProvider.setUseOledBlack(v)
+              ? (v) {
+                  HapticFeedback.lightImpact();
+                  themeProvider.setUseOledBlack(v);
+                }
               : null,
         ),
         const Divider(),
@@ -693,6 +708,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: const Text('开启后需双击歌词行才能跳转播放位置'),
           value: _lyricDoubleTapToJump,
           onChanged: (v) {
+            HapticFeedback.lightImpact();
             setState(() => _lyricDoubleTapToJump = v);
             context.read<ThemeProvider>().setLyricDoubleTapToJump(v);
           },
@@ -703,6 +719,7 @@ class _SettingsPageState extends State<SettingsPage> {
           value: _useArtistPhotoBackground,
           onChanged: !_useAmStylePlayer
               ? (v) {
+                  HapticFeedback.lightImpact();
                   setState(() => _useArtistPhotoBackground = v);
                   context.read<ThemeProvider>().setUseArtistPhotoBackground(v);
                 }
@@ -746,6 +763,7 @@ class _SettingsPageState extends State<SettingsPage> {
           value: _useGaussianBlur,
           onChanged: _useAmStylePlayer
               ? (v) {
+                  HapticFeedback.lightImpact();
                   setState(() => _useGaussianBlur = v);
                   LyricPreferences.instance.setUseGaussianBlur(v);
                 }
@@ -757,6 +775,7 @@ class _SettingsPageState extends State<SettingsPage> {
           value: _useGlowEffect,
           onChanged: _useAmStylePlayer
               ? (v) {
+                  HapticFeedback.lightImpact();
                   setState(() => _useGlowEffect = v);
                   LyricPreferences.instance.setUseGlowEffect(v);
                 }
@@ -768,6 +787,7 @@ class _SettingsPageState extends State<SettingsPage> {
           value: _useFlowingBackground,
           onChanged: _useAmStylePlayer
               ? (v) {
+                  HapticFeedback.lightImpact();
                   setState(() => _useFlowingBackground = v);
                   LyricPreferences.instance.setUseFlowingBackground(v);
                 }
@@ -779,6 +799,7 @@ class _SettingsPageState extends State<SettingsPage> {
           value: _useDuetLayout,
           onChanged: _useAmStylePlayer
               ? (v) {
+                  HapticFeedback.lightImpact();
                   setState(() => _useDuetLayout = v);
                   LyricPreferences.instance.setUseDuetLayout(v);
                 }
@@ -975,6 +996,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: const Text('每次启动自动领取每日VIP（需要登录）'),
           value: _autoReceiveVip,
           onChanged: (value) {
+            HapticFeedback.lightImpact();
             setState(() {
               _autoReceiveVip = value;
             });
@@ -986,6 +1008,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: const Text('暂停/播放时音量平滑过渡，避免突然出声'),
           value: _pauseFadeEnabled,
           onChanged: (value) {
+            HapticFeedback.lightImpact();
             setState(() {
               _pauseFadeEnabled = value;
             });
@@ -997,6 +1020,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: const Text('播放歌曲或 MV 时屏幕不会自动息屏'),
           value: _keepScreenOn,
           onChanged: (value) {
+            HapticFeedback.lightImpact();
             setState(() {
               _keepScreenOn = value;
             });
@@ -1048,6 +1072,7 @@ class _SettingsPageState extends State<SettingsPage> {
               subtitle: const Text('播放时自动缓存音频、歌词和封面，减少流量消耗'),
               value: enabled,
               onChanged: (v) async {
+                HapticFeedback.lightImpact();
                 await SettingsRepository().setStreamCacheEnabled(v);
                 setState(() {}); // 刷新整个页面
               },
@@ -1249,6 +1274,7 @@ class _SettingsPageState extends State<SettingsPage> {
           subtitle: const Text('开启后嵌入字级 LRC 歌词，关闭则嵌入行级 LRC。无逐字数据时自动降级为行级'),
           value: _downloadWordLevelLyrics,
           onChanged: (value) async {
+            HapticFeedback.lightImpact();
             setState(() => _downloadWordLevelLyrics = value);
             await _settingsRepository.setDownloadWordLevelLyrics(value);
           },
@@ -1843,6 +1869,7 @@ class _TabManagementPanel extends StatelessWidget {
                           Switch(
                             value: !isHidden,
                             onChanged: (_) {
+                              HapticFeedback.lightImpact();
                               tabConfig.toggleTabVisibility(tab.id);
                             },
                           ),

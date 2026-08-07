@@ -192,6 +192,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
       child: ClipOval(
         child: CachedNetworkImage(
           imageUrl: avatarUrl,
+          memCacheWidth: 192,
+          memCacheHeight: 192,
           cacheKey: cacheKey,
           width: 64,
           height: 64,

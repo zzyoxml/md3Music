@@ -232,6 +232,8 @@ class _CollectionCard extends StatelessWidget {
                 child: brief.coverUrl != null
                     ? CachedNetworkImage(
                         imageUrl: brief.coverUrl!,
+                        memCacheWidth: 540,
+                        memCacheHeight: 540,
                         fit: BoxFit.cover,
                         errorWidget: (_, _, _) => _placeholder(cs),
                       )

@@ -21,6 +21,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
@@ -82,7 +83,9 @@ class AudioPlaybackService : Service() {
                     PowerManager.PARTIAL_WAKE_LOCK,
                     "md3music::audio_playback"
                 )
-                wakeLock?.acquire(24 * 60 * 60 * 1000L)
+                // P0: 不再固定 24h 超时。播放期间持有，暂停/停止时由
+                // onStartCommand 与 ACTION_STOP 主动释放，避免 CPU 无法休眠耗电
+                wakeLock?.acquire()
             }
         }
 
@@ -169,6 +172,9 @@ class AudioPlaybackService : Service() {
     private var currentBtLyricText = ""
     private var originalTitle = ""
     private var originalArtist = ""
+    // 封面缓存：后台封面线程写入，主线程 refreshMetadata（蓝牙歌词）读取，
+    // 必须 @Volatile 保证跨线程可见性
+    @Volatile
     private var lastArtBitmap: Bitmap? = null
     private var lastArtUrl: String? = null
     // 缓存最近一次通知构建所需的播放状态，供 refreshMetadata 复用
@@ -176,6 +182,34 @@ class AudioPlaybackService : Service() {
     private var lastDesktopLyricEnabled = false
     private var lastIsFavorited = false
     private var lastDuration = 0L
+
+    // P0: 蓝牙歌词刷新节流状态：通知重建最小间隔 + 最近一次显示的文本
+    private var lastBtLyricNotifyTime = 0L
+    private var lastShownBtLyricTitle: String? = null
+    private var lastShownBtLyricArtist: String? = null
+
+    // P0: 缓存通知 PendingIntent（showNotification / refreshMetadata 共用），
+    // 避免蓝牙歌词高频刷新时每次重建 5+ 个 PendingIntent 对象
+    private var cachedLaunchPendingIntent: PendingIntent? = null
+    private val cachedServicePendingIntents = arrayOfNulls<PendingIntent>(6)
+
+    private fun launchPendingIntent(): PendingIntent {
+        cachedLaunchPendingIntent?.let { return it }
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        return PendingIntent.getActivity(
+            this, 0, launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        ).also { cachedLaunchPendingIntent = it }
+    }
+
+    private fun servicePendingIntent(requestCode: Int, action: String): PendingIntent {
+        cachedServicePendingIntents[requestCode]?.let { return it }
+        return PendingIntent.getService(
+            this, requestCode,
+            Intent(this, AudioPlaybackService::class.java).apply { this.action = action },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        ).also { cachedServicePendingIntents[requestCode] = it }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -185,7 +219,8 @@ class AudioPlaybackService : Service() {
         notificationManager = getSystemService(NotificationManager::class.java)
         initMediaSession()
         registerReceiver()
-        acquireWakeLock(this)
+        // P0: 不再在 onCreate 无条件持有 WakeLock（此时未必在播放）。
+        // 仅当 onStartCommand 收到 isPlaying=true 时才持有，暂停时释放。
 
         // 初始化 Lyricon Provider（用 try-catch 包裹，防止 SDK 在低版本 Android 抛异常）
         lyriconProvider = try {
@@ -304,11 +339,18 @@ class AudioPlaybackService : Service() {
         val isFavorited =
             intent?.getBooleanExtra(EXTRA_IS_FAVORITED, false) ?: false
 
-        showNotification(title, artist, artUrl, fallbackFilePath, isPlaying, position, duration, desktopLyricEnabled, isFavorited)
-
+        // WakeLock 在 showNotification 之前处理：
+        // showNotification 内含封面线程/startForeground/MediaSession 更新，
+        // 若其抛异常会跳过 releaseWakeLock，导致暂停后 CPU 无法休眠（功耗降不下来）。
+        // 提前处理保证 isPlaying=false 时 WakeLock 一定被释放。
         if (isPlaying) {
             acquireWakeLock(this)
+        } else {
+            // P0: 暂停时立即释放 WakeLock，避免 CPU 无法休眠造成耗电
+            releaseWakeLock()
         }
+
+        showNotification(title, artist, artUrl, fallbackFilePath, isPlaying, position, duration, desktopLyricEnabled, isFavorited)
 
         return START_STICKY
     }
@@ -464,7 +506,16 @@ class AudioPlaybackService : Service() {
         // 1. http(s):// 在线封面
         if (artUri.startsWith("http://") || artUri.startsWith("https://")) {
             return try {
-                BitmapFactory.decodeStream(java.net.URL(artUri).openStream())
+                // P0: HttpURLConnection 显式设置超时，避免慢响应导致线程永久阻塞
+                val conn = java.net.URL(artUri).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 5000
+                conn.readTimeout = 10000
+                conn.instanceFollowRedirects = true
+                try {
+                    BitmapFactory.decodeStream(conn.inputStream)
+                } finally {
+                    conn.disconnect()
+                }
             } catch (_: Exception) { null }
         }
 
@@ -508,8 +559,8 @@ class AudioPlaybackService : Service() {
     /// 用 MediaMetadataRetriever 从音频文件中提取内嵌封面图。
     /// 支持真实文件路径、file:// URI 和 content:// URI。
     private fun extractEmbeddedArtwork(filePath: String): Bitmap? {
+        val retriever = MediaMetadataRetriever()
         return try {
-            val retriever = MediaMetadataRetriever()
             if (filePath.startsWith("content://")) {
                 // content:// URI 需要 Context 重载
                 retriever.setDataSource(this, Uri.parse(filePath))
@@ -522,9 +573,13 @@ class AudioPlaybackService : Service() {
                 retriever.setDataSource(filePath)
             }
             val art = retriever.embeddedPicture
-            retriever.release()
             if (art != null) BitmapFactory.decodeByteArray(art, 0, art.size) else null
-        } catch (_: Exception) { null }
+        } catch (_: Exception) {
+            null
+        } finally {
+            // P0: 异常路径也必须释放 native 资源，避免 FD 泄漏
+            try { retriever.release() } catch (_: Exception) {}
+        }
     }
 
     private fun showNotification(
@@ -558,33 +613,13 @@ class AudioPlaybackService : Service() {
             displayArtist = originalArtist
         }
 
-        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val prevIntent = PendingIntent.getService(
-            this, 1, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_PREV },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val playPauseIntent = PendingIntent.getService(
-            this, 2, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_PLAY_PAUSE },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val nextIntent = PendingIntent.getService(
-            this, 3, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_NEXT },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        // 桌面歌词开关：通知栏按钮 → 调 dart 端 toggleDesktopLyric
-        val toggleLyricIntent = PendingIntent.getService(
-            this, 4, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_TOGGLE_DESKTOP_LYRIC },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val toggleFavoriteIntent = PendingIntent.getService(
-            this, 5, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_TOGGLE_FAVORITE },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
+        // P0: 复用缓存的 PendingIntent（懒加载一次，后续共用），避免每次通知重建对象
+        val pendingIntent = launchPendingIntent()
+        val prevIntent = servicePendingIntent(1, ACTION_PREV)
+        val playPauseIntent = servicePendingIntent(2, ACTION_PLAY_PAUSE)
+        val nextIntent = servicePendingIntent(3, ACTION_NEXT)
+        val toggleLyricIntent = servicePendingIntent(4, ACTION_TOGGLE_DESKTOP_LYRIC)
+        val toggleFavoriteIntent = servicePendingIntent(5, ACTION_TOGGLE_FAVORITE)
 
         val playPauseIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
         val lyricIconRes = if (desktopLyricEnabled) R.drawable.ic_lyric_on else R.drawable.ic_lyric_off
@@ -626,20 +661,28 @@ class AudioPlaybackService : Service() {
                 try {
                     val originalBitmap = loadArtworkBitmap(effectiveArtUrl, fallbackFilePath)
                     if (originalBitmap != null) {
-                        // 缓存原始 bitmap 供蓝牙歌词 refreshMetadata 复用，避免重复下载
-                        lastArtBitmap = originalBitmap
+                        // P0: 统一降采样到 512px 后再缓存/使用，避免原始大图（2000x2000+）常驻内存
+                        val displayBitmap = resizeBitmap(originalBitmap, 512)
+                        if (displayBitmap !== originalBitmap) {
+                            originalBitmap.recycle()
+                        }
+                        // 切歌时不再显式 recycle 旧封面：主线程 refreshMetadata（蓝牙歌词
+                        // 逐句刷新）可能正持有 lastArtBitmap 并放入 MediaSession 元数据，
+                        // 后台线程显式回收存在 use-after-recycle 竞态 → 偶发闪退。
+                        // 旧 bitmap 失去强引用后由 GC 回收，此处仅做引用切换。
+                        lastArtBitmap = displayBitmap
                         // 同步封面到桌面小组件（与通知栏/MediaSession 一致）
-                        MusicWidgetProvider.cachedArtwork = resizeBitmap(originalBitmap, 200)
+                        MusicWidgetProvider.cachedArtwork = resizeBitmap(displayBitmap, 200)
                         MusicWidgetProvider.notifyArtworkChanged(this@AudioPlaybackService)
                         // 通知 LargeIcon：缩放到 192px（~64dp @ xxhdpi）
-                        val iconBitmap = resizeBitmap(originalBitmap, 192)
+                        val iconBitmap = resizeBitmap(displayBitmap, 192)
                         builder.setLargeIcon(iconBitmap)
                         startForeground(NOTIFICATION_ID, builder.build())
 
-                        // MediaSession Metadata：用原始分辨率 bitmap + URI
+                        // MediaSession Metadata：用降采样 bitmap + URI
                         // title/artist 用 display 值（蓝牙歌词开启时为歌词文本）
                         updateMediaSessionMetadata(
-                            displayTitle, displayArtist, duration, originalBitmap, effectiveArtUrl
+                            displayTitle, displayArtist, duration, displayBitmap, effectiveArtUrl
                         )
                     }
                 } catch (_: Exception) {}
@@ -724,71 +767,58 @@ class AudioPlaybackService : Service() {
             displayArtist = originalArtist
         }
 
-        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, launchIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val prevIntent = PendingIntent.getService(
-            this, 1, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_PREV },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val playPauseIntent = PendingIntent.getService(
-            this, 2, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_PLAY_PAUSE },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val nextIntent = PendingIntent.getService(
-            this, 3, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_NEXT },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val toggleLyricIntent = PendingIntent.getService(
-            this, 4, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_TOGGLE_DESKTOP_LYRIC },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val toggleFavoriteIntent = PendingIntent.getService(
-            this, 5, Intent(this, AudioPlaybackService::class.java).apply { action = ACTION_TOGGLE_FAVORITE },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val playPauseIcon = if (lastIsPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val lyricIconRes = if (lastDesktopLyricEnabled) R.drawable.ic_lyric_on else R.drawable.ic_lyric_off
-        val favoriteIconRes = if (lastIsFavorited) R.drawable.ic_favorite_on else R.drawable.ic_favorite_off
+        // P0: 文本未变化（歌词行未变 / 开关未切换）时直接跳过，避免无效刷新
+        if (displayTitle == lastShownBtLyricTitle && displayArtist == lastShownBtLyricArtist) return
+        lastShownBtLyricTitle = displayTitle
+        lastShownBtLyricArtist = displayArtist
 
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle(displayTitle)
-            .setContentText(displayArtist)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOnlyAlertOnce(true)
-            .setShowWhen(false)
-            .addAction(android.R.drawable.ic_media_previous, "上一首", prevIntent)
-            .addAction(playPauseIcon, if (lastIsPlaying) "暂停" else "播放", playPauseIntent)
-            .addAction(favoriteIconRes, "收藏", toggleFavoriteIntent)
-            .addAction(android.R.drawable.ic_media_next, "下一首", nextIntent)
-            .addAction(lyricIconRes, "桌面歌词", toggleLyricIntent)
-            .setStyle(
-                androidx.media.app.NotificationCompat.MediaStyle()
-                    .setMediaSession(mediaSession?.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 3)
-            )
+        // P0: 通知重建节流：逐字歌词每句（50-100ms）都会走到这里，
+        // 通知栏重建限制为最少 500ms 一次（车机 AVRCP 歌词读的是 MediaSession，不受节流影响）
+        val now = SystemClock.elapsedRealtime()
+        val shouldUpdateNotification = now - lastBtLyricNotifyTime >= 500
+        if (shouldUpdateNotification) {
+            lastBtLyricNotifyTime = now
+            val playPauseIcon = if (lastIsPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
+            val lyricIconRes = if (lastDesktopLyricEnabled) R.drawable.ic_lyric_on else R.drawable.ic_lyric_off
+            val favoriteIconRes = if (lastIsFavorited) R.drawable.ic_favorite_on else R.drawable.ic_favorite_off
 
-        // 复用缓存的封面 bitmap（缩放到 192px 作为通知 LargeIcon）
-        val cachedBitmap = lastArtBitmap
-        if (cachedBitmap != null) {
-            builder.setLargeIcon(resizeBitmap(cachedBitmap, 192))
+            val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setContentTitle(displayTitle)
+                .setContentText(displayArtist)
+                .setContentIntent(launchPendingIntent())
+                .setOngoing(true)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .addAction(android.R.drawable.ic_media_previous, "上一首", servicePendingIntent(1, ACTION_PREV))
+                .addAction(playPauseIcon, if (lastIsPlaying) "暂停" else "播放", servicePendingIntent(2, ACTION_PLAY_PAUSE))
+                .addAction(favoriteIconRes, "收藏", servicePendingIntent(5, ACTION_TOGGLE_FAVORITE))
+                .addAction(android.R.drawable.ic_media_next, "下一首", servicePendingIntent(3, ACTION_NEXT))
+                .addAction(lyricIconRes, "桌面歌词", servicePendingIntent(4, ACTION_TOGGLE_DESKTOP_LYRIC))
+                .setStyle(
+                    androidx.media.app.NotificationCompat.MediaStyle()
+                        .setMediaSession(mediaSession?.sessionToken)
+                        .setShowActionsInCompactView(0, 1, 3)
+                )
+
+            // 复用缓存的封面 bitmap（缩放到 192px 作为通知 LargeIcon）
+            val cachedBitmap = lastArtBitmap
+            if (cachedBitmap != null) {
+                builder.setLargeIcon(resizeBitmap(cachedBitmap, 192))
+            }
+            notificationManager?.notify(NOTIFICATION_ID, builder.build())
         }
-        notificationManager?.notify(NOTIFICATION_ID, builder.build())
 
-        // 更新 MediaSession 元数据（车机 AVRCP 读取此处）
+        // 更新 MediaSession 元数据（车机 AVRCP 读取此处，需要实时歌词，每次歌词变化都更新）
         val metaBuilder = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, displayTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, displayArtist)
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, lastDuration)
-        if (cachedBitmap != null) {
-            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, cachedBitmap)
-            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, cachedBitmap)
+        if (lastArtBitmap != null) {
+            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, lastArtBitmap)
+            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, lastArtBitmap)
         }
         if (!lastArtUrl.isNullOrEmpty()) {
             metaBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, lastArtUrl)
@@ -812,6 +842,9 @@ class AudioPlaybackService : Service() {
         } catch (_: Exception) {}
         lyriconProvider = null
         releaseWakeLock()
+        // 释放缓存的封面 bitmap
+        lastArtBitmap?.let { if (!it.isRecycled) it.recycle() }
+        lastArtBitmap = null
         super.onDestroy()
     }
 }

@@ -245,21 +245,50 @@ pub fn encode_uri_component(s: &str) -> String {
 }
 
 /// JSON.stringify like for building data strings.
+///
+/// P0: 原实现每个对象/数组都 `collect::<Vec<String>>().join(",")`，产生大量中间
+/// String 分配（全项目 51 处调用，处于签名热路径）。改为直接累积到单个 String，
+/// 转义语义逐字符保持不变（签名 md5 原文依赖此处输出，不能切换到 serde_json——
+/// 后者会把 0x08/0x0c 转成 \b/\f，与旧行为不一致）。
 pub fn json_stringify(v: &Value) -> String {
+    let mut out = String::new();
+    json_stringify_into(v, &mut out);
+    out
+}
+
+fn json_stringify_into(v: &Value, out: &mut String) {
     match v {
         Value::Object(m) => {
-            let parts: Vec<String> = m
-                .iter()
-                .map(|(k, val)| format!("\"{}\":{}", k, json_stringify(val)))
-                .collect();
-            format!("{{{}}}", parts.join(","))
+            out.push('{');
+            let mut first = true;
+            for (k, val) in m.iter() {
+                if !first {
+                    out.push(',');
+                }
+                first = false;
+                // 与旧实现行为一致：key 不做转义（旧实现同样未转义）
+                out.push('"');
+                out.push_str(k);
+                out.push('"');
+                out.push(':');
+                json_stringify_into(val, out);
+            }
+            out.push('}');
         }
         Value::Array(a) => {
-            let parts: Vec<String> = a.iter().map(json_stringify).collect();
-            format!("[{}]", parts.join(","))
+            out.push('[');
+            let mut first = true;
+            for val in a {
+                if !first {
+                    out.push(',');
+                }
+                first = false;
+                json_stringify_into(val, out);
+            }
+            out.push(']');
         }
         Value::String(s) => {
-            let mut out = String::from("\"");
+            out.push('"');
             for ch in s.chars() {
                 match ch {
                     '"' => out.push_str("\\\""),
@@ -272,11 +301,10 @@ pub fn json_stringify(v: &Value) -> String {
                 }
             }
             out.push('"');
-            out
         }
-        Value::Number(n) => n.to_string(),
-        Value::Bool(b) => b.to_string(),
-        Value::Null => "null".to_string(),
+        Value::Number(n) => out.push_str(&n.to_string()),
+        Value::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+        Value::Null => out.push_str("null"),
     }
 }
 

@@ -937,6 +937,8 @@ class _ArtistAvatarState extends State<_ArtistAvatar> {
     return ClipOval(
       child: CachedNetworkImage(
         imageUrl: url,
+        memCacheWidth: 144,
+        memCacheHeight: 144,
         width: size,
         height: size,
         fit: BoxFit.cover,
@@ -980,6 +982,8 @@ class _SearchAlbumCard extends StatelessWidget {
                 child: artworkUri != null
                     ? CachedNetworkImage(
                         imageUrl: artworkUri!,
+                        memCacheWidth: 540,
+                        memCacheHeight: 540,
                         fit: BoxFit.cover,
                         width: double.infinity,
                         placeholder: (_, _) => _buildPlaceholder(colorScheme),

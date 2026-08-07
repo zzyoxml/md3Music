@@ -180,6 +180,8 @@ class _ChannelStoryDetailPageState extends State<ChannelStoryDetailPage> {
                         borderRadius: BorderRadius.circular(16),
                         child: CachedNetworkImage(
                           imageUrl: _coverUrl!,
+                          memCacheWidth: 1080,
+                          memCacheHeight: 540,
                           height: 180,
                           width: double.infinity,
                           fit: BoxFit.cover,

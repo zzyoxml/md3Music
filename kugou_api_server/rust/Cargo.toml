@@ -27,6 +27,10 @@ qrcode = { version = "0.14.0", features = ["image"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 
 [profile.release]
-opt-level = "s"
+# P0: "s"（体积优先）禁用循环展开/函数内联，HTTP 服务器是 CPU 密集型
+# （加密/JSON），改为 opt-level = 3 追求运行时性能。
+# 注意：不使用 strip = true——cdylib 的动态导出符号（start_server /
+# Java_com_md3music_* JNI 符号）可能被 strip 移除，导致 App 启动找不到符号崩溃
+opt-level = 3
 lto = true
 panic = "abort"

@@ -166,6 +166,8 @@ class _ChartsPageState extends State<ChartsPage> {
                                 child: rank.coverUrl != null
                                     ? CachedNetworkImage(
                                         imageUrl: rank.coverUrl!,
+                                        memCacheWidth: 156,
+                                        memCacheHeight: 156,
                                         fit: BoxFit.cover,
                                       )
                                     : Container(
@@ -309,6 +311,8 @@ class _RankGridCard extends StatelessWidget {
                 child: coverUrl != null
                     ? CachedNetworkImage(
                         imageUrl: coverUrl!,
+                        memCacheWidth: 540,
+                        memCacheHeight: 540,
                         fit: BoxFit.cover,
                         width: double.infinity,
                         placeholder: (_, _) => _buildPlaceholder(colorScheme),
