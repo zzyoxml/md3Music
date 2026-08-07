@@ -599,7 +599,16 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
     final displayList = _displaySongs;
     final index = displayList.indexWhere((s) => s.id == currentSong.id);
-    if (index == -1) return;
+    // 随机播放 / 跨歌单场景：当前歌曲可能不在本歌单显示列表中，提示而非静默失败
+    if (index == -1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('当前播放歌曲不在本歌单中'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     // 高亮提示
     setState(() {
@@ -613,13 +622,25 @@ class _PlaylistPageState extends State<PlaylistPage> {
       if (mounted) setState(() => _highlightSongId = null);
     });
 
+    // 目标项可能已构建（用户已滚到附近）：直接精确居中，省去滚动开销
+    var targetContext = _targetItemKey?.currentContext;
+    if (targetContext != null) {
+      await Scrollable.ensureVisible(
+        targetContext,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+        alignment: 0.5,
+      );
+      return;
+    }
+
     // SliverChildBuilderDelegate 懒构建：目标项在视口外时没有 RenderObject，
     // ensureVisible 拿不到位置。头部 slivers（SliverAppBar 280 + 歌单介绍 +
-    // 搜索框 + 播放按钮行等）收缩后约 240px 高；若粗滚余量给太大（如 600）
-    // 会滚过头——目标项停在视口上方且从未被构建，GlobalKey 拿不到 context，
-    // 分步又只向下滚，永远找不到。因此粗滚取「欠滚」保守位置（宁少勿多），
-    // 让目标项落在视口下方，再分步下滚命中（进入视口即被构建），
-    // 最后 ensureVisible 精确居中消除估算偏差。
+    // 搜索框 + 播放按钮行等）收缩后约 240px 高；粗滚取「欠滚」保守位置
+    // （宁少勿多），让目标项落在视口下方附近再分步下滚命中。
+    // 行高按 72 估算：实际行高更大时欠滚（向下补找），实际行高更小时会
+    // 滚过头（目标项停在视口上方且从未构建，GlobalKey 拿不到 context）——
+    // 因此向下找不到后回粗滚位置向上回找，双向兜底。
     const itemHeight = 72.0;
     final rough = index * itemHeight + 150;
     await _scrollController.animateTo(
@@ -629,15 +650,15 @@ class _PlaylistPageState extends State<PlaylistPage> {
     );
     if (!mounted) return;
 
-    // 分步下滚直到目标项构建（进入视口/cacheExtent）或触底
-    var targetContext = _targetItemKey?.currentContext;
+    // 向下分步找：目标项进入视口即被构建
+    const step = 400.0;
     var guard = 0;
     while (targetContext == null && guard < 20 && mounted) {
       guard++;
       final pos = _scrollController.position;
       final current = _scrollController.offset;
       final next =
-          (current + 400).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+          (current + step).clamp(pos.minScrollExtent, pos.maxScrollExtent);
       if (next <= current) break; // 已触底
       await _scrollController.animateTo(
         next,
@@ -645,6 +666,32 @@ class _PlaylistPageState extends State<PlaylistPage> {
         curve: Curves.easeOut,
       );
       targetContext = _targetItemKey?.currentContext;
+    }
+
+    // 向下未命中：粗滚过头（实际行高 < 估算 72），回粗滚位置向上回找
+    if (targetContext == null && mounted) {
+      final pos = _scrollController.position;
+      final back = rough.clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      await _scrollController.animateTo(
+        back,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+      guard = 0;
+      while (targetContext == null && guard < 20 && mounted) {
+        guard++;
+        final p = _scrollController.position;
+        final current = _scrollController.offset;
+        final next =
+            (current - step).clamp(p.minScrollExtent, p.maxScrollExtent);
+        if (next >= current) break; // 已到顶
+        await _scrollController.animateTo(
+          next,
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+        );
+        targetContext = _targetItemKey?.currentContext;
+      }
     }
     if (!mounted || targetContext == null || !targetContext.mounted) return;
 
