@@ -1871,7 +1871,10 @@ class _LyricsPainter extends CustomPainter {
       // 让点整体居中偏右，视觉更平衡
       final double dotsStartX = fontSize * 1.5;
       interludeDots.paintAtLineY(canvas, dotsStartX, centerY,
-          dotRadius: dotRadius, spacing: dotSpacing);
+          dotRadius: dotRadius,
+          spacing: dotSpacing,
+          // 间奏点颜色跟随当前行动态色（未开启/未提取到时回退基础歌词色）
+          colorValue: activeLineColorValue ?? LyricLayout.textColorValue);
     }
   }
 
