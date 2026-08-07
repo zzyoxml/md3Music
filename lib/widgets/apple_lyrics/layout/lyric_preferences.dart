@@ -84,6 +84,8 @@ class LyricPreferences extends ChangeNotifier {
   static const String _keyShowTranslation = 'lyric_show_translation';
   static const String _keyDisplayMode = 'lyric_display_mode';
   static const String _keyUseDuetLayout = 'lyric_use_duet_layout';
+  static const String _keyEcoMode = 'lyric_eco_mode';
+  static const String _keyUseDynamicLyricColor = 'lyric_dynamic_color';
 
   // ============== 当前值 ==============
 
@@ -97,6 +99,10 @@ class LyricPreferences extends ChangeNotifier {
   LyricDisplayMode _displayMode = LyricDisplayMode.translation;
   LyricFontSource _fontSource = LyricFontSource.system;
   String? _customFontPath;
+  // 歌词省电模式（默认关闭）：开启后歌词界面锁定 60fps，用户上下滑动歌词时临时解锁
+  bool _ecoMode = false;
+  // 动态字体颜色（默认关闭，仅 AM 播放器可用）：当前行歌词颜色按「70% 白 + 30% 封面提取色」混色
+  bool _useDynamicLyricColor = false;
   // 运行时加载成功后填充的 family（仅 custom 模式且加载成功时非 null）
   String? _loadedCustomFontFamily;
   bool _loaded = false;
@@ -111,6 +117,12 @@ class LyricPreferences extends ChangeNotifier {
   LyricDisplayMode get displayMode => _displayMode;
   LyricFontSource get fontSource => _fontSource;
   String? get customFontPath => _customFontPath;
+
+  /// 歌词省电模式是否开启（默认关闭）。
+  bool get ecoMode => _ecoMode;
+
+  /// 歌词动态字体颜色是否开启（默认关闭，仅 AM 播放器生效）。
+  bool get useDynamicLyricColor => _useDynamicLyricColor;
 
   /// 当前生效的 fontFamily（传给 TextPainter 的 TextStyle）：
   /// - [LyricFontSource.system]：返回 null（让 Flutter 走系统字体链）
@@ -152,6 +164,8 @@ class LyricPreferences extends ChangeNotifier {
     _displayMode = _displayModeFromName(prefs.getString(_keyDisplayMode));
     _fontSource = _fontSourceFromName(prefs.getString(_keyFontSource));
     _customFontPath = prefs.getString(_keyCustomFontPath);
+    _ecoMode = prefs.getBool(_keyEcoMode) ?? false;
+    _useDynamicLyricColor = prefs.getBool(_keyUseDynamicLyricColor) ?? false;
     _loaded = true;
     notifyListeners();
     // 若已配置自定义字体，立即尝试加载（Fire-and-forget，加载完成后会 notifyListeners）
@@ -214,6 +228,26 @@ class LyricPreferences extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyUseDuetLayout, enabled);
+  }
+
+  /// 设置歌词省电模式开关并持久化。
+  /// 开启后歌词界面锁定 60fps，用户上下滑动歌词时临时解锁帧率限制。
+  Future<void> setEcoMode(bool enabled) async {
+    if (_ecoMode == enabled) return;
+    _ecoMode = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyEcoMode, enabled);
+  }
+
+  /// 设置歌词动态字体颜色开关并持久化。
+  /// 开启后当前行歌词颜色按「70% 白 + 30% 封面提取色」混色（仅 AM 播放器生效）。
+  Future<void> setUseDynamicLyricColor(bool enabled) async {
+    if (_useDynamicLyricColor == enabled) return;
+    _useDynamicLyricColor = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyUseDynamicLyricColor, enabled);
   }
 
   /// 设置歌词翻译副行显示开关并持久化。
@@ -324,6 +358,8 @@ class LyricPreferences extends ChangeNotifier {
     _fontSource = LyricFontSource.system;
     _customFontPath = null;
     _loadedCustomFontFamily = null;
+    _ecoMode = false;
+    _useDynamicLyricColor = false;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyFontSize, _fontSize);
@@ -334,6 +370,8 @@ class LyricPreferences extends ChangeNotifier {
     await prefs.setBool(_keyUseDuetLayout, _useDuetLayout);
     await prefs.setBool(_keyShowTranslation, _showTranslation);
     await prefs.setString(_keyDisplayMode, _displayMode.name);
+    await prefs.remove(_keyEcoMode);
+    await prefs.remove(_keyUseDynamicLyricColor);
     await prefs.remove(_keyFontSource);
     await prefs.remove(_keyCustomFontPath);
   }

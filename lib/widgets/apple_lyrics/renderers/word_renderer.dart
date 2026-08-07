@@ -104,6 +104,11 @@ class WordRenderer {
   /// 主题切换时 textColorValue 变化，需清空 _lastSetAlphas 强制重建所有 word TextSpan。
   int _lastTextColorValue = -1;
 
+  /// 当前行专用的文字颜色（ARGB int，仅 [_isActive] 时生效）。
+  /// 动态字体颜色：由封面提取色按「70% 白 + 30% 提取色」混色得到，
+  /// null 表示不使用（回退到 LyricLayout.textColorValue）。
+  int? _activeColorValue;
+
   /// 每字辉光判定缓存（行绑定期计算一次）。
   /// 与 [_wordPainters] / [_wordWidths] 同长度同索引。
   /// true 表示该 word 应触发辉光（已通过 duration + 内容过滤）。
@@ -190,10 +195,11 @@ class WordRenderer {
   /// [scale] 是行缩放，0.97（inactive）~1.0（active）。
   /// [blurFade] 控制非当前行透明度：1.0=透明（模糊图片覆盖），0.0=正常显示。
   /// [blurActive] 是否启用高斯模糊：false 时不降低非当前行透明度。
-  void setLineState({required bool isActive, required double scale, double blurFade = 1.0, bool blurActive = true}) {
+  void setLineState({required bool isActive, required double scale, double blurFade = 1.0, bool blurActive = true, int? activeColorValue}) {
     _isActive = isActive;
     _scale = scale;
     _blurFade = blurActive ? blurFade : 0.0;
+    _activeColorValue = activeColorValue;
   }
 
   /// 设置强调辉光效果计算器。
@@ -423,11 +429,19 @@ class WordRenderer {
       double viewportWidth = 0}) {
     _ensureBound(line, fontSize);
 
-    // 主题切换时 textColorValue 变化，清空 alpha 缓存强制重建所有 word TextSpan
-    if (LyricLayout.textColorValue != _lastTextColorValue) {
+    // 解析当前行实际文字颜色：动态字体颜色（仅当前行）优先，否则回退主题默认色。
+    // 颜色变化时清空 alpha 缓存强制重建所有 word TextSpan。
+    final int textColorValue =
+        (_isActive && _activeColorValue != null)
+            ? _activeColorValue!
+            : LyricLayout.textColorValue;
+    if (textColorValue != _lastTextColorValue) {
       _lastSetAlphas = List<int>.filled(_lastSetAlphas.length, -1);
-      _lastTextColorValue = LyricLayout.textColorValue;
+      _lastTextColorValue = textColorValue;
     }
+    final int textRed = (textColorValue >> 16) & 0xFF;
+    final int textGreen = (textColorValue >> 8) & 0xFF;
+    final int textBlue = textColorValue & 0xFF;
 
     if (line.words.isEmpty) {
       _paintSolidFallback(canvas, offset, line, fontSize,
@@ -546,7 +560,7 @@ class WordRenderer {
           painter.text = TextSpan(
             text: word.text,
             style: TextStyle(
-              color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, uniformAlpha),
+              color: Color.fromRGBO(textRed, textGreen, textBlue, uniformAlpha),
               fontSize: fontSize,
               height: lineHeight,
               fontFamily: LyricLayout.fontFamily,
@@ -609,8 +623,8 @@ class WordRenderer {
         // 复用 _gradientPaint 实例，只改 shader 和 blendMode
         _gradientPaint.shader = LinearGradient(
           colors: [
-            Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, leftAlpha),
-            Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, rightAlpha),
+            Color.fromRGBO(textRed, textGreen, textBlue, leftAlpha),
+            Color.fromRGBO(textRed, textGreen, textBlue, rightAlpha),
           ],
           stops: const <double>[0.0, 1.0],
         ).createShader(wordRect);
@@ -642,7 +656,7 @@ class WordRenderer {
       _translationPainter.text = TextSpan(
         text: auxText,
         style: TextStyle(
-          color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, LyricLayout.translationOpacity),
+          color: Color.fromRGBO(textRed, textGreen, textBlue, LyricLayout.translationOpacity),
           fontSize: transFontSize,
           height: LyricLayout.translationLineHeight,
           fontFamily: LyricLayout.fontFamily,
@@ -747,11 +761,16 @@ class WordRenderer {
       double viewportWidth = 0}) {
     if (line.text.isEmpty) return;
     final double alpha = dynamicDarkAlpha;
+    // 动态字体颜色（仅当前行）优先，否则回退主题默认色
+    final int colorValue =
+        (_isActive && _activeColorValue != null)
+            ? _activeColorValue!
+            : LyricLayout.textColorValue;
     final painter = TextPainter(textDirection: TextDirection.ltr);
     painter.text = TextSpan(
       text: line.text,
       style: TextStyle(
-        color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, alpha),
+        color: Color.fromRGBO((colorValue >> 16) & 0xFF, (colorValue >> 8) & 0xFF, colorValue & 0xFF, alpha),
         fontSize: fontSize,
         height: LyricLayout.lineHeight,
         // 显式注入歌词 fontFamily，与 paintLine 路径保持一致
@@ -842,6 +861,7 @@ class WordRenderer {
     _isActive = false;
     _scale = LyricLayout.inactiveScale;
     _boundLine = null;
+    _activeColorValue = null;
     _boundFontSize = -1;
     _wordWidths = const <double>[];
     _wordStartXs = const <double>[];

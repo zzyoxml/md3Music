@@ -77,6 +77,11 @@ class LineRenderer {
   /// 主题切换时 textColorValue 变化，需强制重建 TextSpan。
   int _lastTextColorValue = -1;
 
+  /// 当前行专用的文字颜色（ARGB int，仅 [_isActive] 时生效）。
+  /// 动态字体颜色：由封面提取色按「70% 白 + 30% 提取色」混色得到，
+  /// null 表示不使用（回退到 LyricLayout.textColorValue）。
+  int? _activeColorValue;
+
   /// 当前绑定的 LyricLine 引用。
   ///
   /// 用于检测 line 切换（如 useDuetLayout 切换后 _cleanedLines 重建为新对象），
@@ -102,6 +107,7 @@ class LineRenderer {
   double _lastScale = double.nan;
   double _lastBlurFade = double.nan;
   bool _lastBlurActive = false;
+  int? _lastActiveColorValue;
 
   // ============== 状态查询 ==============
 
@@ -132,20 +138,23 @@ class LineRenderer {
   /// **v4 bug 修复**：检测 _targetAlpha 变化时重置 _isConverged=false。
   /// 之前 setLineState 修改 _targetAlpha 但不重置 _isConverged，
   /// 导致后续 tick 调用时 _isConverged=true（来自上次收敛）即便 target 已变也不会重新计算。
-  void setLineState({required bool isActive, required double scale, double blurFade = 1.0, bool blurActive = true}) {
-    // 输入缓存早退：稳态下 4 个输入全相等 → 跳过 dynamic 公式重算与 target 比较
+  void setLineState({required bool isActive, required double scale, double blurFade = 1.0, bool blurActive = true, int? activeColorValue}) {
+    // 输入缓存早退：稳态下 5 个输入全相等 → 跳过 dynamic 公式重算与 target 比较
     if (isActive == _lastIsActive &&
         scale == _lastScale &&
         blurFade == _lastBlurFade &&
-        blurActive == _lastBlurActive) {
+        blurActive == _lastBlurActive &&
+        activeColorValue == _lastActiveColorValue) {
       return;
     }
     _lastIsActive = isActive;
     _lastScale = scale;
     _lastBlurFade = blurFade;
     _lastBlurActive = blurActive;
+    _lastActiveColorValue = activeColorValue;
 
     _isActive = isActive;
+    _activeColorValue = activeColorValue;
     final double factor = ((scale - LyricLayout.inactiveScale) /
             (LyricLayout.activeScale - LyricLayout.inactiveScale))
         .clamp(0.0, 1.0)
@@ -217,10 +226,18 @@ class LineRenderer {
       DuetAlignment alignment = DuetAlignment.defaultAlign,
       double viewportWidth = 0}) {
     if (line.text.isEmpty) return;
+    // 解析当前行实际文字颜色：动态字体颜色（仅当前行）优先，否则回退主题默认色
+    final int textColorValue =
+        (_isActive && _activeColorValue != null)
+            ? _activeColorValue!
+            : LyricLayout.textColorValue;
+    final int textRed = (textColorValue >> 16) & 0xFF;
+    final int textGreen = (textColorValue >> 8) & 0xFF;
+    final int textBlue = textColorValue & 0xFF;
     // v4 优化：alpha 变化 < 0.001 且 maxWidth 未变且颜色未变时跳过 set text + layout
     // 新增：line 引用变化时强制 set text + layout，避免 useDuetLayout 切换后
     // _painter 缓存旧文本（带「男：」前缀）导致 alignment 计算用错误宽度
-    final bool colorChanged = LyricLayout.textColorValue != _lastTextColorValue;
+    final bool colorChanged = textColorValue != _lastTextColorValue;
     final bool lineChanged = !identical(_boundLine, line);
     // alignment 变化时也强制重建（避免 _painter 缓存旧 textAlign 影响多行对齐）
     final bool alignChanged = _lastAlignment != alignment;
@@ -232,8 +249,9 @@ class LineRenderer {
       _painter.text = TextSpan(
         text: line.text,
         style: TextStyle(
-          // 文字颜色从 LyricLayout 获取，支持主题动态切换
-          color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, _currentAlpha),
+          // 文字颜色从 LyricLayout 获取，支持主题动态切换；
+          // 当前行动态字体颜色时用混色后的 RGB
+          color: Color.fromRGBO(textRed, textGreen, textBlue, _currentAlpha),
           fontSize: fontSize,
           height: LyricLayout.lineHeight,
           // 显式注入歌词 fontFamily（system 模式为 null，走系统字体链）
@@ -244,7 +262,7 @@ class LineRenderer {
           maxWidth: maxWidth == double.infinity ? double.infinity : maxWidth);
       _lastSetAlpha = _currentAlpha;
       _lastSetMaxWidth = maxWidth;
-      _lastTextColorValue = LyricLayout.textColorValue;
+      _lastTextColorValue = textColorValue;
       _boundLine = line;
       _lastAlignment = alignment;
     }
@@ -261,7 +279,7 @@ class LineRenderer {
     } else {
       // 多行：按行拆分绘制，每行独立对齐
       _paintMultiLineAligned(canvas, offset, line, fontSize, alignment,
-          maxWidth, viewportWidth);
+          maxWidth, viewportWidth, textColorValue);
     }
 
     // 辅助副行（翻译或罗马音）：仅当前行 + 开关开启 + 有内容时绘制
@@ -282,7 +300,7 @@ class LineRenderer {
       _translationPainter.text = TextSpan(
         text: auxText,
         style: TextStyle(
-          color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, LyricLayout.translationOpacity),
+          color: Color.fromRGBO(textRed, textGreen, textBlue, LyricLayout.translationOpacity),
           fontSize: transFontSize,
           height: LyricLayout.translationLineHeight,
           fontFamily: LyricLayout.fontFamily,
@@ -303,8 +321,12 @@ class LineRenderer {
   /// 多行文本按行独立对齐绘制：按视觉行拆分文本，每行用对应 x 偏移。
   void _paintMultiLineAligned(
       Canvas canvas, Offset offset, LyricLine line, double fontSize,
-      DuetAlignment alignment, double maxWidth, double viewportWidth) {
+      DuetAlignment alignment, double maxWidth, double viewportWidth,
+      int textColorValue) {
     final String text = line.text;
+    final int textRed = (textColorValue >> 16) & 0xFF;
+    final int textGreen = (textColorValue >> 8) & 0xFF;
+    final int textBlue = textColorValue & 0xFF;
     // 拆分视觉行（与 _computeLineAlignOffsets 一致）
     final List<int> lineStarts = <int>[0];
     int pos = 0;
@@ -325,7 +347,7 @@ class LineRenderer {
       _lineMeasurer.text = TextSpan(
         text: lineText,
         style: TextStyle(
-          color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, _currentAlpha),
+          color: Color.fromRGBO(textRed, textGreen, textBlue, _currentAlpha),
           fontSize: fontSize,
           height: LyricLayout.lineHeight,
           fontFamily: LyricLayout.fontFamily,
@@ -382,11 +404,13 @@ class LineRenderer {
     _lastSetMaxWidth = -1;
     _lastTextColorValue = -1;
     _boundLine = null;
+    _activeColorValue = null;
     _lastAlignment = DuetAlignment.defaultAlign;
     // 同步重置 setLineState 输入缓存，避免 reset 后下次 setLineState 误命中早退
     _lastIsActive = false;
     _lastScale = double.nan;
     _lastBlurFade = double.nan;
     _lastBlurActive = false;
+    _lastActiveColorValue = null;
   }
 }

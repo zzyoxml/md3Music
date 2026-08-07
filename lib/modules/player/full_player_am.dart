@@ -11,6 +11,7 @@ import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/equalizer_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/utils/audio_scanner.dart';
+import '../../core/utils/artwork_color_extractor.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../album/album_detail_page.dart';
@@ -96,6 +97,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
   // 桌面歌词状态监听：长按歌词按钮 toggle 后同步 icon
   late final VoidCallback _onDesktopLyricChanged;
+
+  // 动态字体颜色：从专辑封面提取的主色（歌词当前行「70% 白 + 30% 提取色」混色用）
+  Color? _lyricAccentColor;
+  String? _lastAccentUrl;
 
   // Pad 模式：左侧已有封面，隐藏"封面"Tab，只保留 2 个 Tab
   bool _isPadMode = false;
@@ -367,10 +372,25 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
+  /// 切歌时异步提取专辑封面主色，供歌词「动态字体颜色」混色使用。
+  ///
+  /// 复用流光背景的提取思路（PaletteGenerator + 过滤 + 饱和度归一化）。
+  /// 提取完成后若已切到别的歌（url 变化）则丢弃结果。
+  Future<void> _updateLyricAccent(String? url) async {
+    if (url == _lastAccentUrl) return;
+    _lastAccentUrl = url;
+    final color = await ArtworkColorExtractor.extract(url);
+    if (!mounted || _lastAccentUrl != url) return;
+    setState(() => _lyricAccentColor = color);
+  }
+
   Future<void> _fetchLyrics(dynamic song) async {
     final songId = song.id as String;
     if (songId == _lastSongId) return;
     _lastSongId = songId;
+
+    // 切歌时同步提取封面主色（动态字体颜色用，fire-and-forget）
+    _updateLyricAccent(song.artworkUri);
 
     setState(() {
       _isLoadingLyrics = true;
@@ -979,6 +999,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                     currentSong,
                                   ),
                               doubleTapToJump: lyricDoubleTap,
+                              accentColor: _lyricAccentColor,
                               onSeek: (ms) => playerProvider.seek(
                                 Duration(milliseconds: ms),
                               ),
@@ -1230,6 +1251,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                                   currentSong,
                                                 ),
                                             doubleTapToJump: lyricDoubleTap,
+                                            accentColor: _lyricAccentColor,
                                             onSeek: (ms) =>
                                                 playerProvider.seek(
                                                   Duration(milliseconds: ms),
@@ -1493,6 +1515,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                                   currentSong,
                                                 ),
                                             doubleTapToJump: lyricDoubleTap,
+                                            accentColor: _lyricAccentColor,
                                             onSeek: (ms) =>
                                                 playerProvider.seek(
                                                   Duration(milliseconds: ms),
