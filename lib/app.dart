@@ -894,37 +894,67 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   }
 
   /// tabId → 可作为二级路由打开的页面（复用主 tab 页面，去掉主 tab 专属参数）。
+  ///
+  /// 二级路由页统一在底部挂全局 MiniPlayer（与主 tab 模式一致）：
+  /// - 页面自带 MiniPlayer 的（如 SearchPage）通过 showMiniPlayer: false 关闭，
+  ///   避免与这里提供的重复；
+  /// - 其余页面在 tab 模式下依赖 _MainLayout 的全局 MiniPlayer，作为二级路由
+  ///   打开时没有该全局条，这里统一补上；
+  /// - 设置页除外：不挂 MiniPlayer，保持纯设置界面。
   Widget _pageForTabAsRoute(String tabId) {
+    final Widget page;
     switch (tabId) {
       case 'discover':
-        return const DiscoverPage();
+        page = const DiscoverPage();
+        break;
       case 'coverflow':
-        return const CoverFlowPage();
+        page = const CoverFlowPage();
+        break;
       case 'library':
-        return const LibraryPage();
+        page = const LibraryPage();
+        break;
       case 'favorites':
-        return const FavoritesPage();
+        page = const FavoritesPage();
+        break;
       case 'fm':
-        return const PersonalFmPage();
+        page = const PersonalFmPage();
+        break;
       case 'search':
-        return const SearchPage();
+        // 路由模式的 MiniPlayer 由本方法统一提供，关闭页面自带的以免重复
+        page = const SearchPage(showMiniPlayer: false);
+        break;
       case 'charts':
-        return const ChartsPage();
+        page = const ChartsPage();
+        break;
       case 'ip':
-        return const IpPage();
+        page = const IpPage();
+        break;
       case 'recognition':
-        return const SongRecognitionPage();
+        page = const SongRecognitionPage();
+        break;
       case 'audiobook':
-        return const AudiobookPage();
+        page = const AudiobookPage();
+        break;
       case 'scene':
-        return const ScenePage();
+        page = const ScenePage();
+        break;
       case 'channel':
-        return const ChannelPage();
+        page = const ChannelPage();
+        break;
       case 'settings':
-        return const SettingsPage();
+        page = const SettingsPage();
+        break;
       default:
-        return const SizedBox.shrink();
+        page = const SizedBox.shrink();
     }
+    // 设置页不挂 MiniPlayer，其余二级路由页统一挂载
+    if (tabId == 'settings') return page;
+    return Column(
+      children: [
+        Expanded(child: page),
+        const MiniPlayer(),
+      ],
+    );
   }
 
   @override
