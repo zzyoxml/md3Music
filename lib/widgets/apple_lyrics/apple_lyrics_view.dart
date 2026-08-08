@@ -112,6 +112,23 @@ class AppleLyricsView extends StatefulWidget {
     return lo > 0 ? lo - 1 : 0;
   }
 
+  /// 计算行的"人声实际结束时间"（毫秒），用于间奏 gap 判定与激活窗口。
+  ///
+  /// - 无逐字行（LRC/纯文本）：直接返回 [LyricLine.endTime]
+  ///   （LRC duration 为 0，endTime = startTime，两行间隔即 startTime 之差）。
+  /// - 逐字行（KRC）：KRC 行级 duration 常覆盖尾音/空白，甚至延伸到下一行，
+  ///   若直接用 endTime = startTime + duration，gap 被压缩为负或 < 阈值，
+  ///   导致间奏点从源头识别不到。取「行 duration 结束」与「最后一个字结束」
+  ///   的较小值作为人声实际结束，更贴近演唱真实空档。
+  @visibleForTesting
+  static int effectiveLineEndTime(LyricLine line) {
+    final int lineEnd = line.endTime;
+    if (line.words.isEmpty) return lineEnd;
+    final LyricWord lastWord = line.words.last;
+    final int wordEnd = lastWord.startTime + lastWord.duration;
+    return math.min(lineEnd, wordEnd);
+  }
+
   @override
   State<AppleLyricsView> createState() => _AppleLyricsViewState();
 }
@@ -199,11 +216,27 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 省电模式下的推进间隔（60fps ≈ 16.67ms）
   static const double _ecoFrameInterval = 1.0 / 60.0;
 
+  /// Ticker 帧间隔跳变阈值（秒）。
+  ///
+  /// 超过此值视为 Ticker 曾被 mute（TabBarView 切走 / App 退后台 /
+  /// 主线程长时间卡顿）：mute 期间帧回调冻结，间奏点动画时钟（帧 dt 累积）
+  /// 会停留在切走前的位置，而歌曲继续播放 → 切回后"跟不上进度"。
+  /// 此时需把间奏点动画时钟重新对齐到真实窗口进度（O(1) 检测，无额外功耗）。
+  static const double _tickerGapResumeThreshold = 0.5;
+
   /// 省电模式帧时间累积器：未到推进间隔时跳过本帧
   double _ecoAccumulator = 0;
 
   /// 省电模式是否被用户滚动解锁（true = 每帧推进）
   bool _ecoUnlocked = false;
+
+  /// P1-C：上次间奏检测时的权威播放时间（毫秒）。
+  ///
+  /// 间奏检测只依赖 currentTimeMs（positionStream 约 200ms 更新一次），
+  /// 时间未变且占位动画已收敛时，跳过每帧 O(间奏数) 的线性遍历。
+  /// 同时用于检测时间回退（seek/跳转）：currentTimeMs < 上次值时说明
+  /// 播放位置回跳，需强制重置间奏点动画时钟（见 [_updateInterlude]）。
+  int _lastInterludeCheckTimeMs = -1;
 
   // ============== 动态字体颜色（仅 AM 播放器，默认关闭） ==============
   // 开启后当前行歌词颜色按「70% 白 + 30% 封面提取色」混色，
@@ -461,7 +494,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       // _updateInterlude 自然不会激活任何间奏，节奏点不会出现。
       if (widget.enableInterludeDots && i < _cleanedLines.length - 1) {
         final next = _cleanedLines[i + 1];
-        final gap = next.startTime - line.endTime;
+        // 用"人声实际结束时间"而非 endTime（KRC 行 duration 常覆盖尾音/空白，
+        // 会把真实 gap 压缩导致间奏点识别不到，见 effectiveLineEndTime）
+        final gap = next.startTime - AppleLyricsView.effectiveLineEndTime(line);
         if (gap >= LyricLayout.interludeThresholdMs) {
           interludeIndices.add(i);
         }
@@ -697,6 +732,13 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     double dt = (elapsed - _lastElapsed).inMicroseconds / 1000000.0;
     _lastElapsed = elapsed;
 
+    // 检测 Ticker 曾被 mute（TabBarView 切走 / App 退后台 / 长时间卡顿）：
+    // 恢复后首帧 dt 会等于切走时长（远大于正常帧间隔）。mute 期间
+    // 间奏点动画时钟（帧 dt 累积）冻结而歌曲继续播放，需在本帧把时钟
+    // 对齐到真实窗口进度（见 _updateInterlude 的 alignDotsToRealTime）。
+    // 该检测为 O(1) 比较，不增加每帧开销。
+    final bool tickerGapResume = dt > _tickerGapResumeThreshold;
+
     // ============== 歌词省电模式：限帧到 60fps ==============
     // 滚动中（拖动/惯性/等待回弹/回弹动画）解锁帧率限制，每帧推进；
     // 滚动收敛后自动重新锁定，未到推进间隔的帧直接跳过（省 CPU + 重绘）。
@@ -828,7 +870,30 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     }
 
     // 5. 间奏检测与推进
-    _updateInterlude();
+    // P1-C: 间奏检测只依赖 currentTimeMs（positionStream 约 200ms 更新一次），
+    // 时间未变且占位动画已收敛时，跳过每帧 O(间奏数) 的线性遍历。
+    // 占位未收敛（展开/收起中）时仍需每帧检测以正确处理 clear 时机。
+    final bool interludeTimeChanged =
+        widget.currentTimeMs != _lastInterludeCheckTimeMs;
+    final bool interludePlaceholderSettled = _activeInterludeIdx >= 0
+        ? _interludeExpandProgress >= 0.999
+        : _interludeExpandProgress <= 0.001;
+    if (interludeTimeChanged ||
+        !interludePlaceholderSettled ||
+        tickerGapResume) {
+      // 时间回退（seek/跳转回跳）时强制重置间奏点动画时钟：
+      // setInterlude 幂等保护无法区分"每帧重复调用"与"seek 回到同一间奏"，
+      // 不重置会导致动画从旧进度继续、甚至超时隐藏（间奏点不显示）。
+      final bool timeRewound =
+          widget.currentTimeMs < _lastInterludeCheckTimeMs;
+      _lastInterludeCheckTimeMs = widget.currentTimeMs;
+      _updateInterlude(
+        forceDotsReset: timeRewound,
+        // Ticker 曾被 mute（切走 tab / 退后台）恢复：动画时钟滞后于真实进度，
+        // 需对齐到当前间奏窗口内的真实偏移（而非重置从 0 重播入场动画）。
+        alignDotsToRealTime: tickerGapResume,
+      );
+    }
 
     // 6. 推进间奏点动画时钟（基于帧 dt，60fps 流畅，不受 positionStream 5fps 限制）
     // 暂停时不推进动画时钟，让间奏点随播放器一起暂停
@@ -1027,7 +1092,19 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 间奏点会自然完成消失动画（最后 750ms easeInBack 缩小）。
   /// 占位收起与点消失同步进行（都是 ~300-750ms）。
   /// 只有当 `_interludeExpandProgress` 收起到 0 后才 `clear()` 间奏点状态。
-  void _updateInterlude() {
+  /// [forceDotsReset] 为 true 时，即使命中的间奏与当前激活相同，也强制重置
+  /// 间奏点动画时钟（`_interludeDots.setInterlude(..., forceReset: true)`）。
+  /// 用于 seek/跳转回跳：幂等保护会忽略相同间奏，导致动画时钟从旧进度继续，
+  /// 一旦超过间奏总时长，间奏点会直接隐藏（识别为"未启用"）。
+  ///
+  /// [alignDotsToRealTime] 为 true 时，把间奏点动画时钟对齐到
+  /// `currentTimeMs - gapStart`（真实窗口内偏移）。用于 Ticker 被 mute
+  /// （切走 tab / 退后台）后恢复：帧时钟冻结期间歌曲继续播放，动画时钟
+  /// 滞后于真实进度，对齐后间奏点立即处于正确阶段，而非重置重播入场动画。
+  void _updateInterlude({
+    bool forceDotsReset = false,
+    bool alignDotsToRealTime = false,
+  }) {
     int foundIdx = -1;
     int? gapStart;
     int? gapEnd;
@@ -1036,7 +1113,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       if (lineIdx < 0 || lineIdx >= widget.lines.length - 1) continue;
       final current = widget.lines[lineIdx];
       final next = widget.lines[lineIdx + 1];
-      final start = current.endTime;
+      // 激活窗口起点与 gap 判定（_recomputeLineHeightsIfNeeded）保持一致，
+      // 均用"人声实际结束时间"（KRC 行 duration 覆盖尾音/空白时窗口起点会偏晚，
+      // 导致短暂处于真实空档却未激活间奏点）。
+      final start = AppleLyricsView.effectiveLineEndTime(current);
       final end = next.startTime - LyricLayout.interludeEarlyEndMs;
       if (widget.currentTimeMs >= start && widget.currentTimeMs < end) {
         foundIdx = i;
@@ -1049,7 +1129,19 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _activeInterludeIdx = foundIdx;
 
     if (foundIdx >= 0 && gapStart != null && gapEnd != null) {
-      _interludeDots.setInterlude(gapStart, gapEnd);
+      // 先确保间奏状态正确（新间奏会重置时钟，幂等命中的相同间奏保留），
+      // 再按需校正动画时钟。
+      _interludeDots.setInterlude(gapStart, gapEnd,
+          forceReset: forceDotsReset);
+      // 时钟漂移校正：帧时钟在 Ticker mute（切走 tab / 退后台）或页面重建
+      // （TabBarView 默认销毁 State，新 State 时钟从 0 开始）期间滞后于真实
+      // 进度。每次权威位置更新时比较偏差，超阈值（1s）即对齐到真实窗口偏移。
+      // 正常播放下偏差不超过 position 更新粒度（约 200ms），不会误触发，
+      // 因此不引入额外开销。
+      if (alignDotsToRealTime ||
+          _interludeDots.shouldRealignTo(widget.currentTimeMs, driftMs: 1000)) {
+        _interludeDots.alignToRealTime(widget.currentTimeMs);
+      }
       // 记录最后激活的 anchor 行索引（用于间奏结束后继续计算占位偏移）
       if (foundIdx < _interludeAfterIndices.length) {
         _lastActiveAnchorIdx = _interludeAfterIndices[foundIdx];

@@ -52,6 +52,43 @@ void main() {
     });
   });
 
+  group('AppleLyricsView.effectiveLineEndTime', () {
+    test('无逐字行（LRC/纯文本）返回 endTime = startTime + duration', () {
+      const line = LyricLine(startTime: 1000, duration: 0, text: 'A');
+      expect(AppleLyricsView.effectiveLineEndTime(line), 1000);
+      const line2 = LyricLine(startTime: 1000, duration: 500, text: 'A');
+      expect(AppleLyricsView.effectiveLineEndTime(line2), 1500);
+    });
+
+    test('逐字行（KRC）：行 duration 覆盖空白时取最后一个字结束时间', () {
+      const line = LyricLine(
+        startTime: 12500,
+        duration: 4200, // 行 duration 覆盖到 16700（含尾音/空白）
+        text: '運命の華',
+        words: [
+          LyricWord(startTime: 12500, duration: 300, text: '運'),
+          LyricWord(startTime: 12800, duration: 400, text: '命'),
+          LyricWord(startTime: 13700, duration: 600, text: '華'), // 结束于 14300
+        ],
+      );
+      // 最后一个字结束 14300 < 行 duration 结束 16700 → 取 14300
+      expect(AppleLyricsView.effectiveLineEndTime(line), 14300);
+    });
+
+    test('逐字行（KRC）：行 duration 精确覆盖到最后字时不改变行为', () {
+      const line = LyricLine(
+        startTime: 12500,
+        duration: 1800, // 恰好 = 最后字结束偏移（12500+1800=14300）
+        text: '運命の華',
+        words: [
+          LyricWord(startTime: 12500, duration: 300, text: '運'),
+          LyricWord(startTime: 13700, duration: 600, text: '華'),
+        ],
+      );
+      expect(AppleLyricsView.effectiveLineEndTime(line), 14300);
+    });
+  });
+
   group('AppleLyricsView build', () {
     // 辅助：泵送多帧让弹簧动画推进
     Future<void> pumpFrames(WidgetTester tester, int frames) async {
