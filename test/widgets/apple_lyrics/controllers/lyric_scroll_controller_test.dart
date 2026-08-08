@@ -264,5 +264,39 @@ void main() {
       // 多次 dispose 也不应崩溃
       controller.dispose();
     });
+
+    test('11. 相同参数重复 setCurrentLine 不重算弹簧参数（P1-D 缓存）', () {
+      final controller = LyricScrollController();
+      controller.setViewportSize(const Size(400, 600));
+      // seeking 模式固定参数 (90, 15)
+      controller.setCurrentLine(0, isSeeking: true, lineHeight: 40);
+      expect(controller.currentStiffness, closeTo(90, 1e-9));
+      expect(controller.currentDamping, closeTo(15, 1e-9));
+
+      // 相同输入重复调用：缓存命中，参数保持不变（不重算 pow）
+      controller.setCurrentLine(0, isSeeking: true, lineHeight: 40);
+      expect(controller.currentStiffness, closeTo(90, 1e-9));
+      expect(controller.currentDamping, closeTo(15, 1e-9));
+
+      // 切换普通模式（intervalMs 变化）→ 触发重算并更新缓存
+      controller.setCurrentLine(
+        0,
+        isSeeking: false,
+        lineHeight: 40,
+        intervalMs: 200,
+      );
+      final double stiffness = controller.currentStiffness;
+      expect(stiffness,
+          closeTo(LyricLayout.posYNormalStiffness(200), 1e-9));
+      // 再次相同：缓存命中，值保持
+      controller.setCurrentLine(
+        0,
+        isSeeking: false,
+        lineHeight: 40,
+        intervalMs: 200,
+      );
+      expect(controller.currentStiffness, closeTo(stiffness, 1e-9));
+      controller.dispose();
+    });
   });
 }

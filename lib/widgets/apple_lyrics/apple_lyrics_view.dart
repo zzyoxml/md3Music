@@ -283,6 +283,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 在 _recomputeDuetIfNeeded 中随 lines 引用变化时更新。
   bool _cachedHasTimestamps = false;
 
+  /// 缓存的"是否含逐字行"结果（避免每帧 O(N) 遍历所有 lines）。
+  ///
+  /// 逐字行 = words 非空（KRC、字级 LRC，含本地/云盘音乐的 LRC 逐字）。
+  /// P0-A 只对「整首歌都无逐字」的歌词（LRC 逐行 / 纯文本）启用
+  /// 播放中停 Ticker 的静止省电模式；任何逐字行都必须保持 Ticker
+  /// 持续推进逐字渐变/上浮/辉光动画。
+  bool _cachedHasAnyWordTiming = false;
+
   /// 重算对唱预处理结果（若 lines 引用或开关变化）。
   void _recomputeDuetIfNeeded() {
     final useDuet = LyricPreferences.instance.useDuetLayout;
@@ -295,6 +303,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _cachedDuetLinesRef = widget.lines;
     // 缓存 hasTimestamps 结果，避免每帧 O(N) 遍历
     _cachedHasTimestamps = widget.lines.any((l) => l.startTime > 0);
+    // 缓存"是否含逐字行"（KRC / 字级 LRC 的 words 非空），P0-A 静止省电
+    // 模式仅对整首歌无逐字（LRC 逐行 / 纯文本）生效
+    _cachedHasAnyWordTiming = widget.lines.any((l) => l.words.isNotEmpty);
     final result = DuetLayout.process(widget.lines, useDuet);
     _cleanedLines = result.cleanedLines;
     _duetAlignments = result.alignments;
@@ -663,6 +674,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     if (!identical(oldWidget.lines, widget.lines)) {
       _startTickerIfNeeded();
     }
+    // P0-A: 非逐字歌词在播放中可能已停 Ticker（静止省电）。position 更新
+    //（约 200ms，经 ListenableBuilder 重建本 widget）时唤醒一帧：若确实
+    // 发生行切换 / 滚动回弹 / 间奏等动画则继续跑，否则下一帧再次收敛停止。
+    if (oldWidget.currentTimeMs != widget.currentTimeMs && widget.isPlaying) {
+      _startTickerIfNeeded();
+    }
   }
 
   @override
@@ -1000,13 +1017,23 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     //   - 视口附近 renderer alpha 已收敛
     // 收敛时停止 Ticker，恢复播放或用户交互时由 didUpdateWidget /
     // _onTapDown / _onVerticalDragUpdate 重新启动。
-    if (!widget.isPlaying &&
+    // P0-A：非逐字歌词（LRC 逐行 / 纯文本，整首歌无 word timing）在播放中
+    // 画面同样静止（无逐字渐变/上浮/辉光），允许播放中停 Ticker 省电；
+    // position 更新（约 200ms）由 didUpdateWidget 唤醒一帧检查即可。
+    // 逐字歌词（KRC / 字级 LRC，含本地/云盘音乐的 LRC 逐字）必须保持
+    // Ticker 持续推进动画，由 canStopWhilePlaying 排除。
+    // 间奏激活期间（_activeInterludeIdx >= 0）间奏点有呼吸/亮起动画，
+    // 也不能停 Ticker，否则圆点冻结。
+    final bool animConverged =
         _scrollController.isConverged &&
-        _scaleController.isConverged &&
-        (_blurFade - blurFadeTarget).abs() < 0.001 &&
-        (_interludeExpandProgress - interludeTarget).abs() < 0.001 &&
-        _arePerLineSpringsConverged() &&
-        _areRenderersConverged()) {
+            _scaleController.isConverged &&
+            (_blurFade - blurFadeTarget).abs() < 0.001 &&
+            (_interludeExpandProgress - interludeTarget).abs() < 0.001 &&
+            _arePerLineSpringsConverged() &&
+            _areRenderersConverged();
+    final bool canStopWhilePlaying =
+        !_cachedHasAnyWordTiming && _activeInterludeIdx < 0;
+    if (animConverged && (!widget.isPlaying || canStopWhilePlaying)) {
       _stopTickerIfNeeded();
       // 最后一帧 setState 确保稳态画面渲染
       setState(() {});
