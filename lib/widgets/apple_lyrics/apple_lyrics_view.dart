@@ -140,6 +140,18 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   double _lastRepaintInterludeProgress = 0;
   int _lastRepaintCurrentLineIndex = -1;
 
+  /// P0-1 方案 A：高斯模糊层（Positioned/Opacity/RawImage）的脏标记缓存。
+  ///
+  /// 稳态逐字演唱时模糊层完全静止（行 / posY / blurFade / 间奏占位 / 弹簧
+  /// 都不变），无需每帧 setState 重建 widget 树。仅当以下任一变化时重建：
+  /// 当前行、posY(>0.5px)、blurFade(>0.001)、间奏占位 progress(>0.001)、
+  /// perLine 弹簧偏移(>0.5px)。
+  /// blurFade 初始 -1 强制首帧重建（首次进入需创建模糊层）。
+  int _lastBlurRebuildLineIndex = -1;
+  double _lastBlurRebuildPosY = 0;
+  double _lastBlurRebuildBlurFade = -1;
+  double _lastBlurRebuildInterludeProgress = -1;
+
   // ============== 控制器与效果 ==============
 
   final LyricScrollController _scrollController = LyricScrollController();
@@ -682,13 +694,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   void _onTick(Duration elapsed) {
     // 使用 Ticker 的调度器时钟（测试中为模拟时间）计算 dt，
     // 避免 DateTime.now() 在测试中返回真实墙钟时间导致弹簧不推进。
-    final dt = (elapsed - _lastElapsed).inMicroseconds / 1000000.0;
+    double dt = (elapsed - _lastElapsed).inMicroseconds / 1000000.0;
     _lastElapsed = elapsed;
 
     // ============== 歌词省电模式：限帧到 60fps ==============
     // 滚动中（拖动/惯性/等待回弹/回弹动画）解锁帧率限制，每帧推进；
     // 滚动收敛后自动重新锁定，未到推进间隔的帧直接跳过（省 CPU + 重绘）。
-    // 跳过帧的 dt 已累加进下一次推进，动画进度保持真实时间。
+    // 跳过帧的 dt 累加进 [_ecoAccumulator]；执行帧用累积后的 dt 推进，
+    // 保证动画（逐字渐变/间奏点/弹簧）按真实时间速度前进，限帧不变慢。
     if (LyricPreferences.instance.ecoMode) {
       _ecoUnlocked = _scrollController.isUserScrolling ||
           _scrollController.isWaitingForAutoReturn ||
@@ -698,7 +711,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         if (_ecoAccumulator < _ecoFrameInterval) {
           return; // 未到推进时机：跳过本帧全部动画计算与重绘
         }
-        _ecoAccumulator -= _ecoFrameInterval;
+        // 修复：把累积的跳过帧时间一并作为本帧 dt 推进动画。
+        // 之前只累加到 _ecoAccumulator 做节流判断，执行帧仍用本帧单帧 dt：
+        // 120Hz 屏上每 2 帧才执行一次但 dt 只有 8.3ms，
+        // 导致间奏点时钟/逐字渐变等 dt 驱动动画以真实时间一半的速度运行。
+        dt = _ecoAccumulator;
+        _ecoAccumulator = 0;
       }
     }
 
@@ -953,11 +971,13 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       _lastRepaintScale = currentScale;
       _lastRepaintBlurFade = _blurFade;
       _lastRepaintInterludeProgress = _interludeExpandProgress;
-      // 性能优化：用持久化 painter + notifyListeners 替代 setState，
-      // 避免每帧触发 build() 重建整个 widget tree（LayoutBuilder/GestureDetector/ShaderMask）。
-      // Gaussian 模糊需要重建 widget（Positioned/Opacity 层），仍用 setState。
-      final useGaussian = LyricPreferences.instance.useGaussianBlur;
-      if (_painter != null && !useGaussian) {
+      // P0-1 方案 A：统一走持久化 painter 快路径（repaintNotifier 驱动文字层重绘），
+      // 避免每帧 setState + build 重建整个 widget tree（LayoutBuilder/GestureDetector/
+      // ShaderMask/模糊层 Stack）。
+      // 高斯模糊层（Positioned/Opacity/RawImage）仅在自身状态变化时才 setState 重建：
+      // 当前行 / posY / blurFade / 间奏占位 progress / perLine 弹簧偏移任一变化。
+      // 稳态逐字演唱时模糊层完全静止，零重建。
+      if (_painter != null) {
         _painter!.updatePerFrame(
           currentLineIndex: _currentLineIndex,
           posY: currentPosY,
@@ -970,6 +990,21 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           perLineOffsetsGeneration: _perLineOffsetsGeneration,
         );
         _repaintNotifier.fireRepaint();
+        final useGaussian = LyricPreferences.instance.useGaussianBlur;
+        if (useGaussian &&
+            (_currentLineIndex != _lastBlurRebuildLineIndex ||
+                (currentPosY - _lastBlurRebuildPosY).abs() > 0.5 ||
+                (_blurFade - _lastBlurRebuildBlurFade).abs() > 0.001 ||
+                (_interludeExpandProgress - _lastBlurRebuildInterludeProgress)
+                        .abs() >
+                    0.001 ||
+                _hasPerLineOffsetChanged())) {
+          _lastBlurRebuildLineIndex = _currentLineIndex;
+          _lastBlurRebuildPosY = currentPosY;
+          _lastBlurRebuildBlurFade = _blurFade;
+          _lastBlurRebuildInterludeProgress = _interludeExpandProgress;
+          setState(() {});
+        }
       } else {
         setState(() {});
       }
@@ -1381,6 +1416,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
     // 从缓存绘制模糊层
     final List<Widget> layers = [];
+    // P0-2：perLine 弹簧偏移列表只需构建一次供所有模糊层复用，
+    // 避免每层都全量遍历 O(N) 行（k 层 × N 行 = 每帧 O(k×N) 迭代）。
+    final List<double> offsets = _buildPerLineOffsets();
 
     for (final entry in _cachedBlurLevels.entries) {
       final int i = entry.key;
@@ -1399,7 +1437,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
               : i * mainLineHeight) +
           _interludeOffsetBefore(i);
       // 应用弹簧偏移
-      final List<double> offsets = _buildPerLineOffsets();
       final double springOffset = (i < offsets.length) ? offsets[i] : 0.0;
       final double y = lineTop + _scrollController.posY + springOffset;
       final double lineHeight = (i < _lineHeights.length)
@@ -1451,6 +1488,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         if (image != null) {
           _lineBlurImages[lineIndex]?.$1.dispose();
           _lineBlurImages[lineIndex] = (image, blurLevel);
+          // P0-1 方案 A：异步模糊图渲染完成后必须重建一次模糊层。
+          // 稳态（无其他 setState 源）下若不 setState，新图片永远不会显示。
+          if (mounted) setState(() {});
         }
       });
     }
