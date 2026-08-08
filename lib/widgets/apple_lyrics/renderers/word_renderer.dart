@@ -673,7 +673,8 @@ class WordRenderer {
         final Rect wordRect = Rect.fromLTWH(wordX, wordY, width, fontSize * lineHeight);
         canvas.saveLayer(wordRect, Paint());
         painter.paint(canvas, wordPos); // dst = 白色文字（layout 已缓存，不重算）
-        // 复用 _gradientPaint 实例，只改 shader 和 blendMode
+        // 复用 _gradientPaint 实例，只改 shader 和 blendMode。
+        // 注意：不要对渐变 alpha 做量化缓存（曾引入 5% 可见阶跃闪烁 + 频繁清空重建反而卡顿）。
         _gradientPaint.shader = LinearGradient(
           colors: [
             Color.fromRGBO(textRed, textGreen, textBlue, leftAlpha),
