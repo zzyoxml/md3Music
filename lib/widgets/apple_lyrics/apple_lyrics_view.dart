@@ -112,6 +112,23 @@ class AppleLyricsView extends StatefulWidget {
     return lo > 0 ? lo - 1 : 0;
   }
 
+  /// 计算行的"人声实际结束时间"（毫秒），用于间奏 gap 判定与激活窗口。
+  ///
+  /// - 无逐字行（LRC/纯文本）：直接返回 [LyricLine.endTime]
+  ///   （LRC duration 为 0，endTime = startTime，两行间隔即 startTime 之差）。
+  /// - 逐字行（KRC）：KRC 行级 duration 常覆盖尾音/空白，甚至延伸到下一行，
+  ///   若直接用 endTime = startTime + duration，gap 被压缩为负或 < 阈值，
+  ///   导致间奏点从源头识别不到。取「行 duration 结束」与「最后一个字结束」
+  ///   的较小值作为人声实际结束，更贴近演唱真实空档。
+  @visibleForTesting
+  static int effectiveLineEndTime(LyricLine line) {
+    final int lineEnd = line.endTime;
+    if (line.words.isEmpty) return lineEnd;
+    final LyricWord lastWord = line.words.last;
+    final int wordEnd = lastWord.startTime + lastWord.duration;
+    return math.min(lineEnd, wordEnd);
+  }
+
   @override
   State<AppleLyricsView> createState() => _AppleLyricsViewState();
 }
@@ -199,11 +216,27 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 省电模式下的推进间隔（60fps ≈ 16.67ms）
   static const double _ecoFrameInterval = 1.0 / 60.0;
 
+  /// Ticker 帧间隔跳变阈值（秒）。
+  ///
+  /// 超过此值视为 Ticker 曾被 mute（TabBarView 切走 / App 退后台 /
+  /// 主线程长时间卡顿）：mute 期间帧回调冻结，间奏点动画时钟（帧 dt 累积）
+  /// 会停留在切走前的位置，而歌曲继续播放 → 切回后"跟不上进度"。
+  /// 此时需把间奏点动画时钟重新对齐到真实窗口进度（O(1) 检测，无额外功耗）。
+  static const double _tickerGapResumeThreshold = 0.5;
+
   /// 省电模式帧时间累积器：未到推进间隔时跳过本帧
   double _ecoAccumulator = 0;
 
   /// 省电模式是否被用户滚动解锁（true = 每帧推进）
   bool _ecoUnlocked = false;
+
+  /// P1-C：上次间奏检测时的权威播放时间（毫秒）。
+  ///
+  /// 间奏检测只依赖 currentTimeMs（positionStream 约 200ms 更新一次），
+  /// 时间未变且占位动画已收敛时，跳过每帧 O(间奏数) 的线性遍历。
+  /// 同时用于检测时间回退（seek/跳转）：currentTimeMs < 上次值时说明
+  /// 播放位置回跳，需强制重置间奏点动画时钟（见 [_updateInterlude]）。
+  int _lastInterludeCheckTimeMs = -1;
 
   // ============== 动态字体颜色（仅 AM 播放器，默认关闭） ==============
   // 开启后当前行歌词颜色按「70% 白 + 30% 封面提取色」混色，
@@ -228,6 +261,43 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   final Map<int, (ui.Image image, int blurLevel)> _lineBlurImages = {};
   double _viewportWidth = 0;
 
+  // P2-H 方案 A：ShaderMask 上下渐隐 shader 缓存。
+  // shaderCallback 在每次 build 时被调用，渐隐参数仅依赖 bounds 尺寸，
+  // 尺寸不变时复用同一 shader，避免每帧/每次重建 LinearGradient + createShader。
+  ui.Shader? _fadeShader;
+  Rect? _fadeShaderBounds;
+
+  /// 获取（或按需重建）歌词界面上下边界渐隐 shader。
+  ///
+  /// 渐隐是静态的（上下 24px alpha 渐变），仅随视口尺寸变化。
+  /// bounds 不变时直接返回缓存实例，消除每次 build 的对象与 shader 分配。
+  ui.Shader _fadeShaderFor(Rect bounds) {
+    if (_fadeShader != null && bounds == _fadeShaderBounds) {
+      return _fadeShader!;
+    }
+    const double fadeHeight = 24.0;
+    final double fadeRatio = (fadeHeight / bounds.height).clamp(0.0, 0.5);
+    final shader = LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: const [
+        Colors.transparent,
+        Colors.black,
+        Colors.black,
+        Colors.transparent,
+      ],
+      stops: [
+        0.0,
+        fadeRatio,
+        1.0 - fadeRatio,
+        1.0,
+      ],
+    ).createShader(bounds);
+    _fadeShader = shader;
+    _fadeShaderBounds = bounds;
+    return shader;
+  }
+
   /// 最大 sigma 限制
   static const double _maxSigma = 2.0;
 
@@ -250,6 +320,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 在 _recomputeDuetIfNeeded 中随 lines 引用变化时更新。
   bool _cachedHasTimestamps = false;
 
+  /// 缓存的"是否含逐字行"结果（避免每帧 O(N) 遍历所有 lines）。
+  ///
+  /// 逐字行 = words 非空（KRC、字级 LRC，含本地/云盘音乐的 LRC 逐字）。
+  /// P0-A 只对「整首歌都无逐字」的歌词（LRC 逐行 / 纯文本）启用
+  /// 播放中停 Ticker 的静止省电模式；任何逐字行都必须保持 Ticker
+  /// 持续推进逐字渐变/上浮/辉光动画。
+  bool _cachedHasAnyWordTiming = false;
+
   /// 重算对唱预处理结果（若 lines 引用或开关变化）。
   void _recomputeDuetIfNeeded() {
     final useDuet = LyricPreferences.instance.useDuetLayout;
@@ -262,6 +340,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _cachedDuetLinesRef = widget.lines;
     // 缓存 hasTimestamps 结果，避免每帧 O(N) 遍历
     _cachedHasTimestamps = widget.lines.any((l) => l.startTime > 0);
+    // 缓存"是否含逐字行"（KRC / 字级 LRC 的 words 非空），P0-A 静止省电
+    // 模式仅对整首歌无逐字（LRC 逐行 / 纯文本）生效
+    _cachedHasAnyWordTiming = widget.lines.any((l) => l.words.isNotEmpty);
     final result = DuetLayout.process(widget.lines, useDuet);
     _cleanedLines = result.cleanedLines;
     _duetAlignments = result.alignments;
@@ -461,7 +542,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       // _updateInterlude 自然不会激活任何间奏，节奏点不会出现。
       if (widget.enableInterludeDots && i < _cleanedLines.length - 1) {
         final next = _cleanedLines[i + 1];
-        final gap = next.startTime - line.endTime;
+        // 用"人声实际结束时间"而非 endTime（KRC 行 duration 常覆盖尾音/空白，
+        // 会把真实 gap 压缩导致间奏点识别不到，见 effectiveLineEndTime）
+        final gap = next.startTime - AppleLyricsView.effectiveLineEndTime(line);
         if (gap >= LyricLayout.interludeThresholdMs) {
           interludeIndices.add(i);
         }
@@ -543,40 +626,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     return true;
   }
 
-  /// v3 优化：检测本帧 perLine 偏移是否有显著变化（>0.5px）。
-  /// 用于 _onTick 末尾判断是否需要 setState。
-  bool _hasPerLineOffsetChanged() {
-    final int len = _reusedPerLineOffsets.length;
-    for (int i = 0; i < len; i++) {
-      final spring = _perLineSprings[i];
-      if (spring == null) continue;
-      if ((spring.position - _reusedPerLineOffsets[i]).abs() > 0.5) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// v3 优化：检测本帧 renderer alpha 是否有显著变化。
-  /// !isConverged 表示仍在动画中，需要继续 setState。
-  bool _hasRendererAlphaChanged() {
-    final currentWord = _wordRenderers[_currentLineIndex];
-    if (currentWord != null && !currentWord.isConverged) {
-      return true;
-    }
-    final int overscan = _overscan;
-    final int startIdx = math.max(0, _currentLineIndex - overscan);
-    final int endIdx =
-        math.min(widget.lines.length, _currentLineIndex + overscan);
-    for (int i = startIdx; i < endIdx; i++) {
-      final renderer = _lineRenderers[i];
-      if (renderer != null && !renderer.isConverged) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /// 偏好变化时触发重绘。
   ///
   /// **始终 setState**：偏好变化（如 useDuetLayout 切换）需要触发 build，
@@ -626,6 +675,17 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     }
     // v3 优化：切歌（lines 引用变化）时重启 Ticker，重新推进新行的 renderer
     if (!identical(oldWidget.lines, widget.lines)) {
+      // P2-K: 清理按行索引缓存的弹簧与延迟记录——它们只增不减，
+      // 长歌曲 + 多次切歌会持续累积内存（Spring 对象虽小但按行数增长）。
+      // 新歌行数不同，旧索引无意义，直接整体清空。
+      _perLineSprings.clear();
+      _delayStartTimes.clear();
+      _startTickerIfNeeded();
+    }
+    // P0-A: 非逐字歌词在播放中可能已停 Ticker（静止省电）。position 更新
+    //（约 200ms，经 ListenableBuilder 重建本 widget）时唤醒一帧：若确实
+    // 发生行切换 / 滚动回弹 / 间奏等动画则继续跑，否则下一帧再次收敛停止。
+    if (oldWidget.currentTimeMs != widget.currentTimeMs && widget.isPlaying) {
       _startTickerIfNeeded();
     }
   }
@@ -696,6 +756,13 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 避免 DateTime.now() 在测试中返回真实墙钟时间导致弹簧不推进。
     double dt = (elapsed - _lastElapsed).inMicroseconds / 1000000.0;
     _lastElapsed = elapsed;
+
+    // 检测 Ticker 曾被 mute（TabBarView 切走 / App 退后台 / 长时间卡顿）：
+    // 恢复后首帧 dt 会等于切走时长（远大于正常帧间隔）。mute 期间
+    // 间奏点动画时钟（帧 dt 累积）冻结而歌曲继续播放，需在本帧把时钟
+    // 对齐到真实窗口进度（见 _updateInterlude 的 alignDotsToRealTime）。
+    // 该检测为 O(1) 比较，不增加每帧开销。
+    final bool tickerGapResume = dt > _tickerGapResumeThreshold;
 
     // ============== 歌词省电模式：限帧到 60fps ==============
     // 滚动中（拖动/惯性/等待回弹/回弹动画）解锁帧率限制，每帧推进；
@@ -802,6 +869,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final int overscan = _overscan;
     final int startIdx = math.max(0, _currentLineIndex - overscan);
     final int endIdx = math.min(widget.lines.length, _currentLineIndex + overscan);
+    // P1-G: 顺带聚合"是否有 renderer 仍在动画"，替代 _hasRendererAlphaChanged
+    // 的二次 O(±10 行) 遍历（hasVisualChange 与收敛判断复用）。
+    bool anyRendererAnimating = false;
     for (int i = startIdx; i < endIdx; i++) {
       final line = widget.lines[i];
       final isActive = i == _currentLineIndex;
@@ -820,15 +890,40 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade, blurActive: blurActive, activeColorValue: _activeLineColorValue);
         // 用平滑时间驱动逐字动画（上浮/字内渐变），避免 positionStream 5fps 卡顿
         renderer.tick(dt, _smoothPosMs.round());
+        if (!renderer.isConverged) anyRendererAnimating = true;
       } else {
         final renderer = _lineRendererFor(i);
         renderer.setLineState(isActive: isActive, scale: scale, blurFade: _blurFade, blurActive: blurActive, activeColorValue: _activeLineColorValue);
         renderer.tick(dt);
+        if (!renderer.isConverged) anyRendererAnimating = true;
       }
     }
 
     // 5. 间奏检测与推进
-    _updateInterlude();
+    // P1-C: 间奏检测只依赖 currentTimeMs（positionStream 约 200ms 更新一次），
+    // 时间未变且占位动画已收敛时，跳过每帧 O(间奏数) 的线性遍历。
+    // 占位未收敛（展开/收起中）时仍需每帧检测以正确处理 clear 时机。
+    final bool interludeTimeChanged =
+        widget.currentTimeMs != _lastInterludeCheckTimeMs;
+    final bool interludePlaceholderSettled = _activeInterludeIdx >= 0
+        ? _interludeExpandProgress >= 0.999
+        : _interludeExpandProgress <= 0.001;
+    if (interludeTimeChanged ||
+        !interludePlaceholderSettled ||
+        tickerGapResume) {
+      // 时间回退（seek/跳转回跳）时强制重置间奏点动画时钟：
+      // setInterlude 幂等保护无法区分"每帧重复调用"与"seek 回到同一间奏"，
+      // 不重置会导致动画从旧进度继续、甚至超时隐藏（间奏点不显示）。
+      final bool timeRewound =
+          widget.currentTimeMs < _lastInterludeCheckTimeMs;
+      _lastInterludeCheckTimeMs = widget.currentTimeMs;
+      _updateInterlude(
+        forceDotsReset: timeRewound,
+        // Ticker 曾被 mute（切走 tab / 退后台）恢复：动画时钟滞后于真实进度，
+        // 需对齐到当前间奏窗口内的真实偏移（而非重置从 0 重播入场动画）。
+        alignDotsToRealTime: tickerGapResume,
+      );
+    }
 
     // 6. 推进间奏点动画时钟（基于帧 dt，60fps 流畅，不受 positionStream 5fps 限制）
     // 暂停时不推进动画时钟，让间奏点随播放器一起暂停
@@ -896,6 +991,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 视口外的行弹簧偏移对渲染不可见，无需每帧推进。
     final int springStartI = math.max(0, _currentLineIndex);
     final int springEndI = math.min(widget.lines.length, _currentLineIndex + overscan);
+    // P1-G: 顺带聚合"弹簧偏移是否有显著变化（>0.5px）"，替代
+    // _hasPerLineOffsetChanged 的二次 O(N) 遍历。仅检查视口内行——
+    // 视口外行偏移对渲染不可见，无需触发重绘。
+    bool anySpringOffsetChanged = false;
     for (int i = springStartI; i < springEndI; i++) {
       final spring = _perLineSprings[i];
       if (spring == null) continue;
@@ -907,6 +1006,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           spring.tick(dt);
         }
         // 延迟未到：保持初始偏移（setPosition 已设置）
+      }
+      if (i < _reusedPerLineOffsets.length &&
+          (spring.position - _reusedPerLineOffsets[i]).abs() > 0.5) {
+        anySpringOffsetChanged = true;
       }
     }
 
@@ -935,13 +1038,28 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     //   - 视口附近 renderer alpha 已收敛
     // 收敛时停止 Ticker，恢复播放或用户交互时由 didUpdateWidget /
     // _onTapDown / _onVerticalDragUpdate 重新启动。
-    if (!widget.isPlaying &&
+    // P0-A：非逐字歌词（LRC 逐行 / 纯文本，整首歌无 word timing）在播放中
+    // 画面同样静止（无逐字渐变/上浮/辉光），允许播放中停 Ticker 省电；
+    // position 更新（约 200ms）由 didUpdateWidget 唤醒一帧检查即可。
+    // 逐字歌词（KRC / 字级 LRC，含本地/云盘音乐的 LRC 逐字）必须保持
+    // Ticker 持续推进动画，由 canStopWhilePlaying 排除。
+    // 间奏激活期间（_activeInterludeIdx >= 0）间奏点有呼吸/亮起动画，
+    // 也不能停 Ticker，否则圆点冻结。
+    final bool animConverged =
         _scrollController.isConverged &&
-        _scaleController.isConverged &&
-        (_blurFade - blurFadeTarget).abs() < 0.001 &&
-        (_interludeExpandProgress - interludeTarget).abs() < 0.001 &&
-        _arePerLineSpringsConverged() &&
-        _areRenderersConverged()) {
+            _scaleController.isConverged &&
+            (_blurFade - blurFadeTarget).abs() < 0.001 &&
+            (_interludeExpandProgress - interludeTarget).abs() < 0.001;
+    // P1-G: perLine 弹簧 / renderer 的收敛检测（各 O(±10 行) 遍历）只在
+    // 需要"停 Ticker 决策"时执行：逐字歌词播放中永远不会停（P0-A 排除），
+    // 跳过这两个循环；非逐字播放中仅每 200ms 唤醒帧执行一次。
+    final bool needsStopDecision = !widget.isPlaying || !_cachedHasAnyWordTiming;
+    final bool canStopWhilePlaying =
+        !_cachedHasAnyWordTiming && _activeInterludeIdx < 0;
+    final bool deepConverged = !needsStopDecision ||
+        (_arePerLineSpringsConverged() && _areRenderersConverged());
+    if (animConverged && deepConverged &&
+        (!widget.isPlaying || canStopWhilePlaying)) {
       _stopTickerIfNeeded();
       // 最后一帧 setState 确保稳态画面渲染
       setState(() {});
@@ -959,8 +1077,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
             (_blurFade - _lastRepaintBlurFade).abs() > 0.001 ||
             (_interludeExpandProgress - _lastRepaintInterludeProgress).abs() >
                 0.001 ||
-            _hasPerLineOffsetChanged() ||
-            _hasRendererAlphaChanged() ||
+            // P1-G: 复用 renderer tick / spring 推进循环的聚合结果，避免二次遍历
+            anySpringOffsetChanged ||
+            anyRendererAnimating ||
             // P0: 暂停时间奏点动画已冻结（tick 跳过、画面静止），
             // shouldRender 仅表示"处于间奏时段"，不应再驱动每帧重绘
             (widget.isPlaying && _interludeDots.shouldRender);
@@ -998,7 +1117,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
                 (_interludeExpandProgress - _lastBlurRebuildInterludeProgress)
                         .abs() >
                     0.001 ||
-                _hasPerLineOffsetChanged())) {
+                anySpringOffsetChanged)) {
           _lastBlurRebuildLineIndex = _currentLineIndex;
           _lastBlurRebuildPosY = currentPosY;
           _lastBlurRebuildBlurFade = _blurFade;
@@ -1027,7 +1146,19 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 间奏点会自然完成消失动画（最后 750ms easeInBack 缩小）。
   /// 占位收起与点消失同步进行（都是 ~300-750ms）。
   /// 只有当 `_interludeExpandProgress` 收起到 0 后才 `clear()` 间奏点状态。
-  void _updateInterlude() {
+  /// [forceDotsReset] 为 true 时，即使命中的间奏与当前激活相同，也强制重置
+  /// 间奏点动画时钟（`_interludeDots.setInterlude(..., forceReset: true)`）。
+  /// 用于 seek/跳转回跳：幂等保护会忽略相同间奏，导致动画时钟从旧进度继续，
+  /// 一旦超过间奏总时长，间奏点会直接隐藏（识别为"未启用"）。
+  ///
+  /// [alignDotsToRealTime] 为 true 时，把间奏点动画时钟对齐到
+  /// `currentTimeMs - gapStart`（真实窗口内偏移）。用于 Ticker 被 mute
+  /// （切走 tab / 退后台）后恢复：帧时钟冻结期间歌曲继续播放，动画时钟
+  /// 滞后于真实进度，对齐后间奏点立即处于正确阶段，而非重置重播入场动画。
+  void _updateInterlude({
+    bool forceDotsReset = false,
+    bool alignDotsToRealTime = false,
+  }) {
     int foundIdx = -1;
     int? gapStart;
     int? gapEnd;
@@ -1036,7 +1167,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       if (lineIdx < 0 || lineIdx >= widget.lines.length - 1) continue;
       final current = widget.lines[lineIdx];
       final next = widget.lines[lineIdx + 1];
-      final start = current.endTime;
+      // 激活窗口起点与 gap 判定（_recomputeLineHeightsIfNeeded）保持一致，
+      // 均用"人声实际结束时间"（KRC 行 duration 覆盖尾音/空白时窗口起点会偏晚，
+      // 导致短暂处于真实空档却未激活间奏点）。
+      final start = AppleLyricsView.effectiveLineEndTime(current);
       final end = next.startTime - LyricLayout.interludeEarlyEndMs;
       if (widget.currentTimeMs >= start && widget.currentTimeMs < end) {
         foundIdx = i;
@@ -1049,7 +1183,19 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _activeInterludeIdx = foundIdx;
 
     if (foundIdx >= 0 && gapStart != null && gapEnd != null) {
-      _interludeDots.setInterlude(gapStart, gapEnd);
+      // 先确保间奏状态正确（新间奏会重置时钟，幂等命中的相同间奏保留），
+      // 再按需校正动画时钟。
+      _interludeDots.setInterlude(gapStart, gapEnd,
+          forceReset: forceDotsReset);
+      // 时钟漂移校正：帧时钟在 Ticker mute（切走 tab / 退后台）或页面重建
+      // （TabBarView 默认销毁 State，新 State 时钟从 0 开始）期间滞后于真实
+      // 进度。每次权威位置更新时比较偏差，超阈值（1s）即对齐到真实窗口偏移。
+      // 正常播放下偏差不超过 position 更新粒度（约 200ms），不会误触发，
+      // 因此不引入额外开销。
+      if (alignDotsToRealTime ||
+          _interludeDots.shouldRealignTo(widget.currentTimeMs, driftMs: 1000)) {
+        _interludeDots.alignToRealTime(widget.currentTimeMs);
+      }
       // 记录最后激活的 anchor 行索引（用于间奏结束后继续计算占位偏移）
       if (foundIdx < _interludeAfterIndices.length) {
         _lastActiveAnchorIdx = _interludeAfterIndices[foundIdx];
@@ -1240,6 +1386,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
             perLineOffsets: _buildPerLineOffsets(),
             blurFade: _blurFade,
             blurActive: useGaussian,
+            blurReadyLineIndices: _lineBlurImages.keys,
             textColorValue: LyricLayout.textColorValue,
             activeLineColorValue: _activeLineColorValue,
             linesGeneration: _linesGeneration,
@@ -1276,6 +1423,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           _painter!.perLineOffsets = _buildPerLineOffsets();
           _painter!.blurFade = _blurFade;
           _painter!.blurActive = useGaussian;
+          // P2-I：同步已就绪模糊图行索引（live view，map 修改后自动反映最新状态）
+          _painter!.blurReadyLineIndices = _lineBlurImages.keys;
           _painter!.textColorValue = LyricLayout.textColorValue;
           _painter!.activeLineColorValue = _activeLineColorValue;
           _painter!.linesGeneration = _linesGeneration;
@@ -1304,27 +1453,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
             // 歌词界面上下边界 alpha 渐变（参数与评论区一致：24px 渐变高度），
             // 顶部 24px alpha 0→1，底部 24px alpha 1→0，
             // 让歌词从边界柔和淡入/淡出。
-            shaderCallback: (Rect bounds) {
-              const double fadeHeight = 24.0;
-              final double fadeRatio =
-                  (fadeHeight / bounds.height).clamp(0.0, 0.5);
-              return LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: const [
-                  Colors.transparent,
-                  Colors.black,
-                  Colors.black,
-                  Colors.transparent,
-                ],
-                stops: [
-                  0.0,
-                  fadeRatio,
-                  1.0 - fadeRatio,
-                  1.0,
-                ],
-              ).createShader(bounds);
-            },
+            // P2-H 方案 A：shader 按 bounds 尺寸缓存复用，避免每次 build 重建。
+            shaderCallback: (Rect bounds) => _fadeShaderFor(bounds),
             blendMode: BlendMode.dstIn,
             child: useGaussian
                 ? ClipRect(
@@ -1686,6 +1816,10 @@ class _LyricsPainter extends CustomPainter {
   List<double> perLineOffsets;
   double blurFade;
   bool blurActive;
+  // P2-I：已就绪模糊图的行索引集合（live view，零分配）。
+  // 当 blurActive && blurFade > 0.99 时，非当前行文字 alpha≈0（不可见），
+  // 若该行模糊图已就绪则跳过文字层绘制——模糊层已覆盖显示。
+  Iterable<int> blurReadyLineIndices;
   int textColorValue;
   int? activeLineColorValue;
   int linesGeneration;
@@ -1722,6 +1856,7 @@ class _LyricsPainter extends CustomPainter {
     required this.perLineOffsets,
     required this.blurFade,
     required this.blurActive,
+    this.blurReadyLineIndices = const <int>[],
     required this.textColorValue,
     required this.activeLineColorValue,
     required this.linesGeneration,
@@ -1817,6 +1952,23 @@ class _LyricsPainter extends CustomPainter {
       if (y > viewportHeight + LyricLayout.overscanPx) break;
 
       final bool isActive = i == currentLineIndex;
+
+      // P2-I：高斯模糊全开且非当前行 alpha≈0（文字不可见）时，
+      // 若该行模糊图已就绪，跳过文字层绘制——模糊层已在其上方覆盖显示。
+      // 条件分解：
+      // - blurActive && blurFade > 0.99：非当前行 alpha = dynamicDark*(1-blurFade) ≈ 0
+      //   （LineRenderer/WordRenderer 中 effectiveFade = blurActive ? blurFade : 0，
+      //    非当前行 alpha = dynamicDark * (1 - effectiveFade)）
+      // - !isActive：仅跳过非当前行（当前行无模糊图，必须绘制）
+      // - blurReadyLineIndices.contains(i)：模糊图已异步渲染完成，模糊层会显示该行；
+      //   未就绪时仍绘制文字层，避免 blurFade 刚跨过 0.99 但模糊图尚未到位时出现空缺
+      if (blurActive &&
+          blurFade > 0.99 &&
+          !isActive &&
+          blurReadyLineIndices.contains(i)) {
+        continue;
+      }
+
       // 文字层不再使用 scale 弹簧，当前行瞬移到 activeScale
       final double scale = isActive
           ? LyricLayout.activeScale

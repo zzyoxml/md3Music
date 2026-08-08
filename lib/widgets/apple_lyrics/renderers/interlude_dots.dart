@@ -90,6 +90,10 @@ class InterludeDots {
   int? get startTime => _startTime;
   int? get endTime => _endTime;
 
+  /// 当前动画时钟（毫秒）。仅测试断言用，非热路径。
+  @visibleForTesting
+  double get animationTimeMs => _animationTimeMs;
+
   /// 当前是否需要绘制（间奏激活时）。
   bool get shouldRender => _isActive;
 
@@ -100,7 +104,12 @@ class InterludeDots {
   /// **重要**：本方法会被外部每帧调用，必须用"相同间奏不重置"保护。
   /// 只有切换到新间奏（startTime/endTime 变化）或从无到有才更新状态。
   /// 传 null 表示清除间奏。
-  void setInterlude(int? startTime, int? endTime) {
+  ///
+  /// [forceReset] 为 true 时即使间奏与当前相同也重置动画时钟。
+  /// 用于 seek/跳转回退到同一间奏窗口的场景：幂等保护无法区分
+  /// "每帧重复调用"与"时间回跳"，若不重置，动画时钟从旧进度继续，
+  /// 一旦超过间奏总时长，[paintAtLineY] 会直接 return 导致圆点隐藏。
+  void setInterlude(int? startTime, int? endTime, {bool forceReset = false}) {
     if (startTime == null || endTime == null) {
       _isActive = false;
       _startTime = null;
@@ -109,7 +118,8 @@ class InterludeDots {
       return;
     }
     // 相同间奏不重置（保持 _animationTimeMs 等状态，避免每帧重置）
-    if (_startTime == startTime && _endTime == endTime && _isActive) {
+    if (!forceReset &&
+        _startTime == startTime && _endTime == endTime && _isActive) {
       return;
     }
     _startTime = startTime;
@@ -135,6 +145,36 @@ class InterludeDots {
   void tick(double dt) {
     if (!_isActive) return;
     _animationTimeMs += dt * 1000;
+  }
+
+  /// 将动画时钟对齐到真实播放位置（毫秒，绝对时间）。
+  ///
+  /// 用于 Ticker 被 mute（TabBarView 切走 / App 退后台）后恢复：
+  /// 动画时钟由帧 dt 累积，mute 期间帧回调冻结而歌曲继续播放，
+  /// 需重新对齐到当前间奏窗口内的偏移（`currentTimeMs - start`，
+  /// clamp 到 [0, 间奏时长]），避免"跟不上进度"（如滞后到间奏
+  /// 后期才显示，或已过消失动画阶段被 [paintAtLineY] 隐藏）。
+  void alignToRealTime(int currentTimeMs) {
+    final start = _startTime;
+    final end = _endTime;
+    if (!_isActive || start == null || end == null) return;
+    final int offset = (currentTimeMs - start).clamp(0, end - start);
+    _animationTimeMs = offset.toDouble();
+  }
+
+  /// 判断帧时钟是否滞后于真实窗口进度超过 [driftMs]。
+  ///
+  /// 帧时钟由 dt 累积：Ticker 被 mute（切走 tab / 退后台）或页面重建
+  /// （TabBarView 默认销毁 State）期间不推进，而歌曲继续播放 → 真实窗口
+  /// 偏移 `currentTimeMs - start` 会远超帧时钟。返回 true 表示需要
+  /// [alignToRealTime] 校正。
+  /// 正常播放下两者偏差不超过 position 更新粒度（约 200ms），不会误触发。
+  bool shouldRealignTo(int currentTimeMs, {int driftMs = 1000}) {
+    final start = _startTime;
+    final end = _endTime;
+    if (!_isActive || start == null || end == null) return false;
+    final int realOffset = (currentTimeMs - start).clamp(0, end - start);
+    return (_animationTimeMs - realOffset).abs() > driftMs;
   }
 
   bool isInterlude(int currentTimeMs) {

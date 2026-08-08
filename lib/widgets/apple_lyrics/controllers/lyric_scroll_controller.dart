@@ -62,6 +62,14 @@ class LyricScrollController {
   /// 当前弹簧 damping（用于测试与外部诊断）
   double _currentDamping = LyricLayout.posYSeekingDamping;
 
+  // P1-D：弹簧参数计算缓存。
+  // _applySpringParams 由 _onTick 每帧调用，而普通模式的 stiffness 计算
+  // 依赖 math.pow（posYNormalStiffness），intervalMs 只在当前行切换时变化。
+  // 三个输入未变时直接早退，跳过 pow 与 setParams，每帧省一次 pow + 若干比较。
+  bool _cachedIsSeeking = false;
+  int _cachedIntervalMs = -1;
+  bool _cachedIsInterludeActive = false;
+
   /// 视口高度
   double get viewportHeight => _viewportHeight;
 
@@ -148,11 +156,22 @@ class LyricScrollController {
   ///   damping = LyricLayout.posYNormalDamping(stiffness)
   void _applySpringParams(bool isSeeking, int intervalMs,
       [bool isInterludeActive = false]) {
+    // P1-D: 输入未变时直接早退（_onTick 每帧调用，intervalMs 只在行切换时变）。
+    // 跳过 math.pow（posYNormalStiffness）与 setParams；参数未变时 setParams
+    // 本就无效果（运动中才重新初始化求解器），早退不改变弹簧行为。
+    if (isSeeking == _cachedIsSeeking &&
+        intervalMs == _cachedIntervalMs &&
+        isInterludeActive == _cachedIsInterludeActive) {
+      return;
+    }
+    _cachedIsSeeking = isSeeking;
+    _cachedIntervalMs = intervalMs;
+    _cachedIsInterludeActive = isInterludeActive;
+
     if (isSeeking) {
       _currentStiffness = LyricLayout.posYSeekingStiffness;
       _currentDamping = LyricLayout.posYSeekingDamping;
     } else if (isInterludeActive) {
-      // 间奏模式：更柔和的弹簧，让歌词跟随占位收起时有阻尼感
       _currentStiffness = 40;
       _currentDamping = 10;
     } else {
