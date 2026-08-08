@@ -12,6 +12,7 @@ library;
 
 import 'dart:math';
 import 'dart:ui';
+import 'dart:ui' as ui;
 
 import 'package:flutter/widgets.dart';
 
@@ -104,6 +105,11 @@ class WordRenderer {
   /// 主题切换时 textColorValue 变化，需清空 _lastSetAlphas 强制重建所有 word TextSpan。
   int _lastTextColorValue = -1;
 
+  /// 当前行专用的文字颜色（ARGB int，仅 [_isActive] 时生效）。
+  /// 动态字体颜色：由封面提取色按「70% 白 + 30% 提取色」混色得到，
+  /// null 表示不使用（回退到 LyricLayout.textColorValue）。
+  int? _activeColorValue;
+
   /// 每字辉光判定缓存（行绑定期计算一次）。
   /// 与 [_wordPainters] / [_wordWidths] 同长度同索引。
   /// true 表示该 word 应触发辉光（已通过 duration + 内容过滤）。
@@ -120,6 +126,27 @@ class WordRenderer {
 
   /// 辉光层复用的 Paint 实例（避免每帧新建 Paint + ImageFilter）。
   final Paint _glowBlurPaint = Paint();
+
+  /// P1-5 方案 1：辉光精灵缓存（wordIndex → 最大 blur 的模糊白字图）。
+  ///
+  /// word 激活时用 [PictureRecorder] + [ui.Image] 异步渲染一次，
+  /// 之后每帧 [Canvas.drawImage] 贴图（透明度跟随 glowLevel），
+  /// 替代每帧 `saveLayer + ImageFilter.blur` 的 GPU 开销。
+  /// 仅在 _ensureBound 重置（切行/字号变化）与文字颜色变化时失效。
+  final Map<int, ui.Image> _glowSprites = <int, ui.Image>{};
+
+  /// 正在异步渲染辉光精灵的 wordIndex 集合（避免重复请求）。
+  final Set<int> _glowSpritePending = <int>{};
+
+  /// 精灵渲染代数：_ensureBound / reset 时递增，
+  /// 异步回调用代数校验，丢弃过期（renderer 已重置/切行）的渲染结果。
+  int _spriteEpoch = 0;
+
+  /// 辉光精灵贴图复用的 Paint（透明度由 glowLevel 经 ColorFilter 驱动）。
+  final Paint _glowImagePaint = Paint();
+
+  /// 最大辉光 blur sigma：shadowBlurEm 封顶 0.3em × 0.8 = 0.24 × fontSize。
+  static double _maxGlowSigma(double fontSize) => 0.24 * fontSize;
 
   // ============== 渐变遮罩状态 ==============
 
@@ -190,10 +217,11 @@ class WordRenderer {
   /// [scale] 是行缩放，0.97（inactive）~1.0（active）。
   /// [blurFade] 控制非当前行透明度：1.0=透明（模糊图片覆盖），0.0=正常显示。
   /// [blurActive] 是否启用高斯模糊：false 时不降低非当前行透明度。
-  void setLineState({required bool isActive, required double scale, double blurFade = 1.0, bool blurActive = true}) {
+  void setLineState({required bool isActive, required double scale, double blurFade = 1.0, bool blurActive = true, int? activeColorValue}) {
     _isActive = isActive;
     _scale = scale;
     _blurFade = blurActive ? blurFade : 0.0;
+    _activeColorValue = activeColorValue;
   }
 
   /// 设置强调辉光效果计算器。
@@ -423,11 +451,25 @@ class WordRenderer {
       double viewportWidth = 0}) {
     _ensureBound(line, fontSize);
 
-    // 主题切换时 textColorValue 变化，清空 alpha 缓存强制重建所有 word TextSpan
-    if (LyricLayout.textColorValue != _lastTextColorValue) {
+    // 解析当前行实际文字颜色：动态字体颜色（仅当前行）优先，否则回退主题默认色。
+    // 颜色变化时清空 alpha 缓存强制重建所有 word TextSpan。
+    final int textColorValue =
+        (_isActive && _activeColorValue != null)
+            ? _activeColorValue!
+            : LyricLayout.textColorValue;
+    if (textColorValue != _lastTextColorValue) {
       _lastSetAlphas = List<int>.filled(_lastSetAlphas.length, -1);
-      _lastTextColorValue = LyricLayout.textColorValue;
+      _lastTextColorValue = textColorValue;
+      // P1-5：辉光精灵颜色跟随文字色（当前行渐变路径下为白色），
+      // 颜色变化（主题/动态字体色切换）时失效所有精灵缓存。
+      for (final img in _glowSprites.values) {
+        img.dispose();
+      }
+      _glowSprites.clear();
     }
+    final int textRed = (textColorValue >> 16) & 0xFF;
+    final int textGreen = (textColorValue >> 8) & 0xFF;
+    final int textBlue = textColorValue & 0xFF;
 
     if (line.words.isEmpty) {
       _paintSolidFallback(canvas, offset, line, fontSize,
@@ -546,7 +588,7 @@ class WordRenderer {
           painter.text = TextSpan(
             text: word.text,
             style: TextStyle(
-              color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, uniformAlpha),
+              color: Color.fromRGBO(textRed, textGreen, textBlue, uniformAlpha),
               fontSize: fontSize,
               height: lineHeight,
               fontFamily: LyricLayout.fontFamily,
@@ -582,19 +624,44 @@ class WordRenderer {
             wordX - blurSigma * 2, wordY - blurSigma * 2,
             width + blurSigma * 4, fontSize * lineHeight + blurSigma * 4,
           );
-          _glowBlurPaint.imageFilter = ImageFilter.blur(
-            sigmaX: blurSigma, sigmaY: blurSigma,
-          );
-          // 辉光整体透明度随 glowLevel 平滑变化，避免辉光开关式突兀出现/消失
-          _glowBlurPaint.colorFilter = ColorFilter.matrix(<double>[
-            1, 0, 0, 0, 0,
-            0, 1, 0, 0, 0,
-            0, 0, 1, 0, 0,
-            0, 0, 0, emState.glowLevel.clamp(0.0, 1.0), 0,
-          ]);
-          canvas.saveLayer(glowRect, _glowBlurPaint);
-          painter.paint(canvas, wordPos);
-          canvas.restore();
+          // P1-5 方案 1：优先用预渲染辉光精灵贴图。
+          // 精灵 = 固定最大 blur 的模糊白字图，透明度经 ColorFilter 跟随
+          // glowLevel 平滑变化；每帧成本从「saveLayer + blur」降为「一次贴图」。
+          // 视觉差异：blur 半径不再随字内进度连续变化，改为恒定最大 + 透明度动画
+          // （主要区间——满强度段 blur 本就是最大——与现状一致）。
+          final ui.Image? sprite = _glowSprites[i];
+          if (sprite != null) {
+            final double pad = _maxGlowSigma(fontSize) * 2;
+            // 辉光整体透明度随 glowLevel 平滑变化，避免辉光开关式突兀出现/消失
+            _glowImagePaint.colorFilter = ColorFilter.matrix(<double>[
+              1, 0, 0, 0, 0,
+              0, 1, 0, 0, 0,
+              0, 0, 1, 0, 0,
+              0, 0, 0, emState.glowLevel.clamp(0.0, 1.0), 0,
+            ]);
+            canvas.drawImage(
+              sprite,
+              Offset(wordX - pad, wordY - pad),
+              _glowImagePaint,
+            );
+          } else {
+            // 精灵未就绪（word 激活早期，glowLevel≈0 几乎不可见）：
+            // 异步请求渲染，本帧降级旧 saveLayer 路径保证视觉连续。
+            _requestGlowSprite(i, word, fontSize);
+            _glowBlurPaint.imageFilter = ImageFilter.blur(
+              sigmaX: blurSigma, sigmaY: blurSigma,
+            );
+            // 辉光整体透明度随 glowLevel 平滑变化，避免辉光开关式突兀出现/消失
+            _glowBlurPaint.colorFilter = ColorFilter.matrix(<double>[
+              1, 0, 0, 0, 0,
+              0, 1, 0, 0, 0,
+              0, 0, 1, 0, 0,
+              0, 0, 0, emState.glowLevel.clamp(0.0, 1.0), 0,
+            ]);
+            canvas.saveLayer(glowRect, _glowBlurPaint);
+            painter.paint(canvas, wordPos);
+            canvas.restore();
+          }
         }
       }
 
@@ -606,11 +673,12 @@ class WordRenderer {
         final Rect wordRect = Rect.fromLTWH(wordX, wordY, width, fontSize * lineHeight);
         canvas.saveLayer(wordRect, Paint());
         painter.paint(canvas, wordPos); // dst = 白色文字（layout 已缓存，不重算）
-        // 复用 _gradientPaint 实例，只改 shader 和 blendMode
+        // 复用 _gradientPaint 实例，只改 shader 和 blendMode。
+        // 注意：不要对渐变 alpha 做量化缓存（曾引入 5% 可见阶跃闪烁 + 频繁清空重建反而卡顿）。
         _gradientPaint.shader = LinearGradient(
           colors: [
-            Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, leftAlpha),
-            Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, rightAlpha),
+            Color.fromRGBO(textRed, textGreen, textBlue, leftAlpha),
+            Color.fromRGBO(textRed, textGreen, textBlue, rightAlpha),
           ],
           stops: const <double>[0.0, 1.0],
         ).createShader(wordRect);
@@ -642,7 +710,7 @@ class WordRenderer {
       _translationPainter.text = TextSpan(
         text: auxText,
         style: TextStyle(
-          color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, LyricLayout.translationOpacity),
+          color: Color.fromRGBO(textRed, textGreen, textBlue, LyricLayout.translationOpacity),
           fontSize: transFontSize,
           height: LyricLayout.translationLineHeight,
           fontFamily: LyricLayout.fontFamily,
@@ -747,11 +815,16 @@ class WordRenderer {
       double viewportWidth = 0}) {
     if (line.text.isEmpty) return;
     final double alpha = dynamicDarkAlpha;
+    // 动态字体颜色（仅当前行）优先，否则回退主题默认色
+    final int colorValue =
+        (_isActive && _activeColorValue != null)
+            ? _activeColorValue!
+            : LyricLayout.textColorValue;
     final painter = TextPainter(textDirection: TextDirection.ltr);
     painter.text = TextSpan(
       text: line.text,
       style: TextStyle(
-        color: Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, alpha),
+        color: Color.fromRGBO((colorValue >> 16) & 0xFF, (colorValue >> 8) & 0xFF, colorValue & 0xFF, alpha),
         fontSize: fontSize,
         height: LyricLayout.lineHeight,
         // 显式注入歌词 fontFamily，与 paintLine 路径保持一致
@@ -763,6 +836,86 @@ class WordRenderer {
     final double x = _alignX(alignment, offset.dx, painter.width, viewportWidth);
     painter.paint(canvas, Offset(x, offset.dy));
     painter.dispose();
+  }
+
+  /// P1-5 方案 1：异步渲染 word 的最大 blur 辉光精灵图并缓存。
+  ///
+  /// 渲染内容 = 纯白文字 + 恒定最大 blur（sigma = 0.24 × fontSize），
+  /// 与现状「当前字渐变路径（painter=plain white）下的辉光」颜色一致；
+  /// 透明度由每帧 [emState.glowLevel] 经 ColorFilter 控制，不参与精灵内容。
+  ///
+  /// 幂等保护：wordIndex 已在缓存或渲染中时直接返回。
+  /// 异步回调用 [_spriteEpoch] 校验，renderer 已重置/切行时丢弃结果。
+  void _requestGlowSprite(int wordIndex, LyricWord word, double fontSize) {
+    if (_glowSpritePending.contains(wordIndex)) return;
+    if (_glowSprites.containsKey(wordIndex)) return;
+    _glowSpritePending.add(wordIndex);
+    final int epoch = _spriteEpoch;
+    final double sigma = _maxGlowSigma(fontSize);
+    final double pad = sigma * 2;
+    final double wordH = fontSize * LyricLayout.lineHeight;
+    // 空字安全保护
+    if (word.text.isEmpty || wordH <= 0) {
+      _glowSpritePending.remove(wordIndex);
+      return;
+    }
+    // 异步渲染（toImage 在光栅线程执行，回调回 UI 线程）
+    _renderGlowSpriteImage(word, fontSize, sigma, pad).then((image) {
+      _glowSpritePending.remove(wordIndex);
+      if (image == null) return;
+      if (epoch != _spriteEpoch) {
+        // renderer 已重置/切行：过期结果直接释放
+        image.dispose();
+        return;
+      }
+      _glowSprites[wordIndex]?.dispose();
+      _glowSprites[wordIndex] = image;
+    });
+  }
+
+  /// 渲染单张辉光精灵图（纯白文字 + blur，异步）。
+  ///
+  /// 内部 try-catch 兜底：任何渲染失败（如 GPU 资源紧张）返回 null，
+  /// 下次 _requestGlowSprite 会重新尝试。
+  Future<ui.Image?> _renderGlowSpriteImage(
+      LyricWord word, double fontSize, double sigma, double pad) async {
+    try {
+      final textPainter = TextPainter(textDirection: TextDirection.ltr)
+        ..text = TextSpan(
+          text: word.text,
+          style: TextStyle(
+            // 与渐变路径 painter 一致：plain white，blur 后即白色辉光
+            color: const Color.fromRGBO(255, 255, 255, 1.0),
+            fontSize: fontSize,
+            height: LyricLayout.lineHeight,
+            fontFamily: LyricLayout.fontFamily,
+          ),
+        )
+        ..layout();
+      final int imgW = (textPainter.width + pad * 2).ceil();
+      final int imgH = (fontSize * LyricLayout.lineHeight + pad * 2).ceil();
+      if (imgW <= 0 || imgH <= 0) {
+        textPainter.dispose();
+        return null;
+      }
+
+      final recorder = ui.PictureRecorder();
+      final glowCanvas = Canvas(recorder);
+      glowCanvas.saveLayer(
+        Rect.fromLTWH(0, 0, imgW.toDouble(), imgH.toDouble()),
+        Paint()
+          ..imageFilter = ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+      );
+      textPainter.paint(glowCanvas, Offset(pad, pad));
+      textPainter.dispose();
+      glowCanvas.restore();
+
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(imgW, imgH);
+      return image;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 检测 line 切换并重置 alpha map，同时测量并缓存所有 word 宽度。
@@ -797,6 +950,14 @@ class WordRenderer {
     }
 
     final double dark = dynamicDarkAlpha;
+    // P1-5：行绑定切换（切行/字号变化）时失效辉光精灵缓存——
+    // 旧行的 word 文本/字号不同，精灵图不再匹配；异步渲染中的结果也丢弃。
+    _spriteEpoch++;
+    for (final img in _glowSprites.values) {
+      img.dispose();
+    }
+    _glowSprites.clear();
+    _glowSpritePending.clear();
     // 测量所有 word 宽度并初始化 per-word TextPainter
     _wordWidths = List<double>.filled(line.words.length, 0);
     _wordPainters = List<TextPainter>.generate(
@@ -842,6 +1003,7 @@ class WordRenderer {
     _isActive = false;
     _scale = LyricLayout.inactiveScale;
     _boundLine = null;
+    _activeColorValue = null;
     _boundFontSize = -1;
     _wordWidths = const <double>[];
     _wordStartXs = const <double>[];
@@ -862,5 +1024,12 @@ class WordRenderer {
     _wordYOffsets = const <double>[];
     _lastSetAlphas = const <int>[];
     _emphasizeStates.clear();
+    // P1-5：reset 时失效辉光精灵缓存（dispose 图片 + 代数递增丢弃异步结果）
+    _spriteEpoch++;
+    for (final img in _glowSprites.values) {
+      img.dispose();
+    }
+    _glowSprites.clear();
+    _glowSpritePending.clear();
   }
 }

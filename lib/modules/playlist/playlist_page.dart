@@ -69,6 +69,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   // 定位正在播放歌曲
   String? _highlightSongId;
+  // 定位目标项的索引与 GlobalKey：粗滚到附近让目标项构建后，
+  // 用 ensureVisible 精确对齐（消除头部 slivers / 非固定行高的估算误差）
+  int? _targetScrollIndex;
+  GlobalKey? _targetItemKey;
 
   // 歌单介绍展开/折叠
   bool _isDescriptionExpanded = false;
@@ -588,29 +592,115 @@ class _PlaylistPageState extends State<PlaylistPage> {
     });
   }
 
-  void _scrollToPlayingSong() {
+  Future<void> _scrollToPlayingSong() async {
     final player = context.read<PlayerProvider>();
     final currentSong = player.currentSong;
     if (currentSong == null) return;
 
     final displayList = _displaySongs;
     final index = displayList.indexWhere((s) => s.id == currentSong.id);
-    if (index == -1) return;
+    // 随机播放 / 跨歌单场景：当前歌曲可能不在本歌单显示列表中，提示而非静默失败
+    if (index == -1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('当前播放歌曲不在本歌单中'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     // 高亮提示
-    setState(() => _highlightSongId = currentSong.id);
+    setState(() {
+      _highlightSongId = currentSong.id;
+      // 每次定位新建 GlobalKey 挂到目标项（itemBuilder 使用），
+      // 避免旧 key 残留导致重复 GlobalKey 冲突
+      _targetItemKey = GlobalKey();
+      _targetScrollIndex = index;
+    });
     Future.delayed(const Duration(seconds: 2), () {
       if (mounted) setState(() => _highlightSongId = null);
     });
 
-    // 使用 SliverChildBuilderDelegate 的 key 来定位并滚动
-    // 通过 ScrollController 滚动到大致位置（每项约 72px 高度）
+    // 目标项可能已构建（用户已滚到附近）：直接精确居中，省去滚动开销
+    var targetContext = _targetItemKey?.currentContext;
+    if (targetContext != null) {
+      await Scrollable.ensureVisible(
+        targetContext,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+        alignment: 0.5,
+      );
+      return;
+    }
+
+    // SliverChildBuilderDelegate 懒构建：目标项在视口外时没有 RenderObject，
+    // ensureVisible 拿不到位置。头部 slivers（SliverAppBar 280 + 歌单介绍 +
+    // 搜索框 + 播放按钮行等）收缩后约 240px 高；粗滚取「欠滚」保守位置
+    // （宁少勿多），让目标项落在视口下方附近再分步下滚命中。
+    // 行高按 72 估算：实际行高更大时欠滚（向下补找），实际行高更小时会
+    // 滚过头（目标项停在视口上方且从未构建，GlobalKey 拿不到 context）——
+    // 因此向下找不到后回粗滚位置向上回找，双向兜底。
     const itemHeight = 72.0;
-    final targetOffset = index * itemHeight;
-    _scrollController.animateTo(
-      targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
+    final rough = index * itemHeight + 150;
+    await _scrollController.animateTo(
+      rough,
+      duration: const Duration(milliseconds: 250),
+      curve: Curves.easeOut,
+    );
+    if (!mounted) return;
+
+    // 向下分步找：目标项进入视口即被构建
+    const step = 400.0;
+    var guard = 0;
+    while (targetContext == null && guard < 20 && mounted) {
+      guard++;
+      final pos = _scrollController.position;
+      final current = _scrollController.offset;
+      final next =
+          (current + step).clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      if (next <= current) break; // 已触底
+      await _scrollController.animateTo(
+        next,
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+      );
+      targetContext = _targetItemKey?.currentContext;
+    }
+
+    // 向下未命中：粗滚过头（实际行高 < 估算 72），回粗滚位置向上回找
+    if (targetContext == null && mounted) {
+      final pos = _scrollController.position;
+      final back = rough.clamp(pos.minScrollExtent, pos.maxScrollExtent);
+      await _scrollController.animateTo(
+        back,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+      guard = 0;
+      while (targetContext == null && guard < 20 && mounted) {
+        guard++;
+        final p = _scrollController.position;
+        final current = _scrollController.offset;
+        final next =
+            (current - step).clamp(p.minScrollExtent, p.maxScrollExtent);
+        if (next >= current) break; // 已到顶
+        await _scrollController.animateTo(
+          next,
+          duration: const Duration(milliseconds: 150),
+          curve: Curves.easeOut,
+        );
+        targetContext = _targetItemKey?.currentContext;
+      }
+    }
+    if (!mounted || targetContext == null || !targetContext.mounted) return;
+
+    // 精确滚动到目标项并居中：消除固定行高估算与头部 slivers 的累计偏差
+    await Scrollable.ensureVisible(
+      targetContext,
       duration: const Duration(milliseconds: 300),
       curve: Curves.easeOut,
+      alignment: 0.5,
     );
   }
 
@@ -1515,6 +1605,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
                           final isHighlighted = _highlightSongId == song.id;
                           final isSelected = _selectedSongIds.contains(song.id);
                           return AnimatedContainer(
+                            // 定位目标项挂 GlobalKey，供 ensureVisible 精确对齐
+                            key: index == _targetScrollIndex
+                                ? _targetItemKey
+                                : null,
                             duration: const Duration(milliseconds: 300),
                             color: isHighlighted && !_isMultiSelectMode
                                 ? colorScheme.primaryContainer.withValues(alpha: 0.5)

@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -41,9 +43,22 @@ class _FlowingBackgroundState extends State<FlowingBackground>
   // dispose 标志：用于取消 _extractColors 异步任务，
   // 避免 setState 在 widget 销毁后被调用
   bool _disposed = false;
+
+  /// 提取结果缓存（url → 流光 3 色），跨播放器往返复用。
+  ///
+  /// 同一封面反复进出播放器时，避免每次重新解码 + PaletteGenerator 分析；
+  /// 仅缓存成功结果（失败不缓存，避免临时网络问题导致该封面永远用默认色）。
+  static final Map<String, List<Color>> _paletteCache = {};
   // Ticker 真实运行状态跟踪，用于幂等保护 start/stop 调用
   // （Ticker.start() 在 Flutter 3.44+ 重复调用会断言失败）
   bool _isRunning = false;
+
+  /// 进入页面时延迟启动 Ticker 的定时器。
+  ///
+  /// 打开播放器的瞬间不立即开始 24fps 全屏渐变绘制，
+  /// 等路由入场动画（~300ms）结束后再流动，避免与入场动画、
+  /// 模糊背景首帧叠加导致卡顿。
+  Timer? _delayedStartTimer;
 
   /// 幂等地启动/停止 Ticker。
   ///
@@ -70,10 +85,20 @@ class _FlowingBackgroundState extends State<FlowingBackground>
     _ticker = createTicker(_onTick);
     // 注册生命周期监听：后台时停止 Ticker，前台时按 isPlaying 决定是否恢复
     WidgetsBinding.instance.addObserver(this);
-    // 根据初始 isPlaying 决定是否启动 Ticker
-    // （避免 didUpdateWidget 后再次 start 触发 "started twice" 断言）
-    _setRunning(widget.isPlaying);
-    _extractColors();
+    // 延迟到入场动画结束后再启动 Ticker：进入播放器瞬间避免 24fps
+    // 全屏渐变绘制与路由入场动画 / 模糊背景首帧叠加导致卡顿。
+    // （暂停/恢复等后续状态切换仍由 didUpdateWidget 即时处理）
+    _setRunning(false);
+    _delayedStartTimer = Timer(const Duration(milliseconds: 400), () {
+      if (mounted && !_disposed) _setRunning(widget.isPlaying);
+    });
+    // 延迟到首帧渲染完成后提取颜色：
+    // 立即提取会触发封面网络下载 + 图片解码 + PaletteGenerator 分析，
+    // 与路由入场动画 / 首帧构建抢资源，导致点击 MiniPlayer 展开时卡顿。
+    // 切歌时的提取仍在 didUpdateWidget 中立即触发（页面已稳定，无此问题）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_disposed) _extractColors();
+    });
   }
 
   @override
@@ -115,6 +140,7 @@ class _FlowingBackgroundState extends State<FlowingBackground>
   /// 在 deactivate 中提前停止 Ticker 可避免此竞态。
   @override
   void deactivate() {
+    _delayedStartTimer?.cancel();
     _setRunning(false);
     super.deactivate();
   }
@@ -146,9 +172,24 @@ class _FlowingBackgroundState extends State<FlowingBackground>
     if (_lastArtworkUrl == url) return;
     _lastArtworkUrl = url;
 
+    // 跨播放器往返缓存命中：直接复用上次提取的 3 色，跳过解码 + 分析
+    final cachedColors = _paletteCache[url];
+    if (cachedColors != null) {
+      if (mounted && !_disposed) {
+        setState(() {
+          _colors = cachedColors;
+        });
+      }
+      return;
+    }
+
     try {
+      // 用 CachedNetworkImageProvider 而非 NetworkImage：
+      // UI 封面走 CachedNetworkImage 的磁盘缓存，两者共用 cacheManager，
+      // 提取可命中 UI 已下载的封面，避免流光开启时每次进播放器 /
+      // 切歌都重新网络下载封面（与 UI 封面下载并发导致卡顿）。
       final palette = await PaletteGenerator.fromImageProvider(
-        NetworkImage(url),
+        CachedNetworkImageProvider(url),
         maximumColorCount: 12,
       );
       // 双重检查：mounted（widget 还在树中）+ _disposed（State 未销毁）
@@ -187,6 +228,8 @@ class _FlowingBackgroundState extends State<FlowingBackground>
               .withSaturation(HSLColor.fromColor(c).saturation.clamp(0.55, 0.9).toDouble())
               .toColor())
           .toList();
+      // 缓存成功结果，供播放器往返时复用
+      _paletteCache[url] = normalized;
       setState(() {
         _colors = normalized;
       });
@@ -234,6 +277,7 @@ class _FlowingBackgroundState extends State<FlowingBackground>
   @override
   void dispose() {
     _disposed = true;
+    _delayedStartTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _setRunning(false); // 幂等停止（deactivate 已停过则直接 return）
     _ticker?.dispose();

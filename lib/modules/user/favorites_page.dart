@@ -572,7 +572,10 @@ class _FavoritesPageState extends State<FavoritesPage>
       final playlist = _playlists[index];
       final listId = playlist.listId;
       if (listId.isNotEmpty) {
-        await api.deletePlaylist(listId);
+        // 自己创建的歌单 type=1（真正删除），收藏的歌单 type=0（取消收藏），
+        // 与 /playlist/del 的 type 语义（playlist_del.js: 1=删除自己歌单, 0=取消收藏）一致
+        final type = _isCreated(playlist) ? 1 : 0;
+        await api.deletePlaylist(listId, type: type);
       }
     }
 

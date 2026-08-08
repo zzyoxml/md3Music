@@ -201,12 +201,14 @@ class InterludeDots {
   /// [centerY]：占位区域的中心 y 坐标
   /// [dotRadius]：单点基准半径
   /// [spacing]：点间距（点圆心到圆心）
+  /// [colorValue]：ARGB 颜色值，默认纯白；传入当前行动态色时间奏点跟随歌词高亮色
   void paintAtLineY(
     Canvas canvas,
     double startX,
     double centerY, {
     double dotRadius = 4,
     double spacing = 16,
+    int colorValue = 0xFFFFFFFF,
   }) {
     if (!_isActive) return;
     final start = _startTime;
@@ -292,9 +294,15 @@ class InterludeDots {
       // 相对中心点的 x 偏移：-spacing, 0, +spacing
       final double dx = (i - 1) * spacing;
       final double dy = 0.0;
+      // 颜色跟随传入的 colorValue（默认基础歌词色，动态色开启时跟随当前行高亮色）
       final paint = Paint()
         ..style = PaintingStyle.fill
-        ..color = Color.fromRGBO(LyricLayout.textRed, LyricLayout.textGreen, LyricLayout.textBlue, alpha);
+        ..color = Color.fromRGBO(
+          (colorValue >> 16) & 0xFF,
+          (colorValue >> 8) & 0xFF,
+          colorValue & 0xFF,
+          alpha,
+        );
       canvas.drawCircle(Offset(dx, dy), dotRadius, paint);
     }
 

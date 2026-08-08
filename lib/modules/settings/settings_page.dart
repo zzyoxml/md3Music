@@ -63,6 +63,10 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _useGlowEffect = true;
   bool _useFlowingBackground = true;
   bool _useDuetLayout = false;
+  // 歌词省电模式开关（默认关闭，开启后歌词界面锁定 60fps，滑动时解锁）
+  bool _lyricEcoMode = false;
+  // 歌词动态字体颜色开关（默认关闭，仅 AM 播放器生效）
+  bool _lyricDynamicColor = false;
   String _appVersion = '';
   // Lyricon 词幕推送相关状态
   bool _lyriconEnabled = false;
@@ -204,6 +208,8 @@ class _SettingsPageState extends State<SettingsPage> {
       _useGlowEffect = LyricPreferences.instance.useGlowEffect;
       _useFlowingBackground = LyricPreferences.instance.useFlowingBackground;
       _useDuetLayout = LyricPreferences.instance.useDuetLayout;
+      _lyricEcoMode = LyricPreferences.instance.ecoMode;
+      _lyricDynamicColor = LyricPreferences.instance.useDynamicLyricColor;
       _downloadDir = downloadDir;
       _downloadWordLevelLyrics = downloadWordLevelLyrics;
       _uiScale = uiScale;
@@ -802,6 +808,32 @@ class _SettingsPageState extends State<SettingsPage> {
                   HapticFeedback.lightImpact();
                   setState(() => _useDuetLayout = v);
                   LyricPreferences.instance.setUseDuetLayout(v);
+                }
+              : null,
+        ),
+        // 歌词省电模式：AM 播放器歌词界面锁定 60fps，上下滑动歌词时临时解锁
+        SwitchListTile(
+          title: const Text('歌词省电模式'),
+          subtitle: const Text('歌词界面锁定 60fps 更省电，上下滑动歌词时自动解除限帧'),
+          value: _lyricEcoMode,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  HapticFeedback.lightImpact();
+                  setState(() => _lyricEcoMode = v);
+                  LyricPreferences.instance.setEcoMode(v);
+                }
+              : null,
+        ),
+        // 歌词动态字体颜色：当前行按「85% 白 + 15% 封面提取色」混色（仅 AM 播放器）
+        SwitchListTile(
+          title: const Text('歌词动态颜色'),
+          subtitle: const Text('当前行歌词根据专辑封面取色混色（85% 白 + 15% 提取色）'),
+          value: _lyricDynamicColor,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  HapticFeedback.lightImpact();
+                  setState(() => _lyricDynamicColor = v);
+                  LyricPreferences.instance.setUseDynamicLyricColor(v);
                 }
               : null,
         ),

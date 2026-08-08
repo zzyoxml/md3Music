@@ -16,6 +16,7 @@ import 'package:provider/provider.dart';
 import '../data/models/song.dart';
 import '../providers/player_provider.dart';
 import 'player_artwork_image.dart';
+import 'playing_spectrum_indicator.dart';
 
 /// 自定义长按延迟 700ms 的 Reorderable 监听器（与 PlayerPlaylistDialog 内实现一致）。
 ///
@@ -211,14 +212,19 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
   @override
   Widget build(BuildContext context) {
     final playerProvider = context.read<PlayerProvider>();
-    // Selector 隔离：仅在播放列表内容（歌曲 id 指纹）或当前索引变化时重建面板，
-    // 避免播放进度每 200ms 的 provider 通知触发整面板重建。
+    // Selector 隔离：仅在播放列表内容（歌曲 id 指纹）、当前索引或播放状态变化时
+    // 重建面板，避免播放进度每 200ms 的 provider 通知触发整面板重建。
     // 不能直接用 playlist 引用作键：removeFromPlaylist / reorderPlaylist 均为
     // 原地修改（removeAt/insert），List 引用不变，Selector 检测不到变化。
-    return Selector<PlayerProvider, ({int fingerprint, int currentIndex})>(
+    // isPlaying 纳入 selector：暂停/恢复时让正在播放的频谱波形同步启停。
+    return Selector<
+      PlayerProvider,
+      ({int fingerprint, int currentIndex, bool isPlaying})
+    >(
       selector: (_, p) => (
         fingerprint: Object.hashAll(p.playlist.map((s) => s.id)),
         currentIndex: p.currentIndex,
+        isPlaying: p.isPlaying,
       ),
       builder: (context, data, _) {
         final playlist = playerProvider.playlist;
@@ -305,21 +311,12 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
                               index: index,
                               song: playlist[index],
                               isCurrent: index == data.currentIndex,
+                              isPlaying: data.isPlaying,
                               playerProvider: playerProvider,
                             ),
                         ],
                       ),
                     ),
-            ),
-            // 底部操作提示
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 4, 12, 8),
-              child: Text(
-                '长按拖拽 · 右滑删除',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: const Color(0x80FFFFFF),
-                ),
-              ),
             ),
           ],
         );
@@ -383,6 +380,7 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
     required int index,
     required Song song,
     required bool isCurrent,
+    required bool isPlaying,
     required PlayerProvider playerProvider,
   }) {
     final dx = _dragExtent[song.id] ?? 0.0;
@@ -429,8 +427,13 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
               color: const Color(0xB3FFFFFF),
             ),
           ),
+          // 正在播放的歌曲右侧：歌单同款三柱起伏波形（暂停时 ticker 停止保留最后一帧）
           trailing: isCurrent
-              ? const Icon(Icons.play_arrow, color: Colors.white)
+              ? PlayingSpectrumIndicator(
+                  color: Colors.white,
+                  size: 14,
+                  isPlaying: isPlaying,
+                )
               : const SizedBox.shrink(),
           onTap: () {
             // 点击切歌（不关闭面板，留在 tab）

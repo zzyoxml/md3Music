@@ -70,6 +70,13 @@ class AppleLyricsView extends StatefulWidget {
   /// 是否启用双击跳转（开启后单击不跳转，双击才跳转播放位置）
   final bool doubleTapToJump;
 
+  /// 专辑封面提取色（动态字体颜色用，仅 AM 播放器传入）。
+  ///
+  /// 非 null 且 [LyricPreferences.useDynamicLyricColor] 开启且 [forceDarkBackground]
+  /// 为 true 时，当前行歌词颜色按「70% 白 + 30% 提取色」混色；
+  /// 非当前行保持默认白色不变。
+  final Color? accentColor;
+
   const AppleLyricsView({
     super.key,
     required this.lines,
@@ -80,6 +87,7 @@ class AppleLyricsView extends StatefulWidget {
     this.forceDarkBackground = false,
     this.enableInterludeDots = true,
     this.doubleTapToJump = false,
+    this.accentColor,
   });
 
   /// 找到当前应高亮的行索引：最后一个 `startTime <= currentTimeMs` 的行。
@@ -132,6 +140,18 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   double _lastRepaintInterludeProgress = 0;
   int _lastRepaintCurrentLineIndex = -1;
 
+  /// P0-1 方案 A：高斯模糊层（Positioned/Opacity/RawImage）的脏标记缓存。
+  ///
+  /// 稳态逐字演唱时模糊层完全静止（行 / posY / blurFade / 间奏占位 / 弹簧
+  /// 都不变），无需每帧 setState 重建 widget 树。仅当以下任一变化时重建：
+  /// 当前行、posY(>0.5px)、blurFade(>0.001)、间奏占位 progress(>0.001)、
+  /// perLine 弹簧偏移(>0.5px)。
+  /// blurFade 初始 -1 强制首帧重建（首次进入需创建模糊层）。
+  int _lastBlurRebuildLineIndex = -1;
+  double _lastBlurRebuildPosY = 0;
+  double _lastBlurRebuildBlurFade = -1;
+  double _lastBlurRebuildInterludeProgress = -1;
+
   // ============== 控制器与效果 ==============
 
   final LyricScrollController _scrollController = LyricScrollController();
@@ -169,6 +189,29 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
   // P0: 间奏点动画降频（30fps）用的帧时间累积器
   double _interludeAccumulator = 0;
+
+  // ============== 歌词省电模式（60fps 限帧，默认关闭） ==============
+  // 开启后歌词渲染推进频率锁定 60fps（_ecoFrameInterval），
+  // 用户上下滑动歌词（拖动/惯性/等待回弹/回弹动画）时解锁，
+  // 以最高刷新率渲染保证滑动顺滑；滚动收敛后自动重新锁定。
+  // 跳过帧的 dt 已通过 _lastElapsed 累积，动画推进保持真实时间进度。
+
+  /// 省电模式下的推进间隔（60fps ≈ 16.67ms）
+  static const double _ecoFrameInterval = 1.0 / 60.0;
+
+  /// 省电模式帧时间累积器：未到推进间隔时跳过本帧
+  double _ecoAccumulator = 0;
+
+  /// 省电模式是否被用户滚动解锁（true = 每帧推进）
+  bool _ecoUnlocked = false;
+
+  // ============== 动态字体颜色（仅 AM 播放器，默认关闭） ==============
+  // 开启后当前行歌词颜色按「70% 白 + 30% 封面提取色」混色，
+  // 非当前行保持默认白色。颜色由 build 根据 accentColor 计算一次，
+  // _onTick 与 painter 每帧读取，避免每帧 Color.lerp 分配。
+
+  /// 当前行动态字体颜色（ARGB int），null 表示不使用（回退默认白色）。
+  int? _activeLineColorValue;
 
   // overscan 视口缓冲行数：pad 端 15、手机端 10。在 build 中根据最短边更新
   int _overscan = 10;
@@ -651,8 +694,31 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   void _onTick(Duration elapsed) {
     // 使用 Ticker 的调度器时钟（测试中为模拟时间）计算 dt，
     // 避免 DateTime.now() 在测试中返回真实墙钟时间导致弹簧不推进。
-    final dt = (elapsed - _lastElapsed).inMicroseconds / 1000000.0;
+    double dt = (elapsed - _lastElapsed).inMicroseconds / 1000000.0;
     _lastElapsed = elapsed;
+
+    // ============== 歌词省电模式：限帧到 60fps ==============
+    // 滚动中（拖动/惯性/等待回弹/回弹动画）解锁帧率限制，每帧推进；
+    // 滚动收敛后自动重新锁定，未到推进间隔的帧直接跳过（省 CPU + 重绘）。
+    // 跳过帧的 dt 累加进 [_ecoAccumulator]；执行帧用累积后的 dt 推进，
+    // 保证动画（逐字渐变/间奏点/弹簧）按真实时间速度前进，限帧不变慢。
+    if (LyricPreferences.instance.ecoMode) {
+      _ecoUnlocked = _scrollController.isUserScrolling ||
+          _scrollController.isWaitingForAutoReturn ||
+          !_scrollController.isConverged;
+      if (!_ecoUnlocked) {
+        _ecoAccumulator += dt;
+        if (_ecoAccumulator < _ecoFrameInterval) {
+          return; // 未到推进时机：跳过本帧全部动画计算与重绘
+        }
+        // 修复：把累积的跳过帧时间一并作为本帧 dt 推进动画。
+        // 之前只累加到 _ecoAccumulator 做节流判断，执行帧仍用本帧单帧 dt：
+        // 120Hz 屏上每 2 帧才执行一次但 dt 只有 8.3ms，
+        // 导致间奏点时钟/逐字渐变等 dt 驱动动画以真实时间一半的速度运行。
+        dt = _ecoAccumulator;
+        _ecoAccumulator = 0;
+      }
+    }
 
     // P0: 推进逐字动画平滑时间（上浮/字内渐变的进度来源）。
     // positionStream 每 ~200ms 才给一个权威位置，播放中若直接用它会
@@ -751,12 +817,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       if (useWordRenderer) {
         final renderer = _wordRendererFor(i);
         renderer.emphasizeEffect = _emphasizeEffect;
-        renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade, blurActive: blurActive);
+        renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade, blurActive: blurActive, activeColorValue: _activeLineColorValue);
         // 用平滑时间驱动逐字动画（上浮/字内渐变），避免 positionStream 5fps 卡顿
         renderer.tick(dt, _smoothPosMs.round());
       } else {
         final renderer = _lineRendererFor(i);
-        renderer.setLineState(isActive: isActive, scale: scale, blurFade: _blurFade, blurActive: blurActive);
+        renderer.setLineState(isActive: isActive, scale: scale, blurFade: _blurFade, blurActive: blurActive, activeColorValue: _activeLineColorValue);
         renderer.tick(dt);
       }
     }
@@ -905,11 +971,13 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       _lastRepaintScale = currentScale;
       _lastRepaintBlurFade = _blurFade;
       _lastRepaintInterludeProgress = _interludeExpandProgress;
-      // 性能优化：用持久化 painter + notifyListeners 替代 setState，
-      // 避免每帧触发 build() 重建整个 widget tree（LayoutBuilder/GestureDetector/ShaderMask）。
-      // Gaussian 模糊需要重建 widget（Positioned/Opacity 层），仍用 setState。
-      final useGaussian = LyricPreferences.instance.useGaussianBlur;
-      if (_painter != null && !useGaussian) {
+      // P0-1 方案 A：统一走持久化 painter 快路径（repaintNotifier 驱动文字层重绘），
+      // 避免每帧 setState + build 重建整个 widget tree（LayoutBuilder/GestureDetector/
+      // ShaderMask/模糊层 Stack）。
+      // 高斯模糊层（Positioned/Opacity/RawImage）仅在自身状态变化时才 setState 重建：
+      // 当前行 / posY / blurFade / 间奏占位 progress / perLine 弹簧偏移任一变化。
+      // 稳态逐字演唱时模糊层完全静止，零重建。
+      if (_painter != null) {
         _painter!.updatePerFrame(
           currentLineIndex: _currentLineIndex,
           posY: currentPosY,
@@ -922,6 +990,21 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           perLineOffsetsGeneration: _perLineOffsetsGeneration,
         );
         _repaintNotifier.fireRepaint();
+        final useGaussian = LyricPreferences.instance.useGaussianBlur;
+        if (useGaussian &&
+            (_currentLineIndex != _lastBlurRebuildLineIndex ||
+                (currentPosY - _lastBlurRebuildPosY).abs() > 0.5 ||
+                (_blurFade - _lastBlurRebuildBlurFade).abs() > 0.001 ||
+                (_interludeExpandProgress - _lastBlurRebuildInterludeProgress)
+                        .abs() >
+                    0.001 ||
+                _hasPerLineOffsetChanged())) {
+          _lastBlurRebuildLineIndex = _currentLineIndex;
+          _lastBlurRebuildPosY = currentPosY;
+          _lastBlurRebuildBlurFade = _blurFade;
+          _lastBlurRebuildInterludeProgress = _interludeExpandProgress;
+          setState(() {});
+        }
       } else {
         setState(() {});
       }
@@ -1056,6 +1139,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 用户滚动后 5s 自动回弹到当前行）。这里补上 onVerticalDragUpdate/End。
   void _onVerticalDragUpdate(DragUpdateDetails details) {
     _startTickerIfNeeded(); // v3 优化：用户滚动时重启 Ticker
+    // 省电模式：用户开始滑动歌词立即解锁帧率限制（保持 120Hz 顺滑滚动）
+    _ecoUnlocked = true;
     _scrollController.onUserScroll(details.primaryDelta ?? 0);
   }
 
@@ -1073,6 +1158,22 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 根据屏幕最短边判断设备类型：>= 600dp 视为 pad（平板），更新 overscan 缓冲行数
     final shortestSide = MediaQuery.of(context).size.shortestSide;
     _overscan = shortestSide >= 600 ? 15 : 10;
+    // 动态字体颜色：仅 AM 播放器（深色背景）且开关开启且提取到封面颜色时，
+    // 当前行歌词颜色 = 85% 白 + 15% 提取色；否则回退默认白色（null）。
+    // 混色后再兜底提升明度（≥0.78），保证深色背景上的可读性；
+    // 仅抬升明度、保留色相与饱和度，视觉上仍是封面色调的浅色。
+    if (widget.forceDarkBackground &&
+        LyricPreferences.instance.useDynamicLyricColor &&
+        widget.accentColor != null) {
+      final mixed = Color.lerp(Colors.white, widget.accentColor!, 0.15)!;
+      final hsl = HSLColor.fromColor(mixed);
+      _activeLineColorValue = hsl
+          .withLightness(math.max(hsl.lightness, 0.78))
+          .toColor()
+          .toARGB32();
+    } else {
+      _activeLineColorValue = null;
+    }
     // 根据主题亮度设置歌词文字颜色：
     // - AM 风格（forceDarkBackground=true）→ 始终白色
     // - 深色主题 → 白色
@@ -1140,6 +1241,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
             blurFade: _blurFade,
             blurActive: useGaussian,
             textColorValue: LyricLayout.textColorValue,
+            activeLineColorValue: _activeLineColorValue,
             linesGeneration: _linesGeneration,
             lineHeightsGeneration: _lineHeightsGeneration,
             lineTopsGeneration: _lineTopsGeneration,
@@ -1175,6 +1277,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           _painter!.blurFade = _blurFade;
           _painter!.blurActive = useGaussian;
           _painter!.textColorValue = LyricLayout.textColorValue;
+          _painter!.activeLineColorValue = _activeLineColorValue;
           _painter!.linesGeneration = _linesGeneration;
           _painter!.lineHeightsGeneration = _lineHeightsGeneration;
           _painter!.lineTopsGeneration = _lineTopsGeneration;
@@ -1313,6 +1416,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
     // 从缓存绘制模糊层
     final List<Widget> layers = [];
+    // P0-2：perLine 弹簧偏移列表只需构建一次供所有模糊层复用，
+    // 避免每层都全量遍历 O(N) 行（k 层 × N 行 = 每帧 O(k×N) 迭代）。
+    final List<double> offsets = _buildPerLineOffsets();
 
     for (final entry in _cachedBlurLevels.entries) {
       final int i = entry.key;
@@ -1331,7 +1437,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
               : i * mainLineHeight) +
           _interludeOffsetBefore(i);
       // 应用弹簧偏移
-      final List<double> offsets = _buildPerLineOffsets();
       final double springOffset = (i < offsets.length) ? offsets[i] : 0.0;
       final double y = lineTop + _scrollController.posY + springOffset;
       final double lineHeight = (i < _lineHeights.length)
@@ -1383,6 +1488,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         if (image != null) {
           _lineBlurImages[lineIndex]?.$1.dispose();
           _lineBlurImages[lineIndex] = (image, blurLevel);
+          // P0-1 方案 A：异步模糊图渲染完成后必须重建一次模糊层。
+          // 稳态（无其他 setState 源）下若不 setState，新图片永远不会显示。
+          if (mounted) setState(() {});
         }
       });
     }
@@ -1579,6 +1687,7 @@ class _LyricsPainter extends CustomPainter {
   double blurFade;
   bool blurActive;
   int textColorValue;
+  int? activeLineColorValue;
   int linesGeneration;
   int lineHeightsGeneration;
   int lineTopsGeneration;
@@ -1614,6 +1723,7 @@ class _LyricsPainter extends CustomPainter {
     required this.blurFade,
     required this.blurActive,
     required this.textColorValue,
+    required this.activeLineColorValue,
     required this.linesGeneration,
     required this.lineHeightsGeneration,
     required this.lineTopsGeneration,
@@ -1744,7 +1854,7 @@ class _LyricsPainter extends CustomPainter {
       if (useWordRenderer) {
         // 逐字模式：当前行的 KRC 行
         final renderer = wordRenderers[i] ?? WordRenderer();
-        renderer.setLineState(isActive: true, scale: scale, blurFade: blurFade, blurActive: blurActive);
+        renderer.setLineState(isActive: true, scale: scale, blurFade: blurFade, blurActive: blurActive, activeColorValue: activeLineColorValue);
         renderer.paintLine(
           canvas,
           Offset(startX, y),
@@ -1757,7 +1867,7 @@ class _LyricsPainter extends CustomPainter {
       } else {
         // 整行模式：LRC/纯文本行 + 非当前行的 KRC 行
         final renderer = lineRenderers[i] ?? LineRenderer();
-        renderer.setLineState(isActive: isActive, scale: scale, blurFade: blurFade, blurActive: blurActive);
+        renderer.setLineState(isActive: isActive, scale: scale, blurFade: blurFade, blurActive: blurActive, activeColorValue: activeLineColorValue);
         renderer.paintLine(
           canvas,
           Offset(startX, y),
@@ -1801,7 +1911,10 @@ class _LyricsPainter extends CustomPainter {
       // 让点整体居中偏右，视觉更平衡
       final double dotsStartX = fontSize * 1.5;
       interludeDots.paintAtLineY(canvas, dotsStartX, centerY,
-          dotRadius: dotRadius, spacing: dotSpacing);
+          dotRadius: dotRadius,
+          spacing: dotSpacing,
+          // 间奏点颜色跟随当前行动态色（未开启/未提取到时回退基础歌词色）
+          colorValue: activeLineColorValue ?? LyricLayout.textColorValue);
     }
   }
 
