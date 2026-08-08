@@ -261,6 +261,43 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   final Map<int, (ui.Image image, int blurLevel)> _lineBlurImages = {};
   double _viewportWidth = 0;
 
+  // P2-H 方案 A：ShaderMask 上下渐隐 shader 缓存。
+  // shaderCallback 在每次 build 时被调用，渐隐参数仅依赖 bounds 尺寸，
+  // 尺寸不变时复用同一 shader，避免每帧/每次重建 LinearGradient + createShader。
+  ui.Shader? _fadeShader;
+  Rect? _fadeShaderBounds;
+
+  /// 获取（或按需重建）歌词界面上下边界渐隐 shader。
+  ///
+  /// 渐隐是静态的（上下 24px alpha 渐变），仅随视口尺寸变化。
+  /// bounds 不变时直接返回缓存实例，消除每次 build 的对象与 shader 分配。
+  ui.Shader _fadeShaderFor(Rect bounds) {
+    if (_fadeShader != null && bounds == _fadeShaderBounds) {
+      return _fadeShader!;
+    }
+    const double fadeHeight = 24.0;
+    final double fadeRatio = (fadeHeight / bounds.height).clamp(0.0, 0.5);
+    final shader = LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: const [
+        Colors.transparent,
+        Colors.black,
+        Colors.black,
+        Colors.transparent,
+      ],
+      stops: [
+        0.0,
+        fadeRatio,
+        1.0 - fadeRatio,
+        1.0,
+      ],
+    ).createShader(bounds);
+    _fadeShader = shader;
+    _fadeShaderBounds = bounds;
+    return shader;
+  }
+
   /// 最大 sigma 限制
   static const double _maxSigma = 2.0;
 
@@ -589,40 +626,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     return true;
   }
 
-  /// v3 优化：检测本帧 perLine 偏移是否有显著变化（>0.5px）。
-  /// 用于 _onTick 末尾判断是否需要 setState。
-  bool _hasPerLineOffsetChanged() {
-    final int len = _reusedPerLineOffsets.length;
-    for (int i = 0; i < len; i++) {
-      final spring = _perLineSprings[i];
-      if (spring == null) continue;
-      if ((spring.position - _reusedPerLineOffsets[i]).abs() > 0.5) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  /// v3 优化：检测本帧 renderer alpha 是否有显著变化。
-  /// !isConverged 表示仍在动画中，需要继续 setState。
-  bool _hasRendererAlphaChanged() {
-    final currentWord = _wordRenderers[_currentLineIndex];
-    if (currentWord != null && !currentWord.isConverged) {
-      return true;
-    }
-    final int overscan = _overscan;
-    final int startIdx = math.max(0, _currentLineIndex - overscan);
-    final int endIdx =
-        math.min(widget.lines.length, _currentLineIndex + overscan);
-    for (int i = startIdx; i < endIdx; i++) {
-      final renderer = _lineRenderers[i];
-      if (renderer != null && !renderer.isConverged) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /// 偏好变化时触发重绘。
   ///
   /// **始终 setState**：偏好变化（如 useDuetLayout 切换）需要触发 build，
@@ -672,6 +675,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     }
     // v3 优化：切歌（lines 引用变化）时重启 Ticker，重新推进新行的 renderer
     if (!identical(oldWidget.lines, widget.lines)) {
+      // P2-K: 清理按行索引缓存的弹簧与延迟记录——它们只增不减，
+      // 长歌曲 + 多次切歌会持续累积内存（Spring 对象虽小但按行数增长）。
+      // 新歌行数不同，旧索引无意义，直接整体清空。
+      _perLineSprings.clear();
+      _delayStartTimes.clear();
       _startTickerIfNeeded();
     }
     // P0-A: 非逐字歌词在播放中可能已停 Ticker（静止省电）。position 更新
@@ -861,6 +869,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final int overscan = _overscan;
     final int startIdx = math.max(0, _currentLineIndex - overscan);
     final int endIdx = math.min(widget.lines.length, _currentLineIndex + overscan);
+    // P1-G: 顺带聚合"是否有 renderer 仍在动画"，替代 _hasRendererAlphaChanged
+    // 的二次 O(±10 行) 遍历（hasVisualChange 与收敛判断复用）。
+    bool anyRendererAnimating = false;
     for (int i = startIdx; i < endIdx; i++) {
       final line = widget.lines[i];
       final isActive = i == _currentLineIndex;
@@ -879,10 +890,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade, blurActive: blurActive, activeColorValue: _activeLineColorValue);
         // 用平滑时间驱动逐字动画（上浮/字内渐变），避免 positionStream 5fps 卡顿
         renderer.tick(dt, _smoothPosMs.round());
+        if (!renderer.isConverged) anyRendererAnimating = true;
       } else {
         final renderer = _lineRendererFor(i);
         renderer.setLineState(isActive: isActive, scale: scale, blurFade: _blurFade, blurActive: blurActive, activeColorValue: _activeLineColorValue);
         renderer.tick(dt);
+        if (!renderer.isConverged) anyRendererAnimating = true;
       }
     }
 
@@ -978,6 +991,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 视口外的行弹簧偏移对渲染不可见，无需每帧推进。
     final int springStartI = math.max(0, _currentLineIndex);
     final int springEndI = math.min(widget.lines.length, _currentLineIndex + overscan);
+    // P1-G: 顺带聚合"弹簧偏移是否有显著变化（>0.5px）"，替代
+    // _hasPerLineOffsetChanged 的二次 O(N) 遍历。仅检查视口内行——
+    // 视口外行偏移对渲染不可见，无需触发重绘。
+    bool anySpringOffsetChanged = false;
     for (int i = springStartI; i < springEndI; i++) {
       final spring = _perLineSprings[i];
       if (spring == null) continue;
@@ -989,6 +1006,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           spring.tick(dt);
         }
         // 延迟未到：保持初始偏移（setPosition 已设置）
+      }
+      if (i < _reusedPerLineOffsets.length &&
+          (spring.position - _reusedPerLineOffsets[i]).abs() > 0.5) {
+        anySpringOffsetChanged = true;
       }
     }
 
@@ -1028,12 +1049,17 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         _scrollController.isConverged &&
             _scaleController.isConverged &&
             (_blurFade - blurFadeTarget).abs() < 0.001 &&
-            (_interludeExpandProgress - interludeTarget).abs() < 0.001 &&
-            _arePerLineSpringsConverged() &&
-            _areRenderersConverged();
+            (_interludeExpandProgress - interludeTarget).abs() < 0.001;
+    // P1-G: perLine 弹簧 / renderer 的收敛检测（各 O(±10 行) 遍历）只在
+    // 需要"停 Ticker 决策"时执行：逐字歌词播放中永远不会停（P0-A 排除），
+    // 跳过这两个循环；非逐字播放中仅每 200ms 唤醒帧执行一次。
+    final bool needsStopDecision = !widget.isPlaying || !_cachedHasAnyWordTiming;
     final bool canStopWhilePlaying =
         !_cachedHasAnyWordTiming && _activeInterludeIdx < 0;
-    if (animConverged && (!widget.isPlaying || canStopWhilePlaying)) {
+    final bool deepConverged = !needsStopDecision ||
+        (_arePerLineSpringsConverged() && _areRenderersConverged());
+    if (animConverged && deepConverged &&
+        (!widget.isPlaying || canStopWhilePlaying)) {
       _stopTickerIfNeeded();
       // 最后一帧 setState 确保稳态画面渲染
       setState(() {});
@@ -1051,8 +1077,9 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
             (_blurFade - _lastRepaintBlurFade).abs() > 0.001 ||
             (_interludeExpandProgress - _lastRepaintInterludeProgress).abs() >
                 0.001 ||
-            _hasPerLineOffsetChanged() ||
-            _hasRendererAlphaChanged() ||
+            // P1-G: 复用 renderer tick / spring 推进循环的聚合结果，避免二次遍历
+            anySpringOffsetChanged ||
+            anyRendererAnimating ||
             // P0: 暂停时间奏点动画已冻结（tick 跳过、画面静止），
             // shouldRender 仅表示"处于间奏时段"，不应再驱动每帧重绘
             (widget.isPlaying && _interludeDots.shouldRender);
@@ -1090,7 +1117,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
                 (_interludeExpandProgress - _lastBlurRebuildInterludeProgress)
                         .abs() >
                     0.001 ||
-                _hasPerLineOffsetChanged())) {
+                anySpringOffsetChanged)) {
           _lastBlurRebuildLineIndex = _currentLineIndex;
           _lastBlurRebuildPosY = currentPosY;
           _lastBlurRebuildBlurFade = _blurFade;
@@ -1359,6 +1386,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
             perLineOffsets: _buildPerLineOffsets(),
             blurFade: _blurFade,
             blurActive: useGaussian,
+            blurReadyLineIndices: _lineBlurImages.keys,
             textColorValue: LyricLayout.textColorValue,
             activeLineColorValue: _activeLineColorValue,
             linesGeneration: _linesGeneration,
@@ -1395,6 +1423,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           _painter!.perLineOffsets = _buildPerLineOffsets();
           _painter!.blurFade = _blurFade;
           _painter!.blurActive = useGaussian;
+          // P2-I：同步已就绪模糊图行索引（live view，map 修改后自动反映最新状态）
+          _painter!.blurReadyLineIndices = _lineBlurImages.keys;
           _painter!.textColorValue = LyricLayout.textColorValue;
           _painter!.activeLineColorValue = _activeLineColorValue;
           _painter!.linesGeneration = _linesGeneration;
@@ -1423,27 +1453,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
             // 歌词界面上下边界 alpha 渐变（参数与评论区一致：24px 渐变高度），
             // 顶部 24px alpha 0→1，底部 24px alpha 1→0，
             // 让歌词从边界柔和淡入/淡出。
-            shaderCallback: (Rect bounds) {
-              const double fadeHeight = 24.0;
-              final double fadeRatio =
-                  (fadeHeight / bounds.height).clamp(0.0, 0.5);
-              return LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: const [
-                  Colors.transparent,
-                  Colors.black,
-                  Colors.black,
-                  Colors.transparent,
-                ],
-                stops: [
-                  0.0,
-                  fadeRatio,
-                  1.0 - fadeRatio,
-                  1.0,
-                ],
-              ).createShader(bounds);
-            },
+            // P2-H 方案 A：shader 按 bounds 尺寸缓存复用，避免每次 build 重建。
+            shaderCallback: (Rect bounds) => _fadeShaderFor(bounds),
             blendMode: BlendMode.dstIn,
             child: useGaussian
                 ? ClipRect(
@@ -1805,6 +1816,10 @@ class _LyricsPainter extends CustomPainter {
   List<double> perLineOffsets;
   double blurFade;
   bool blurActive;
+  // P2-I：已就绪模糊图的行索引集合（live view，零分配）。
+  // 当 blurActive && blurFade > 0.99 时，非当前行文字 alpha≈0（不可见），
+  // 若该行模糊图已就绪则跳过文字层绘制——模糊层已覆盖显示。
+  Iterable<int> blurReadyLineIndices;
   int textColorValue;
   int? activeLineColorValue;
   int linesGeneration;
@@ -1841,6 +1856,7 @@ class _LyricsPainter extends CustomPainter {
     required this.perLineOffsets,
     required this.blurFade,
     required this.blurActive,
+    this.blurReadyLineIndices = const <int>[],
     required this.textColorValue,
     required this.activeLineColorValue,
     required this.linesGeneration,
@@ -1936,6 +1952,23 @@ class _LyricsPainter extends CustomPainter {
       if (y > viewportHeight + LyricLayout.overscanPx) break;
 
       final bool isActive = i == currentLineIndex;
+
+      // P2-I：高斯模糊全开且非当前行 alpha≈0（文字不可见）时，
+      // 若该行模糊图已就绪，跳过文字层绘制——模糊层已在其上方覆盖显示。
+      // 条件分解：
+      // - blurActive && blurFade > 0.99：非当前行 alpha = dynamicDark*(1-blurFade) ≈ 0
+      //   （LineRenderer/WordRenderer 中 effectiveFade = blurActive ? blurFade : 0，
+      //    非当前行 alpha = dynamicDark * (1 - effectiveFade)）
+      // - !isActive：仅跳过非当前行（当前行无模糊图，必须绘制）
+      // - blurReadyLineIndices.contains(i)：模糊图已异步渲染完成，模糊层会显示该行；
+      //   未就绪时仍绘制文字层，避免 blurFade 刚跨过 0.99 但模糊图尚未到位时出现空缺
+      if (blurActive &&
+          blurFade > 0.99 &&
+          !isActive &&
+          blurReadyLineIndices.contains(i)) {
+        continue;
+      }
+
       // 文字层不再使用 scale 弹簧，当前行瞬移到 activeScale
       final double scale = isActive
           ? LyricLayout.activeScale
