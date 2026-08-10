@@ -140,11 +140,14 @@ class UsbAudioStream(
         external fun nativeUsbReset(fd: Int): Int
 
         /**
-         * 释放路径专用复位：RESET 触发设备重新枚举，内核驱动（snd-usb-audio）自动重新绑定，
-         * DAC 交还系统（仅 release 接口不足以恢复，Android force-claim 是永久断开驱动）。
+         * 释放路径专用：SETCONFIGURATION(0) → SETCONFIGURATION(current) 触发 USB core
+         * 重新匹配接口驱动（snd-usb-audio 自动重绑），DAC 交还系统。
+         * 实测：USBDEVFS_CONNECT 内核未实现（ENOTTY）；RESET 会让廉价 UAC1 设备
+         * 从 host 栈消失（只能物理拔插恢复）。config 切换是唯一不丢设备的恢复路径。
+         * @param fd usbdevfs 文件描述符
          * @return 0 成功，负数为错误码
          */
         @JvmStatic
-        external fun nativeUsbResetAndRelease(fd: Int): Int
+        external fun nativeUsbReconfigure(fd: Int): Int
     }
 }

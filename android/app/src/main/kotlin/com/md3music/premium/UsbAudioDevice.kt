@@ -147,9 +147,6 @@ class UsbAudioDevice private constructor(private val context: Context) {
     /** 最近一次成功 openDevice 的设备信息（供插件 getStatus 上报）。 */
     fun getCachedInfo(): UsbAudioDeviceInfo? = cachedDeviceInfo
 
-    /** 当前连接的 usbdevfs fd（供 disable 时 RESET 触发设备重新枚举）。 */
-    fun getCurrentFd(): Int? = connection?.fileDescriptor
-
     fun openDevice(device: UsbDevice): UsbAudioDeviceInfo? {
         // Return cached info if already open with valid connection
         val cached = cachedDeviceInfo
@@ -470,7 +467,7 @@ class UsbAudioDevice private constructor(private val context: Context) {
         val conn = connection
         val device = currentDevice
         if (conn != null && device != null) {
-            // 1) AudioStreaming 接口恢复 alt=0（释放 xHCI 等时带宽，让内核驱动干净接管）
+            // 1) AudioStreaming 接口恢复 alt=0（释放 xHCI 等时带宽）
             try {
                 (0 until device.interfaceCount).map { device.getInterface(it) }
                     .firstOrNull { it.interfaceClass == UsbConstants.USB_CLASS_AUDIO &&
@@ -481,12 +478,24 @@ class UsbAudioDevice private constructor(private val context: Context) {
             for (iface in claimedInterfaces) {
                 try { conn.releaseInterface(iface) } catch (_: Exception) {}
             }
+            // 3) SETCONFIGURATION(0→current) 触发 USB core 重新匹配接口驱动
+            //    （snd-usb-audio 自动重绑），DAC 交还系统。
+            //    实测：USBDEVFS_CONNECT 内核未实现（ENOTTY）；RESET 会让廉价 UAC1 设备
+            //    从 host 栈消失（只能物理拔插恢复）。config 切换不丢设备，可再次开启独占。
+            val fd = conn.fileDescriptor
+            try {
+                val ret = UsbAudioStream.nativeUsbReconfigure(fd)
+                Log.i(TAG, "nativeUsbReconfigure ret=$ret")
+            } catch (e: Exception) {
+                Log.e(TAG, "nativeUsbReconfigure failed: ${e.message}")
+            }
         }
+        val releasedCount = claimedInterfaces.size
         claimedInterfaces.clear()
         connection?.close()
         connection = null
         currentDevice = null
-        Log.i(TAG, "USB device closed (${claimedInterfaces.size} interfaces released)")
+        Log.i(TAG, "USB device closed ($releasedCount interfaces released + reconnect)")
     }
 
     /**

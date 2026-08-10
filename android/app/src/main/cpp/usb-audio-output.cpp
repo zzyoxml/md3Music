@@ -649,24 +649,91 @@ Java_com_md3music_premium_UsbAudioStream_nativeUsbReset(
 }
 
 /**
- * 释放路径专用：USBDEVFS_RESET 触发设备复位 → 重新枚举 → 内核驱动（snd-usb-audio）
- * 自动重新绑定，DAC 交还系统（其他 App / 本 App AudioTrack 恢复可用）。
+ * 释放路径专用：SETCONFIGURATION(0) → SETCONFIGURATION(current) 恢复内核驱动绑定，
+ * 让 DAC 交还系统。不触发设备复位（设备保持可见，可再次开启独占）。
  *
- * 为什么必须 RESET：Android claimInterface(force=true) 内部用 USBDEVFS_DISCONNECT
- * 永久断开内核驱动；仅 releaseInterface/close 不会让驱动重新绑定，设备保持
- * "被占用"状态 → 只有重新枚举（插拔/RESET）才能恢复。此函数 RESET 后不再重新
- * claim（区别于 nativeUsbReset），让内核驱动干净接管。
+ * 背景（实测结论）：
+ * - USBDEVFS_CONNECT（_IO('U',17)）在头文件有定义但 Linux/Android 内核 devio.c
+ *   从未实现该分支 → 永远返回 ENOTTY(errno=25)。不能用于恢复驱动绑定。
+ * - USBDEVFS_RESET 会让设备从 Android USB host 栈移除（UsbHostManager: Removed），
+ *   廉价 UAC1 DAC 复位后不重新枚举 → "未连接"，只能物理拔插恢复。不可用。
+ * - 唯一可靠路径：切换设备配置。set_configuration(0) 解除配置（dev->config=NULL），
+ *   set_configuration(current) 重新配置 → USB core 为所有接口重新匹配驱动
+ *   （snd-usb-audio 自动重绑）→ 系统恢复 USB 声音。整个过程设备不离开 host 栈。
+ *
+ * 注意：必须在后台线程调用（本函数对廉价设备可能阻塞数百 ms）。
  */
 JNIEXPORT jint JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbResetAndRelease(
+Java_com_md3music_premium_UsbAudioStream_nativeUsbReconfigure(
         JNIEnv *, jclass, jint fd) {
-    LOGI("USBDEVFS_RESET (release path) fd=%d", fd);
-    int ret = ioctl(fd, USBDEVFS_RESET, 0);
-    if (ret < 0) {
-        LOGE("RESET FAILED errno=%d (%s)", errno, strerror(errno));
-        return ret;
+    // 读取设备当前配置值（标准控制请求 GET_CONFIGURATION，返回 bConfigurationValue）
+    struct usbdevfs_ctrltransfer ctrl = {};
+    ctrl.bRequestType = 0x80; // USB_DIR_IN | USB_TYPE_STANDARD | USB_RECIP_DEVICE
+    ctrl.bRequest = 0x08;     // USB_REQ_GET_CONFIGURATION
+    ctrl.wValue = 0;
+    ctrl.wIndex = 0;
+    ctrl.wLength = 1;
+    ctrl.timeout = 1000;
+    uint8_t currentConfig = 0;
+    ctrl.data = &currentConfig;
+    int rg = ioctl(fd, USBDEVFS_CONTROL, &ctrl);
+    if (rg < 0) {
+        LOGE("GET_CONFIGURATION failed errno=%d (%s), 兜底用 1", errno, strerror(errno));
+        currentConfig = 1;
+    } else {
+        LOGI("GET_CONFIGURATION = %d", currentConfig);
     }
-    LOGI("RESET OK — device re-enumerated, kernel driver will rebind");
+    if (currentConfig == 0) currentConfig = 1;
+
+    // 1) 断开设备上所有接口的内核驱动（USBDEVFS_DISCONNECT，与 claimInterface(force=true)
+    //    同语义；未绑定驱动的接口返回 ENODATA，忽略）。
+    //    关键：若设备存在我们未 claim 的接口（如 USB 输入接口）且仍绑着 snd-usb-audio，
+    //    set_configuration(0) 卸载该驱动会因驱动 busy（ALSA PCM 被 AudioFlinger 打开）
+    //    返回 EBUSY。先全部断开，set_configuration 时就没有 busy 驱动了。
+    for (int ifno = 0; ifno < 8; ifno++) {
+        struct usbdevfs_ioctl cmd = {};
+        cmd.ifno = ifno;
+        cmd.ioctl_code = USBDEVFS_DISCONNECT;
+        int dr = ioctl(fd, USBDEVFS_IOCTL, &cmd);
+        if (dr < 0) {
+            if (errno != ENODATA && errno != EINVAL && errno != ENODEV) {
+                LOGI("DISCONNECT ifno=%d errno=%d (%s)", ifno, errno, strerror(errno));
+            }
+        } else {
+            LOGI("DISCONNECT ifno=%d OK — 内核驱动已断开", ifno);
+        }
+    }
+    // 等驱动断开/ALSA 设备移除完成
+    usleep(200000);
+
+    // 2) 解除配置：释放所有接口、解绑接口驱动（dev->config 置 NULL）。
+    //    EBUSY 偶发时重试（AudioFlinger 释放 USB ALSA 设备需要时间）
+    int c0 = 0;
+    int r0 = -1;
+    for (int attempt = 0; attempt < 5; attempt++) {
+        r0 = ioctl(fd, USBDEVFS_SETCONFIGURATION, &c0);
+        if (r0 >= 0) break;
+        if (errno == EBUSY) {
+            LOGI("SETCONFIGURATION(0) busy, retry %d/5...", attempt + 1);
+            usleep(500000);
+        } else {
+            break;
+        }
+    }
+    if (r0 < 0) {
+        LOGE("SETCONFIGURATION(0) ret=%d errno=%d (%s)", r0, errno, strerror(errno));
+        return r0;
+    }
+    LOGI("SETCONFIGURATION(0) OK — 接口已释放，等待内核驱动重绑...");
+
+    // 3) 重新配置：USB core 为所有接口重新匹配驱动（snd-usb-audio 自动重绑）
+    int c1 = currentConfig;
+    int r1 = ioctl(fd, USBDEVFS_SETCONFIGURATION, &c1);
+    if (r1 < 0) {
+        LOGE("SETCONFIGURATION(%d) ret=%d errno=%d (%s)", currentConfig, r1, errno, strerror(errno));
+        return r1;
+    }
+    LOGI("SETCONFIGURATION(%d) OK — 内核驱动已重新绑定，DAC 交还系统", currentConfig);
     return 0;
 }
 

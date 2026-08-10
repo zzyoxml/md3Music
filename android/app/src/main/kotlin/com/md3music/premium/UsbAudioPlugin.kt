@@ -49,6 +49,9 @@ class UsbAudioPlugin(private val context: Context) {
     /** 当前 DAC 位深（enable 时上报给控制器做状态展示）。 */
     private var currentDacBitDepth: Int = 0
 
+    /** 独占开关互斥锁：防止 enable / disable / 拔插恢复并发操作同一 USB 设备。 */
+    private val exclusiveLock = Any()
+
     /**
      * 设备扫描缓存：Dart 端每秒轮询 getStatus，若每次都调 UsbManager.getDeviceList()
      * 会对部分 USB DAC（如廉价 UAC1 设备）造成反复枚举 → 每秒"滋"一声。
@@ -86,7 +89,13 @@ class UsbAudioPlugin(private val context: Context) {
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     Log.w(TAG, "USB_DEVICE_DETACHED — 自动关闭独占，避免写入失效 fd")
                     invalidateDeviceCache()
-                    disableExclusive()
+                    // 与 MethodChannel 的 disable 共用同一把锁，后台线程执行，
+                    // 避免与手动关闭（RESET/config 切换）并发操作设备导致重复释放
+                    Thread {
+                        synchronized(exclusiveLock) {
+                            if (UsbAudioSinkController.isEnabled()) disableExclusive()
+                        }
+                    }.start()
                 }
             }
         }
@@ -132,8 +141,14 @@ class UsbAudioPlugin(private val context: Context) {
             "isEnabled" -> result.success(UsbAudioSinkController.isEnabled())
             "enableExclusive" -> requestEnableInternal(result)
             "disableExclusive" -> {
-                disableExclusive()
-                result.success(getStatus())
+                // RESET 会阻塞约 3s（等待设备重新枚举），必须在后台线程执行避免 ANR；
+                // 加锁防止与 enableExclusive / 拔插恢复路径并发操作设备
+                Thread {
+                    synchronized(exclusiveLock) {
+                        disableExclusive()
+                        result.success(getStatus())
+                    }
+                }.start()
             }
             else -> result.notImplemented()
         }
@@ -202,20 +217,23 @@ class UsbAudioPlugin(private val context: Context) {
     private fun doEnable(device: UsbDevice, result: MethodChannel.Result?) {
         Thread {
             try {
-                val adapter = createStartedStream(device) ?: run {
-                    mainHandler.post {
-                        if (result != null) result.error("STREAM_CREATE_FAILED", "USB 流创建失败，详见 logcat", null)
+                // 与 disable 共用互斥锁，防止开关并发操作同一设备
+                synchronized(exclusiveLock) {
+                    val adapter = createStartedStream(device) ?: run {
+                        mainHandler.post {
+                            if (result != null) result.error("STREAM_CREATE_FAILED", "USB 流创建失败，详见 logcat", null)
+                        }
+                        return@Thread
                     }
-                    return@Thread
-                }
-                currentAdapter = adapter
-                val rate = UsbAudioSinkController.getLastSampleRate().takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
-                val ch = UsbAudioSinkController.getLastChannelCount().takeIf { it > 0 } ?: DEFAULT_CHANNELS
-                val ok = UsbAudioSinkController.enable(adapter, currentDacBitDepth, rate, ch)
-                mainHandler.post {
-                    if (result != null) {
-                        if (ok) result.success(getStatus())
-                        else result.error("ENABLE_FAILED", "USB 独占开启失败", null)
+                    currentAdapter = adapter
+                    val rate = UsbAudioSinkController.getLastSampleRate().takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
+                    val ch = UsbAudioSinkController.getLastChannelCount().takeIf { it > 0 } ?: DEFAULT_CHANNELS
+                    val ok = UsbAudioSinkController.enable(adapter, currentDacBitDepth, rate, ch)
+                    mainHandler.post {
+                        if (result != null) {
+                            if (ok) result.success(getStatus())
+                            else result.error("ENABLE_FAILED", "USB 独占开启失败", null)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -329,21 +347,9 @@ class UsbAudioPlugin(private val context: Context) {
             }
         }
         currentAdapter = null
-        // 阶段二：USBDEVFS_RESET 触发设备重新枚举 → 内核驱动（snd-usb-audio）自动重新绑定。
-        // 必须做这一步：Android force-claim 是 USBDEVFS_DISCONNECT 永久断开内核驱动，
-        // 仅 releaseInterface/close 驱动不会重绑，DAC 会一直"被占用"（只能插拔恢复）。
-        try {
-            val fd = usbAudioDevice.getCurrentFd()
-            if (fd != null) {
-                val ret = UsbAudioStream.nativeUsbResetAndRelease(fd)
-                Log.i(TAG, "nativeUsbResetAndRelease ret=$ret")
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "nativeUsbResetAndRelease failed: ${e.message}")
-        }
-        // 阶段三：释放接口 + close（RESET 已清 claims，这里兜底清理）
+        // 阶段二：释放接口 + USBDEVFS_CONNECT 重绑内核驱动 + close（见 closeDevice 内实现）
         usbAudioDevice.closeDevice()
-        // 阶段四：设备释放完成后再恢复 delegate 音量/路由
+        // 阶段三：设备释放完成后再恢复 delegate 音量/路由
         UsbAudioSinkController.onUsbReleased()
         Log.i(TAG, "disableExclusive done")
     }
