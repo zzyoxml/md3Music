@@ -37,6 +37,22 @@ class UsbAudioDevice private constructor(private val context: Context) {
      *  否则内核驱动无法重新绑定 → 其他 App（及本 App 的 AudioTrack）都无法使用 DAC。 */
     private val claimedInterfaces: MutableList<UsbInterface> = mutableListOf()
 
+    /** AudioControl 描述符中 Feature Unit（音量控制）的 bUnitID；<=0 表示 DAC 无硬件音量。 */
+    @Volatile
+    private var featureUnitId: Int = -1
+
+    /** Feature Unit master 声道的 bmaControls（小端），bit1=Volume 支持。 */
+    @Volatile
+    private var featureUnitMasterControls: Int = 0
+
+    /** GET_CUR 探测确定的可用音量声道；-1=未探测（-1 也可能是探测失败）。 */
+    @Volatile
+    private var volumeChannel: Int = -1
+
+    /** DAC 是否支持硬件音量控制（存在 Feature Unit 且带 Volume 控制位）。 */
+    val hasHardwareVolume: Boolean
+        get() = featureUnitId > 0 && (featureUnitMasterControls and 0x02) != 0
+
     companion object {
         private const val TAG = "UsbAudioDevice"
         private const val ACTION_USB_PERMISSION_SUFFIX = ".USB_AUDIO_PERMISSION"
@@ -268,8 +284,11 @@ class UsbAudioDevice private constructor(private val context: Context) {
         // Auto-detect Clock Source ID and best alt setting from USB descriptors
         val clockSourceId = parseClockSourceId(conn)
         val (bestAlt, bestBits) = parseBestAltSetting(conn)
+        featureUnitId = parseFeatureUnitId(conn)
         Log.i(TAG, "Auto-detected: clockSourceId=0x${clockSourceId.toString(16)}, " +
-                "bestAlt=$bestAlt, bestBits=$bestBits")
+                "bestAlt=$bestAlt, bestBits=$bestBits, featureUnitId=0x${if (featureUnitId > 0) featureUnitId.toString(16) else "-"} " +
+                "masterControls=0x${featureUnitMasterControls.toString(16)}" +
+                if (hasHardwareVolume) " (硬件音量可用)" else " (无硬件音量，用软件音量 fallback)")
 
         val info = UsbAudioDeviceInfo(
                 connection = conn,
@@ -358,6 +377,125 @@ class UsbAudioDevice private constructor(private val context: Context) {
 
         Log.w(TAG, "parseClockSourceId: no CLOCK_SOURCE descriptor found")
         return -1
+    }
+
+    /**
+     * 解析 AudioControl 接口描述符，查找 Feature Unit（音量控制实体）。
+     *
+     * CS_INTERFACE(0x24) 的 FEATURE_UNIT subtype = 0x06（UAC1/UAC2 相同）。
+     * 返回 bUnitID；没有 Feature Unit 或不在 AudioControl 接口内则返回 -1
+     * （表示 DAC 无硬件音量控制，上层应回退软件音量）。
+     */
+    private fun parseFeatureUnitId(conn: UsbDeviceConnection): Int {
+        val raw = conn.rawDescriptors ?: return -1
+        var i = 0
+        var inAudioControl = false
+        while (i + 1 < raw.size) {
+            val bLength = raw[i].toInt() and 0xFF
+            if (bLength < 2) break
+            if (i + bLength > raw.size) break
+            val bDescriptorType = raw[i + 1].toInt() and 0xFF
+
+            // Interface descriptor (0x04)：进入/离开 AudioControl 接口（class=1, subclass=1）
+            if (bDescriptorType == 0x04 && bLength >= 9) {
+                val cls = raw[i + 5].toInt() and 0xFF
+                val sub = raw[i + 6].toInt() and 0xFF
+                inAudioControl = (cls == 1 && sub == 1)
+            }
+
+            // CS_INTERFACE descriptor (0x24)：Feature Unit
+            if (inAudioControl && bDescriptorType == 0x24 && bLength >= 6) {
+                val bDescriptorSubtype = raw[i + 2].toInt() and 0xFF
+                if (bDescriptorSubtype == 0x06) {  // FEATURE_UNIT
+                    val bUnitID = raw[i + 3].toInt() and 0xFF
+                    // 解析 master 声道 bmaControls（小端）：UAC1 bControlSize=1，UAC2=2
+                    val bControlSize = raw[i + 5].toInt() and 0xFF
+                    if (bControlSize in 1..2 && i + 5 + bControlSize <= raw.size) {
+                        var mc = 0
+                        for (k in 0 until bControlSize) {
+                            mc = mc or ((raw[i + 6 + k].toInt() and 0xFF) shl (8 * k))
+                        }
+                        featureUnitMasterControls = mc
+                        Log.i(TAG, "parseFeatureUnitId: bUnitID=0x${bUnitID.toString(16)} " +
+                                "bControlSize=$bControlSize masterControls=0x${mc.toString(16)} " +
+                                "mute=${(mc and 0x01) != 0} volume=${(mc and 0x02) != 0}")
+                    }
+                    return bUnitID
+                }
+            }
+
+            i += bLength
+        }
+        Log.w(TAG, "parseFeatureUnitId: no Feature Unit found — DAC 无硬件音量控制")
+        return -1
+    }
+
+    /**
+     * 通过 UAC 控制传输设置 DAC 硬件主音量。
+     *
+     * 传输格式与本设备可用的 setSampleRate 一致（UAC2 风格 wIndex=entityId<<8|iface）：
+     *   bmRequestType = 0x22 (Host→Device, Class, Interface)
+     *   bRequest      = 0x01 (SET_CUR)
+     *   wValue        = 0x0200 (CS=FU_VOLUME_CONTROL<<8 | channel 0=master)
+     *   wIndex        = (featureUnitId << 8) | audioControlInterfaceNumber
+     *   data          = 2 字节有符号 dB/256：0=0dB（最大），-0x8000=-128dB（静音）
+     *
+     * @param percent 0..100（0=静音，100=0dB）
+     * @return 是否成功写入
+     */
+    fun setDacVolume(percent: Int): Boolean {
+        val conn = connection ?: return false
+        val fuId = featureUnitId
+        if (fuId <= 0) return false
+
+        // 先探测音量声道：master(0)/左(1)/右(2)，GET_CUR 成功即该声道支持音量控制。
+        // 注意：部分 DAC 的 FU 存在但 master 无 Volume 控制位（STALL），需要逐声道探测。
+        if (volumeChannel < 0) {
+            for (ch in 0..2) {
+                val probe = ByteArray(2)
+                val gr = conn.controlTransfer(
+                        0xA2,  // bmRequestType: Device-to-Host, Class, Interface
+                        0x01,  // bRequest: GET_CUR
+                        (0x02 shl 8) or ch,  // FU_VOLUME_CONTROL | channel
+                        (fuId shl 8) or 0,   // entityId << 8 | AudioControl iface(0)
+                        probe,
+                        probe.size,
+                        500
+                )
+                if (gr >= 2) {
+                    val cur = (probe[0].toInt() and 0xFF) or ((probe[1].toInt() and 0xFF) shl 8)
+                    val signed = if (cur >= 0x8000) cur - 0x10000 else cur
+                    volumeChannel = ch
+                    Log.i(TAG, "setDacVolume: probe channel $ch OK (cur=${signed / 256.0}dB)")
+                    break
+                }
+            }
+            if (volumeChannel < 0) {
+                Log.w(TAG, "setDacVolume: FU 0x${fuId.toString(16)} all channels no volume — DAC 不支持硬件音量")
+                return false
+            }
+        }
+
+        val p = percent.coerceIn(0, 100)
+        val volume = if (p <= 0) {
+            -0x8000  // 完全静音
+        } else {
+            // 线性映射：100% → 0dB(0)，1% → -128dB(-0x8000)。保持 16bit 精度。
+            -((100 - p) * 32768) / 100
+        }
+
+        val data = ByteArray(2)
+        data[0] = (volume and 0xFF).toByte()
+        data[1] = ((volume shr 8) and 0xFF).toByte()
+
+        val wValue = (0x02 shl 8) or volumeChannel
+        val ret = conn.controlTransfer(0x22, 0x01, wValue, (fuId shl 8) or 0, data, data.size, 1000)
+        if (ret >= 0) {
+            Log.i(TAG, "setDacVolume($p%) ch=$volumeChannel vol=$volume (${volume / 256.0}dB) OK")
+            return true
+        }
+        Log.w(TAG, "setDacVolume($p%): SET_CUR failed ret=$ret")
+        return false
     }
 
     /**
@@ -464,6 +602,9 @@ class UsbAudioDevice private constructor(private val context: Context) {
      */
     fun closeDevice() {
         cachedDeviceInfo = null
+        featureUnitId = -1
+        featureUnitMasterControls = 0
+        volumeChannel = -1
         val conn = connection
         val device = currentDevice
         if (conn != null && device != null) {

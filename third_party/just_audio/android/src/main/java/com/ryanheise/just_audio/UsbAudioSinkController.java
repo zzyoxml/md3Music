@@ -47,6 +47,24 @@ public final class UsbAudioSinkController {
     private static volatile int usbSampleRate = 0;
     private static volatile int usbChannelCount = 0;
 
+    /** 最近一次播放器音量（0..1）。DAC 音量 = 系统媒体音量 × 该值。 */
+    private static volatile float lastPlayerVolume = 1f;
+
+    /** 播放器音量变化回调（应用侧用它更新 DAC 硬件音量）。 */
+    public interface UsbVolumeListener {
+        void onPlayerVolumeChanged(float volume);
+    }
+
+    private static volatile UsbVolumeListener volumeListener = null;
+
+    public static void setVolumeListener(UsbVolumeListener listener) {
+        volumeListener = listener;
+    }
+
+    public static float getLastPlayerVolume() {
+        return lastPlayerVolume;
+    }
+
     /** 所有存活包装器（应用可能创建多个播放器实例）。 */
     private static final List<UsbInterceptAudioSink> liveSinks = new CopyOnWriteArrayList<>();
 
@@ -365,7 +383,15 @@ public final class UsbAudioSinkController {
         }
 
         @Override public void setVolume(float volume) {
+            // 节流：音量值没变时不通知应用侧（ExoPlayer 初始化可能多次 setVolume 同值）
+            boolean changed = volume != lastPlayerVolume;
             pendingVolume = volume;
+            lastPlayerVolume = volume;
+            if (changed) {
+                // 通知应用侧更新 DAC 硬件音量（独占时有效；未独占时应用侧会忽略）
+                UsbVolumeListener l = volumeListener;
+                if (l != null) l.onPlayerVolumeChanged(volume);
+            }
             if (exclusiveEnabled && activeStream != null && activeStream.isAlive()) {
                 // 独占：委托静音（真实音量走 USB 流，原生按位深直写不受音量影响）
                 if (!delegateMuted) {

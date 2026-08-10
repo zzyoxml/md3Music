@@ -64,6 +64,12 @@ class UsbAudioStream(
     /** 写入交错 float32 PCM。原生层转换为 DAC 位深并按 1ms URB 分包。 */
     fun write(pcmBuffer: FloatArray) {
         if (nativeHandle == 0L) return
+        // 软件音量 fallback：DAC 无硬件音量控制时对 float 数据缩放
+        // （bit-perfect 场景优先用 DAC 硬件音量，此处仅在硬件音量不可用时生效）
+        val v = streamVolume
+        if (v < 0.999f) {
+            for (i in pcmBuffer.indices) pcmBuffer[i] *= v
+        }
         nativeUsbAudioWrite(nativeHandle, pcmBuffer)
     }
 
@@ -76,7 +82,60 @@ class UsbAudioStream(
             0x16 -> 32 // C.ENCODING_PCM_32BIT
             else -> return
         }
+        // 软件音量 fallback：整数直写路径也必须缩放（DAC 无硬件音量时）
+        val v = streamVolume
+        if (v < 0.999f) scalePcmInPlace(pcmBuffer, inputBitDepth, v)
         nativeUsbAudioWriteRaw(nativeHandle, pcmBuffer, inputBitDepth)
+    }
+
+    /**
+     * 原地缩放整数 PCM 音量（16/24/32bit LE）。
+     * 注意：与 [write] 的 float 路径共用 [streamVolume]，两路都应用，互不重复。
+     */
+    private fun scalePcmInPlace(buffer: ByteArray, bitDepth: Int, volume: Float) {
+        when (bitDepth) {
+            16 -> {
+                var i = 0
+                while (i + 1 < buffer.size) {
+                    var s = (buffer[i].toInt() and 0xFF) or (buffer[i + 1].toInt() shl 8)
+                    if (s >= 0x8000) s -= 0x10000
+                    s = (s * volume).toInt()
+                    buffer[i] = (s and 0xFF).toByte()
+                    buffer[i + 1] = ((s shr 8) and 0xFF).toByte()
+                    i += 2
+                }
+            }
+            24 -> {
+                var i = 0
+                while (i + 2 < buffer.size) {
+                    var s = (buffer[i].toInt() and 0xFF) or
+                            ((buffer[i + 1].toInt() and 0xFF) shl 8) or
+                            (buffer[i + 2].toInt() shl 16)
+                    if (s >= 0x800000) s -= 0x1000000
+                    s = (s * volume).toInt()
+                    buffer[i] = (s and 0xFF).toByte()
+                    buffer[i + 1] = ((s shr 8) and 0xFF).toByte()
+                    buffer[i + 2] = ((s shr 16) and 0xFF).toByte()
+                    i += 3
+                }
+            }
+            32 -> {
+                var i = 0
+                while (i + 3 < buffer.size) {
+                    // 用 Double 避免 float32 精度丢失（int32 全范围 31bit > float 24bit 尾数）
+                    val s = ((buffer[i].toInt() and 0xFF) or
+                            ((buffer[i + 1].toInt() and 0xFF) shl 8) or
+                            ((buffer[i + 2].toInt() and 0xFF) shl 16) or
+                            (buffer[i + 3].toInt() shl 24)) * volume.toDouble()
+                    val r = s.toInt()
+                    buffer[i] = (r and 0xFF).toByte()
+                    buffer[i + 1] = ((r shr 8) and 0xFF).toByte()
+                    buffer[i + 2] = ((r shr 16) and 0xFF).toByte()
+                    buffer[i + 3] = ((r shr 24) and 0xFF).toByte()
+                    i += 4
+                }
+            }
+        }
     }
 
     fun stop() {
@@ -127,6 +186,9 @@ class UsbAudioStream(
 
     companion object {
         private const val TAG = "UsbAudioStream"
+        /** 软件音量（0..1）。DAC 无硬件音量控制时的 fallback，write() 对 float 缩放。 */
+        @Volatile
+        var streamVolume: Float = 1f
 
         init {
             System.loadLibrary("usb_audio_driver")

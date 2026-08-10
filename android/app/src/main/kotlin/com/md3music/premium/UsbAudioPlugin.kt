@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -40,6 +41,8 @@ class UsbAudioPlugin(private val context: Context) {
 
     private val usbManager: UsbManager =
         context.getSystemService(Context.USB_SERVICE) as UsbManager
+    private val audioManager: AudioManager =
+        context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val usbAudioDevice: UsbAudioDevice = UsbAudioDevice.getInstance(context)
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -51,6 +54,87 @@ class UsbAudioPlugin(private val context: Context) {
 
     /** 独占开关互斥锁：防止 enable / disable / 拔插恢复并发操作同一 USB 设备。 */
     private val exclusiveLock = Any()
+
+    /** 上一次系统媒体音量百分比（检测变化后更新 DAC 音量）。 */
+    private var lastSystemVolumePct: Int = -1
+
+    /**
+     * 系统媒体音量轮询：独占时音量键走 AudioFlinger，不会作用于直写 USB 的数据，
+     * 必须由应用侧监听 STREAM_MUSIC 并同步到 DAC 硬件音量（或软件音量 fallback）。
+     * 500ms 轮询足够跟手且开销可忽略。
+     */
+    private val volumePollRunnable = object : Runnable {
+        override fun run() {
+            if (!UsbAudioSinkController.isEnabled()) return
+            val pct = systemVolumePercent()
+            if (pct != lastSystemVolumePct) {
+                lastSystemVolumePct = pct
+                Log.i(TAG, "system media volume: $pct%")
+                applyDacVolume()
+            }
+            mainHandler.postDelayed(this, 500)
+        }
+    }
+
+    private fun systemVolumePercent(): Int {
+        val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+        if (max <= 0) return 100
+        val cur = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
+        return (cur * 100 / max).coerceIn(0, 100)
+    }
+
+    /** 硬件音量是否已被确认可用（首次尝试成功后置 true；失败则永久走软件 fallback）。 */
+    private var hardwareVolumeUsable: Boolean = false
+    private var hardwareVolumeTried: Boolean = false
+    private var lastAppliedDacPct: Int = -1
+
+    /**
+     * 计算并应用 DAC 音量（硬件音量优先，无硬件音量/设置失败时回退软件缩放）：
+     *   DAC 音量% = 系统媒体音量% × 播放器音量(0..1)
+     */
+    private fun applyDacVolume() {
+        val playerVol = UsbAudioSinkController.getLastPlayerVolume().coerceIn(0f, 1f)
+        val sysPct = systemVolumePercent()
+        val dacPct = (sysPct * playerVol).toInt().coerceIn(0, 100)
+        if (dacPct != lastAppliedDacPct) {
+            lastAppliedDacPct = dacPct
+            Log.i(TAG, "applyDacVolume: sys=$sysPct% player=$playerVol → dac=$dacPct%")
+        }
+        if (!UsbAudioSinkController.isEnabled()) return
+        if (hardwareVolumeUsable) {
+            usbAudioDevice.setDacVolume(dacPct)
+        } else if (!hardwareVolumeTried) {
+            // 首次尝试：成功则锁定硬件音量；失败（DAC 不支持）则回退软件音量
+            hardwareVolumeTried = true
+            if (usbAudioDevice.hasHardwareVolume && usbAudioDevice.setDacVolume(dacPct)) {
+                hardwareVolumeUsable = true
+                Log.i(TAG, "hardware volume usable — DAC 硬件音量接管")
+            } else {
+                Log.w(TAG, "hardware volume unavailable — 使用软件音量 fallback")
+                UsbAudioStream.streamVolume = dacPct / 100f
+            }
+        } else {
+            UsbAudioStream.streamVolume = dacPct / 100f
+        }
+    }
+
+    /** enable 时重置硬件音量探测状态。 */
+    private fun resetVolumeState() {
+        hardwareVolumeUsable = false
+        hardwareVolumeTried = false
+        lastAppliedDacPct = -1
+        UsbAudioStream.streamVolume = 1f
+    }
+
+    private fun startVolumePolling() {
+        lastSystemVolumePct = -1
+        mainHandler.removeCallbacks(volumePollRunnable)
+        mainHandler.post(volumePollRunnable)
+    }
+
+    private fun stopVolumePolling() {
+        mainHandler.removeCallbacks(volumePollRunnable)
+    }
 
     /**
      * 设备扫描缓存：Dart 端每秒轮询 getStatus，若每次都调 UsbManager.getDeviceList()
@@ -120,6 +204,11 @@ class UsbAudioPlugin(private val context: Context) {
             rebuildStream(rate, ch)
         }
 
+        // 播放器音量变化 → 更新 DAC 硬件音量（渲染线程回调，controlTransfer 很短可接受）
+        UsbAudioSinkController.setVolumeListener { volume ->
+            if (UsbAudioSinkController.isEnabled()) applyDacVolume()
+        }
+
         // 动态注册拔插广播（不抢占 MainActivity 的 USB intent-filter，
         // App 运行时即可 claim；未运行时无需处理）
         val filter = IntentFilter().apply {
@@ -181,6 +270,15 @@ class UsbAudioPlugin(private val context: Context) {
         base["deviceConnected"] = device != null
         base["deviceName"] = cached?.deviceName ?: device?.productName
         base["hasPermission"] = device != null && usbAudioDevice.hasPermission(device)
+        base["hasHardwareVolume"] = usbAudioDevice.hasHardwareVolume && hardwareVolumeUsable
+        base["dacVolumePercent"] = if (UsbAudioSinkController.isEnabled()) {
+            if (hardwareVolumeUsable) {
+                // 硬件音量：由 AudioManager STREAM_MUSIC × 播放器音量决定，这里只回读映射值
+                systemVolumePercent() * UsbAudioSinkController.getLastPlayerVolume()
+            } else {
+                UsbAudioStream.streamVolume * 100f
+            }
+        } else 0f
         return base
     }
 
@@ -229,6 +327,14 @@ class UsbAudioPlugin(private val context: Context) {
                     val rate = UsbAudioSinkController.getLastSampleRate().takeIf { it > 0 } ?: DEFAULT_SAMPLE_RATE
                     val ch = UsbAudioSinkController.getLastChannelCount().takeIf { it > 0 } ?: DEFAULT_CHANNELS
                     val ok = UsbAudioSinkController.enable(adapter, currentDacBitDepth, rate, ch)
+                    if (ok) {
+                        // 应用初始 DAC 音量 + 启动系统媒体音量轮询（音量键 → DAC 硬件音量）
+                        mainHandler.post {
+                            resetVolumeState()
+                            applyDacVolume()
+                            startVolumePolling()
+                        }
+                    }
                     mainHandler.post {
                         if (result != null) {
                             if (ok) result.success(getStatus())
@@ -334,6 +440,9 @@ class UsbAudioPlugin(private val context: Context) {
     }
 
     private fun disableExclusive() {
+        // 停止系统音量轮询（独占关闭后音量回到 AudioFlinger 管）
+        stopVolumePolling()
+        resetVolumeState()
         // 阶段一：停写线程 + 清活动流（不恢复 delegate，见控制器 disable() 注释）
         UsbAudioSinkController.disable()
         currentAdapter?.let { adapter ->
