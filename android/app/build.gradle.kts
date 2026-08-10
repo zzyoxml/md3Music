@@ -30,6 +30,12 @@ android {
         targetSdk = 35
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // USB 独占输出 C++ 驱动：只编译与 jniLibs 相同的 4 个 ABI
+        externalNativeBuild {
+            cmake {
+                abiFilters("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            }
+        }
     }
 
     signingConfigs {
@@ -64,6 +70,13 @@ android {
             ndk {
                 debugSymbolLevel = "none"
             }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
         }
     }
 }

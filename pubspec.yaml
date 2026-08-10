@@ -11,7 +11,9 @@ dependencies:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
-  just_audio: ^0.10.6
+  # just_audio 0.10.6 本地 fork：注入可拦截 AudioSink 的 RenderersFactory（USB 独占输出）
+  just_audio:
+    path: third_party/just_audio
   just_audio_background: ^0.0.1-beta.11
   audio_session: ^0.1.18
   http: ^1.2.1

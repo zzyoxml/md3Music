@@ -13,6 +13,7 @@ import 'core/services/equalizer_service.dart';
 import 'core/services/local_http_server.dart';
 import 'core/services/lyricon_provider_service.dart';
 import 'core/services/media_notification_service.dart';
+import 'core/services/usb_audio_service.dart';
 import 'core/services/wakelock_service.dart';
 import 'data/repositories/settings_repository.dart';
 import 'modules/onboarding/user_agreement_page.dart';
@@ -65,6 +66,10 @@ Future<void> main() async {
   // 注册 Lyricon 反向回调（连接状态变更 → UI 刷新）
   // initialize 内部仅 setMethodCallHandler，同步完成，无需 await
   LyriconProviderService.instance.initialize();
+  // 启动 USB 独占输出状态轮询（设置页/歌曲信息页共用实时状态）
+  if (!kIsWeb && Platform.isAndroid) {
+    UsbAudioService.instance.init();
+  }
 
   // P0: 本地 API 服务器与 DLNA 本地 HTTP 服务器改为后台启动（不阻塞 runApp）。
   // 之前 await KugouApiServer.start() 在首帧前完成，其中
