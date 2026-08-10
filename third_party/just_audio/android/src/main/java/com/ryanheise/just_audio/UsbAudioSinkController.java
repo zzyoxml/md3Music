@@ -1,8 +1,6 @@
 package com.ryanheise.just_audio;
 
 import android.content.Context;
-import android.media.AudioDeviceInfo;
-import android.media.AudioManager;
 import android.util.Log;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
@@ -92,17 +90,24 @@ public final class UsbAudioSinkController {
     }
 
     /**
-     * 关闭独占。先让各包装器停止写线程/恢复音量，再返回旧流由调用方
-     * stop → drainUrbs → release（顺序不可颠倒，见 AGENTS/dec drain 铁律）。
+     * 关闭独占（阶段一）：停写线程、清活动流。
+     * 注意：不在此处恢复 delegate 音量/路由 —— 必须先由调用方释放 USB 设备
+     * （stop→drain→release→closeDevice，否则 DAC 仍被占用，delegate 路由回去会无声），
+     * 再调用 [onUsbReleased] 恢复。顺序见 UsbAudioPlugin.disableExclusive。
      */
     public static synchronized UsbAudioSink disable() {
         UsbAudioSink old = activeStream;
         exclusiveEnabled = false;
-        for (UsbInterceptAudioSink s : liveSinks) s.onExclusiveChanged(false);
+        for (UsbInterceptAudioSink s : liveSinks) s.stopStreamingThread();
         activeStream = null;
         activeDacBitDepth = 0;
-        Log.i(TAG, "exclusive DISABLED");
+        Log.i(TAG, "exclusive DISABLED (delegate restore deferred to onUsbReleased)");
         return old;
+    }
+
+    /** 关闭独占（阶段二）：USB 设备完全释放后调用，恢复 delegate 音量/路由。 */
+    public static synchronized void onUsbReleased() {
+        for (UsbInterceptAudioSink s : liveSinks) s.onExclusiveChanged(false);
     }
 
     public static boolean isEnabled() { return exclusiveEnabled; }
@@ -163,6 +168,7 @@ public final class UsbAudioSinkController {
         private int currentChannelCount = 0;
         private boolean isPlaying = false;
         private long handleBufferCallCount = 0;
+        private long posLogCount = 0;
         private long usbStartMediaTimeUs = 0L;
         private boolean usbStartMediaTimeNeedsInit = true;
         private boolean handledEndOfStream = false;
@@ -235,11 +241,12 @@ public final class UsbAudioSinkController {
                 usbChannelCount = channelCount;
                 Log.i(TAG, "reconfigStream OK → " + sampleRate + "Hz/" + channelCount + "ch");
             } else {
-                // 重建失败：回退普通输出。disable() 返回旧流（已释放），由插件侧
-                // rebuildStream 失败时清空 currentAdapter，避免二次 release。
+                // 重建失败：回退普通输出。disable() 已停线程/清流；恢复 delegate 音量。
+                // 设备连接保留（插件侧 currentAdapter 已清空，下次 enable 复用）。
                 Log.e(TAG, "reconfigStream FAILED — falling back to normal output");
                 if (fresh != null) { try { fresh.release(); } catch (Exception ignored) {} }
                 disable();
+                onUsbReleased();
             }
             }
         }
@@ -252,8 +259,10 @@ public final class UsbAudioSinkController {
                 muteDelegateIfNeeded();
                 if (streamingThread == null) {
                     streamingThread = new UsbStreamingThread(stream);
+                    // 暂停状态接管 → 线程创建即暂停（不消费队列 → 不写 DAC）
+                    if (!isPlaying) streamingThread.pauseStreaming();
                     streamingThread.start();
-                    Log.i(TAG, "USB streaming thread created");
+                    Log.i(TAG, "USB streaming thread created (isPlaying=" + isPlaying + ")");
                 }
                 // 捕获媒体时间线偏移，用于 framesWritten → 播放进度换算
                 if (usbStartMediaTimeNeedsInit) {
@@ -261,11 +270,18 @@ public final class UsbAudioSinkController {
                     usbStartMediaTimeNeedsInit = false;
                     Log.i(TAG, "usbStartMediaTimeUs=" + usbStartMediaTimeUs);
                 }
-                // 背压：队列接近满时让 ExoPlayer 重试
+                handleBufferCallCount++;
+                // 诊断：前 5 次 + 每 500 次打印，观察暂停后是否仍有数据喂入
+                if (handleBufferCallCount <= 5 || handleBufferCallCount % 500 == 0) {
+                    Log.i(TAG, "handleBuffer #" + handleBufferCallCount + " pts=" + presentationTimeUs
+                            + " isPlaying=" + isPlaying + " queue=" + streamingThread.queueSize()
+                            + " enc=" + encName(currentEncoding));
+                }
+                // 背压：队列接近满时让 ExoPlayer 重试（暂停时线程不消费 → 队列堆积 →
+                // 背压触发，renderer 停止 feed，但状态机保持正常，seek/恢复播放不受影响）
                 if (streamingThread.queueSize() >= QUEUE_BACKPRESSURE_THRESHOLD) {
                     return false;
                 }
-                handleBufferCallCount++;
                 ByteBuffer snapshot = buffer.slice().order(buffer.order());
                 if (currentEncoding == C.ENCODING_PCM_FLOAT) {
                     int totalSamples = snapshot.remaining() / 4;
@@ -314,12 +330,14 @@ public final class UsbAudioSinkController {
             super.play();
             isPlaying = true;
             if (streamingThread != null) streamingThread.resumeStreaming();
+            Log.i(TAG, "sink.play() → isPlaying=true (exclusive=" + exclusiveEnabled + ")");
         }
 
         @Override public void pause() {
             isPlaying = false;
             if (streamingThread != null) streamingThread.pauseStreaming();
             super.pause();
+            Log.i(TAG, "sink.pause() → isPlaying=false (exclusive=" + exclusiveEnabled + ")");
         }
 
         @Override public void flush() {
@@ -366,7 +384,14 @@ public final class UsbAudioSinkController {
             super.playToEndOfStream();
         }
 
-        @Override public boolean isEnded() { return super.isEnded(); }
+        @Override public boolean isEnded() {
+            boolean r = super.isEnded();
+            if (exclusiveEnabled && (++posLogCount % 500 == 1L)) {
+                Log.i(TAG, "isEnded=" + r + " hasPending(super)=" + super.hasPendingData()
+                        + " hasPending(thread)=" + (streamingThread != null && streamingThread.hasPendingData()));
+            }
+            return r;
+        }
 
         @Override public boolean hasPendingData() {
             if (exclusiveEnabled && streamingThread != null && streamingThread.hasPendingData()) {
@@ -378,12 +403,14 @@ public final class UsbAudioSinkController {
         /** 开关状态变化时由控制器调用。 */
         void onExclusiveChanged(boolean enabled) {
             if (enabled) {
+                // 注意：不做 setPreferredDevice 强制路由 —— 那会重启 delegate AudioTrack，
+                // 导致 ExoPlayer renderer 误判为播放中（暂停状态也会被喂数据 → 每秒滴答播放）。
+                // DAC 已被我们 claim（force=true 断开内核驱动），AudioFlinger 的 usb HAL
+                // 打开必然失败并自动 fallback，无需显式路由即可防抢占。
                 muteDelegateIfNeeded();
-                forceMediaToSpeaker();
                 usbStartMediaTimeNeedsInit = true;
             } else {
                 stopStreamingThread();
-                clearForcedRouting();
                 unmuteDelegateIfNeeded();
             }
         }
@@ -407,33 +434,6 @@ public final class UsbAudioSinkController {
                 super.setVolume(pendingVolume);
                 delegateMuted = false;
             }
-        }
-
-        /** 委托 AudioTrack 强制路由内置扬声器，防止 AudioFlinger 打开 USB 设备抢占通道。 */
-        private void forceMediaToSpeaker() {
-            try {
-                AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
-                AudioDeviceInfo speaker = null;
-                if (am != null) {
-                    AudioDeviceInfo[] devices = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
-                    for (AudioDeviceInfo d : devices) {
-                        if (d.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
-                            speaker = d;
-                            break;
-                        }
-                    }
-                }
-                if (speaker != null) {
-                    setPreferredDevice(speaker);
-                    Log.i(TAG, "delegate routed to speaker");
-                }
-            } catch (Exception e) {
-                Log.w(TAG, "forceMediaToSpeaker failed: " + e.getMessage());
-            }
-        }
-
-        private void clearForcedRouting() {
-            try { setPreferredDevice(null); } catch (Exception ignored) { }
         }
     }
 }

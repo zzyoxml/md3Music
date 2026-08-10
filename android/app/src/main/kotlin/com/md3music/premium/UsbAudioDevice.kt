@@ -23,7 +23,7 @@ import android.util.Log
  * - Open the device and extract endpoint/interface info
  * - Provide the file descriptor and endpoint addresses to [UsbAudioStream]
  *
- * This class does NOT perform audio I/O 鈥?that's handled by the native layer
+ * This class does NOT perform audio I/O — that's handled by the native layer
  * via [UsbAudioStream].
  *
  * @author DecentPlayer project
@@ -33,7 +33,9 @@ class UsbAudioDevice private constructor(private val context: Context) {
     private var usbManager: UsbManager = context.getSystemService(Context.USB_SERVICE) as UsbManager
     private var connection: UsbDeviceConnection? = null
     private var currentDevice: UsbDevice? = null
-    private var claimedInterface: UsbInterface? = null
+    /** 所有已 claim 的音频接口（AudioControl + AudioStreaming），close 时必须全部 release，
+     *  否则内核驱动无法重新绑定 → 其他 App（及本 App 的 AudioTrack）都无法使用 DAC。 */
+    private val claimedInterfaces: MutableList<UsbInterface> = mutableListOf()
 
     companion object {
         private const val TAG = "UsbAudioDevice"
@@ -215,6 +217,7 @@ class UsbAudioDevice private constructor(private val context: Context) {
 
         if (controlInterface != null) {
             val claimed = conn.claimInterface(controlInterface, true)
+            if (claimed) claimedInterfaces.add(controlInterface)
             Log.i(TAG, "Claimed AudioControl interface ${controlInterface.id} force=true: $claimed")
         }
 
@@ -225,11 +228,11 @@ class UsbAudioDevice private constructor(private val context: Context) {
         Log.i(TAG, "Claimed AudioStreaming interface ${streamingInterface.id} force=true: $claimed " +
                 "(alt=${streamingInterface.alternateSetting}, endpoints=${streamingInterface.endpointCount})")
         if (!claimed) {
-            Log.e(TAG, "Failed to claim streaming interface 鈥?kernel driver may still be active")
+            Log.e(TAG, "Failed to claim streaming interface — kernel driver may still be active")
             conn.close()
             return null
         }
-        claimedInterface = streamingInterface
+        claimedInterfaces.add(streamingInterface)
 
         // Force alt=0 to stop any streaming left by kernel driver
         val zeroAlt = (0 until device.interfaceCount)
@@ -296,7 +299,7 @@ class UsbAudioDevice private constructor(private val context: Context) {
 
         Log.i(TAG, "Performing REAL USBDEVFS_RESET on fd=$fd...")
 
-        // Real USB port reset via native ioctl 鈥?resets DAC clock state
+        // Real USB port reset via native ioctl — resets DAC clock state
         val ret = UsbAudioStream.nativeUsbReset(fd)
         Log.i(TAG, "USBDEVFS_RESET result: $ret")
 
@@ -304,8 +307,8 @@ class UsbAudioDevice private constructor(private val context: Context) {
         // Clear cache so openDevice re-claims, but KEEP the connection
         // so the same fd is reused (native claims are on this fd).
         cachedDeviceInfo = null
-        claimedInterface = null
-        // DO NOT close connection 鈥?the fd from reset+native claim must be reused
+        claimedInterfaces.clear()
+        // DO NOT close connection — the fd from reset+native claim must be reused
         // The next openDevice() will see connection != null and skip re-opening
     }
 
@@ -395,7 +398,7 @@ class UsbAudioDevice private constructor(private val context: Context) {
                 if (inAudioStreaming) currentAlt = bAlternateSetting
             }
 
-            // CS_INTERFACE (0x24) in AudioStreaming 鈥?Format Type I (subtype 0x02)
+            // CS_INTERFACE (0x24) in AudioStreaming — Format Type I (subtype 0x02)
             if (inAudioStreaming && bDescriptorType == 0x24 && bLength >= 6) {
                 val bDescriptorSubtype = raw[i + 2].toInt() and 0xFF
                 if (bDescriptorSubtype == 0x02) {
@@ -461,14 +464,26 @@ class UsbAudioDevice private constructor(private val context: Context) {
      */
     fun closeDevice() {
         cachedDeviceInfo = null
-        claimedInterface?.let { iface ->
-            connection?.releaseInterface(iface)
-            claimedInterface = null
+        val conn = connection
+        val device = currentDevice
+        if (conn != null && device != null) {
+            // 1) AudioStreaming 接口恢复 alt=0（释放 xHCI 等时带宽，让内核驱动干净接管）
+            try {
+                (0 until device.interfaceCount).map { device.getInterface(it) }
+                    .firstOrNull { it.interfaceClass == UsbConstants.USB_CLASS_AUDIO &&
+                            it.interfaceSubclass == 2 && it.alternateSetting == 0 }
+                    ?.let { conn.setInterface(it) }
+            } catch (_: Exception) {}
+            // 2) 释放所有已 claim 的接口（AudioControl + AudioStreaming）
+            for (iface in claimedInterfaces) {
+                try { conn.releaseInterface(iface) } catch (_: Exception) {}
+            }
         }
+        claimedInterfaces.clear()
         connection?.close()
         connection = null
         currentDevice = null
-        Log.i(TAG, "USB device closed")
+        Log.i(TAG, "USB device closed (${claimedInterfaces.size} interfaces released)")
     }
 
     /**

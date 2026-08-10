@@ -316,7 +316,8 @@ class UsbAudioPlugin(private val context: Context) {
     }
 
     private fun disableExclusive() {
-        val old = UsbAudioSinkController.disable()
+        // 阶段一：停写线程 + 清活动流（不恢复 delegate，见控制器 disable() 注释）
+        UsbAudioSinkController.disable()
         currentAdapter?.let { adapter ->
             try {
                 // 顺序不可颠倒：stop → drain（排空事件环）→ release
@@ -328,8 +329,12 @@ class UsbAudioPlugin(private val context: Context) {
             }
         }
         currentAdapter = null
+        // 阶段二：完全释放 USB 设备（恢复 alt=0 + 释放全部接口 + close），
+        // 让内核驱动重新绑定 → 其他 App 与本 App 的 AudioTrack 才能重新使用 DAC
         usbAudioDevice.closeDevice()
-        Log.i(TAG, "disableExclusive done (old=$old)")
+        // 阶段三：设备释放完成后再恢复 delegate 音量/路由
+        UsbAudioSinkController.onUsbReleased()
+        Log.i(TAG, "disableExclusive done")
     }
 
     fun cleanup() {
