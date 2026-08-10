@@ -147,6 +147,9 @@ class UsbAudioDevice private constructor(private val context: Context) {
     /** 最近一次成功 openDevice 的设备信息（供插件 getStatus 上报）。 */
     fun getCachedInfo(): UsbAudioDeviceInfo? = cachedDeviceInfo
 
+    /** 当前连接的 usbdevfs fd（供 disable 时 RESET 触发设备重新枚举）。 */
+    fun getCurrentFd(): Int? = connection?.fileDescriptor
+
     fun openDevice(device: UsbDevice): UsbAudioDeviceInfo? {
         // Return cached info if already open with valid connection
         val cached = cachedDeviceInfo

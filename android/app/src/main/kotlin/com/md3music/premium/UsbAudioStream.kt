@@ -138,5 +138,13 @@ class UsbAudioStream(
          */
         @JvmStatic
         external fun nativeUsbReset(fd: Int): Int
+
+        /**
+         * 释放路径专用复位：RESET 触发设备重新枚举，内核驱动（snd-usb-audio）自动重新绑定，
+         * DAC 交还系统（仅 release 接口不足以恢复，Android force-claim 是永久断开驱动）。
+         * @return 0 成功，负数为错误码
+         */
+        @JvmStatic
+        external fun nativeUsbResetAndRelease(fd: Int): Int
     }
 }

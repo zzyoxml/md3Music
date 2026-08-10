@@ -329,10 +329,21 @@ class UsbAudioPlugin(private val context: Context) {
             }
         }
         currentAdapter = null
-        // 阶段二：完全释放 USB 设备（恢复 alt=0 + 释放全部接口 + close），
-        // 让内核驱动重新绑定 → 其他 App 与本 App 的 AudioTrack 才能重新使用 DAC
+        // 阶段二：USBDEVFS_RESET 触发设备重新枚举 → 内核驱动（snd-usb-audio）自动重新绑定。
+        // 必须做这一步：Android force-claim 是 USBDEVFS_DISCONNECT 永久断开内核驱动，
+        // 仅 releaseInterface/close 驱动不会重绑，DAC 会一直"被占用"（只能插拔恢复）。
+        try {
+            val fd = usbAudioDevice.getCurrentFd()
+            if (fd != null) {
+                val ret = UsbAudioStream.nativeUsbResetAndRelease(fd)
+                Log.i(TAG, "nativeUsbResetAndRelease ret=$ret")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "nativeUsbResetAndRelease failed: ${e.message}")
+        }
+        // 阶段三：释放接口 + close（RESET 已清 claims，这里兜底清理）
         usbAudioDevice.closeDevice()
-        // 阶段三：设备释放完成后再恢复 delegate 音量/路由
+        // 阶段四：设备释放完成后再恢复 delegate 音量/路由
         UsbAudioSinkController.onUsbReleased()
         Log.i(TAG, "disableExclusive done")
     }

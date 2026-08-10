@@ -648,6 +648,28 @@ Java_com_md3music_premium_UsbAudioStream_nativeUsbReset(
     return 0;
 }
 
+/**
+ * 释放路径专用：USBDEVFS_RESET 触发设备复位 → 重新枚举 → 内核驱动（snd-usb-audio）
+ * 自动重新绑定，DAC 交还系统（其他 App / 本 App AudioTrack 恢复可用）。
+ *
+ * 为什么必须 RESET：Android claimInterface(force=true) 内部用 USBDEVFS_DISCONNECT
+ * 永久断开内核驱动；仅 releaseInterface/close 不会让驱动重新绑定，设备保持
+ * "被占用"状态 → 只有重新枚举（插拔/RESET）才能恢复。此函数 RESET 后不再重新
+ * claim（区别于 nativeUsbReset），让内核驱动干净接管。
+ */
+JNIEXPORT jint JNICALL
+Java_com_md3music_premium_UsbAudioStream_nativeUsbResetAndRelease(
+        JNIEnv *, jclass, jint fd) {
+    LOGI("USBDEVFS_RESET (release path) fd=%d", fd);
+    int ret = ioctl(fd, USBDEVFS_RESET, 0);
+    if (ret < 0) {
+        LOGE("RESET FAILED errno=%d (%s)", errno, strerror(errno));
+        return ret;
+    }
+    LOGI("RESET OK — device re-enumerated, kernel driver will rebind");
+    return 0;
+}
+
 } // extern "C" 鈥?pause for non-JNI functions used by native-audio-engine
 
 // 鈹€鈹€ Integer padding (lossless, zero float) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
