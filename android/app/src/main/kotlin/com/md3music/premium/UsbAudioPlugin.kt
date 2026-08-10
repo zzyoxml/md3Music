@@ -49,12 +49,35 @@ class UsbAudioPlugin(private val context: Context) {
     /** 当前 DAC 位深（enable 时上报给控制器做状态展示）。 */
     private var currentDacBitDepth: Int = 0
 
+    /**
+     * 设备扫描缓存：Dart 端每秒轮询 getStatus，若每次都调 UsbManager.getDeviceList()
+     * 会对部分 USB DAC（如廉价 UAC1 设备）造成反复枚举 → 每秒"滋"一声。
+     * 因此扫描结果缓存 5 秒；拔插广播会立即失效缓存。
+     */
+    private var deviceCacheTime: Long = 0L
+    private var deviceCacheResult: UsbDevice? = null
+
+    private fun findCachedDevice(): UsbDevice? {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (deviceCacheResult == null || now - deviceCacheTime > 5000) {
+            deviceCacheTime = now
+            deviceCacheResult = usbAudioDevice.findUsbAudioDevice()
+        }
+        return deviceCacheResult
+    }
+
+    private fun invalidateDeviceCache() {
+        deviceCacheResult = null
+        deviceCacheTime = 0L
+    }
+
     /** 拔插广播：独占开启时拔线自动关闭（避免写坏 fd），重新插入自动恢复。 */
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(ctx: Context, intent: Intent) {
             when (intent.action) {
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
                     Log.i(TAG, "USB_DEVICE_ATTACHED (exclusive=" + UsbAudioSinkController.isEnabled() + ")")
+                    invalidateDeviceCache()
                     if (UsbAudioSinkController.isEnabled()) {
                         // 重插后设备需重新授权 + 重建流
                         requestEnableInternal(null)
@@ -62,6 +85,7 @@ class UsbAudioPlugin(private val context: Context) {
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     Log.w(TAG, "USB_DEVICE_DETACHED — 自动关闭独占，避免写入失效 fd")
+                    invalidateDeviceCache()
                     disableExclusive()
                 }
             }
@@ -137,7 +161,7 @@ class UsbAudioPlugin(private val context: Context) {
     private fun getStatus(): Map<String, Any?> {
         val base = HashMap<String, Any?>()
         base.putAll(UsbAudioSinkController.getStatus())
-        val device = usbAudioDevice.findUsbAudioDevice()
+        val device = findCachedDevice()
         val cached = usbAudioDevice.getCachedInfo()
         base["deviceConnected"] = device != null
         base["deviceName"] = cached?.deviceName ?: device?.productName
@@ -149,7 +173,7 @@ class UsbAudioPlugin(private val context: Context) {
 
     /** 开启独占（可带授权流程）。result 为空时表示由拔插广播触发。 */
     private fun requestEnableInternal(result: MethodChannel.Result?) {
-        val device = usbAudioDevice.findUsbAudioDevice()
+        val device = findCachedDevice()
         if (device == null) {
             Log.e(TAG, "enableExclusive: no USB audio device")
             if (result != null) result.error("NO_DEVICE", "未检测到 USB 音频设备", null)
@@ -268,7 +292,7 @@ class UsbAudioPlugin(private val context: Context) {
     /** 采样率/声道变化时重建流（UsbAudioSinkController 回调，渲染线程执行）。 */
     private fun rebuildStream(rate: Int, ch: Int): UsbAudioSink? {
         return try {
-            val device = usbAudioDevice.findUsbAudioDevice()
+            val device = findCachedDevice()
                 ?: run { Log.e(TAG, "rebuild: no device"); currentAdapter = null; return null }
             if (!usbManager.hasPermission(device)) {
                 Log.e(TAG, "rebuild: no permission")

@@ -28,6 +28,7 @@ class UsbAudioService {
   Timer? _pollTimer;
   Map<String, dynamic> _lastStatus = const {};
   bool _inited = false;
+  String _lastPollError = '';
 
   /// 实时状态流（每秒一帧）。
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
@@ -78,8 +79,13 @@ class UsbAudioService {
           _debug('status: deviceConnected $prevConn → $nowConn (${nowConn ? 'attached' : 'detached'})');
         }
       }
-    } catch (e, s) {
-      _debug('poll failed: $e\n$s');
+    } catch (e) {
+      // 错误日志节流：同一错误只打印一次，避免后台 isolate 每秒刷屏
+      final err = e.toString();
+      if (err != _lastPollError) {
+        _lastPollError = err;
+        _debug('poll failed: $err');
+      }
     }
   }
 
