@@ -1,0 +1,187 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+
+/// USB 独占输出服务：封装原生 MethodChannel "com.md3music.premium/usb_audio"。
+///
+/// 提供：
+/// - 开关：enableExclusive / disableExclusive（原生负责授权、开设备、xHCI 时序）
+/// - 查询：listDevices / getStatus / getFormatInfo / isEnabled
+/// - 实时状态：每秒轮询 getStatus，通过 [statusStream] 广播（设置页/歌曲信息页共用）
+///
+/// Debug 约定：所有关键路径输出 `[UsbAudio]` 前缀日志，便于 logcat 过滤排查。
+class UsbAudioService {
+  UsbAudioService._();
+
+  static final UsbAudioService instance = UsbAudioService._();
+
+  static const MethodChannel _channel =
+      MethodChannel('com.md3music.premium/usb_audio');
+
+  static const String _tag = 'UsbAudioService';
+
+  final StreamController<Map<String, dynamic>> _statusController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  Timer? _pollTimer;
+  Map<String, dynamic> _lastStatus = const {};
+  bool _inited = false;
+  String _lastPollError = '';
+
+  /// 实时状态流（每秒一帧）。
+  Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
+
+  /// 最近一次轮询到的状态。
+  Map<String, dynamic> get lastStatus => _lastStatus;
+
+  bool get _isAndroid => defaultTargetPlatform == TargetPlatform.android;
+
+  /// 启动轮询（幂等）。App 启动时调用一次。
+  void init() {
+    if (_inited) return;
+    _inited = true;
+    if (!_isAndroid) {
+      _debug('init skipped (non-Android)');
+      return;
+    }
+    _debug('init: start polling (1s)');
+    _poll();
+    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _poll());
+  }
+
+  void dispose() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    _inited = false;
+  }
+
+  Future<void> _poll() async {
+    try {
+      final status = await _channel.invokeMapMethod<String, dynamic>('getStatus');
+      if (status == null) return;
+      final prev = _lastStatus;
+      _lastStatus = status;
+      if (!_statusController.isClosed) {
+        _statusController.add(status);
+      }
+      // 状态变化 debug 日志（便于排查：开关切换/拔插/采样率切换）
+      final prevEnabled = prev['enabled'] == true;
+      final nowEnabled = status['enabled'] == true;
+      if (prevEnabled != nowEnabled) {
+        _debug('status: enabled $prevEnabled → $nowEnabled');
+      }
+      if (nowEnabled) {
+        final prevConn = prev['deviceConnected'] == true;
+        final nowConn = status['deviceConnected'] == true;
+        if (prevConn != nowConn) {
+          _debug('status: deviceConnected $prevConn → $nowConn (${nowConn ? 'attached' : 'detached'})');
+        }
+      }
+    } catch (e) {
+      // 错误日志节流：同一错误只打印一次，避免后台 isolate 每秒刷屏
+      final err = e.toString();
+      if (err != _lastPollError) {
+        _lastPollError = err;
+        _debug('poll failed: $err');
+      }
+    }
+  }
+
+  // ── MethodChannel 封装 ────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>> listDevices() async {
+    try {
+      final list = await _channel.invokeListMethod<dynamic>('listDevices');
+      return (list ?? [])
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
+    } catch (e) {
+      _debug('listDevices failed: $e');
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>> getStatus() async {
+    try {
+      final s = await _channel.invokeMapMethod<String, dynamic>('getStatus');
+      if (s != null) _lastStatus = s;
+      return s ?? const {};
+    } catch (e) {
+      _debug('getStatus failed: $e');
+      return const {};
+    }
+  }
+
+  /// 当前解码输出格式：{sampleRate, channelCount, encoding, hasData}。
+  Future<Map<String, dynamic>> getFormatInfo() async {
+    try {
+      final f = await _channel.invokeMapMethod<String, dynamic>('getFormatInfo');
+      return f ?? const {};
+    } catch (e) {
+      _debug('getFormatInfo failed: $e');
+      return const {};
+    }
+  }
+
+  Future<bool> isEnabled() async {
+    try {
+      return await _channel.invokeMethod<bool>('isEnabled') ?? false;
+    } catch (e) {
+      _debug('isEnabled failed: $e');
+      return false;
+    }
+  }
+
+  /// 开启 USB 独占。成功返回最新状态；失败抛出 [UsbAudioException]。
+  Future<Map<String, dynamic>> enableExclusive() async {
+    _debug('enableExclusive()');
+    try {
+      final s = await _channel.invokeMapMethod<String, dynamic>('enableExclusive');
+      if (s != null) _lastStatus = s;
+      _debug('enableExclusive → ${_statusSummary(s ?? const {})}');
+      return s ?? const {};
+    } on PlatformException catch (e) {
+      _debug('enableExclusive error: ${e.code} ${e.message}');
+      throw UsbAudioException(e.code, e.message ?? '开启失败');
+    } catch (e) {
+      _debug('enableExclusive error: $e');
+      throw UsbAudioException('ENABLE_FAILED', '开启失败: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> disableExclusive() async {
+    _debug('disableExclusive()');
+    try {
+      final s = await _channel.invokeMapMethod<String, dynamic>('disableExclusive');
+      if (s != null) _lastStatus = s;
+      _debug('disableExclusive → ${_statusSummary(s ?? const {})}');
+      return s ?? const {};
+    } catch (e) {
+      _debug('disableExclusive failed: $e');
+      return const {};
+    }
+  }
+
+  // ── 工具 ──────────────────────────────────────────────────────
+
+  void _debug(String msg) {
+    // ignore: avoid_print
+    print('[$_tag] $msg');
+  }
+
+  String _statusSummary(Map<String, dynamic> s) {
+    return jsonEncode(s);
+  }
+}
+
+/// USB 独占操作失败（code 对应原生 errorCode，如 NO_DEVICE / PERMISSION_DENIED）。
+class UsbAudioException implements Exception {
+  final String code;
+  final String message;
+  UsbAudioException(this.code, this.message);
+
+  @override
+  String toString() => 'UsbAudioException($code): $message';
+}

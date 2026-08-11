@@ -91,6 +91,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Song? get currentSong => _currentSong;
   bool get isPlaying => _isPlaying;
 
+  /// audio_service 实例（歌曲信息页读取源格式用）。
+  dynamic get audioService => _audioService;
+
   /// P0: position 独立通知通道。positionStream 每 ~200ms 触发一次，
   /// 之前每次都全量 notifyListeners() 导致所有 `Consumer<PlayerProvider>` 重建。
   /// 现在高频更新只通知 [positionNotifier]，进度条/歌词等高频 UI 订阅它，
