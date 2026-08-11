@@ -32,6 +32,7 @@ import androidx.media3.exoplayer.Renderer;
 import androidx.media3.exoplayer.RenderersFactory;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.common.Metadata;
+import androidx.media3.common.Format;
 import androidx.media3.exoplayer.metadata.MetadataOutput;
 import androidx.media3.extractor.metadata.icy.IcyHeaders;
 import androidx.media3.extractor.metadata.icy.IcyInfo;
@@ -49,6 +50,8 @@ import androidx.media3.exoplayer.dash.DashMediaSource; // Deprecated
 import androidx.media3.exoplayer.hls.HlsMediaSource; // Deprecated
 import androidx.media3.exoplayer.trackselection.TrackSelectionArray;
 import androidx.media3.datasource.DataSource;
+import androidx.media3.datasource.DataSpec;
+import androidx.media3.datasource.TransferListener;
 import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.common.MimeTypes;
@@ -112,6 +115,21 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
     private String errorMessage;
     private Integer currentIndex;
     private final Handler handler = new Handler(Looper.getMainLooper());
+
+    /** 本曲累计下载/读取的音频数据字节（歌曲信息页实时码率用）。换歌时重置。 */
+    private long transferredBytes = 0;
+    private final TransferListener transferListener = new TransferListener() {
+        @Override
+        public void onTransferInitializing(DataSource dataSource, DataSpec dataSpec, boolean isNetwork) {}
+        @Override
+        public void onTransferStart(DataSource dataSource, DataSpec dataSpec, boolean isNetwork) {}
+        @Override
+        public void onBytesTransferred(DataSource dataSource, DataSpec dataSpec, boolean isNetwork, int bytesTransferred) {
+            transferredBytes += bytesTransferred;
+        }
+        @Override
+        public void onTransferEnd(DataSource dataSource, DataSpec dataSpec, boolean isNetwork) {}
+    };
     private final Runnable bufferWatcher = new Runnable() {
         @Override
         public void run() {
@@ -458,6 +476,16 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                 setVolume((float) ((double) ((Double) call.argument("volume"))));
                 result.success(new HashMap<String, Object>());
                 break;
+            case "getSourceFormat":
+                result.success(getSourceFormat());
+                break;
+            case "getTransferStats": {
+                Map<String, Object> s = new HashMap<>();
+                s.put("totalBytes", transferredBytes);
+                s.put("positionMs", player.getCurrentPosition());
+                result.success(s);
+                break;
+            }
             case "setSpeed":
                 setSpeed((float) ((double) ((Double) call.argument("speed"))));
                 result.success(new HashMap<String, Object>());
@@ -743,7 +771,8 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         }
         DefaultHttpDataSource.Factory httpDataSourceFactory = new DefaultHttpDataSource.Factory()
             .setUserAgent(userAgent)
-            .setAllowCrossProtocolRedirects(true);
+            .setAllowCrossProtocolRedirects(true)
+            .setTransferListener(transferListener);
         if (stringHeaders != null && stringHeaders.size() > 0) {
             httpDataSourceFactory.setDefaultRequestProperties(stringHeaders);
         }
@@ -752,6 +781,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
 
     private void load(final List<MediaSource> mediaSources, ShuffleOrder shuffleOrder, final long initialPosition, final Integer initialIndex, final Result result) {
         currentIndex = initialIndex != null ? initialIndex : 0;
+        transferredBytes = 0;  // 换歌重置传输统计（歌曲信息页实时码率）
         switch (processingState) {
         case idle:
             break;
@@ -1012,6 +1042,38 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
 
     public void setVolume(final float volume) {
         player.setVolume(volume);
+    }
+
+    /**
+     * 读取当前曲目的「源格式」（TrackGroup 中媒体轨道本身的 Format），用于歌曲信息页。
+     * 与解码输出格式（AudioSink.configure 的 inputFormat）不同：源格式保留歌曲原始位深
+     * （如 FLAC 24bit → bitsPerSample=24），而解码输出可能被降为 16bit。
+     */
+    public Map<String, Object> getSourceFormat() {
+        Map<String, Object> m = new HashMap<>();
+        m.put("hasData", false);
+        try {
+            Tracks tracks = player.getCurrentTracks();
+            if (tracks != null && !tracks.getGroups().isEmpty()) {
+                for (Tracks.Group group : tracks.getGroups()) {
+                    if (group.getType() != C.TRACK_TYPE_AUDIO) continue;
+                    Format f = group.getMediaTrackGroup().getFormat(0);
+                    if (f == null) continue;
+                    m.put("hasData", true);
+                    m.put("sampleRate", f.sampleRate > 0 ? f.sampleRate : 0);
+                    m.put("channelCount", f.channelCount > 0 ? f.channelCount : 0);
+                    m.put("bitrate", f.bitrate > 0 ? f.bitrate : 0);
+                    m.put("pcmEncoding", f.pcmEncoding);
+                    Log.i(TAG, "getSourceFormat: rate=" + f.sampleRate + " ch=" + f.channelCount
+                            + " bitrate=" + f.bitrate + " pcmEnc=" + f.pcmEncoding
+                            + " mime=" + f.sampleMimeType);
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "getSourceFormat failed: " + e.getMessage());
+        }
+        return m;
     }
 
     public void setSpeed(final float speed) {
