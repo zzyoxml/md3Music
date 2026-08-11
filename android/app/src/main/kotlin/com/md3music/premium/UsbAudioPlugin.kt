@@ -89,16 +89,22 @@ class UsbAudioPlugin(private val context: Context) {
     private var lastAppliedDacPct: Int = -1
 
     /**
+     * USB 独占独立音量系数（0..1，默认 1.0），由设置页/歌曲信息页的"USB 音量"slider
+     * 控制，仅独占开启时参与 DAC 音量计算，与应用内/系统音量分开记忆（Dart 持久化）。
+     */
+    private var usbVolumePercent: Float = 100f
+
+    /**
      * 计算并应用 DAC 音量（硬件音量优先，无硬件音量/设置失败时回退软件缩放）：
-     *   DAC 音量% = 系统媒体音量% × 播放器音量(0..1)
+     *   DAC 音量% = 系统媒体音量% × USB 音量系数(0..1)
+     * 独占时不再乘播放器音量——应用内音量已由「USB 音量」面板取代，避免三层控制。
      */
     private fun applyDacVolume() {
-        val playerVol = UsbAudioSinkController.getLastPlayerVolume().coerceIn(0f, 1f)
         val sysPct = systemVolumePercent()
-        val dacPct = (sysPct * playerVol).toInt().coerceIn(0, 100)
+        val dacPct = (sysPct * (usbVolumePercent / 100f)).toInt().coerceIn(0, 100)
         if (dacPct != lastAppliedDacPct) {
             lastAppliedDacPct = dacPct
-            Log.i(TAG, "applyDacVolume: sys=$sysPct% player=$playerVol → dac=$dacPct%")
+            Log.i(TAG, "applyDacVolume: sys=$sysPct% usbVol=${usbVolumePercent}% → dac=$dacPct%")
         }
         if (!UsbAudioSinkController.isEnabled()) return
         if (hardwareVolumeUsable) {
@@ -229,6 +235,15 @@ class UsbAudioPlugin(private val context: Context) {
             "getFormatInfo" -> result.success(UsbAudioSinkController.getFormatInfo())
             "isEnabled" -> result.success(UsbAudioSinkController.isEnabled())
             "enableExclusive" -> requestEnableInternal(result)
+            "setUsbVolume" -> {
+                // USB 独占独立音量（0..100），仅独占时参与 DAC 音量计算，实时生效
+                val pct = (call.argument<Number>("percent")?.toFloat() ?: 100f)
+                    .coerceIn(0f, 100f)
+                usbVolumePercent = pct
+                Log.i(TAG, "setUsbVolume: $pct% (仅 USB 独占生效)")
+                applyDacVolume()
+                result.success(getStatus())
+            }
             "disableExclusive" -> {
                 // RESET 会阻塞约 3s（等待设备重新枚举），必须在后台线程执行避免 ANR；
                 // 加锁防止与 enableExclusive / 拔插恢复路径并发操作设备
@@ -271,10 +286,11 @@ class UsbAudioPlugin(private val context: Context) {
         base["deviceName"] = cached?.deviceName ?: device?.productName
         base["hasPermission"] = device != null && usbAudioDevice.hasPermission(device)
         base["hasHardwareVolume"] = usbAudioDevice.hasHardwareVolume && hardwareVolumeUsable
+        base["usbVolumePercent"] = usbVolumePercent
         base["dacVolumePercent"] = if (UsbAudioSinkController.isEnabled()) {
             if (hardwareVolumeUsable) {
-                // 硬件音量：由 AudioManager STREAM_MUSIC × 播放器音量决定，这里只回读映射值
-                systemVolumePercent() * UsbAudioSinkController.getLastPlayerVolume()
+                // 硬件音量：DAC 音量% = 系统媒体音量% × USB 音量系数（独占时无播放器音量层）
+                systemVolumePercent() * usbVolumePercent / 100f
             } else {
                 UsbAudioStream.streamVolume * 100f
             }

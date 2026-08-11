@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../core/services/usb_audio_service.dart';
 
@@ -21,12 +22,17 @@ class _UsbExclusiveSectionState extends State<UsbExclusiveSection> {
   bool _loading = false;
   bool _wasDeviceConnected = false;
 
+  /// USB 独占独立音量（0..1，独立记忆，仅独占生效）。本地副本用于 slider 拖动即时反馈。
+  double _usbVolume = 1.0;
+
   @override
   void initState() {
     super.initState();
     _status = UsbAudioService.instance.lastStatus;
     UsbAudioService.instance.statusStream.listen(_onStatus);
     _wasDeviceConnected = _status['deviceConnected'] == true;
+    // 从服务恢复已持久化的 USB 音量（服务启动时已从 SharedPreferences 读取）
+    _usbVolume = (UsbAudioService.instance.usbVolumePercent / 100).clamp(0.0, 1.0);
   }
 
   void _onStatus(Map<String, dynamic> s) {
@@ -141,6 +147,66 @@ class _UsbExclusiveSectionState extends State<UsbExclusiveSection> {
                     _InfoItem('声道', _formatChannels(_status['channelCount'])),
                     _InfoItem('已写帧', '$frames'),
                   ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        // USB 独占独立音量（任何时候可调；独立记忆，仅对独占生效）
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
+            decoration: BoxDecoration(
+              color: colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(
+                      _usbVolume <= 0
+                          ? Icons.volume_off
+                          : _usbVolume < 0.5
+                              ? Icons.volume_down
+                              : Icons.volume_up,
+                      size: 18,
+                      color: colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'USB 音量',
+                        style: textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    Text(
+                      '${(_usbVolume * 100).round()}%',
+                      style: textTheme.labelMedium
+                          ?.copyWith(color: colorScheme.primary),
+                    ),
+                  ],
+                ),
+                Slider(
+                  value: _usbVolume,
+                  // 实时生效：拖动即下发原生，无需松手
+                  onChanged: (v) {
+                    setState(() => _usbVolume = v);
+                    UsbAudioService.instance.setUsbVolume(v * 100);
+                  },
+                  onChangeStart: (_) => HapticFeedback.lightImpact(),
+                  onChangeEnd: (_) => HapticFeedback.selectionClick(),
+                ),
+                Text(
+                  enabled
+                      ? '已生效：DAC 音量 = 系统音量 × USB 音量'
+                      : '未开启独占时暂不生效，开启后即按此音量输出',
+                  style: textTheme.bodySmall
+                      ?.copyWith(color: colorScheme.onSurfaceVariant),
                 ),
               ],
             ),
