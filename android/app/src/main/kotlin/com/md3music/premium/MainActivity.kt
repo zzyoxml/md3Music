@@ -78,6 +78,9 @@ class MainActivity : FlutterActivity() {
         // 注册均衡器插件：Android 原生 Equalizer，绑定 just_audio 的 audio session ID
         EqualizerPlugin().register(flutterEngine)
 
+        // 注册 USB 独占输出插件：MethodChannel + 动态拔插广播 + AudioSink 拦截桥接
+        UsbAudioPlugin(this).register(flutterEngine)
+
         // 初始化本地 API 服务器（KugouApiService 含 JNI external 方法，
         // 如果 .so 的 JNI 符号名与当前包名不匹配，实例化可能触发类验证错误，
         // 这里包一层 try-catch，失败时 Dart 端会走 dart:ffi 兜底）。

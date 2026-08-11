@@ -18,6 +18,7 @@ import '../coverflow/coverflow_page.dart';
 import '../settings/equalizer_settings_page.dart';
 import 'artist_photo_background.dart';
 import 'mv_player_page.dart';
+import 'song_info_page.dart';
 import '../../providers/device_provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
@@ -1331,6 +1332,17 @@ class _FullPlayerState extends State<FullPlayer>
                 );
               },
             ),
+          // 歌曲信息：频率/位深/码率/声道 + USB 独占开关
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: '歌曲信息',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const SongInfoPage()),
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.more_vert),
             onPressed: () => _showMoreMenu(context),

@@ -12,3 +12,11 @@
 -keep class org.jaudiotagger.tag.lyrics.** { *; }
 -keep class org.jaudiotagger.tag.id3.framebody.** { *; }
 -keep class org.jaudiotagger.tag.id3.valuepair.** { *; }
+
+# ── USB 独占输出（JNI 外部方法 + fork 桥接接口，R8 必须保留方法名） ──
+-keepclasseswithmembernames class com.md3music.premium.UsbAudioStream {
+    native <methods>;
+}
+-keep class com.md3music.premium.UsbAudioAdapter { *; }
+-keep class com.ryanheise.just_audio.UsbAudioSinkController { *; }
+-keep class com.ryanheise.just_audio.UsbAudioSink { *; }
