@@ -325,6 +325,70 @@ class SettingsRepository {
     await prefs.setBool(_keyKeepScreenOn, value);
   }
 
+  // ===== 音乐频谱环绕显示 =====
+  static const String _keySpectrumEnabled = 'settings_spectrum_enabled';
+  static const String _keySpectrumBandCount = 'settings_spectrum_band_count';
+  static const String _keySpectrumStyle = 'settings_spectrum_style';
+
+  /// 全屏播放器是否显示音乐频谱环绕（圆形旋转封面 + 环形频谱柱），默认 false。
+  Future<bool> getSpectrumEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keySpectrumEnabled) ?? false;
+  }
+
+  Future<void> setSpectrumEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keySpectrumEnabled, value);
+  }
+
+  /// 频谱柱数量（20~80，默认 40）。
+  Future<int> getSpectrumBandCount() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keySpectrumBandCount) ?? 40;
+  }
+
+  Future<void> setSpectrumBandCount(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keySpectrumBandCount, value);
+  }
+
+  /// 频谱样式：0=柱状图，1=曲线（默认 0）。
+  Future<int> getSpectrumStyle() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keySpectrumStyle) ?? 0;
+  }
+
+  Future<void> setSpectrumStyle(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keySpectrumStyle, value);
+  }
+
+  // ── 频谱背景层 ──
+  static const String _keySpectrumBgOpacity = 'settings_spectrum_bg_opacity';
+  static const String _keySpectrumBgHeight = 'settings_spectrum_bg_height';
+
+  /// 频谱背景层透明度（0.1~0.8，默认 0.4）。
+  Future<double> getSpectrumBgOpacity() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_keySpectrumBgOpacity) ?? 0.4;
+  }
+
+  Future<void> setSpectrumBgOpacity(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keySpectrumBgOpacity, value);
+  }
+
+  /// 频谱背景层高度比例（0.2~0.8，默认 0.4，占屏幕高度的比例）。
+  Future<double> getSpectrumBgHeight() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_keySpectrumBgHeight) ?? 0.4;
+  }
+
+  Future<void> setSpectrumBgHeight(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keySpectrumBgHeight, value);
+  }
+
   // ===== 主页 Tab 配置 =====
   static const String _keyTabOrder = 'settings_tab_order';
   static const String _keyHiddenTabs = 'settings_hidden_tabs';
