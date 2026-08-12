@@ -99,11 +99,15 @@ class MainActivity : FlutterActivity() {
             // 注册 MetadataWriterPlugin：处理下载完成后嵌入元数据（标题/艺术家/专辑/封面/歌词）
             MetadataWriterPlugin().register(flutterEngine)
 
-        // 注册频谱可视化插件：Android 原生 Visualizer，回传 FFT 数据给 Dart 端绘制环形频谱
-        spectrumPlugin = SpectrumPlugin().also { it.register(flutterEngine) }
+            // 注册均衡器插件：Android 原生 Equalizer，绑定 just_audio 的 audio session ID
+            EqualizerPlugin().register(flutterEngine)
 
-        // 注册 USB 独占输出插件：MethodChannel + 动态拔插广播 + AudioSink 拦截桥接
-        UsbAudioPlugin(this).register(flutterEngine)
+            // 注册频谱可视化插件：Android 原生 Visualizer，回传 FFT 数据给 Dart 端绘制环形频谱
+            spectrumPlugin = SpectrumPlugin().also { it.register(flutterEngine) }
+
+            // 注册 USB 独占输出插件：MethodChannel + 动态拔插广播 + AudioSink 拦截桥接
+            UsbAudioPlugin(this).register(flutterEngine)
+        }
 
         // 初始化本地 API 服务器（KugouApiService 含 JNI external 方法，
         // 如果 .so 的 JNI 符号名与当前包名不匹配，实例化可能触发类验证错误，
