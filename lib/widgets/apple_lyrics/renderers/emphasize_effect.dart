@@ -12,7 +12,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
-import '../models/lyric_line.dart';
+import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 
 /// 强调辉光状态。
 ///

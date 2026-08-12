@@ -28,7 +28,7 @@ import 'package:flutter/widgets.dart';
 import '../layout/duet_layout.dart';
 import '../layout/lyric_layout.dart';
 import '../layout/lyric_preferences.dart';
-import '../models/lyric_line.dart';
+import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 
 /// 整行降级渲染器。
 ///
