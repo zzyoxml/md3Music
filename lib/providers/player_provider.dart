@@ -191,6 +191,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _initAudioService();
     // 监听自身变化检测切歌 → 推送 Lyricon（仅 enabled 时实际推送）
     addListener(_handleLyriconSongChange);
+    // 监听 Lyricon 连接状态：headless 唤醒等场景下 auto_restored/connected
+    // 事件到达时可能晚于状态恢复的 notifyListeners，这里补推当前歌曲，
+    // 否则词幕不会自动连接显示（PlayerProvider 自己监听自己无法感知 Lyricon 启用）。
+    LyriconProviderService.instance.addListener(_handleLyriconEnabledChanged);
   }
 
   Future<void> _initAudioService() async {
@@ -205,6 +209,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           resume();
         }
       };
+      MediaNotificationService.onPlay = () => resume();
+      MediaNotificationService.onPause = () => pause();
       MediaNotificationService.onSeekTo = (pos) {
         seek(Duration(milliseconds: pos));
       };
@@ -219,6 +225,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       // 恢复上次播放状态
       await _restoreState();
     } catch (e) {}
+    // 无论初始化是否成功都通知原生端：状态恢复流程已结束。
+    // 进程被杀场景下 AudioPlaybackService 等待该信号后才派发线控耳机命令
+    //（唤醒播放），避免对尚未就绪的播放器派发命令导致空操作。
+    try {
+      await MediaNotificationService.notifyPlayerReady();
+    } catch (_) {}
   }
 
   /// 恢复持久化的应用内音量（App 关闭重启后音量设置保留）。
@@ -2191,6 +2203,24 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _pushLyriconSongChange(song);
   }
 
+  // 记录上次的 enabled 状态，只在 disabled→enabled 边界触发重推，
+  // 避免断开/超时等保持 enabled 的事件反复触发歌词重推
+  bool _lyriconWasEnabled = false;
+
+  /// Lyricon 状态变化时（enabled 从 false→true，如 auto_restored / connected），
+  /// 重置 _lastLyriconSong 强制重推当前歌曲。enabled=false 时无需处理，
+  /// 等下次 enabled 时再推（_handleLyriconSongChange 会自然恢复）。
+  void _handleLyriconEnabledChanged() {
+    final enabled = LyriconProviderService.instance.enabled;
+    if (enabled && !_lyriconWasEnabled) {
+      _lyriconWasEnabled = true;
+      _lastLyriconSong = null;
+      _handleLyriconSongChange();
+    } else if (!enabled) {
+      _lyriconWasEnabled = false;
+    }
+  }
+
   /// 拉取歌词 → 解析 → 推送 Lyricon onSongChanged。
   ///
   /// 参考 [DesktopLyricService._onTick] / [_fetchLyricFor] 的模式：
@@ -2278,6 +2308,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _saveDebounce?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     removeListener(_handleLyriconSongChange);
+    LyriconProviderService.instance.removeListener(_handleLyriconEnabledChanged);
     _positionSubscription?.cancel();
     _durationSubscription?.cancel();
     _playingSubscription?.cancel();

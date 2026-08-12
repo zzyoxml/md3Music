@@ -55,8 +55,11 @@
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+        <!-- 线控耳机媒体键接收器：进程被杀死时仍可被 MEDIA_BUTTON 广播拉起，
+             通过启动 AudioPlaybackService 完成「唤醒播放」。
+             有活跃 MediaSession 时按键由 AudioService 的 MediaSession 回调处理。 -->
         <receiver
-            android:name="com.ryanheise.audioservice.MediaButtonReceiver"
+            android:name=".MediaButtonReceiver"
             android:exported="true"
             android:enabled="true">
             <intent-filter>

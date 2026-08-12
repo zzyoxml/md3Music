@@ -9,6 +9,9 @@ class MediaNotificationService {
   static void Function()? onNext;
   static void Function()? onTogglePlayPause;
   static void Function(int)? onSeekTo;
+  // 线控耳机媒体键映射的独立播放 / 暂停命令（原生端唤醒播放下发）
+  static void Function()? onPlay;
+  static void Function()? onPause;
   // 来自通知栏桌面歌词按钮
   static void Function()? onToggleDesktopLyric;
   static void Function()? onToggleFavorite;
@@ -28,6 +31,12 @@ class MediaNotificationService {
           break;
         case 'togglePlayPause':
           onTogglePlayPause?.call();
+          break;
+        case 'play':
+          onPlay?.call();
+          break;
+        case 'pause':
+          onPause?.call();
           break;
         case 'seekTo':
           final pos = call.arguments as int?;
@@ -81,6 +90,15 @@ class MediaNotificationService {
   static Future<void> hideNotification() async {
     try {
       await _channel.invokeMethod('hideNotification');
+    } catch (_) {}
+  }
+
+  /// 通知原生端：播放状态已恢复完成，可安全派发线控耳机命令（唤醒播放）。
+  /// 原生端 AudioPlaybackService 进程被杀后创建后台 FlutterEngine 并等待该信号
+  /// 后才派发 play/next 等命令，确保 PlayerProvider 已完成状态恢复。
+  static Future<void> notifyPlayerReady() async {
+    try {
+      await _channel.invokeMethod('playerReady');
     } catch (_) {}
   }
 

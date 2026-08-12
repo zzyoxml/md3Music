@@ -25,10 +25,16 @@ import android.os.SystemClock
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugins.GeneratedPluginRegistrant
 import io.github.proify.lyricon.provider.ConnectionListener
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import io.github.proify.lyricon.provider.LyriconFactory
 import io.github.proify.lyricon.provider.LyriconProvider
 import io.github.proify.lyricon.lyric.model.LyricWord
@@ -62,10 +68,20 @@ class AudioPlaybackService : Service() {
         // 桌面小组件按钮动作（由 MusicWidgetProvider 转发）
         const val ACTION_WIDGET_PLAY_PAUSE = "com.md3music.premium.ACTION_WIDGET_PLAY_PAUSE"
         const val ACTION_WIDGET_NEXT = "com.md3music.premium.ACTION_WIDGET_NEXT"
+        // 线控耳机媒体键（由 MediaButtonReceiver 转发，唤醒播放）
+        const val ACTION_MEDIA_BUTTON = "com.md3music.premium.ACTION_MEDIA_BUTTON"
+        const val EXTRA_MEDIA_COMMAND = "mediaCommand"
+
+        private const val TAG = "AudioPlaybackService"
 
         // 静态变量用于跨组件传递 FlutterEngine
         private var staticFlutterEngine: FlutterEngine? = null
         private var wakeLock: PowerManager.WakeLock? = null
+
+        /// 进程被杀后由本服务创建的后台 FlutterEngine 是否已就绪。
+        /// Dart 端 PlayerProvider 完成状态恢复后会通过 playerReady 通知置为 true。
+        @Volatile
+        var playerReadyReceived = false
 
         fun setFlutterEngine(engine: FlutterEngine) {
             staticFlutterEngine = engine
@@ -101,8 +117,76 @@ class AudioPlaybackService : Service() {
         private var lyriconProvider: LyriconProvider? = null
         private var lyriconChannel: MethodChannel? = null
 
+        // —— 词幕（Lyricon）连接重试控制 ——
+        // 启动/连接过程中可能因中心服务尚未就绪等原因失败，按预设次数重试；
+        // 全部失败后向 Dart 发 connect_failed 事件，由 UI 弹窗提示用户。
+        private const val LYRICON_MAX_RETRIES = 3
+        private const val LYRICON_RETRY_DELAY_MS = 2000L
+        private val lyriconRetryHandler = Handler(Looper.getMainLooper())
+        // 用户意图上是否启用词幕（非 SDK 的 ConnectionStatus），决定失败后是否重试
+        @Volatile
+        private var lyriconEnabled = false
+        // 已重试次数 / 是否已有一次重试排期（避免并发事件重复 register）
+        @Volatile
+        private var lyriconRetryCount = 0
+        @Volatile
+        private var lyriconRetryScheduled = false
+
         fun setLyriconChannel(channel: MethodChannel?) {
             lyriconChannel = channel
+        }
+
+        /** 同步记录用户意图的启用状态（setEnabled / 启动恢复时调用）。 */
+        fun setLyriconEnabledState(enabled: Boolean) {
+            lyriconEnabled = enabled
+            if (!enabled) {
+                // 用户主动禁用：取消排期中的重试并清零计数
+                lyriconRetryCount = 0
+                lyriconRetryScheduled = false
+                lyriconRetryHandler.removeCallbacksAndMessages(null)
+            }
+        }
+
+        /**
+         * 连接失败（timeout/disconnected）后的重试调度。
+         * 仅在用户仍启用词幕时有效；重试次数耗尽后向 Dart 发送 connect_failed。
+         * 每次重试间隔 [LYRICON_RETRY_DELAY_MS]，避免对中心服务发起风暴式重连。
+         */
+        private fun retryLyriconConnect(reason: String) {
+            if (!lyriconEnabled) return
+            if (lyriconRetryScheduled) return
+            val provider = getLyriconProvider() ?: return
+            if (lyriconRetryCount >= LYRICON_MAX_RETRIES) {
+                lyriconRetryCount = 0
+                lyriconRetryScheduled = false
+                android.util.Log.w("LyriconDebug",
+                    "lyricon connect failed after $LYRICON_MAX_RETRIES retries ($reason)")
+                invokeLyriconChannelOnMain("onConnectionStateChanged", "connect_failed")
+                return
+            }
+            lyriconRetryCount++
+            lyriconRetryScheduled = true
+            val attempt = lyriconRetryCount
+            android.util.Log.d("LyriconDebug",
+                "lyricon retry $attempt/$LYRICON_MAX_RETRIES (reason=$reason)")
+            lyriconRetryHandler.postDelayed({
+                lyriconRetryScheduled = false
+                if (!lyriconEnabled) return@postDelayed
+                val p = getLyriconProvider() ?: return@postDelayed
+                try {
+                    p.register()
+                } catch (_: Exception) {
+                    // register 抛异常也视为一次失败，继续下一轮重试
+                    retryLyriconConnect("register exception")
+                }
+            }, LYRICON_RETRY_DELAY_MS)
+        }
+
+        /** 连接成功（connected/reconnected）或重新启用时重置重试状态。 */
+        private fun resetLyriconRetryState() {
+            lyriconRetryCount = 0
+            lyriconRetryScheduled = false
+            lyriconRetryHandler.removeCallbacksAndMessages(null)
         }
 
         /** 在主线程安全调用 lyriconChannel.invokeMethod，避免 SDK 回调在后台线程触发崩溃 */
@@ -160,12 +244,140 @@ class AudioPlaybackService : Service() {
             )
             return song
         }
+
+        /**
+         * 注册 Lyricon Provider MethodChannel（Dart ↔ 原生双向）。
+         * 由 MainActivity（正常启动）与 setupHeadlessChannels（进程被杀唤醒）
+         * 共用，避免 headless 场景下 Dart 的 setSong/setEnabled 等调用因缺少
+         * 原生 handler 而静默失败，也保证原生 onConnectionStateChanged 事件
+         * 能送达 Dart（这是 Lyricon 自动恢复的前提）。
+         */
+        fun registerLyriconChannel(engine: FlutterEngine) {
+            val channel = MethodChannel(
+                engine.dartExecutor.binaryMessenger,
+                "com.md3music.premium/lyricon"
+            )
+            setLyriconChannel(channel)
+            channel.setMethodCallHandler { call, result ->
+                val provider = getLyriconProvider()
+                when (call.method) {
+                    "setEnabled" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        setLyriconEnabledState(enabled)
+                        try {
+                            if (enabled) {
+                                // 重新启用：清零重试计数，重新走连接流程
+                                resetLyriconRetryState()
+                                provider?.register()
+                            } else {
+                                provider?.unregister()
+                            }
+                            result.success(true)
+                        } catch (_: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    "setSong" -> {
+                        val arg = call.argument<Map<String, Any?>>("song")
+                        if (arg == null) {
+                            try {
+                                // SDK 的 setSong 不接受 null，传一个空 Song 表示清空
+                                provider?.player?.setSong(Song())
+                                result.success(true)
+                            } catch (_: Exception) {
+                                result.success(false)
+                            }
+                        } else {
+                            try {
+                                val song = buildLyriconSong(arg)
+                                provider?.player?.setSong(song)
+                                result.success(true)
+                            } catch (e: Exception) {
+                                result.error("BUILD_SONG_FAILED", e.message, null)
+                            }
+                        }
+                    }
+                    "sendText" -> {
+                        val text = call.argument<String>("text")
+                        try {
+                            provider?.player?.sendText(text)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    "setPosition" -> {
+                        val pos = call.argument<Number>("positionMs")?.toLong() ?: 0L
+                        try {
+                            provider?.player?.setPosition(pos)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    "setPlaybackState" -> {
+                        val state = call.argument<Number>("state")?.toInt()
+                            ?: PlaybackStateCompat.STATE_NONE
+                        val pos = call.argument<Number>("position")?.toLong() ?: 0L
+                        // SDK 的 setPlaybackState 接受 Boolean，从 PlaybackStateCompat 状态码推导 isPlaying
+                        val isPlaying = state == PlaybackStateCompat.STATE_PLAYING
+                        try {
+                            // 位置通过 setPosition 同步（原本打包在 PlaybackStateCompat 中）
+                            provider?.player?.setPosition(pos)
+                            provider?.player?.setPlaybackState(isPlaying)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    "seekTo" -> {
+                        val pos = call.argument<Number>("positionMs")?.toLong() ?: 0L
+                        try {
+                            provider?.player?.seekTo(pos)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    "setDisplayTranslation" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        try {
+                            provider?.player?.setDisplayTranslation(enabled)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            result.success(false)
+                        }
+                    }
+                    "setDisplayRoma" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        try {
+                            // SDK 0.1.70+ 已原生支持 setDisplayRoma，直接调用
+                            provider?.player?.setDisplayRoma(enabled)
+                            result.success(true)
+                        } catch (_: Exception) {
+                            // 兜底：反射调用兼容旧版 SDK
+                            try {
+                                val method = provider?.player?.javaClass
+                                    ?.getMethod("setDisplayRoma", Boolean::class.java)
+                                method?.invoke(provider?.player, enabled)
+                                result.success(true)
+                            } catch (_: Exception) {
+                                result.success(false)
+                            }
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
     }
 
     private var mediaSession: MediaSessionCompat? = null
     private var notificationManager: NotificationManager? = null
     private var receiver: BroadcastReceiver? = null
     private var flutterEngine: FlutterEngine? = null
+    // Lyricon Provider 是否已 register（restoreLyriconStateIfNeeded 可能被调用多次，需幂等）
+    private var lyriconRegistered = false
 
     // 蓝牙歌词状态：原生端缓存原始元数据，根据开关和当前歌词计算最终显示值
     private var bluetoothLyricEnabled = false
@@ -182,6 +394,13 @@ class AudioPlaybackService : Service() {
     private var lastDesktopLyricEnabled = false
     private var lastIsFavorited = false
     private var lastDuration = 0L
+    // 是否已调用过 startForeground（启动前台服务后必须尽快调用，Android 12+ 超时崩溃）
+    private var foregroundStarted = false
+    // 媒体键命令合并：唤醒期间连续按键只保留最新命令、只启动一个派发会话，
+    // 避免双击（play→next）并发创建多个后台 FlutterEngine
+    private val mediaCommandLock = Any()
+    private var pendingMediaCommand: String? = null
+    private var mediaCommandInFlight = false
 
     // P0: 蓝牙歌词刷新节流状态：通知重建最小间隔 + 最近一次显示的文本
     private var lastBtLyricNotifyTime = 0L
@@ -230,16 +449,22 @@ class AudioPlaybackService : Service() {
                     // SDK 的 ConnectionListener 是 interface，必须用 object 表达式实现
                     service.addConnectionListener(object : ConnectionListener {
                         override fun onConnected(provider: LyriconProvider) {
+                            resetLyriconRetryState()
                             invokeLyriconChannelOnMain("onConnectionStateChanged", "connected")
                         }
                         override fun onReconnected(provider: LyriconProvider) {
+                            resetLyriconRetryState()
                             invokeLyriconChannelOnMain("onConnectionStateChanged", "reconnected")
                         }
                         override fun onDisconnected(provider: LyriconProvider) {
+                            // 用户主动禁用（unregister）也会触发本回调，此时 lyriconEnabled 为 false，
+                            // retryLyriconConnect 内部会直接返回；仅对「仍启用但断联」的场景重试。
                             invokeLyriconChannelOnMain("onConnectionStateChanged", "disconnected")
+                            retryLyriconConnect("disconnected")
                         }
                         override fun onConnectTimeout(provider: LyriconProvider) {
                             invokeLyriconChannelOnMain("onConnectionStateChanged", "timeout")
+                            retryLyriconConnect("timeout")
                         }
                     })
                 } catch (_: Exception) {}
@@ -280,12 +505,19 @@ class AudioPlaybackService : Service() {
             val enabled = prefs.getBoolean("flutter.lyricon_enabled", false)
             val displayTranslation = prefs.getBoolean("flutter.lyricon_display_translation", true)
             val displayRoma = prefs.getBoolean("flutter.lyricon_display_roma", false)
+            // 记录用户意图：headless 唤醒 / 连接失败重试都依赖该标志判断是否继续重试
+            setLyriconEnabledState(enabled)
             android.util.Log.d("LyriconDebug",
                 "restoreLyriconStateIfNeeded: enabled=$enabled, displayTranslation=$displayTranslation, " +
                 "displayRoma=$displayRoma, channelSet=${lyriconChannel != null}")
             if (enabled) {
-                provider.register()
-                android.util.Log.d("LyriconDebug", "restoreLyriconStateIfNeeded: provider.register() done")
+                // 幂等：headless 唤醒时会再次调用本方法（首次在 onCreate，channel 尚为 null），
+                // 只在首次真正 register，避免对 SDK 重复注册。
+                if (!lyriconRegistered) {
+                    provider.register()
+                    lyriconRegistered = true
+                    android.util.Log.d("LyriconDebug", "restoreLyriconStateIfNeeded: provider.register() done")
+                }
                 // 通知 Dart 端：Provider 已自动恢复 enabled 状态
                 // 让 Dart 端同步 _state 并重推当前歌曲
                 invokeLyriconChannelOnMain("onConnectionStateChanged", "auto_restored")
@@ -313,6 +545,14 @@ class AudioPlaybackService : Service() {
             ACTION_PREV, ACTION_PLAY_PAUSE, ACTION_NEXT, ACTION_TOGGLE_DESKTOP_LYRIC, ACTION_TOGGLE_FAVORITE,
             ACTION_WIDGET_PLAY_PAUSE, ACTION_WIDGET_NEXT -> {
                 handleAction(intent.action!!)
+                return START_STICKY
+            }
+            ACTION_MEDIA_BUTTON -> {
+                // 线控耳机唤醒播放：先保证前台服务状态（startForegroundService 必须尽快
+                // 调用 startForeground，否则 Android 12+ 会抛 ForegroundServiceDidNotStartInTimeException）
+                ensureForeground()
+                val command = intent?.getStringExtra(EXTRA_MEDIA_COMMAND) ?: "play"
+                handleMediaButtonCommand(command)
                 return START_STICKY
             }
             ACTION_UPDATE_BT_LYRIC -> {
@@ -386,6 +626,256 @@ class AudioPlaybackService : Service() {
             putExtra("method", method)
         }
         sendBroadcast(intent)
+    }
+
+    /// 前台服务占位通知：唤醒场景下服务可能刚被 startForegroundService 拉起，
+    /// 需要尽快进入前台。真实内容随后由 Dart 端 updateNotification 覆盖。
+    private fun ensureForeground() {
+        if (foregroundStarted) return
+        foregroundStarted = true
+        try {
+            val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_media_play)
+                .setContentTitle("md3music")
+                .setContentText("准备播放")
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+            startForeground(NOTIFICATION_ID, builder.build())
+        } catch (_: Exception) {}
+    }
+
+    /// 线控耳机媒体键 → 派发命令到 Dart 端。
+    /// - 进程存活：复用现有 FlutterEngine（含 MainActivity 缓存的引擎）
+    /// - 进程被杀：创建后台 FlutterEngine 启动 App，恢复上次播放状态后执行命令
+    ///
+    /// 唤醒期间可能连续收到多个按键（双击=下一首），这里做命令合并：
+    /// 任意时刻只保留「最新」命令（pendingMediaCommand），且同一进程内只启动
+    /// 一个派发会话，避免并发创建多个后台 FlutterEngine。
+    private fun handleMediaButtonCommand(command: String) {
+        val method = when (command) {
+            "play" -> "play"
+            "pause", "stop" -> "pause"
+            "next" -> "next"
+            "previous" -> "previous"
+            else -> "play"
+        }
+        var launch = false
+        synchronized(mediaCommandLock) {
+            pendingMediaCommand = method
+            if (!mediaCommandInFlight) {
+                mediaCommandInFlight = true
+                launch = true
+            }
+        }
+        if (!launch) return
+        Thread {
+            try {
+                val engine = obtainFlutterEngine()
+                if (engine != null) {
+                    dispatchToDartWithRetry(engine)
+                } else {
+                    createHeadlessEngineAndDispatch()
+                }
+            } finally {
+                synchronized(mediaCommandLock) {
+                    mediaCommandInFlight = false
+                    pendingMediaCommand = null
+                }
+            }
+        }.start()
+    }
+
+    /// 取走当前待派发的媒体命令（取后清空，避免被后续处理重复消费）。
+    private fun takeMediaCommand(): String? = synchronized(mediaCommandLock) {
+        val m = pendingMediaCommand
+        pendingMediaCommand = null
+        m
+    }
+
+    /// 找到可用的 FlutterEngine：实例字段 → 静态引用 → FlutterEngineCache。
+    /// 已销毁的引擎（isExecutingDart() == false）会被跳过，避免对死引擎派发命令。
+    private fun obtainFlutterEngine(): FlutterEngine? {
+        val candidates = listOfNotNull(
+            flutterEngine,
+            staticFlutterEngine,
+            FlutterEngineCache.getInstance().get("md3music_engine"),
+        )
+        for (engine in candidates) {
+            if (engine.dartExecutor.isExecutingDart()) {
+                if (engine !== staticFlutterEngine) staticFlutterEngine = engine
+                if (engine !== flutterEngine) flutterEngine = engine
+                return engine
+            }
+        }
+        return null
+    }
+
+    /// 进程存活场景：Dart 端可能仍在初始化（PlayerProvider 恢复状态中）。
+    /// 仅当派发失败（channel 尚未注册）时重试；成功后即停止，避免对已开始播放的
+    /// 歌曲重复调用 resume 造成音量波动。每次重试都取「最新」命令，唤醒期间的
+    /// 双击（play→next）能正确合并为 next。
+    ///
+    /// 同步执行（调用方已在后台线程）：必须在本方法内消费 pendingMediaCommand，
+    /// 否则外层 finally 会提前清空命令导致派发丢失（headless 场景曾因此失效）。
+    private fun dispatchToDartWithRetry(engine: FlutterEngine) {
+        try {
+            for (i in 0 until 3) {
+                val method = takeMediaCommand() ?: return
+                if (dispatchOnce(engine, method)) return
+                Thread.sleep(500)
+            }
+        } catch (_: Exception) {}
+    }
+
+    /// 进程被杀场景：创建后台 FlutterEngine 运行完整 App（main() → runApp →
+    /// PlayerProvider 自动恢复上次播放状态），等待 Dart 端上报 playerReady 后
+    /// 派发命令完成「唤醒播放」。引擎放入 FlutterEngineCache，用户随后打开 App
+    /// 时由 MainActivity 复用（provideFlutterEngine），避免双引擎冲突。
+    ///
+    /// 线程注意：FlutterEngine 必须在主线程创建并执行入口（引擎的平台线程即创建
+    /// 线程，后台线程创建会导致后续 MainActivity 复用/UI 附着失败）。
+    /// 本方法在调用方（handleMediaButtonCommand 的后台线程）内同步执行到命令
+    /// 被消费为止：内层不再新起线程，避免外层 finally 提前清空
+    /// pendingMediaCommand 导致 play/next 命令派发丢失。
+    private fun createHeadlessEngineAndDispatch() {
+        playerReadyReceived = false
+        val engineLatch = CountDownLatch(1)
+        runOnMainThread {
+            try {
+                val engine = FlutterEngine(applicationContext)
+                // 手动创建的引擎不会自动注册插件（just_audio 等），必须显式注册
+                GeneratedPluginRegistrant.registerWith(engine)
+                FlutterEngineCache.getInstance().put("md3music_engine", engine)
+                staticFlutterEngine = engine
+                flutterEngine = engine
+                setupHeadlessChannels(engine)
+                engine.dartExecutor.executeDartEntrypoint(
+                    DartExecutor.DartEntrypoint.createDefault()
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "headless engine create failed: $e")
+            } finally {
+                engineLatch.countDown()
+            }
+        }
+        try {
+            engineLatch.await(5, TimeUnit.SECONDS)
+            val engine = flutterEngine ?: staticFlutterEngine
+            if (engine == null || !engine.dartExecutor.isExecutingDart()) return
+            // 等待 Dart 端 PlayerProvider 完成状态恢复（本地歌曲快，在线歌曲走 API 较慢）
+            for (i in 0 until 30) {
+                if (playerReadyReceived) break
+                Thread.sleep(1000)
+            }
+            // playerReady 意味着 Dart main() 已跑完 runApp，Lyricon 反向 handler
+            // 必然已注册，此时补发 auto_restored 事件才可靠（setupHeadlessChannels
+            // 里那次可能因 Dart 尚未注册 handler 而丢消息）。幂等：register 已由
+            // onCreate 完成，这里只负责把事件送达 Dart。
+            restoreLyriconStateIfNeeded()
+            val method = takeMediaCommand() ?: return
+            dispatchOnce(engine, method)
+        } catch (_: Exception) {}
+    }
+
+    /// 在主线程通过 MethodChannel 派发一次命令到 Dart 端。
+    /// 返回是否成功（Dart 端 handler 已注册且方法被处理）。
+    /// 注意：handler 注册 ≠ PlayerProvider 就绪，play 命令的就绪时序由
+    /// playerReady 信号保证（headless 场景）。
+    private fun dispatchOnce(engine: FlutterEngine, method: String): Boolean {
+        val latch = CountDownLatch(1)
+        val dispatched = arrayOf(false)
+        runOnMainThread {
+            try {
+                MethodChannel(
+                    engine.dartExecutor.binaryMessenger,
+                    "com.md3music.premium/floating_lyric"
+                ).invokeMethod(method, null, object : MethodChannel.Result {
+                    override fun success(result: Any?) {
+                        dispatched[0] = true
+                        latch.countDown()
+                    }
+                    override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                        latch.countDown()
+                    }
+                    override fun notImplemented() {
+                        latch.countDown()
+                    }
+                })
+            } catch (_: Exception) {
+                latch.countDown()
+            }
+        }
+        try {
+            latch.await(2, TimeUnit.SECONDS)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+        }
+        return dispatched[0]
+    }
+
+    private fun runOnMainThread(block: () -> Unit) {
+        val handler = Handler(Looper.getMainLooper())
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            block()
+        } else {
+            handler.post(block)
+        }
+    }
+
+    /// 为后台（headless）FlutterEngine 注册原生端 MethodChannel handler。
+    /// MainActivity 正常启动时会注册完整 handler（含桌面歌词等）；进程被杀后由
+    /// 本服务兜底注册，保证通知栏 / MediaSession 在唤醒场景下仍能正常更新。
+    private fun setupHeadlessChannels(engine: FlutterEngine) {
+        try {
+            MethodChannel(
+                engine.dartExecutor.binaryMessenger,
+                "com.md3music.premium/floating_lyric"
+            ).setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "playerReady" -> {
+                        playerReadyReceived = true
+                        result.success(null)
+                    }
+                    "showNotification", "updateNotification" -> {
+                        showNotification(
+                            title = call.argument<String>("title") ?: "",
+                            artist = call.argument<String>("artist") ?: "",
+                            artUrl = call.argument<String>("artUrl"),
+                            fallbackFilePath = call.argument<String>("fallbackFilePath"),
+                            isPlaying = call.argument<Boolean>("isPlaying") ?: false,
+                            position = call.argument<Number>("position")?.toLong() ?: 0L,
+                            duration = call.argument<Number>("duration")?.toLong() ?: 0L,
+                            desktopLyricEnabled = call.argument<Boolean>("desktopLyricEnabled") ?: false,
+                            isFavorited = call.argument<Boolean>("isFavorited") ?: false,
+                        )
+                        result.success(true)
+                    }
+                    "hideNotification" -> {
+                        stopForeground(STOP_FOREGROUND_REMOVE)
+                        releaseWakeLock()
+                        stopSelf()
+                        result.success(true)
+                    }
+                    "updateBluetoothLyric" -> {
+                        currentBtLyricText = call.argument<String>("lyric") ?: ""
+                        refreshMetadata()
+                        result.success(true)
+                    }
+                    "setBluetoothLyricEnabled" -> {
+                        bluetoothLyricEnabled = call.argument<Boolean>("enabled") ?: false
+                        refreshMetadata()
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+            // 进程被杀唤醒场景：Lyricon channel 原生 handler 只能在这里注册
+            // （无 MainActivity），注册后重新通知 Dart 端 Lyricon 已自动恢复，
+            // 否则词幕不会随播放自动连接（Dart 端 _state 一直停留在 disabled）。
+            registerLyriconChannel(engine)
+            restoreLyriconStateIfNeeded()
+        } catch (_: Exception) {}
     }
 
     fun setFlutterEngine(engine: FlutterEngine) {
@@ -601,6 +1091,8 @@ class AudioPlaybackService : Service() {
         lastDesktopLyricEnabled = desktopLyricEnabled
         lastIsFavorited = isFavorited
         lastDuration = duration
+        // 通知会在下方所有分支中调用 startForeground，标记已进入前台
+        foregroundStarted = true
         // 计算最终显示值：蓝牙歌词开启且有当前歌词时，title→歌词，artist→「作者 - 标题」
         val displayTitle: String
         val displayArtist: String
@@ -841,6 +1333,8 @@ class AudioPlaybackService : Service() {
             lyriconProvider?.destroy()
         } catch (_: Exception) {}
         lyriconProvider = null
+        // 取消排期中的词幕重连任务，防止服务销毁后回调仍触发
+        setLyriconEnabledState(false)
         releaseWakeLock()
         // 释放缓存的封面 bitmap
         lastArtBitmap?.let { if (!it.isRecycled) it.recycle() }
