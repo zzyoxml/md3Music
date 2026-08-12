@@ -363,6 +363,32 @@ class SettingsRepository {
     await prefs.setInt(_keySpectrumStyle, value);
   }
 
+  // ── 频谱背景层 ──
+  static const String _keySpectrumBgOpacity = 'settings_spectrum_bg_opacity';
+  static const String _keySpectrumBgHeight = 'settings_spectrum_bg_height';
+
+  /// 频谱背景层透明度（0.1~0.8，默认 0.4）。
+  Future<double> getSpectrumBgOpacity() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_keySpectrumBgOpacity) ?? 0.4;
+  }
+
+  Future<void> setSpectrumBgOpacity(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keySpectrumBgOpacity, value);
+  }
+
+  /// 频谱背景层高度比例（0.2~0.8，默认 0.4，占屏幕高度的比例）。
+  Future<double> getSpectrumBgHeight() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_keySpectrumBgHeight) ?? 0.4;
+  }
+
+  Future<void> setSpectrumBgHeight(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keySpectrumBgHeight, value);
+  }
+
   // ===== 主页 Tab 配置 =====
   static const String _keyTabOrder = 'settings_tab_order';
   static const String _keyHiddenTabs = 'settings_hidden_tabs';

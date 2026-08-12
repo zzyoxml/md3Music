@@ -45,6 +45,7 @@ import '../../widgets/md3e_transport_row.dart';
 import '../../widgets/player_artwork_image.dart';
 import '../../widgets/player_playlist_dialog.dart';
 import '../../widgets/spectrum_artwork.dart';
+import '../../widgets/spectrum_background.dart';
 import 'dlna_cast_sheet.dart';
 import 'full_player_route.dart';
 
@@ -131,8 +132,11 @@ class _FullPlayerState extends State<FullPlayer>
   bool _spectrumStarted = false;
   // 频谱开启时是否提示过 sessionId 为空（避免反复弹 SnackBar）
   bool _spectrumSessionWarned = false;
-  // 频谱样式：0=柱状图，1=曲线
+  // 频谱样式：0=柱状图(环绕)，1=曲线(环绕)，2=背景层(条形)
   int _spectrumStyle = 0;
+  // 频谱背景层参数（仅 style=2 时使用）
+  double _spectrumBgOpacity = 0.4;
+  double _spectrumBgHeight = 0.4;
 
   void _collapseByButton() {
     final route = ModalRoute.of(context);
@@ -387,11 +391,15 @@ class _FullPlayerState extends State<FullPlayer>
     final enabled = await SettingsRepository().getSpectrumEnabled();
     final bandCount = await SettingsRepository().getSpectrumBandCount();
     final style = await SettingsRepository().getSpectrumStyle();
+    final bgOpacity = await SettingsRepository().getSpectrumBgOpacity();
+    final bgHeight = await SettingsRepository().getSpectrumBgHeight();
     if (!mounted) return;
     SpectrumService.instance.bandCount = bandCount;
     setState(() {
       _spectrumEnabled = enabled;
       _spectrumStyle = style;
+      _spectrumBgOpacity = bgOpacity;
+      _spectrumBgHeight = bgHeight;
     });
     if (enabled) {
       // 已开启频谱时注册降级监听
@@ -860,6 +868,13 @@ class _FullPlayerState extends State<FullPlayer>
                       setState(() => _photoBgHasImages = hasImages);
                     }
                   },
+                ),
+              // 频谱背景层：style=2 时显示底部条形频谱图
+              if (_spectrumEnabled && _spectrumStyle == 2)
+                SpectrumBackground(
+                  color: colorScheme.primary,
+                  opacity: _spectrumBgOpacity,
+                  heightRatio: _spectrumBgHeight,
                 ),
               ResponsiveLayout(
                 compact: (_) => _buildCompactLayout(
@@ -1523,8 +1538,8 @@ class _FullPlayerState extends State<FullPlayer>
     double iconSize = 48.0,
     required bool isPlaying,
   }) {
-    // 频谱模式：圆形旋转封面 + 环形频谱柱（外层 AnimatedScale 提供呼吸缩放）
-    if (_spectrumEnabled) {
+    // 频谱模式：style 0/1 显示环绕频谱，style 2 用原封面（频谱在背景层）
+    if (_spectrumEnabled && _spectrumStyle < 2) {
       return SpectrumArtwork(
         artworkUri: currentSong.artworkUri,
         fallbackFilePath: currentSong.localPath,

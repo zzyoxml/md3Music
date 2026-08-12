@@ -46,6 +46,7 @@ import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/player_artwork_image.dart';
 import '../../widgets/spectrum_artwork.dart';
+import '../../widgets/spectrum_background.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/player_playlist_view.dart';
 import 'comments_view.dart';
@@ -141,7 +142,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   bool _spectrumEnabled = false;
   bool _spectrumStarted = false;
   bool _spectrumSessionWarned = false;
+  // 频谱样式：0=柱状图(环绕)，1=曲线(环绕)，2=背景层(条形)
   int _spectrumStyle = 0;
+  // 频谱背景层参数（仅 style=2 时使用）
+  double _spectrumBgOpacity = 0.4;
+  double _spectrumBgHeight = 0.4;
 
   @override
   void initState() {
@@ -194,11 +199,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final enabled = await SettingsRepository().getSpectrumEnabled();
     final bandCount = await SettingsRepository().getSpectrumBandCount();
     final style = await SettingsRepository().getSpectrumStyle();
+    final bgOpacity = await SettingsRepository().getSpectrumBgOpacity();
+    final bgHeight = await SettingsRepository().getSpectrumBgHeight();
     if (!mounted) return;
     SpectrumService.instance.bandCount = bandCount;
     setState(() {
       _spectrumEnabled = enabled;
       _spectrumStyle = style;
+      _spectrumBgOpacity = bgOpacity;
+      _spectrumBgHeight = bgHeight;
     });
     if (enabled) {
       SpectrumService.instance.simulatedNotifier.addListener(_onSpectrumSimulated);
@@ -617,13 +626,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     return !_parsedLyrics.any((line) => line.hasWordTiming);
   }
 
-  /// 构建横屏布局的封面内容：频谱开启时用 SpectrumArtwork（白色），否则用原 ClipRRect + Selector
+  /// 构建横屏布局的封面内容：style 0/1 用 SpectrumArtwork（白色），style 2 用原封面
   Widget _buildLandscapeArtworkContent(
     PlayerProvider playerProvider,
     dynamic currentSong,
     ColorScheme colorScheme,
   ) {
-    if (_spectrumEnabled) {
+    if (_spectrumEnabled && _spectrumStyle < 2) {
       return SpectrumArtwork(
         artworkUri: currentSong.artworkUri,
         fallbackFilePath: currentSong.localPath,
@@ -1054,6 +1063,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               ),
             // 3. 半透明蒙版 rgba(0,0,0,0.35)
             _buildDarkOverlay(),
+            // 3.5 频谱背景层：style=2 时显示底部条形频谱图（白色）
+            if (_spectrumEnabled && _spectrumStyle == 2)
+              SpectrumBackground(
+                color: Colors.white,
+                opacity: _spectrumBgOpacity,
+                heightRatio: _spectrumBgHeight,
+              ),
             // 4. 主体内容（保留原有 compact/landscape/expanded 三套布局）
             ResponsiveLayout(
               compact: (_) => _buildCompactLayout(
@@ -1831,8 +1847,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                             scale: playerProvider.isPlaying ? 1.0 : 0.85,
                             duration: const Duration(milliseconds: 500),
                             curve: Curves.easeOutBack,
-                            // 频谱模式：白色圆形旋转封面 + 环形频谱
-                            child: _spectrumEnabled
+                            // 频谱模式：style 0/1 白色圆形旋转封面 + 环形频谱
+                            child: _spectrumEnabled && _spectrumStyle < 2
                                 ? SpectrumArtwork(
                                     artworkUri: currentSong.artworkUri,
                                     fallbackFilePath: currentSong.localPath,
@@ -1864,7 +1880,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             Expanded(
               child: AspectRatio(
                 aspectRatio: 1,
-                child: _spectrumEnabled
+                child: _spectrumEnabled && _spectrumStyle < 2
                     ? SpectrumArtwork(
                         artworkUri: currentSong.artworkUri,
                         fallbackFilePath: currentSong.localPath,

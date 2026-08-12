@@ -94,8 +94,11 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _spectrumEnabled = false;
   // 频谱柱数量（20~80，默认 40）
   int _spectrumBandCount = 40;
-  // 频谱样式：0=柱状图，1=曲线（默认 0）
+  // 频谱样式：0=柱状图(环绕)，1=曲线(环绕)，2=背景层(条形)
   int _spectrumStyle = 0;
+  // 频谱背景层参数（仅 style=2 时使用）
+  double _spectrumBgOpacity = 0.4;
+  double _spectrumBgHeight = 0.4;
 
   @override
   void initState() {
@@ -205,6 +208,8 @@ class _SettingsPageState extends State<SettingsPage> {
     final spectrumEnabled = await _settingsRepository.getSpectrumEnabled();
     final spectrumBandCount = await _settingsRepository.getSpectrumBandCount();
     final spectrumStyle = await _settingsRepository.getSpectrumStyle();
+    final spectrumBgOpacity = await _settingsRepository.getSpectrumBgOpacity();
+    final spectrumBgHeight = await _settingsRepository.getSpectrumBgHeight();
 
     setState(() {
       _themeMode = themeMode;
@@ -231,6 +236,8 @@ class _SettingsPageState extends State<SettingsPage> {
       _spectrumEnabled = spectrumEnabled;
       _spectrumBandCount = spectrumBandCount;
       _spectrumStyle = spectrumStyle;
+      _spectrumBgOpacity = spectrumBgOpacity;
+      _spectrumBgHeight = spectrumBgHeight;
     });
   }
 
@@ -897,7 +904,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             trailing: Text('$_spectrumBandCount 根'),
           ),
-        // 频谱样式切换：仅开关开启且 Android 时显示
+        // 频谱样式切换（3选1）：柱状图(环绕) / 曲线(环绕) / 背景层(条形)
         if (_spectrumEnabled && Platform.isAndroid)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -910,6 +917,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     segments: const [
                       ButtonSegment(value: 0, label: Text('柱状图')),
                       ButtonSegment(value: 1, label: Text('曲线')),
+                      ButtonSegment(value: 2, label: Text('背景层')),
                     ],
                     selected: {_spectrumStyle},
                     onSelectionChanged: (selection) {
@@ -923,6 +931,43 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ),
           ),
+        // 背景层参数：仅 style=2 时显示
+        if (_spectrumEnabled && _spectrumStyle == 2 && Platform.isAndroid) ...[
+          ListTile(
+            title: const Text('频谱背景透明度'),
+            subtitle: Slider(
+              value: _spectrumBgOpacity,
+              min: 0.1,
+              max: 0.8,
+              divisions: 14,
+              label: '${(_spectrumBgOpacity * 100).round()}%',
+              onChanged: (v) {
+                setState(() => _spectrumBgOpacity = v);
+              },
+              onChangeEnd: (v) {
+                _settingsRepository.setSpectrumBgOpacity(v);
+              },
+            ),
+            trailing: Text('${(_spectrumBgOpacity * 100).round()}%'),
+          ),
+          ListTile(
+            title: const Text('频谱背景高度'),
+            subtitle: Slider(
+              value: _spectrumBgHeight,
+              min: 0.2,
+              max: 0.8,
+              divisions: 12,
+              label: '${(_spectrumBgHeight * 100).round()}%',
+              onChanged: (v) {
+                setState(() => _spectrumBgHeight = v);
+              },
+              onChangeEnd: (v) {
+                _settingsRepository.setSpectrumBgHeight(v);
+              },
+            ),
+            trailing: Text('${(_spectrumBgHeight * 100).round()}%'),
+          ),
+        ],
       ],
     );
   }
