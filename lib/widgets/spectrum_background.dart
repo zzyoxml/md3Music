@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -24,11 +23,15 @@ class SpectrumBackground extends StatefulWidget {
   /// 频谱区域占屏幕高度的比例（0.2-0.8）
   final double heightRatio;
 
+  /// 是否可见（播放时 true）：AnimatedOpacity 淡入淡出过渡
+  final bool visible;
+
   const SpectrumBackground({
     super.key,
     required this.color,
     this.opacity = 0.4,
     this.heightRatio = 0.4,
+    this.visible = true,
   });
 
   @override
@@ -99,28 +102,33 @@ class _SpectrumBackgroundState extends State<SpectrumBackground> {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 根据屏幕宽度动态计算柱数量（约每 5px 一根）
-        final newBarCount = (constraints.maxWidth / 5).round().clamp(32, 128);
-        if (newBarCount != _barCount) {
-          _barCount = newBarCount;
-          _displayedBands = List<double>.filled(_barCount, 0.0);
-        }
+    return AnimatedOpacity(
+      opacity: widget.visible ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 350),
+      curve: Curves.easeOut,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 根据屏幕宽度动态计算柱数量（约每 5px 一根）
+          final newBarCount = (constraints.maxWidth / 5).round().clamp(32, 128);
+          if (newBarCount != _barCount) {
+            _barCount = newBarCount;
+            _displayedBands = List<double>.filled(_barCount, 0.0);
+          }
 
-        return Opacity(
-          opacity: widget.opacity,
-          child: CustomPaint(
-            painter: _SpectrumBarsPainter(
-              bandsNotifier: _bandsNotifier,
-              color: widget.color,
-              barCount: _barCount,
-              heightRatio: widget.heightRatio,
+          return Opacity(
+            opacity: widget.opacity,
+            child: CustomPaint(
+              painter: _SpectrumBarsPainter(
+                bandsNotifier: _bandsNotifier,
+                color: widget.color,
+                barCount: _barCount,
+                heightRatio: widget.heightRatio,
+              ),
+              child: const SizedBox.expand(),
             ),
-            child: const SizedBox.expand(),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }
@@ -138,7 +146,17 @@ class _SpectrumBarsPainter extends CustomPainter {
     required this.color,
     required this.barCount,
     required this.heightRatio,
-  }) : super(repaint: bandsNotifier);
+  })  : _paint = Paint()
+          ..color = color
+          ..style = PaintingStyle.fill,
+        super(repaint: bandsNotifier);
+
+  /// 填充画笔（构造时一次创建）
+  final Paint _paint;
+
+  /// 复用的 Path 与柱位置缓冲：每帧 reset 后重建，避免每帧分配对象
+  final Path _path = Path();
+  final List<double> _xPositions = <double>[];
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -155,22 +173,23 @@ class _SpectrumBarsPainter extends CustomPainter {
     // 基准高度：无数据时显示静止低柱
     final baseHeight = spectrumHeight * 0.03;
 
-    final paint = Paint()
-      ..color = color
-      ..style = PaintingStyle.fill;
+    // 柱 x 位置只依赖尺寸，复用缓冲避免每帧分配
+    final xs = _xPositions..clear();
+    for (int i = 0; i < n; i++) {
+      xs.add(i * barWidth + gap / 2);
+    }
 
+    // 所有柱合并为一条 Path 一次绘制，替代 128 次 drawRect
+    final path = _path..reset();
     for (int i = 0; i < n; i++) {
       final v = (i < bands.length) ? bands[i].clamp(0.0, 1.0) : 0.0;
       final h = baseHeight + (spectrumHeight - baseHeight) * v;
-      final x = i * barWidth + gap / 2;
+      final x = xs[i];
       // 从底部向上画
       final y = size.height - h;
-
-      canvas.drawRect(
-        Rect.fromLTWH(x, y, actualBarWidth, h),
-        paint,
-      );
+      path.addRect(Rect.fromLTWH(x, y, actualBarWidth, h));
     }
+    canvas.drawPath(path, _paint);
   }
 
   @override

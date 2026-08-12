@@ -43,6 +43,10 @@ class SpectrumArtwork extends StatefulWidget {
   /// 频谱样式：0=柱状图，1=曲线（默认 0）
   final int style;
 
+  /// 频谱整体透明度（0.0~1.0，默认 1.0 不透明）。
+  /// 柱状图与曲线共用，由调用方按样式分开记忆后传入。
+  final double opacity;
+
   /// 旋转一圈耗时（默认 8s，慢速防眩晕）
   final Duration rotationDuration;
 
@@ -55,6 +59,7 @@ class SpectrumArtwork extends StatefulWidget {
     this.ringColor,
     this.bandCount = 40,
     this.style = 0,
+    this.opacity = 1.0,
     this.rotationDuration = const Duration(seconds: 8),
   });
 
@@ -174,26 +179,35 @@ class _SpectrumArtworkState extends State<SpectrumArtwork>
           child: Stack(
             clipBehavior: Clip.none,
             children: [
-              // ── 1. 环形频谱层（柱状或曲线） ──
+              // ── 1. 环形频谱层（柱状或曲线）：AnimatedOpacity 过渡，播放淡入、暂停淡出 ──
               Positioned.fill(
-                child: CustomPaint(
-                  painter: widget.style == 1
-                      ? _SpectrumCurvePainter(
-                          bandsNotifier: _bandsNotifier,
-                          center: center,
-                          coverRadius: coverRadius,
-                          barMaxLen: size * barMaxLenRatio,
-                          color: barColor,
-                          bandCount: widget.bandCount,
-                        )
-                      : _SpectrumRingPainter(
-                          bandsNotifier: _bandsNotifier,
-                          center: center,
-                          coverRadius: coverRadius,
-                          barMaxLen: size * barMaxLenRatio,
-                          color: barColor,
-                          bandCount: widget.bandCount,
-                        ),
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: widget.isPlaying ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 350),
+                    curve: Curves.easeOut,
+                    child: CustomPaint(
+                      painter: widget.style == 1
+                          ? _SpectrumCurvePainter(
+                              bandsNotifier: _bandsNotifier,
+                              center: center,
+                              coverRadius: coverRadius,
+                              barMaxLen: size * barMaxLenRatio,
+                              color: barColor,
+                              bandCount: widget.bandCount,
+                              opacity: widget.opacity,
+                            )
+                          : _SpectrumRingPainter(
+                              bandsNotifier: _bandsNotifier,
+                              center: center,
+                              coverRadius: coverRadius,
+                              barMaxLen: size * barMaxLenRatio,
+                              color: barColor,
+                              bandCount: widget.bandCount,
+                              opacity: widget.opacity,
+                            ),
+                    ),
+                  ),
                 ),
               ),
               // ── 2. 圆形旋转封面层 ──
@@ -242,6 +256,7 @@ class _SpectrumRingPainter extends CustomPainter {
   final double barMaxLen;
   final Color color;
   final int bandCount;
+  final double opacity;
 
   _SpectrumRingPainter({
     required this.bandsNotifier,
@@ -250,7 +265,35 @@ class _SpectrumRingPainter extends CustomPainter {
     required this.barMaxLen,
     required this.color,
     required this.bandCount,
-  }) : super(repaint: bandsNotifier);
+    required this.opacity,
+  })  : _cosTable = List<double>.generate(
+          bandCount,
+          (i) => math.cos(-math.pi / 2 + i * 2 * math.pi / bandCount),
+        ),
+        _sinTable = List<double>.generate(
+          bandCount,
+          (i) => math.sin(-math.pi / 2 + i * 2 * math.pi / bandCount),
+        ),
+        _barWidth = bandCount > 0
+            ? (2 * math.pi * (coverRadius + barMaxLen / 2) / bandCount) * 0.78
+            : 0.0,
+        super(repaint: bandsNotifier) {
+    _paint.color = color.withValues(alpha: color.a * opacity);
+    _paint.strokeWidth = _barWidth;
+  }
+
+  /// 预计算的三角函数表（构造时一次算出，避免每帧重复 sin/cos）
+  final List<double> _cosTable;
+  final List<double> _sinTable;
+
+  /// 柱宽度：根据柱数等分圆周，间距小（0.78 = 柱占78%、间距22%）
+  final double _barWidth;
+
+  /// 复用的 Path 与 Paint：每帧 reset 后重建，避免每帧分配对象
+  final Path _path = Path();
+  final Paint _paint = Paint()
+    ..style = PaintingStyle.stroke
+    ..strokeCap = StrokeCap.butt; // 顶部不圆角，且不延伸
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -258,38 +301,30 @@ class _SpectrumRingPainter extends CustomPainter {
     final n = bandCount;
     if (n <= 0) return;
 
-    // 柱宽度：根据柱数等分圆周，间距小（0.78 = 柱占78%、间距22%）
-    final circumference = 2 * math.pi * (coverRadius + barMaxLen / 2);
-    final barWidth = (circumference / n) * 0.78;
-
     // 基准高度：无数据时显示静止低柱（视觉上不空）
     final baseLen = barMaxLen * 0.12;
 
-    final paint = Paint()
-      ..color = color
-      ..strokeCap = StrokeCap.butt // 顶部不圆角，且不延伸
-      ..style = PaintingStyle.fill;
-
-    // 从 12 点方向（-π/2）起顺时针：每个柱角度 = -π/2 + i * 2π/n
+    // 从 12 点方向（-π/2）起顺时针，角度用预计算表查表
+    final path = _path..reset();
     for (int i = 0; i < n; i++) {
-      final angle = -math.pi / 2 + (i * 2 * math.pi / n);
+      final cosA = _cosTable[i];
+      final sinA = _sinTable[i];
       final v = (i < bands.length) ? bands[i].clamp(0.0, 1.0) : 0.0;
       final len = baseLen + barMaxLen * v;
 
-      // 柱起点：紧贴圆形封面外缘（无空隙）
-      final startX = center.dx + coverRadius * math.cos(angle);
-      final startY = center.dy + coverRadius * math.sin(angle);
-      // 柱终点：向外辐射
-      final endX = center.dx + (coverRadius + len) * math.cos(angle);
-      final endY = center.dy + (coverRadius + len) * math.sin(angle);
-
-      paint.strokeWidth = barWidth;
-      canvas.drawLine(
-        Offset(startX, startY),
-        Offset(endX, endY),
-        paint,
-      );
+      // 柱起点：紧贴圆形封面外缘（无空隙）；终点：向外辐射
+      path
+        ..moveTo(
+          center.dx + coverRadius * cosA,
+          center.dy + coverRadius * sinA,
+        )
+        ..lineTo(
+          center.dx + (coverRadius + len) * cosA,
+          center.dy + (coverRadius + len) * sinA,
+        );
     }
+    // 40 根柱合并为一条路径一次绘制，替代 40 次 drawLine
+    canvas.drawPath(path, _paint);
   }
 
   @override
@@ -300,7 +335,8 @@ class _SpectrumRingPainter extends CustomPainter {
         oldDelegate.coverRadius != coverRadius ||
         oldDelegate.barMaxLen != barMaxLen ||
         oldDelegate.color != color ||
-        oldDelegate.bandCount != bandCount;
+        oldDelegate.bandCount != bandCount ||
+        oldDelegate.opacity != opacity;
   }
 }
 
@@ -315,6 +351,7 @@ class _SpectrumCurvePainter extends CustomPainter {
   final double barMaxLen;
   final Color color;
   final int bandCount;
+  final double opacity;
 
   _SpectrumCurvePainter({
     required this.bandsNotifier,
@@ -323,7 +360,37 @@ class _SpectrumCurvePainter extends CustomPainter {
     required this.barMaxLen,
     required this.color,
     required this.bandCount,
-  }) : super(repaint: bandsNotifier);
+    required this.opacity,
+  })  : _cosTable = List<double>.generate(
+          bandCount,
+          (i) => math.cos(-math.pi / 2 + i * 2 * math.pi / bandCount),
+        ),
+        _sinTable = List<double>.generate(
+          bandCount,
+          (i) => math.sin(-math.pi / 2 + i * 2 * math.pi / bandCount),
+        ),
+        _fillPaint = Paint()
+          ..color = color.withValues(alpha: color.a * opacity * 0.15)
+          ..style = PaintingStyle.fill,
+        _strokePaint = Paint()
+          ..color = color.withValues(alpha: color.a * opacity)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0
+          ..strokeJoin = StrokeJoin.round
+          ..strokeCap = StrokeCap.round,
+        super(repaint: bandsNotifier);
+
+  /// 预计算的三角函数表（构造时一次算出，避免每帧重复 sin/cos）
+  final List<double> _cosTable;
+  final List<double> _sinTable;
+
+  /// 半透明填充与描边画笔（构造时一次创建）
+  final Paint _fillPaint;
+  final Paint _strokePaint;
+
+  /// 复用的 Path 与坐标缓冲：每帧 reset 后重建，避免每帧分配对象
+  final Path _path = Path();
+  final List<Offset> _points = <Offset>[];
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -334,53 +401,39 @@ class _SpectrumCurvePainter extends CustomPainter {
     // 基准高度：无数据时紧贴封面外缘
     final baseLen = barMaxLen * 0.05;
 
-    // 计算每个频点的坐标
-    final points = <Offset>[];
+    // 计算每个频点的坐标（复用缓冲，避免每帧分配 List<Offset>）
+    final points = _points..clear();
     for (int i = 0; i < n; i++) {
-      final angle = -math.pi / 2 + (i * 2 * math.pi / n);
       final v = (i < bands.length) ? bands[i].clamp(0.0, 1.0) : 0.0;
       final r = coverRadius + baseLen + barMaxLen * v;
       points.add(Offset(
-        center.dx + r * math.cos(angle),
-        center.dy + r * math.sin(angle),
+        center.dx + r * _cosTable[i],
+        center.dy + r * _sinTable[i],
       ));
     }
 
     // 用平滑闭合曲线连接所有点（quadraticBezierTo，控制点=当前点，终点=相邻两点中点）
-    final path = Path();
-    if (points.isNotEmpty) {
-      // 起点 = 第一个点和最后一个点的中点（闭合平滑）
-      final midStart = Offset(
-        (points[0].dx + points[n - 1].dx) / 2,
-        (points[0].dy + points[n - 1].dy) / 2,
+    final path = _path..reset();
+    // 起点 = 第一个点和最后一个点的中点（闭合平滑）
+    final midStart = Offset(
+      (points[0].dx + points[n - 1].dx) / 2,
+      (points[0].dy + points[n - 1].dy) / 2,
+    );
+    path.moveTo(midStart.dx, midStart.dy);
+    // 对每个点 i：控制点 = points[i]，终点 = points[i] 和 points[i+1] 的中点
+    for (int i = 0; i < n; i++) {
+      final next = points[(i + 1) % n];
+      final mid = Offset(
+        (points[i].dx + next.dx) / 2,
+        (points[i].dy + next.dy) / 2,
       );
-      path.moveTo(midStart.dx, midStart.dy);
-      // 对每个点 i：控制点 = points[i]，终点 = points[i] 和 points[i+1] 的中点
-      for (int i = 0; i < n; i++) {
-        final next = points[(i + 1) % n];
-        final mid = Offset(
-          (points[i].dx + next.dx) / 2,
-          (points[i].dy + next.dy) / 2,
-        );
-        path.quadraticBezierTo(points[i].dx, points[i].dy, mid.dx, mid.dy);
-      }
-      path.close();
+      path.quadraticBezierTo(points[i].dx, points[i].dy, mid.dx, mid.dy);
     }
+    path.close();
 
-    // 半透明填充
-    final fillPaint = Paint()
-      ..color = color.withValues(alpha: 0.15)
-      ..style = PaintingStyle.fill;
-    canvas.drawPath(path, fillPaint);
-
-    // 描边
-    final strokePaint = Paint()
-      ..color = color
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0
-      ..strokeJoin = StrokeJoin.round
-      ..strokeCap = StrokeCap.round;
-    canvas.drawPath(path, strokePaint);
+    // 半透明填充 + 描边
+    canvas.drawPath(path, _fillPaint);
+    canvas.drawPath(path, _strokePaint);
   }
 
   @override
@@ -389,6 +442,7 @@ class _SpectrumCurvePainter extends CustomPainter {
         oldDelegate.coverRadius != coverRadius ||
         oldDelegate.barMaxLen != barMaxLen ||
         oldDelegate.color != color ||
-        oldDelegate.bandCount != bandCount;
+        oldDelegate.bandCount != bandCount ||
+        oldDelegate.opacity != opacity;
   }
 }

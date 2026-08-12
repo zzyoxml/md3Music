@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io' show Platform;
+import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
@@ -141,12 +142,33 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   // ── 音乐频谱环绕显示 ──
   bool _spectrumEnabled = false;
   bool _spectrumStarted = false;
-  bool _spectrumSessionWarned = false;
   // 频谱样式：0=柱状图(环绕)，1=曲线(环绕)，2=背景层(条形)
   int _spectrumStyle = 0;
   // 频谱背景层参数（仅 style=2 时使用）
   double _spectrumBgOpacity = 0.4;
   double _spectrumBgHeight = 0.4;
+  // 环绕频谱透明度（style 0/1 分开记忆，默认不透明）
+  double _spectrumBarOpacity = 1.0;
+  double _spectrumCurveOpacity = 1.0;
+  // 频谱动态取色独立开关（默认关闭）：AM 播放器频谱颜色取封面主色 50/50 混合
+  bool _spectrumDynamicColor = false;
+
+  /// 频谱颜色：独立开关「频谱动态取色」开启且已提取到封面主色时，
+  /// 用 50% 白 + 50% 取色混合（与歌词动态取色相同的兜底：抬升明度避免深色）；
+  /// 否则用 AM 风格白色（动态取色仅 AM 播放器生效）。
+  Color get _spectrumColor {
+    final accent = _lyricAccentColor;
+    if (_spectrumDynamicColor && accent != null) {
+      final mixed = Color.lerp(Colors.white, accent, 0.5)!;
+      final hsl = HSLColor.fromColor(mixed);
+      return hsl.withLightness(math.max(hsl.lightness, 0.78)).toColor();
+    }
+    return Colors.white;
+  }
+
+  /// 当前频谱透明度（按样式分开记忆）
+  double get _spectrumOpacity =>
+      _spectrumStyle == 1 ? _spectrumCurveOpacity : _spectrumBarOpacity;
 
   @override
   void initState() {
@@ -201,6 +223,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final style = await SettingsRepository().getSpectrumStyle();
     final bgOpacity = await SettingsRepository().getSpectrumBgOpacity();
     final bgHeight = await SettingsRepository().getSpectrumBgHeight();
+    final barOpacity = await SettingsRepository().getSpectrumBarOpacity();
+    final curveOpacity = await SettingsRepository().getSpectrumCurveOpacity();
+    final dynamicColor = await SettingsRepository().getSpectrumDynamicColor();
     if (!mounted) return;
     SpectrumService.instance.bandCount = bandCount;
     setState(() {
@@ -208,6 +233,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       _spectrumStyle = style;
       _spectrumBgOpacity = bgOpacity;
       _spectrumBgHeight = bgHeight;
+      _spectrumBarOpacity = barOpacity;
+      _spectrumCurveOpacity = curveOpacity;
+      _spectrumDynamicColor = dynamicColor;
     });
     if (enabled) {
       SpectrumService.instance.simulatedNotifier.addListener(_onSpectrumSimulated);
@@ -217,24 +245,18 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       final isPlaying = context.read<PlayerProvider>().isPlaying;
       await _tryStartSpectrum(isPlaying: isPlaying);
     }
+    // 频谱动态取色开启时补提取当前歌曲封面主色（歌词开关可能未开）
+    if (dynamicColor && _lyricAccentColor == null && mounted) {
+      final song = context.read<PlayerProvider>().currentSong;
+      if (song != null) _updateLyricAccent(song.artworkUri);
+    }
   }
 
   Future<void> _tryStartSpectrum({bool isPlaying = false}) async {
     if (!Platform.isAndroid) return;
     if (_spectrumStarted) return;
-    if (!isPlaying) {
-      if (!_spectrumSessionWarned && mounted) {
-        _spectrumSessionWarned = true;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('频谱模式将在播放后生效'),
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 2),
-          ),
-        );
-      }
-      return;
-    }
+    // 未在播放时不启动（PCM 截取在 AudioSink 层，播放才会产生数据）
+    if (!isPlaying) return;
     final sessionId = AudioService().androidAudioSessionId ?? 0;
     final ok = await SpectrumService.instance.start(sessionId);
     if (ok) {
@@ -254,7 +276,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     setState(() => _spectrumEnabled = newEnabled);
     await SettingsRepository().setSpectrumEnabled(newEnabled);
     if (newEnabled) {
-      _spectrumSessionWarned = false;
       if (Platform.isAndroid) {
         final status = await Permission.microphone.request();
         if (!status.isGranted && mounted) {
@@ -499,14 +520,16 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
-  /// 切歌时异步提取专辑封面主色，供歌词「动态字体颜色」混色使用。
+  /// 切歌时异步提取专辑封面主色，供歌词「动态字体颜色」与频谱动态取色混色使用。
   ///
   /// 复用流光背景的提取思路（PaletteGenerator + 过滤 + 饱和度归一化）。
   /// 提取完成后若已切到别的歌（url 变化）则丢弃结果。
   Future<void> _updateLyricAccent(String? url) async {
-    // 仅动态字体颜色开关开启时才需要提取（默认关闭，避免每次进播放器
-    // 都多一次封面下载 + 解码 + PaletteGenerator 分析的无谓开销）
-    if (!LyricPreferences.instance.useDynamicLyricColor) return;
+    // 仅歌词动态取色或频谱动态取色任一开启时才需要提取（默认关闭，避免每次
+    // 进播放器都多一次封面下载 + 解码 + PaletteGenerator 分析的无谓开销）
+    if (!LyricPreferences.instance.useDynamicLyricColor && !_spectrumDynamicColor) {
+      return;
+    }
     if (url == _lastAccentUrl) return;
     _lastAccentUrl = url;
     final color = await ArtworkColorExtractor.extract(url);
@@ -518,7 +541,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   /// 开关时，立即为当前歌曲补提取封面主色（首次打开时 _fetchLyrics 的提取
   /// 因开关关闭已被跳过）。
   void _onLyricPrefsChanged() {
-    if (LyricPreferences.instance.useDynamicLyricColor &&
+    if ((LyricPreferences.instance.useDynamicLyricColor || _spectrumDynamicColor) &&
         _lyricAccentColor == null &&
         mounted) {
       final song = context.read<PlayerProvider>().currentSong;
@@ -639,7 +662,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         isPlaying: playerProvider.isPlaying,
         bandCount: SpectrumService.instance.bandCount,
         style: _spectrumStyle,
-        barColor: Colors.white,
+        barColor: _spectrumColor,
+        opacity: _spectrumOpacity,
       );
     }
     return ClipRRect(
@@ -1063,12 +1087,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               ),
             // 3. 半透明蒙版 rgba(0,0,0,0.35)
             _buildDarkOverlay(),
-            // 3.5 频谱背景层：style=2 时显示底部条形频谱图（白色）
+            // 3.5 频谱背景层：style=2 时显示底部条形频谱图（播放时淡入、暂停时淡出）
             if (_spectrumEnabled && _spectrumStyle == 2)
               SpectrumBackground(
-                color: Colors.white,
+                color: _spectrumColor,
                 opacity: _spectrumBgOpacity,
                 heightRatio: _spectrumBgHeight,
+                visible: playerProvider.isPlaying,
               ),
             // 4. 主体内容（保留原有 compact/landscape/expanded 三套布局）
             ResponsiveLayout(
@@ -1278,9 +1303,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                     child: Stack(
                                       children: [
                                         AnimatedScale(
-                                          scale: playerProvider.isPlaying
+                                          // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
+                                          scale: _spectrumEnabled &&
+                                                  _spectrumStyle < 2
                                               ? 1.0
-                                              : 0.85,
+                                              : (playerProvider.isPlaying
+                                                  ? 1.0
+                                                  : 0.85),
                                           duration: const Duration(
                                             milliseconds: 500,
                                           ),
@@ -1523,9 +1552,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                       child: Stack(
                                         children: [
                                           AnimatedScale(
-                                            scale: playerProvider.isPlaying
+                                            // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
+                                            scale: _spectrumEnabled &&
+                                                    _spectrumStyle < 2
                                                 ? 1.0
-                                                : 0.85,
+                                                : (playerProvider.isPlaying
+                                                    ? 1.0
+                                                    : 0.85),
                                             duration: const Duration(
                                               milliseconds: 500,
                                             ),
@@ -1844,7 +1877,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         child: AspectRatio(
                           aspectRatio: 1,
                           child: AnimatedScale(
-                            scale: playerProvider.isPlaying ? 1.0 : 0.85,
+                            // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
+                            scale: _spectrumEnabled && _spectrumStyle < 2
+                                ? 1.0
+                                : (playerProvider.isPlaying ? 1.0 : 0.85),
                             duration: const Duration(milliseconds: 500),
                             curve: Curves.easeOutBack,
                             // 频谱模式：style 0/1 白色圆形旋转封面 + 环形频谱
@@ -1855,7 +1891,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                     isPlaying: playerProvider.isPlaying,
                                     bandCount: SpectrumService.instance.bandCount,
                                     style: _spectrumStyle,
-                                    barColor: Colors.white,
+                                    barColor: _spectrumColor,
+                                    opacity: _spectrumOpacity,
                                   )
                                 : ClipRRect(
                                     borderRadius: BorderRadius.circular(16),
@@ -1887,7 +1924,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         isPlaying: playerProvider.isPlaying,
                         bandCount: SpectrumService.instance.bandCount,
                         style: _spectrumStyle,
-                        barColor: Colors.white,
+                        barColor: _spectrumColor,
+                        opacity: _spectrumOpacity,
                       )
                     : ClipRRect(
                         borderRadius: BorderRadius.circular(16),
