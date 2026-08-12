@@ -19,7 +19,7 @@ import 'package:flutter/widgets.dart';
 import '../layout/duet_layout.dart';
 import '../layout/lyric_layout.dart';
 import '../layout/lyric_preferences.dart';
-import '../models/lyric_line.dart';
+import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 import 'emphasize_effect.dart';
 
 /// 逐字 mask alpha 渲染器。

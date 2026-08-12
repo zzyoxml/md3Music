@@ -25,7 +25,7 @@ import 'animation/spring.dart';
 import 'layout/duet_layout.dart';
 import 'layout/lyric_layout.dart';
 import 'layout/lyric_preferences.dart';
-import 'models/lyric_line.dart';
+import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 import 'renderers/emphasize_effect.dart';
 import 'renderers/interlude_dots.dart';
 import 'renderers/line_renderer.dart';

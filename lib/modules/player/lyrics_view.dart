@@ -34,6 +34,13 @@ class LyricsViewState extends State<LyricsView> {
   // 用户松手后，延迟恢复自动滚动的定时器
   Timer? _resumeAutoScrollTimer;
 
+  // 长歌词行（如英文整句）换行后行高自适应缓存：
+  // 每行高度按实际换行数测量，滚动用累计偏移；避免每帧 TextPainter 重测。
+  bool _layoutDirty = true;
+  double _lastLayoutWidth = -1;
+  List<double> _lineHeights = [];
+  List<double> _lineTopOffsets = [];
+
   // ListView 顶部 padding
   static const double _topPadding = 100.0;
 
@@ -128,10 +135,12 @@ class LyricsViewState extends State<LyricsView> {
   }
 
   void _onPrefsChanged() {
+    _layoutDirty = true;
     if (mounted) setState(() {});
   }
 
   void _parseLyrics() {
+    _layoutDirty = true;
     _parsedLyrics = [];
     if (widget.lyrics.isEmpty) return;
 
@@ -276,12 +285,13 @@ class LyricsViewState extends State<LyricsView> {
   /// （ensureVisible 会冒泡到 TabBarView 的 PageView，破坏滚动状态）
   void _scrollToLine(int index, {bool jump = false}) {
     if (!_scrollController.hasClients) return;
+    if (index < 0 || index >= _lineTopOffsets.length) return;
     final viewportHeight = _scrollController.position.viewportDimension;
     if (viewportHeight <= 0) return;
 
-    final lineHeight = _lineHeightFor(_prefs);
+    // 行高自适应后各行高度不同，用累计偏移定位当前行顶部
     final targetOffset =
-        _topPadding + index * lineHeight - viewportHeight * 0.4;
+        _topPadding + _lineTopOffsets[index] - viewportHeight * 0.4;
     final clampedOffset =
         targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent);
 
@@ -296,9 +306,46 @@ class LyricsViewState extends State<LyricsView> {
     }
   }
 
-  /// 计算单行高度 = fontSize * lineSpacing。
-  double _lineHeightFor(Md3LyricPreferences prefs) {
-    return prefs.fontSize * prefs.lineSpacing;
+  /// 计算每行容器高度与累计偏移（缓存，仅在歌词/偏好/宽度变化时重测）。
+  ///
+  /// 行高 = 实际文本块高（按当前字号 TextPainter 完整测量，英文原词+翻译
+  /// 超长行可换 2 行及以上，不截断）
+  ///        + 行间距留白 `fontSize * (lineSpacing - 1.2)`。
+  /// 单行时与原来的 `fontSize * lineSpacing` 一致。
+  void _ensureLayout(double width, double fontSize, String? fontFamily) {
+    if (!_layoutDirty && _lastLayoutWidth == width) return;
+    _layoutDirty = false;
+    _lastLayoutWidth = width;
+
+    final n = _parsedLyrics.length;
+    final spacingExtra = fontSize * (_prefs.lineSpacing - 1.2);
+    _lineHeights = List<double>.generate(n, (i) {
+      final text = _parsedLyrics[i].text;
+      // 空行显示 '...' 占位，按单行处理
+      if (text.isEmpty) return fontSize * _prefs.lineSpacing;
+      final painter = TextPainter(
+        text: TextSpan(
+          text: text,
+          style: TextStyle(
+            fontSize: fontSize,
+            height: 1.2,
+            fontWeight: FontWeight.w600,
+            fontFamily: fontFamily,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: width);
+      final blockHeight = painter.computeLineMetrics().fold<double>(
+        0,
+        (sum, m) => sum + m.height,
+      );
+      return blockHeight + spacingExtra;
+    });
+
+    _lineTopOffsets = List<double>.filled(n, 0);
+    for (var i = 1; i < n; i++) {
+      _lineTopOffsets[i] = _lineTopOffsets[i - 1] + _lineHeights[i - 1];
+    }
   }
 
   void _onLineTap(int index) {
@@ -315,7 +362,6 @@ class LyricsViewState extends State<LyricsView> {
     final prefs = _prefs;
     final fontSize = prefs.fontSize;
     final otherFontSize = (fontSize - 3).clamp(10.0, fontSize);
-    final lineHeight = _lineHeightFor(prefs);
     final fontFamily = prefs.effectiveFontFamily;
 
     // 排除全局 UI 缩放，歌词保持原始大小
@@ -341,48 +387,64 @@ class LyricsViewState extends State<LyricsView> {
         ),
       );
     } else {
-      content = Listener(
-      onPointerDown: _onPointerDown,
-      onPointerUp: _onPointerUp,
-      onPointerCancel: (_) => _onPointerUp(PointerUpEvent()),
-      child: ListView.builder(
-        controller: _scrollController,
-        padding: const EdgeInsets.symmetric(vertical: _topPadding, horizontal: 24),
-        itemCount: _parsedLyrics.length,
-        itemBuilder: (context, index) {
-          final isCurrent = index == _currentLineIndex;
-          final line = _parsedLyrics[index];
-
-          return GestureDetector(
-            onTap: widget.doubleTapToJump ? null : () => _onLineTap(index),
-            onDoubleTap: widget.doubleTapToJump ? () => _onLineTap(index) : null,
-            child: Container(
-              height: lineHeight,
-              alignment: Alignment.center,
-              child: AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 200),
-                curve: Curves.easeInOut,
-                style: DefaultTextStyle.of(context).style.copyWith(
-                  fontSize: isCurrent ? fontSize : otherFontSize,
-                  fontWeight: isCurrent ? FontWeight.w600 : FontWeight.w400,
-                  fontFamily: fontFamily,
-                  color: isCurrent
-                      ? colorScheme.primary
-                      : colorScheme.onSurfaceVariant,
-                  height: 1.2,
-                ),
-                child: Text(
-                  line.text.isEmpty ? '...' : line.text,
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
+      // LayoutBuilder 提供实际宽度，用于测量每行是否换行（长英文歌词自适应行高）
+      content = LayoutBuilder(
+        builder: (context, constraints) {
+          final availableWidth = constraints.maxWidth - 48; // 水平 padding 24*2
+          _ensureLayout(availableWidth, fontSize, fontFamily);
+          return Listener(
+            onPointerDown: _onPointerDown,
+            onPointerUp: _onPointerUp,
+            onPointerCancel: (_) => _onPointerUp(PointerUpEvent()),
+            child: ListView.builder(
+              controller: _scrollController,
+              padding: const EdgeInsets.symmetric(
+                vertical: _topPadding,
+                horizontal: 24,
               ),
+              itemCount: _parsedLyrics.length,
+              itemBuilder: (context, index) {
+                final isCurrent = index == _currentLineIndex;
+                final line = _parsedLyrics[index];
+
+                return GestureDetector(
+                  onTap: widget.doubleTapToJump
+                      ? null
+                      : () => _onLineTap(index),
+                  onDoubleTap: widget.doubleTapToJump
+                      ? () => _onLineTap(index)
+                      : null,
+                  child: Container(
+                    // 行高随换行自适应（1 行或 2 行），不再裁切长歌词
+                    height: _lineHeights[index],
+                    alignment: Alignment.center,
+                    child: AnimatedDefaultTextStyle(
+                      duration: const Duration(milliseconds: 200),
+                      curve: Curves.easeInOut,
+                      style: DefaultTextStyle.of(context).style.copyWith(
+                        fontSize: isCurrent ? fontSize : otherFontSize,
+                        fontWeight: isCurrent
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                        fontFamily: fontFamily,
+                        color: isCurrent
+                            ? colorScheme.primary
+                            : colorScheme.onSurfaceVariant,
+                        height: 1.2,
+                      ),
+                      child: Text(
+                        line.text.isEmpty ? '...' : line.text,
+                        textAlign: TextAlign.center,
+                        // 不截断：英文原词+翻译超长时完整换行显示
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
           );
         },
-      ),
-    );
+      );
     }
 
     return MediaQuery(

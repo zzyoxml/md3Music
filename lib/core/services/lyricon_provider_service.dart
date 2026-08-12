@@ -5,7 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/models/song.dart';
-import '../../widgets/apple_lyrics/models/lyric_line.dart';
+import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 
 /// Lyricon 设备桥接服务：作为 Dart 与 Kotlin（MainActivity MethodChannel
 /// `com.md3music.premium/lyricon`）之间的中间层，负责向 Lyricon 实时歌词

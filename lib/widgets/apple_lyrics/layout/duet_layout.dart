@@ -13,7 +13,7 @@
 /// 翻译/罗马音若同样带中文前缀则一并剔除，对齐跟随原文。
 library;
 
-import '../models/lyric_line.dart';
+import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 
 /// 对唱歌词对齐方式。
 enum DuetAlignment {

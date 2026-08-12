@@ -10,7 +10,7 @@ import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../core/utils/audio_scanner.dart';
-import '../../widgets/apple_lyrics/models/lyric_line.dart';
+import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import 'media_notification_service.dart';
 

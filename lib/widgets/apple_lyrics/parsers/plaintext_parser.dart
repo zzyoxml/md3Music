@@ -7,7 +7,7 @@
 /// 详见 spec.md "Requirement: 纯文本兜底解析器"。
 library;
 
-import '../models/lyric_line.dart';
+import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 
 /// 纯文本歌词解析器。
 ///
