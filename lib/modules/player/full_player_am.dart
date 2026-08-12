@@ -1,20 +1,25 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:ui';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/layout/responsive_layout.dart';
+import '../../core/services/audio_service.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/equalizer_service.dart';
 import '../../core/services/media_notification_service.dart';
+import '../../core/services/spectrum_service.dart';
 import '../../core/services/usb_audio_service.dart';
 import '../../core/utils/audio_scanner.dart';
 import '../../core/utils/artwork_color_extractor.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
 import '../coverflow/coverflow_page.dart';
@@ -40,6 +45,7 @@ import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/player_artwork_image.dart';
+import '../../widgets/spectrum_artwork.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/player_playlist_view.dart';
 import 'comments_view.dart';
@@ -131,6 +137,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   // 进度条拖动状态：记录拖动前是否正在播放，拖动结束后恢复
   bool _wasPlayingBeforeDrag = false;
 
+  // ── 音乐频谱环绕显示 ──
+  bool _spectrumEnabled = false;
+  bool _spectrumStarted = false;
+  bool _spectrumSessionWarned = false;
+  int _spectrumStyle = 0;
+
   @override
   void initState() {
     super.initState();
@@ -173,7 +185,100 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         _fetchLyrics(song);
       }
       context.read<PlayerProvider>().addListener(_onPlayerSongChanged);
+      _loadSpectrumSetting();
     });
+  }
+
+  /// 从设置加载频谱开关状态
+  Future<void> _loadSpectrumSetting() async {
+    final enabled = await SettingsRepository().getSpectrumEnabled();
+    final bandCount = await SettingsRepository().getSpectrumBandCount();
+    final style = await SettingsRepository().getSpectrumStyle();
+    if (!mounted) return;
+    SpectrumService.instance.bandCount = bandCount;
+    setState(() {
+      _spectrumEnabled = enabled;
+      _spectrumStyle = style;
+    });
+    if (enabled) {
+      SpectrumService.instance.simulatedNotifier.addListener(_onSpectrumSimulated);
+      if (Platform.isAndroid) {
+        await Permission.microphone.request();
+      }
+      final isPlaying = context.read<PlayerProvider>().isPlaying;
+      await _tryStartSpectrum(isPlaying: isPlaying);
+    }
+  }
+
+  Future<void> _tryStartSpectrum({bool isPlaying = false}) async {
+    if (!Platform.isAndroid) return;
+    if (_spectrumStarted) return;
+    if (!isPlaying) {
+      if (!_spectrumSessionWarned && mounted) {
+        _spectrumSessionWarned = true;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('频谱模式将在播放后生效'),
+            behavior: SnackBarBehavior.floating,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+    final sessionId = AudioService().androidAudioSessionId ?? 0;
+    final ok = await SpectrumService.instance.start(sessionId);
+    if (ok) {
+      _spectrumStarted = true;
+    }
+  }
+
+  Future<void> _stopSpectrum() async {
+    if (!_spectrumStarted) return;
+    _spectrumStarted = false;
+    await SpectrumService.instance.stop();
+  }
+
+  Future<void> _toggleSpectrum() async {
+    HapticFeedback.lightImpact();
+    final newEnabled = !_spectrumEnabled;
+    setState(() => _spectrumEnabled = newEnabled);
+    await SettingsRepository().setSpectrumEnabled(newEnabled);
+    if (newEnabled) {
+      _spectrumSessionWarned = false;
+      if (Platform.isAndroid) {
+        final status = await Permission.microphone.request();
+        if (!status.isGranted && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('未授予录音权限，将使用模拟频谱模式'),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+      }
+      final isPlaying = context.read<PlayerProvider>().isPlaying;
+      await _tryStartSpectrum(isPlaying: isPlaying);
+      SpectrumService.instance.simulatedNotifier.addListener(_onSpectrumSimulated);
+    } else {
+      SpectrumService.instance.simulatedNotifier.removeListener(_onSpectrumSimulated);
+      await _stopSpectrum();
+    }
+  }
+
+  void _onSpectrumSimulated() {
+    if (!mounted) return;
+    if (SpectrumService.instance.simulatedNotifier.value) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('设备不支持实时频谱，已切换到模拟模式'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 3),
+        ),
+      );
+      setState(() {});
+    }
   }
 
   /// 检测是否为 Pad 模式（宽度 >= 600），并动态调整 TabController
@@ -245,6 +350,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       if (idx < playlist.length - 1)
         _preloadArtwork(playlist[idx + 1].artworkUri);
     }
+    // 频谱启停
+    if (_spectrumEnabled && player.isPlaying && !_spectrumStarted) {
+      _tryStartSpectrum(isPlaying: true);
+    }
+    SpectrumService.instance.setPlaying(player.isPlaying);
   }
 
   @override
@@ -290,6 +400,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     _artworkFadeController.dispose();
     _zenController.dispose();
     _tabController.dispose();
+    // 退出播放器时停止频谱采集
+    SpectrumService.instance.simulatedNotifier.removeListener(_onSpectrumSimulated);
+    _stopSpectrum();
     // 退出播放器时恢复系统栏；若仍处于封面流页横屏沉浸（从封面流进入播放器后返回），
     // 则保持沉浸，避免返回后状态栏闪现。
     if (kCoverFlowImmersiveActive.value) {
@@ -502,6 +615,39 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     if (_lyricFormat != LyricFormat.lrc) return false;
     // 任意一行有字级时间戳即视为字级 LRC（混合场景按字级处理）
     return !_parsedLyrics.any((line) => line.hasWordTiming);
+  }
+
+  /// 构建横屏布局的封面内容：频谱开启时用 SpectrumArtwork（白色），否则用原 ClipRRect + Selector
+  Widget _buildLandscapeArtworkContent(
+    PlayerProvider playerProvider,
+    dynamic currentSong,
+    ColorScheme colorScheme,
+  ) {
+    if (_spectrumEnabled) {
+      return SpectrumArtwork(
+        artworkUri: currentSong.artworkUri,
+        fallbackFilePath: currentSong.localPath,
+        isPlaying: playerProvider.isPlaying,
+        bandCount: SpectrumService.instance.bandCount,
+        style: _spectrumStyle,
+        barColor: Colors.white,
+      );
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Selector<PlayerProvider, (String?, String?)>(
+        selector: (_, p) => (
+          p.currentSong?.artworkUri,
+          p.currentSong?.localPath,
+        ),
+        builder: (context, data, __) => _buildCrossfadeArtwork(
+          data.$1,
+          colorScheme,
+          iconSize: 48,
+          fallbackFilePath: data.$2,
+        ),
+      ),
+    );
   }
 
   /// 封面淡入淡出（AM 风格：白色占位）
@@ -1123,29 +1269,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                             milliseconds: 500,
                                           ),
                                           curve: Curves.easeOutBack,
-                                          child: ClipRRect(
-                                            borderRadius: BorderRadius.circular(
-                                              16,
-                                            ),
-                                            // Selector 让封面仅在 artworkUri 变化时重建
-                                            child:
-                                                Selector<
-                                                  PlayerProvider,
-                                                  (String?, String?)
-                                                >(
-                                                  selector: (_, p) => (
-                                                    p.currentSong?.artworkUri,
-                                                    p.currentSong?.localPath,
-                                                  ),
-                                                  builder: (context, data, __) =>
-                                                      _buildCrossfadeArtwork(
-                                                        data.$1,
-                                                        colorScheme,
-                                                        iconSize: 48,
-                                                        fallbackFilePath:
-                                                            data.$2,
-                                                      ),
-                                                ),
+                                          child: _buildLandscapeArtworkContent(
+                                            playerProvider,
+                                            currentSong,
+                                            colorScheme,
                                           ),
                                         ),
                                         _buildZenLongPressHint(),
@@ -1387,28 +1514,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                               milliseconds: 500,
                                             ),
                                             curve: Curves.easeOutBack,
-                                            child: ClipRRect(
-                                              borderRadius:
-                                                  BorderRadius.circular(16),
-                                              // Selector 让封面仅在 artworkUri 变化时重建
-                                              child:
-                                                  Selector<
-                                                    PlayerProvider,
-                                                    (String?, String?)
-                                                  >(
-                                                    selector: (_, p) => (
-                                                      p.currentSong?.artworkUri,
-                                                      p.currentSong?.localPath,
-                                                    ),
-                                                    builder: (context, data, __) =>
-                                                        _buildCrossfadeArtwork(
-                                                          data.$1,
-                                                          colorScheme,
-                                                          iconSize: 48,
-                                                          fallbackFilePath:
-                                                              data.$2,
-                                                        ),
-                                                  ),
+                                            child: _buildLandscapeArtworkContent(
+                                              playerProvider,
+                                              currentSong,
+                                              colorScheme,
                                             ),
                                           ),
                                           _buildZenLongPressHint(),
@@ -1718,24 +1827,29 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         ),
                         child: AspectRatio(
                           aspectRatio: 1,
-                          // 专辑封面缩放动画（grill-me 第三轮）：
-                          // 暂停时 scale=0.85，播放时 scale=1.0，带超出回弹效果。
-                          // 用 AnimatedScale + easeOutBack 曲线，overshoot 约 1.7，
-                          // 暂停→播放：1.0 ← 0.85（中间略超 1.05），营造"放大回弹"感
-                          // 播放→暂停：0.85 ← 1.0（中间略低 0.8），营造"缩小回弹"感
                           child: AnimatedScale(
                             scale: playerProvider.isPlaying ? 1.0 : 0.85,
                             duration: const Duration(milliseconds: 500),
                             curve: Curves.easeOutBack,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(16),
-                              child: _buildCrossfadeArtwork(
-                                currentSong.artworkUri,
-                                colorScheme,
-                                iconSize: iconSize,
-                                fallbackFilePath: currentSong.localPath,
-                              ),
-                            ),
+                            // 频谱模式：白色圆形旋转封面 + 环形频谱
+                            child: _spectrumEnabled
+                                ? SpectrumArtwork(
+                                    artworkUri: currentSong.artworkUri,
+                                    fallbackFilePath: currentSong.localPath,
+                                    isPlaying: playerProvider.isPlaying,
+                                    bandCount: SpectrumService.instance.bandCount,
+                                    style: _spectrumStyle,
+                                    barColor: Colors.white,
+                                  )
+                                : ClipRRect(
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: _buildCrossfadeArtwork(
+                                      currentSong.artworkUri,
+                                      colorScheme,
+                                      iconSize: iconSize,
+                                      fallbackFilePath: currentSong.localPath,
+                                    ),
+                                  ),
                           ),
                         ),
                       ),
@@ -1750,15 +1864,24 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             Expanded(
               child: AspectRatio(
                 aspectRatio: 1,
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(16),
-                  child: _buildCrossfadeArtwork(
-                    currentSong.artworkUri,
-                    colorScheme,
-                    iconSize: iconSize,
-                    fallbackFilePath: currentSong.localPath,
-                  ),
-                ),
+                child: _spectrumEnabled
+                    ? SpectrumArtwork(
+                        artworkUri: currentSong.artworkUri,
+                        fallbackFilePath: currentSong.localPath,
+                        isPlaying: playerProvider.isPlaying,
+                        bandCount: SpectrumService.instance.bandCount,
+                        style: _spectrumStyle,
+                        barColor: Colors.white,
+                      )
+                    : ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: _buildCrossfadeArtwork(
+                          currentSong.artworkUri,
+                          colorScheme,
+                          iconSize: iconSize,
+                          fallbackFilePath: currentSong.localPath,
+                        ),
+                      ),
               ),
             ),
           SizedBox(height: textSpacing),
@@ -2941,6 +3064,23 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     ).showSnackBar(const SnackBar(content: Text('分享功能开发中')));
                   },
                 ),
+                // 音乐频谱环绕：仅 Android 显示，与 MD 风格一致
+                if (Platform.isAndroid)
+                  SwitchListTile(
+                    title: const Text('音乐频谱环绕'),
+                    subtitle: Text(
+                      _spectrumEnabled
+                          ? SpectrumService.instance.isSimulated
+                              ? '已开启 · 模拟模式（设备不支持实时频谱）'
+                              : '已开启 · 实时频谱'
+                          : '封面裁圆旋转，频谱环绕跳动',
+                    ),
+                    value: _spectrumEnabled,
+                    onChanged: (v) {
+                      Navigator.pop(sheetContext);
+                      _toggleSpectrum();
+                    },
+                  ),
               ],
             ),
           ),

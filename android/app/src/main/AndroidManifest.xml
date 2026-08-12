@@ -17,6 +17,8 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <!-- 均衡器功能需要此权限 -->
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- 频谱可视化：部分 ROM（如 HyperOS）要求此权限才能使用 Visualizer -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- USB 独占输出：声明 USB Host 能力（非必需，无 USB 口的设备也可安装） -->
     <uses-feature android:name="android.hardware.usb.host" android:required="false" />
     <application

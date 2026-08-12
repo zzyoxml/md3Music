@@ -15,6 +15,7 @@ import '../../core/services/equalizer_service.dart';
 import '../../core/services/folder_picker_service.dart';
 import '../../core/services/lyricon_provider_service.dart';
 import '../../core/services/media_notification_service.dart';
+import '../../core/services/spectrum_service.dart';
 import '../../core/services/wakelock_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/theme/motion_constants.dart';
@@ -89,6 +90,12 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _keepScreenOn = false;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
+  // 音乐频谱环绕显示开关（默认关闭，仅 Android 生效）
+  bool _spectrumEnabled = false;
+  // 频谱柱数量（20~80，默认 40）
+  int _spectrumBandCount = 40;
+  // 频谱样式：0=柱状图，1=曲线（默认 0）
+  int _spectrumStyle = 0;
 
   @override
   void initState() {
@@ -195,6 +202,9 @@ class _SettingsPageState extends State<SettingsPage> {
         .getDownloadWordLevelLyrics();
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
     final keepScreenOn = await _settingsRepository.getKeepScreenOn();
+    final spectrumEnabled = await _settingsRepository.getSpectrumEnabled();
+    final spectrumBandCount = await _settingsRepository.getSpectrumBandCount();
+    final spectrumStyle = await _settingsRepository.getSpectrumStyle();
 
     setState(() {
       _themeMode = themeMode;
@@ -218,6 +228,9 @@ class _SettingsPageState extends State<SettingsPage> {
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
       _pauseFadeEnabled = pauseFadeEnabled;
       _keepScreenOn = keepScreenOn;
+      _spectrumEnabled = spectrumEnabled;
+      _spectrumBandCount = spectrumBandCount;
+      _spectrumStyle = spectrumStyle;
     });
   }
 
@@ -846,6 +859,70 @@ class _SettingsPageState extends State<SettingsPage> {
                 }
               : null,
         ),
+        // 音乐频谱环绕：仅在 Android 生效；其他平台开关置灰
+        SwitchListTile(
+          title: const Text('音乐频谱环绕'),
+          subtitle: Text(
+            Platform.isAndroid
+                ? '封面裁圆旋转，环形频谱柱随音频跳动（MD3 / AM 风格均支持）'
+                : '仅 Android 设备支持',
+          ),
+          value: _spectrumEnabled,
+          onChanged: Platform.isAndroid
+              ? (v) {
+                  HapticFeedback.lightImpact();
+                  setState(() => _spectrumEnabled = v);
+                  _settingsRepository.setSpectrumEnabled(v);
+                }
+              : null,
+        ),
+        // 频谱柱数量滑块：仅开关开启且 Android 时显示
+        if (_spectrumEnabled && Platform.isAndroid)
+          ListTile(
+            title: const Text('频谱柱数量'),
+            subtitle: Slider(
+              value: _spectrumBandCount.toDouble(),
+              min: 20,
+              max: 80,
+              divisions: 60,
+              label: '$_spectrumBandCount 根',
+              onChanged: (v) {
+                setState(() => _spectrumBandCount = v.round());
+              },
+              onChangeEnd: (v) {
+                final count = v.round();
+                _settingsRepository.setSpectrumBandCount(count);
+                SpectrumService.instance.bandCount = count;
+              },
+            ),
+            trailing: Text('$_spectrumBandCount 根'),
+          ),
+        // 频谱样式切换：仅开关开启且 Android 时显示
+        if (_spectrumEnabled && Platform.isAndroid)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            child: Row(
+              children: [
+                const Text('频谱样式'),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: SegmentedButton<int>(
+                    segments: const [
+                      ButtonSegment(value: 0, label: Text('柱状图')),
+                      ButtonSegment(value: 1, label: Text('曲线')),
+                    ],
+                    selected: {_spectrumStyle},
+                    onSelectionChanged: (selection) {
+                      HapticFeedback.lightImpact();
+                      final style = selection.first;
+                      setState(() => _spectrumStyle = style);
+                      _settingsRepository.setSpectrumStyle(style);
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
       ],
     );
   }
