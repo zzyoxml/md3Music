@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import 'package:quick_actions/quick_actions.dart';
 
 import 'core/layout/responsive_layout.dart';
+import 'core/services/lyricon_provider_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/motion_constants.dart';
 import 'data/models/playlist.dart';
@@ -384,6 +385,9 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
 
   /// 上一次同步的沉浸状态，避免重复调用 SystemChrome（幂等去重）。
   bool _immersiveSynced = false;
+
+  /// 词幕连接失败弹窗展示中标记，防止连发 connect_failed 时重复弹窗。
+  bool _lyriconFailDialogShown = false;
 
   /// 根据 tab id 构建对应页面 Widget。
   Widget _buildPageForTab(String tabId) {
@@ -827,10 +831,20 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     shortcutTabRequest.addListener(_handleShortcutTabRequest);
     // 监听封面流沉浸请求（长按切换 / 返回键恢复），变更时重算沉浸状态
     kCoverFlowImmersive.addListener(_onCoverFlowImmersiveChanged);
+    // 监听词幕连接失败（原生侧多次重试后 connect_failed）→ 弹窗提示
+    LyriconProviderService.instance.addListener(_onLyriconStateChanged);
+    // 冷启动前若已连接失败（如后台唤醒时），进入主页后立即补弹一次
+    if (LyriconProviderService.instance.connectFailed) {
+      _lyriconFailDialogShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _showLyriconConnectFailedDialog();
+      });
+    }
   }
 
   @override
   void dispose() {
+    LyriconProviderService.instance.removeListener(_onLyriconStateChanged);
     kCoverFlowImmersive.removeListener(_onCoverFlowImmersiveChanged);
     shortcutTabRequest.removeListener(_handleShortcutTabRequest);
     WidgetsBinding.instance.removeObserver(this);
@@ -968,6 +982,53 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       // ignore: discarded_futures
       KugouApiServer.stop();
     }
+  }
+
+  /// 词幕连接失败（原生侧重试耗尽 → connect_failed）回调：弹窗提示用户。
+  /// 只在失败标记置位时触发一次，弹窗期间忽略重复事件。
+  void _onLyriconStateChanged() {
+    if (!LyriconProviderService.instance.connectFailed) return;
+    if (_lyriconFailDialogShown) return;
+    _lyriconFailDialogShown = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _showLyriconConnectFailedDialog();
+    });
+  }
+
+  /// 词幕连接失败提示弹窗（用根 Navigator 的 context，任何页面都能弹出）。
+  Future<void> _showLyriconConnectFailedDialog() async {
+    final ctx = appNavigatorKey.currentContext;
+    if (ctx == null) {
+      _lyriconFailDialogShown = false;
+      return;
+    }
+    await showDialog<void>(
+      context: ctx,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('词幕连接失败'),
+        content: const Text('多次尝试连接词幕服务失败，请确认已开启词幕（Lyricon），检查设备上的词幕服务是否正常运行后重试。'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              LyriconProviderService.instance.connectFailed = false;
+              Navigator.of(dialogCtx).pop();
+            },
+            child: const Text('知道了'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(dialogCtx).pop();
+              // 重新启用触发原生侧重新注册，重试逻辑在原生端（AudioPlaybackService）
+              // ignore: discarded_futures
+              LyriconProviderService.instance.setEnabled(true);
+            },
+            child: const Text('重试'),
+          ),
+        ],
+      ),
+    );
+    _lyriconFailDialogShown = false;
   }
 
   void _showLoginRequiredDialog() {

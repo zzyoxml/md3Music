@@ -43,6 +43,10 @@ class LyriconProviderService {
 
   bool get enabled => _state != LyriconConnectionState.disabled;
 
+  /// 原生端多次重连仍失败（connect_failed）后置 true，UI 监听后弹窗提示用户。
+  /// 用户重新启用 / 连接成功后清空。
+  bool connectFailed = false;
+
   // 通知外部状态变化（让 UI 可以监听刷新连接状态指示）
   final List<VoidCallback> _listeners = [];
   void addListener(VoidCallback cb) => _listeners.add(cb);
@@ -68,6 +72,7 @@ class LyriconProviderService {
     switch (state) {
       case 'connected':
       case 'reconnected':
+        connectFailed = false;
         _state = LyriconConnectionState.connected;
         break;
       case 'auto_restored':
@@ -75,7 +80,13 @@ class LyriconProviderService {
         // 这里直接进 connecting：Provider 已 register，但 Lyricon 中心服务
         // 尚未回调 onConnected，等异步连接成功后再切到 connected。
         // 同时让 PlayerProvider 监听到此状态变化后重推当前歌曲。
+        connectFailed = false;
         _state = LyriconConnectionState.connecting;
+        break;
+      case 'connect_failed':
+        // Kotlin 端多次重连仍失败后回调：通知 UI 弹窗提示用户检查词幕服务。
+        _state = LyriconConnectionState.timeout;
+        connectFailed = true;
         break;
       case 'disconnected':
         _state = LyriconConnectionState.disconnected;
@@ -99,6 +110,8 @@ class LyriconProviderService {
     } else {
       _state = LyriconConnectionState.disabled;
     }
+    // 用户手动操作：清空失败标记，允许后续再次弹窗
+    connectFailed = false;
     _notify();
     try {
       await _channel.invokeMethod('setEnabled', {'enabled': enabled});
