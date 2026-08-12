@@ -9,14 +9,12 @@ import android.os.Bundle
 import android.provider.Settings
 import android.support.v4.media.session.MediaSessionCompat
 import android.view.WindowManager
-import android.support.v4.media.session.PlaybackStateCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.plugin.common.MethodChannel
 import com.md3music.premium.AudioPlaybackService
 import com.md3music.premium.FloatingLyricService
-import io.github.proify.lyricon.lyric.model.Song
 import java.io.File
 
 class MainActivity : FlutterActivity() {
@@ -41,6 +39,12 @@ class MainActivity : FlutterActivity() {
         // 频谱插件引用，Activity 销毁时释放 Visualizer
         @Volatile private var spectrumPlugin: SpectrumPlugin? = null
 
+        // 记录自定义插件已注册到的引擎：provideFlutterEngine 复用后台（headless）
+        // 引擎时 configureFlutterEngine 会再次执行，若对同一引擎重复注册
+        // UsbAudioPlugin 会注册两个拔插广播接收器（无法 unregister），导致 USB
+        // 事件被处理两次；而新引擎（进程被杀后重建）仍需注册，故按引擎身份判断。
+        private var customPluginsEngine: FlutterEngine? = null
+
         fun setKugouApiService(service: KugouApiService?) {
             kugouApiService = service
         }
@@ -63,6 +67,18 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    /// 复用后台（headless）FlutterEngine：线控耳机「唤醒播放」被拉起时，
+    /// AudioPlaybackService 已创建并运行完整 App（main() 已执行、PlayerProvider
+    /// 正在恢复播放状态）。此处返回缓存引擎，避免创建第二个 FlutterEngine 导致
+    /// 双 Dart 隔离区 / 双音频会话冲突。引擎不可用时走默认逻辑新建。
+    override fun provideFlutterEngine(context: android.content.Context): FlutterEngine? {
+        val cached = FlutterEngineCache.getInstance().get("md3music_engine")
+        if (cached != null && cached.dartExecutor.isExecutingDart()) {
+            return cached
+        }
+        return super.provideFlutterEngine(context)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
@@ -74,11 +90,14 @@ class MainActivity : FlutterActivity() {
         // 将 FlutterEngine 传递给 AudioPlaybackService
         AudioPlaybackService.setFlutterEngine(flutterEngine)
 
-        // 注册 MetadataWriterPlugin：处理下载完成后嵌入元数据（标题/艺术家/专辑/封面/歌词）
-        MetadataWriterPlugin().register(flutterEngine)
+        // 自定义插件仅对同一引擎注册一次：引擎被复用（provideFlutterEngine 返回
+        // 缓存引擎）时 configureFlutterEngine 会再次执行，重复注册会注册两个
+        // USB 拔插广播接收器
+        if (customPluginsEngine !== flutterEngine) {
+            customPluginsEngine = flutterEngine
 
-        // 注册均衡器插件：Android 原生 Equalizer，绑定 just_audio 的 audio session ID
-        EqualizerPlugin().register(flutterEngine)
+            // 注册 MetadataWriterPlugin：处理下载完成后嵌入元数据（标题/艺术家/专辑/封面/歌词）
+            MetadataWriterPlugin().register(flutterEngine)
 
         // 注册频谱可视化插件：Android 原生 Visualizer，回传 FFT 数据给 Dart 端绘制环形频谱
         spectrumPlugin = SpectrumPlugin().also { it.register(flutterEngine) }
@@ -256,114 +275,8 @@ class MainActivity : FlutterActivity() {
         }
 
         // 注册 Lyricon Provider MethodChannel，让 Dart 端能控制 Lyricon 播放器
-        val lyriconChannel = MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            "com.md3music.premium/lyricon"
-        )
-        AudioPlaybackService.setLyriconChannel(lyriconChannel)
-        lyriconChannel.setMethodCallHandler { call, result ->
-            val provider = AudioPlaybackService.getLyriconProvider()
-            when (call.method) {
-                "setEnabled" -> {
-                    val enabled = call.argument<Boolean>("enabled") ?: false
-                    try {
-                        if (enabled) provider?.register() else provider?.unregister()
-                        result.success(true)
-                    } catch (_: Exception) {
-                        result.success(false)
-                    }
-                }
-                "setSong" -> {
-                    val arg = call.argument<Map<String, Any?>>("song")
-                    if (arg == null) {
-                        try {
-                            // SDK 的 setSong 不接受 null，传一个空 Song 表示清空
-                            provider?.player?.setSong(Song())
-                            result.success(true)
-                        } catch (_: Exception) {
-                            result.success(false)
-                        }
-                    } else {
-                        try {
-                            val song = AudioPlaybackService.buildLyriconSong(arg)
-                            provider?.player?.setSong(song)
-                            result.success(true)
-                        } catch (e: Exception) {
-                            result.error("BUILD_SONG_FAILED", e.message, null)
-                        }
-                    }
-                }
-                "sendText" -> {
-                    val text = call.argument<String>("text")
-                    try {
-                        provider?.player?.sendText(text)
-                        result.success(true)
-                    } catch (_: Exception) {
-                        result.success(false)
-                    }
-                }
-                "setPosition" -> {
-                    val pos = call.argument<Number>("positionMs")?.toLong() ?: 0L
-                    try {
-                        provider?.player?.setPosition(pos)
-                        result.success(true)
-                    } catch (_: Exception) {
-                        result.success(false)
-                    }
-                }
-                "setPlaybackState" -> {
-                    val state = call.argument<Number>("state")?.toInt()
-                        ?: PlaybackStateCompat.STATE_NONE
-                    val pos = call.argument<Number>("position")?.toLong() ?: 0L
-                    // SDK 的 setPlaybackState 接受 Boolean，从 PlaybackStateCompat 状态码推导 isPlaying
-                    val isPlaying = state == PlaybackStateCompat.STATE_PLAYING
-                    try {
-                        // 位置通过 setPosition 同步（原本打包在 PlaybackStateCompat 中）
-                        provider?.player?.setPosition(pos)
-                        provider?.player?.setPlaybackState(isPlaying)
-                        result.success(true)
-                    } catch (_: Exception) {
-                        result.success(false)
-                    }
-                }
-                "seekTo" -> {
-                    val pos = call.argument<Number>("positionMs")?.toLong() ?: 0L
-                    try {
-                        provider?.player?.seekTo(pos)
-                        result.success(true)
-                    } catch (_: Exception) {
-                        result.success(false)
-                    }
-                }
-                "setDisplayTranslation" -> {
-                    val enabled = call.argument<Boolean>("enabled") ?: false
-                    try {
-                        provider?.player?.setDisplayTranslation(enabled)
-                        result.success(true)
-                    } catch (_: Exception) {
-                        result.success(false)
-                    }
-                }
-                "setDisplayRoma" -> {
-                    val enabled = call.argument<Boolean>("enabled") ?: false
-                    try {
-                        // SDK 0.1.70+ 已原生支持 setDisplayRoma，直接调用
-                        provider?.player?.setDisplayRoma(enabled)
-                        result.success(true)
-                    } catch (_: Exception) {
-                        // 兜底：反射调用兼容旧版 SDK
-                        try {
-                            val method = provider?.player?.javaClass?.getMethod("setDisplayRoma", Boolean::class.java)
-                            method?.invoke(provider?.player, enabled)
-                            result.success(true)
-                        } catch (_: Exception) {
-                            result.success(false)
-                        }
-                    }
-                }
-                else -> result.notImplemented()
-            }
-        }
+        // （逻辑与 AudioPlaybackService.setupHeadlessChannels 共用，见该函数）
+        AudioPlaybackService.registerLyriconChannel(flutterEngine)
 
         // 注册文件夹选择器 MethodChannel
         val folderPickerChannel = MethodChannel(

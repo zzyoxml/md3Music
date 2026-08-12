@@ -25,7 +25,7 @@ import '../data/repositories/settings_repository.dart';
 import '../main.dart';
 import '../services/stream_cache_manager.dart';
 import '../services/kugou_server.dart';
-import '../widgets/apple_lyrics/models/lyric_line.dart';
+import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 import '../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import 'favorites_provider.dart';
 import 'kugou_provider.dart';
@@ -191,6 +191,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _initAudioService();
     // 监听自身变化检测切歌 → 推送 Lyricon（仅 enabled 时实际推送）
     addListener(_handleLyriconSongChange);
+    // 监听 Lyricon 连接状态：headless 唤醒等场景下 auto_restored/connected
+    // 事件到达时可能晚于状态恢复的 notifyListeners，这里补推当前歌曲，
+    // 否则词幕不会自动连接显示（PlayerProvider 自己监听自己无法感知 Lyricon 启用）。
+    LyriconProviderService.instance.addListener(_handleLyriconEnabledChanged);
   }
 
   Future<void> _initAudioService() async {
@@ -205,6 +209,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           resume();
         }
       };
+      MediaNotificationService.onPlay = () => resume();
+      MediaNotificationService.onPause = () => pause();
       MediaNotificationService.onSeekTo = (pos) {
         seek(Duration(milliseconds: pos));
       };
@@ -219,6 +225,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       // 恢复上次播放状态
       await _restoreState();
     } catch (e) {}
+    // 无论初始化是否成功都通知原生端：状态恢复流程已结束。
+    // 进程被杀场景下 AudioPlaybackService 等待该信号后才派发线控耳机命令
+    //（唤醒播放），避免对尚未就绪的播放器派发命令导致空操作。
+    try {
+      await MediaNotificationService.notifyPlayerReady();
+    } catch (_) {}
   }
 
   /// 恢复持久化的应用内音量（App 关闭重启后音量设置保留）。
@@ -722,17 +734,32 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
+  /// 加载歌单播放顺序：随机开启时保持点击曲目为首曲、其余打乱；
+  /// 关闭时按原顺序播放。始终以原始顺序同步 [_originalPlaylist]
+  /// （关闭随机时用于还原）。
+  void _loadPlaylist(List<Song> songs, int startIndex) {
+    _originalPlaylist = List.from(songs);
+    if (_shuffleEnabled) {
+      final currentSong = songs[startIndex];
+      final remaining = songs.where((s) => s.id != currentSong.id).toList();
+      remaining.shuffle();
+      _playlist = [currentSong, ...remaining];
+      _currentIndex = 0;
+    } else {
+      _playlist = List.from(songs);
+      _currentIndex = startIndex;
+    }
+  }
+
   Future<void> playPlaylist(List<Song> songs, int startIndex) async {
     if (songs.isEmpty) return;
     _resetAbnormalRetry();
 
-    _playlist = List.from(songs);
-    _originalPlaylist = List.from(songs);
-    _currentIndex = startIndex;
-    _currentSong = songs[startIndex];
+    _loadPlaylist(songs, startIndex);
+    _currentSong = _playlist[_currentIndex];
     _resolveError = null;
     _updatePosition(Duration.zero);
-    _recordHistory(songs[startIndex]);
+    _recordHistory(_currentSong!);
     _saveState();
     notifyListeners();
 
@@ -754,7 +781,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           _actualPlayingQuality = result.quality;
           final resolvedSong = _currentSong!.copyWith(url: result.url);
           _currentSong = resolvedSong;
-          _playlist[startIndex] = resolvedSong;
+          _playlist[_currentIndex] = resolvedSong;
           _isResolvingUrl = false;
           notifyListeners();
 
@@ -778,7 +805,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         notifyListeners();
       }
 
-      _prefetchNextSongs(startIndex);
+      _prefetchNextSongs(_currentIndex);
     } else if (_audioService != null) {
       final playbackUrl = await _resolvePlaybackUrl(_currentSong!);
       if (playbackUrl == null || playbackUrl.isEmpty) {
@@ -817,14 +844,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    _playlist = List.from(songs);
-    _originalPlaylist = List.from(songs);
-    _currentIndex = startIndex;
-    _currentSong = songs[startIndex];
+    _loadPlaylist(songs, startIndex);
+    _currentSong = _playlist[_currentIndex];
     _isResolvingUrl = true;
     _resolveError = null;
     _updatePosition(Duration.zero);
-    _recordHistory(songs[startIndex]);
+    _recordHistory(_currentSong!);
     _updateNotification();
     notifyListeners();
 
@@ -835,7 +860,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         final fileUri = Uri.file(cachedPath).toString();
         final resolvedSong = _currentSong!.copyWith(url: fileUri);
         _currentSong = resolvedSong;
-        _playlist[startIndex] = resolvedSong;
+        _playlist[_currentIndex] = resolvedSong;
         _isResolvingUrl = false;
         // 查询本地缓存封面路径，供 MediaSession 断网兜底
         _cachedArtworkPath = await StreamCacheManager.instance
@@ -860,7 +885,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           _actualPlayingQuality = result.quality;
           final resolvedSong = _currentSong!.copyWith(url: result.url);
           _currentSong = resolvedSong;
-          _playlist[startIndex] = resolvedSong;
+          _playlist[_currentIndex] = resolvedSong;
           _isResolvingUrl = false;
           notifyListeners();
 
@@ -902,7 +927,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
     }
 
-    _prefetchNextSongs(startIndex);
+    _prefetchNextSongs(_currentIndex);
     _fetchClimaxData();
   }
 
@@ -941,24 +966,22 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
 
-    _playlist = List.from(songs);
-    _originalPlaylist = List.from(songs);
-    _currentIndex = startIndex;
-    _currentSong = songs[startIndex];
+    _loadPlaylist(songs, startIndex);
+    _currentSong = _playlist[_currentIndex];
     _isResolvingUrl = true;
     _resolveError = null;
     _updatePosition(Duration.zero);
-    _recordHistory(songs[startIndex]);
+    _recordHistory(_currentSong!);
     _updateNotification();
     notifyListeners();
 
     try {
       final apiClient = KugouApiClient();
-      final url = await resolveCloudUrl(apiClient, songs[startIndex]);
+      final url = await resolveCloudUrl(apiClient, _currentSong!);
       if (url != null && url.isNotEmpty) {
-        final resolvedSong = songs[startIndex].copyWith(url: url);
+        final resolvedSong = _currentSong!.copyWith(url: url);
         _currentSong = resolvedSong;
-        _playlist[startIndex] = resolvedSong;
+        _playlist[_currentIndex] = resolvedSong;
         _isResolvingUrl = false;
         notifyListeners();
         if (_audioService != null) {
@@ -978,7 +1001,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
     }
 
-    _prefetchCloudSongs(startIndex);
+    _prefetchCloudSongs(_currentIndex);
     _fetchClimaxData();
   }
 
@@ -2191,6 +2214,24 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _pushLyriconSongChange(song);
   }
 
+  // 记录上次的 enabled 状态，只在 disabled→enabled 边界触发重推，
+  // 避免断开/超时等保持 enabled 的事件反复触发歌词重推
+  bool _lyriconWasEnabled = false;
+
+  /// Lyricon 状态变化时（enabled 从 false→true，如 auto_restored / connected），
+  /// 重置 _lastLyriconSong 强制重推当前歌曲。enabled=false 时无需处理，
+  /// 等下次 enabled 时再推（_handleLyriconSongChange 会自然恢复）。
+  void _handleLyriconEnabledChanged() {
+    final enabled = LyriconProviderService.instance.enabled;
+    if (enabled && !_lyriconWasEnabled) {
+      _lyriconWasEnabled = true;
+      _lastLyriconSong = null;
+      _handleLyriconSongChange();
+    } else if (!enabled) {
+      _lyriconWasEnabled = false;
+    }
+  }
+
   /// 拉取歌词 → 解析 → 推送 Lyricon onSongChanged。
   ///
   /// 参考 [DesktopLyricService._onTick] / [_fetchLyricFor] 的模式：
@@ -2278,6 +2319,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _saveDebounce?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     removeListener(_handleLyriconSongChange);
+    LyriconProviderService.instance.removeListener(_handleLyriconEnabledChanged);
     _positionSubscription?.cancel();
     _durationSubscription?.cancel();
     _playingSubscription?.cancel();
