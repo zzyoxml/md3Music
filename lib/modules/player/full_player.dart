@@ -9,6 +9,7 @@ import '../../core/layout/responsive_layout.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/equalizer_service.dart';
 import '../../core/services/media_notification_service.dart';
+import '../../core/services/usb_audio_service.dart';
 import '../../core/utils/audio_scanner.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
@@ -2027,7 +2028,10 @@ class _FullPlayerState extends State<FullPlayer>
   }
 
   // MD3E v2: 音量调节改为右上角长按音质徽章呼出。
+  // 独占开启时控制 USB 独立音量（与设置页同步），否则控制应用音量；带模式标识。
   void _showVolumeDialog(PlayerProvider playerProvider) {
+    final usbService = UsbAudioService.instance;
+    final usbEnabled = usbService.lastStatus['enabled'] == true;
     showDialog(
       context: context,
       builder: (context) {
@@ -2041,32 +2045,68 @@ class _FullPlayerState extends State<FullPlayer>
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
               child: StatefulBuilder(
                 builder: (context, setState) {
-                  final volume = playerProvider.volume;
+                  final volume = usbEnabled
+                      ? usbService.usbVolumePercent / 100
+                      : playerProvider.volume;
                   final percent = (volume * 100).round();
                   final icon = volume <= 0
                       ? Icons.volume_off
                       : volume < 0.5
                       ? Icons.volume_down
                       : Icons.volume_up;
+                  final colorScheme = Theme.of(context).colorScheme;
                   return Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // 模式标识：独占状态 / 普通状态
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: (usbEnabled ? Colors.green : colorScheme.primary)
+                              .withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Text(
+                          usbEnabled ? 'USB 独占音量' : '应用音量',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: usbEnabled ? Colors.green : colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
                       Icon(
                         icon,
                         size: 32,
-                        color: Theme.of(context).colorScheme.primary,
+                        color: colorScheme.primary,
                       ),
                       const SizedBox(height: 8),
                       Slider(
                         value: volume,
                         onChanged: (value) {
-                          playerProvider.setVolume(value);
+                          if (usbEnabled) {
+                            // 独占：与设置页「USB 音量」同步
+                            usbService.setUsbVolume(value * 100);
+                          } else {
+                            playerProvider.setVolume(value);
+                          }
                           setState(() {});
                         },
                       ),
                       Text(
                         '$percent%',
                         style: Theme.of(context).textTheme.labelMedium,
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        usbEnabled
+                            ? '与设置页「USB 音量」同步'
+                            : '普通播放音量（重启后保留）',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                              color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            ),
                       ),
                     ],
                   );

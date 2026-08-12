@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart' as just_audio;
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/services/audio_service.dart';
 import '../core/services/desktop_lyric_service.dart';
@@ -213,9 +214,24 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       await _audioService.init();
       _initStreams();
       await _loadDefaultQuality();
+      // 恢复持久化的应用内音量（重启后保留）
+      await _restoreVolume();
       // 恢复上次播放状态
       await _restoreState();
     } catch (e) {}
+  }
+
+  /// 恢复持久化的应用内音量（App 关闭重启后音量设置保留）。
+  Future<void> _restoreVolume() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = prefs.getDouble('player_volume');
+      if (saved != null) {
+        _volume = saved.clamp(0.0, 1.0);
+        await _audioService?.player?.setVolume(_volume);
+        notifyListeners();
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadDefaultQuality() async {
@@ -1835,6 +1851,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> setVolume(double volume) async {
     _volume = volume.clamp(0.0, 1.0);
     await _audioService?.player?.setVolume(_volume);
+    // 持久化应用内音量（重启保留）
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setDouble('player_volume', _volume);
+    } catch (_) {}
     notifyListeners();
   }
 
