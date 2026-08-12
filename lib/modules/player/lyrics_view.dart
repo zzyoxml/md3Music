@@ -310,25 +310,31 @@ class LyricsViewState extends State<LyricsView> {
   ///
   /// 行高 = 实际文本块高（按当前字号 TextPainter 完整测量，英文原词+翻译
   /// 超长行可换 2 行及以上，不截断）
-  ///        + 行间距留白 `fontSize * (lineSpacing - 1.2)`。
-  /// 单行时与原来的 `fontSize * lineSpacing` 一致。
+  ///        + 行间距留白 `fontSize * (lineSpacing - 1.4)`（下限 0）。
+  /// 行距基准取 1.4 而非 1.2：英文 ascenders/descenders（g/y/p/j/l/h）需要
+  /// 更宽松的行距，否则长英文行换行后字形会被上下行重叠/截断；lineSpacing
+  /// 低于 1.4 时以 1.4 为下限，保证容器高度不低于文本块（lineSpacing 最小
+  /// 可调到 0.8，原实现会出现负留白导致行高小于文本被裁切）。
   void _ensureLayout(double width, double fontSize, String? fontFamily) {
     if (!_layoutDirty && _lastLayoutWidth == width) return;
     _layoutDirty = false;
     _lastLayoutWidth = width;
 
     final n = _parsedLyrics.length;
-    final spacingExtra = fontSize * (_prefs.lineSpacing - 1.2);
+    final spacingExtra = fontSize * (_prefs.lineSpacing - 1.4);
+    final safeSpacing = spacingExtra > 0 ? spacingExtra : 0.0;
+    final minRowHeight =
+        fontSize * (_prefs.lineSpacing < 1.4 ? 1.4 : _prefs.lineSpacing);
     _lineHeights = List<double>.generate(n, (i) {
       final text = _parsedLyrics[i].text;
       // 空行显示 '...' 占位，按单行处理
-      if (text.isEmpty) return fontSize * _prefs.lineSpacing;
+      if (text.isEmpty) return minRowHeight;
       final painter = TextPainter(
         text: TextSpan(
           text: text,
           style: TextStyle(
             fontSize: fontSize,
-            height: 1.2,
+            height: 1.4,
             fontWeight: FontWeight.w600,
             fontFamily: fontFamily,
           ),
@@ -339,7 +345,7 @@ class LyricsViewState extends State<LyricsView> {
         0,
         (sum, m) => sum + m.height,
       );
-      return blockHeight + spacingExtra;
+      return blockHeight + safeSpacing;
     });
 
     _lineTopOffsets = List<double>.filled(n, 0);
@@ -430,7 +436,7 @@ class LyricsViewState extends State<LyricsView> {
                         color: isCurrent
                             ? colorScheme.primary
                             : colorScheme.onSurfaceVariant,
-                        height: 1.2,
+                        height: 1.4,
                       ),
                       child: Text(
                         line.text.isEmpty ? '...' : line.text,
