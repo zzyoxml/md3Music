@@ -430,6 +430,20 @@ class SettingsRepository {
     await prefs.setBool(_keySpectrumDynamicColor, value);
   }
 
+  // ===== MiniPlayer 滑动切歌 =====
+  static const String _keyMiniPlayerSwipeSwitch = 'settings_mini_player_swipe_switch';
+
+  /// MiniPlayer 是否支持水平滑动切歌，默认开启。
+  Future<bool> getMiniPlayerSwipeSwitchEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyMiniPlayerSwipeSwitch) ?? true;
+  }
+
+  Future<void> setMiniPlayerSwipeSwitchEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyMiniPlayerSwipeSwitch, value);
+  }
+
   // ===== 主页 Tab 配置 =====
   static const String _keyTabOrder = 'settings_tab_order';
   static const String _keyHiddenTabs = 'settings_hidden_tabs';

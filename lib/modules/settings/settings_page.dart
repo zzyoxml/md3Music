@@ -33,6 +33,7 @@ import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/apple_lyrics/preview/lyrics_preview_page.dart';
 import '../../widgets/seed_color_picker.dart';
 import '../../widgets/usb_exclusive_section.dart';
+import '../player/mini_player.dart';
 import 'equalizer_settings_page.dart';
 
 /// CI compile-time version injection via --dart-define=APP_VERSION=X
@@ -89,6 +90,8 @@ class _SettingsPageState extends State<SettingsPage>
   bool _pauseFadeEnabled = false;
   // 播放时保持屏幕常亮开关
   bool _keepScreenOn = false;
+  // MiniPlayer 滑动切歌开关（默认开启）
+  bool _miniPlayerSwipeSwitch = true;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
   // 音乐频谱环绕显示开关（默认关闭，仅 Android 生效）
@@ -228,6 +231,8 @@ class _SettingsPageState extends State<SettingsPage>
     final spectrumBarOpacity = await _settingsRepository.getSpectrumBarOpacity();
     final spectrumCurveOpacity = await _settingsRepository.getSpectrumCurveOpacity();
     final spectrumDynamicColor = await _settingsRepository.getSpectrumDynamicColor();
+    final miniPlayerSwipeSwitch = await _settingsRepository
+        .getMiniPlayerSwipeSwitchEnabled();
 
     setState(() {
       _themeMode = themeMode;
@@ -259,7 +264,10 @@ class _SettingsPageState extends State<SettingsPage>
       _spectrumBarOpacity = spectrumBarOpacity;
       _spectrumCurveOpacity = spectrumCurveOpacity;
       _spectrumDynamicColor = spectrumDynamicColor;
+      _miniPlayerSwipeSwitch = miniPlayerSwipeSwitch;
     });
+    // 同步到全局开关，让已挂载的 MiniPlayer 实例实时响应
+    miniPlayerSwipeSwitchEnabled.value = miniPlayerSwipeSwitch;
   }
 
   Future<void> _loadVersion() async {
@@ -1338,6 +1346,20 @@ class _SettingsPageState extends State<SettingsPage>
             });
             _settingsRepository.setKeepScreenOn(value);
             WakelockService.instance.setSettingEnabled(value);
+          },
+        ),
+        SwitchListTile(
+          title: const Text('MiniPlayer 滑动切歌'),
+          subtitle: const Text('在迷你播放条上左右滑动切换上一首/下一首'),
+          value: _miniPlayerSwipeSwitch,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            setState(() {
+              _miniPlayerSwipeSwitch = value;
+            });
+            // 同步到全局开关，让已挂载的 MiniPlayer 实例实时生效
+            miniPlayerSwipeSwitchEnabled.value = value;
+            _settingsRepository.setMiniPlayerSwipeSwitchEnabled(value);
           },
         ),
       ],
