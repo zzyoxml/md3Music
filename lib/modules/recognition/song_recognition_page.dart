@@ -7,15 +7,12 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 
-import '../../data/models/song.dart';
-import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
-import '../../services/kugou_api/kugou_models.dart';
-import '../player/full_player_route.dart';
 import '../player/mini_player.dart';
+import 'floating_recognition_service.dart';
+import 'recognition_utils.dart';
 
 class SongRecognitionPage extends StatefulWidget {
   /// 是否在页面底部显示 MiniPlayer。
@@ -54,6 +51,8 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
   @override
   void initState() {
     super.initState();
+    // 监听悬浮窗识曲状态变化（开启/关闭）刷新入口按钮
+    FloatingRecognitionService.instance.addListener(_onFloatingRecognitionChanged);
     _pulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -63,8 +62,13 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
     );
   }
 
+  void _onFloatingRecognitionChanged() {
+    if (mounted) setState(() {});
+  }
+
   @override
   void dispose() {
+    FloatingRecognitionService.instance.removeListener(_onFloatingRecognitionChanged);
     _pulseController.dispose();
     _recorder.dispose();
     super.dispose();
@@ -233,16 +237,11 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       print('[SongRecognition] fileBytes=${fileBytes.length}, rawPcm=${rawPcm.length} (${_recordSampleRate}Hz)');
 
       // 降采样到 8000Hz
-      final pcmData = _downsample(rawPcm, _recordSampleRate, _targetSampleRate);
+      final pcmData = downsamplePcm(rawPcm, _recordSampleRate, _targetSampleRate);
       print('[SongRecognition] downsampled: ${pcmData.length} bytes (${_targetSampleRate}Hz)');
 
       // 检查音量
-      int maxAmplitude = 0;
-      for (int i = 0; i < pcmData.length - 1; i += 2) {
-        final sample = (pcmData[i] | (pcmData[i + 1] << 8)).toSigned(16);
-        final abs = sample.abs();
-        if (abs > maxAmplitude) maxAmplitude = abs;
-      }
+      final maxAmplitude = computeMaxAmplitude(pcmData);
       print('[SongRecognition] maxAmplitude=$maxAmplitude');
       if (maxAmplitude < 100) {
         print('[SongRecognition] 本段为静音，跳过');
@@ -250,7 +249,7 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       }
 
       // 增益归一化：提升音量到目标振幅，改善指纹识别率
-      final normalizedPcm = _normalizeGain(pcmData, maxAmplitude);
+      final normalizedPcm = normalizeGain(pcmData, maxAmplitude);
       print('[SongRecognition] gain normalized, sending ${normalizedPcm.length} bytes');
 
       final api = KugouApiClient();
@@ -260,7 +259,7 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
 
       print('[SongRecognition] 第 $_attemptCount 轮响应: $response');
 
-      if (response != null && _hasSongData(response)) {
+      if (response != null && hasSongData(response)) {
         setState(() {
           _result = response;
           _isRecognizing = false;
@@ -272,93 +271,6 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       print('[SongRecognition] 识别出错: $e');
       return false;
     }
-  }
-
-  /// 将 PCM 数据从 fromHz 降采样到 toHz
-  /// 使用均值抗混叠滤波器（anti-aliasing filter），防止高于 toHz/2 的频率混叠
-  Uint8List _downsample(Uint8List input, int fromHz, int toHz) {
-    if (fromHz == toHz) return input;
-
-    final inputSamples = input.length ~/ 2;
-    final ratio = fromHz / toHz;
-    final outputSamples = (inputSamples * toHz / fromHz).round();
-    final output = Uint8List(outputSamples * 2);
-
-    // 抗混叠窗口大小：取 ratio 的向上取整
-    // 对于 44100→8000，ratio≈5.51，窗口=6，半窗=3，每次平均 7 个采样点
-    final windowSize = ratio.ceil();
-    final halfWindow = windowSize ~/ 2;
-
-    for (int i = 0; i < outputSamples; i++) {
-      final centerSrcIdx = (i * ratio).floor();
-
-      // 以 centerSrcIdx 为中心，对窗口内采样点取均值（低通滤波）
-      int sum = 0;
-      int count = 0;
-      for (int j = -halfWindow; j <= halfWindow; j++) {
-        final idx = centerSrcIdx + j;
-        if (idx >= 0 && idx < inputSamples) {
-          final byteIdx = idx * 2;
-          final sample = (input[byteIdx] | (input[byteIdx + 1] << 8)).toSigned(16);
-          sum += sample;
-          count++;
-        }
-      }
-
-      final avg = count > 0 ? sum ~/ count : 0;
-      final clamped = avg.clamp(-32768, 32767);
-      output[i * 2] = clamped & 0xFF;
-      output[i * 2 + 1] = (clamped >> 8) & 0xFF;
-    }
-
-    return output;
-  }
-
-  /// 增益归一化：去除 DC 偏移并放大到目标振幅，提升指纹识别率
-  Uint8List _normalizeGain(Uint8List input, int currentMaxAmplitude,
-      {int targetAmplitude = 25000}) {
-    if (input.isEmpty || input.length < 2) return input;
-
-    // 1. 计算 DC 偏移（直流分量）
-    int sum = 0;
-    int sampleCount = input.length ~/ 2;
-    for (int i = 0; i < input.length - 1; i += 2) {
-      final sample = (input[i] | (input[i + 1] << 8)).toSigned(16);
-      sum += sample;
-    }
-    final dcOffset = sampleCount > 0 ? (sum / sampleCount).round() : 0;
-
-    // 2. 去除 DC 偏移后重新计算最大振幅
-    int adjustedMax = 0;
-    for (int i = 0; i < input.length - 1; i += 2) {
-      final sample =
-          (input[i] | (input[i + 1] << 8)).toSigned(16) - dcOffset;
-      final abs = sample.abs();
-      if (abs > adjustedMax) adjustedMax = abs;
-    }
-
-    if (adjustedMax < 1) return input;
-
-    // 3. 计算增益因子
-    final gain = targetAmplitude / adjustedMax;
-    if (gain <= 1.0) {
-      print('[SongRecognition] gain=$gain (already loud enough, no boost)');
-      return input;
-    }
-
-    print('[SongRecognition] applying gain=$gain (${adjustedMax} -> $targetAmplitude)');
-
-    // 4. 应用增益
-    final output = Uint8List(input.length);
-    for (int i = 0; i < input.length - 1; i += 2) {
-      final sample =
-          (input[i] | (input[i + 1] << 8)).toSigned(16) - dcOffset;
-      final amplified = (sample * gain).round().clamp(-32768, 32767);
-      output[i] = amplified & 0xFF;
-      output[i + 1] = (amplified >> 8) & 0xFF;
-    }
-
-    return output;
   }
 
   Future<void> _stopLoop() async {
@@ -401,6 +313,7 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       ),
       body: Column(
         children: [
+          _buildFloatingEntry(colorScheme, textTheme),
           Expanded(
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -433,6 +346,61 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
         ],
       ),
     );
+  }
+
+  /// 悬浮窗识曲入口按钮（顶部横幅）。
+  /// 点击开启/关闭悬浮窗式识曲；Android < 10 或权限缺失时给出提示。
+  Widget _buildFloatingEntry(ColorScheme colorScheme, TextTheme textTheme) {
+    final active = FloatingRecognitionService.instance.isActive;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: SizedBox(
+        width: double.infinity,
+        child: FilledButton.tonalIcon(
+          onPressed: _openFloatingRecognition,
+          icon: Icon(active ? Icons.stop : Icons.picture_in_picture_alt),
+          label: Text(active ? '关闭悬浮窗识曲' : '悬浮窗模式'),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openFloatingRecognition() async {
+    final svc = FloatingRecognitionService.instance;
+    if (svc.isActive) {
+      await svc.stop();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已关闭悬浮窗识曲')),
+        );
+        setState(() {});
+      }
+      return;
+    }
+
+    final result = await svc.start();
+    if (!mounted) return;
+    switch (result) {
+      case FloatingStartResult.started:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('悬浮窗识曲已开启，可返回任意界面点击悬浮按钮识别')),
+        );
+        Navigator.of(context).pop();
+      case FloatingStartResult.alreadyActive:
+        break;
+      case FloatingStartResult.unsupported:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('仅支持 Android 10 及以上')),
+        );
+      case FloatingStartResult.permissionDenied:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('需要麦克风/悬浮窗权限，请在系统设置中开启后重试')),
+        );
+      case FloatingStartResult.failed:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('启动失败，请重试')),
+        );
+    }
   }
 
   Widget _buildPulseCircle(ColorScheme colorScheme) {
@@ -514,12 +482,12 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       audioInfo = data;
     }
 
-    final songName = _extractField(audioInfo, ['songname', 'song_name', 'name', 'SongName']) ?? '未知歌曲';
-    final artist = _extractField(audioInfo, ['singername', 'singer_name', 'artist', 'SingerName']) ?? '未知歌手';
-    final albumName = _extractField(audioInfo, ['album_name', 'AlbumName', 'albumname']) ?? '';
+    final songName = extractField(audioInfo, ['songname', 'song_name', 'name', 'SongName']) ?? '未知歌曲';
+    final artist = extractField(audioInfo, ['singername', 'singer_name', 'artist', 'SingerName']) ?? '未知歌手';
+    final albumName = extractField(audioInfo, ['album_name', 'AlbumName', 'albumname']) ?? '';
     final score = audioInfo?['score']?.toString() ?? '';
-    // 封面 URL（与播放逻辑中的字段一致），union_cover 可能带 {size} 占位符
-    final coverUrl = _extractCoverUrl(audioInfo);
+    // 封面 URL（与播放逻辑中的字段顺序一致），union_cover 可能带 {size} 占位符
+    final coverUrl = extractCoverUrl(audioInfo);
 
     // 歌曲信息列（歌名/歌手/专辑）
     final infoColumn = Column(
@@ -600,7 +568,14 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
           SizedBox(
             width: double.infinity,
             child: FilledButton.icon(
-              onPressed: () => _playRecognizedSong(audioInfo),
+              onPressed: () => playRecognizedSong(
+                context,
+                audioInfo,
+                openFullPlayer: true,
+                onError: (msg) {
+                  if (mounted) setState(() => _error = msg);
+                },
+              ),
               icon: const Icon(Icons.play_arrow),
               label: const Text('播放'),
             ),
@@ -608,19 +583,6 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
         ],
       ),
     );
-  }
-
-  /// 从识别结果中提取歌曲封面 URL（与播放逻辑中的字段顺序一致）。
-  /// union_cover 可能带 {size} 占位符，统一替换为 480。
-  String? _extractCoverUrl(Map<String, dynamic>? map) {
-    if (map == null) return null;
-    for (final key in ['imgurl', 'sizable_cover', 'union_cover']) {
-      final value = map[key];
-      if (value != null && value.toString().isNotEmpty) {
-        return value.toString().replaceAll('{size}', '480');
-      }
-    }
-    return null;
   }
 
   /// 识别结果卡片左侧的歌曲封面（96x96 圆角，带加载中/失败占位）。
@@ -646,33 +608,6 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
     );
   }
 
-  bool _hasSongData(Map<String, dynamic> response) {
-    final data = response['data'];
-    if (data is List && data.isNotEmpty) {
-      final first = data.first;
-      if (first is Map) {
-        final hasName = first.containsKey('songname') ||
-            first.containsKey('song_name') ||
-            first.containsKey('name') ||
-            first.containsKey('SongName');
-        final hasHash = first.containsKey('hash') ||
-            first.containsKey('FileHash') ||
-            first.containsKey('album_audio_id');
-        return hasName || hasHash;
-      }
-    }
-    if (data is Map) {
-      final hasName = data.containsKey('songname') ||
-          data.containsKey('song_name') ||
-          data.containsKey('name');
-      final hasHash = data.containsKey('hash') ||
-          data.containsKey('FileHash') ||
-          data.containsKey('album_audio_id');
-      return hasName || hasHash;
-    }
-    return false;
-  }
-
   Uint8List _extractPcmFromWav(List<int> bytes) {
     if (bytes.length < 44) return Uint8List.fromList(bytes);
     if (bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46) {
@@ -686,122 +621,6 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
       }
     }
     return Uint8List.fromList(bytes);
-  }
-
-  String? _extractField(Map<String, dynamic>? map, List<String> keys) {
-    if (map == null) return null;
-    for (final key in keys) {
-      final value = map[key];
-      if (value != null && value.toString().isNotEmpty) {
-        return value.toString();
-      }
-    }
-    return null;
-  }
-
-  void _playRecognizedSong(Map<String, dynamic>? audioInfo) {
-    if (audioInfo == null) return;
-    print('[SongRecognition] 播放按钮点击，audioInfo=$audioInfo');
-    final songName = _extractField(audioInfo, ['songname', 'song_name', 'name', 'SongName']) ?? '';
-    final singerName = _extractField(audioInfo, ['singername', 'singer_name', 'SingerName', 'author_name']) ?? '';
-    final albumAudioId = audioInfo['album_audio_id']?.toString() ??
-        audioInfo['MixSongID']?.toString() ??
-        audioInfo['mixsongid']?.toString();
-    final hash = audioInfo['hash']?.toString() ??
-        audioInfo['FileHash']?.toString() ??
-        audioInfo['file_hash']?.toString();
-
-    print('[SongRecognition] songName=$songName, singerName=$singerName, hash=$hash, albumAudioId=$albumAudioId');
-
-    if (hash != null && hash.isNotEmpty) {
-      // 有 hash，直接播放
-      _playWithHash(hash, songName, singerName, albumAudioId, audioInfo);
-    } else if (albumAudioId != null && albumAudioId.isNotEmpty) {
-      // 没有 hash 但有 album_audio_id，通过搜索获取 hash
-      _playBySearchingHash(songName, singerName, albumAudioId, audioInfo);
-    } else {
-      // 既没有 hash 也没有 album_audio_id，尝试通过歌曲名搜索
-      _playBySearchingHash(songName, singerName, null, audioInfo);
-    }
-  }
-
-  void _playWithHash(String hash, String songName, String singerName,
-      String? albumAudioId, Map<String, dynamic> audioInfo) {
-    final song = Song(
-      id: hash,
-      title: songName,
-      artist: singerName,
-      album: '',
-      duration: Duration.zero,
-      artworkUri: audioInfo['imgurl']?.toString() ??
-          audioInfo['sizable_cover']?.toString() ??
-          audioInfo['union_cover']?.toString()?.replaceAll('{size}', '480'),
-      albumAudioId: albumAudioId,
-      isOnline: true,
-    );
-    context.read<PlayerProvider>().playOnlinePlaylist([song], 0);
-    // 直接打开全屏播放页
-    if (mounted) {
-      Navigator.of(context).push(fullPlayerRoute(context));
-    }
-  }
-
-  Future<void> _playBySearchingHash(String songName, String singerName,
-      String? albumAudioId, Map<String, dynamic> audioInfo) async {
-    if (songName.isEmpty) {
-      setState(() => _error = '无法获取播放信息：缺少歌曲名');
-      return;
-    }
-    setState(() => _isRecognizing = true);
-    try {
-      final query = singerName.isNotEmpty ? '$singerName $songName' : songName;
-      print('[SongRecognition] 搜索歌曲获取 hash: $query');
-      final api = KugouApiClient();
-      final result = await api.search(query, pagesize: 5);
-      if (result == null || result.songs.isEmpty) {
-        setState(() {
-          _isRecognizing = false;
-          _error = '未找到可播放的歌曲源';
-        });
-        return;
-      }
-      // 优先匹配 album_audio_id，否则取第一个结果
-      KugouSongDetail? matched;
-      if (albumAudioId != null) {
-        for (final s in result.songs) {
-          if (s.albumAudioId == albumAudioId) {
-            matched = s;
-            break;
-          }
-        }
-      }
-      matched ??= result.songs.first;
-      print('[SongRecognition] 搜索到歌曲: ${matched.songName}, hash=${matched.hash}');
-
-      final song = Song(
-        id: matched.hash,
-        title: songName,
-        artist: singerName,
-        album: matched.albumName ?? '',
-        duration: Duration(milliseconds: matched.duration),
-        artworkUri: matched.artworkUri ?? audioInfo['imgurl']?.toString(),
-        albumAudioId: matched.albumAudioId ?? albumAudioId,
-        albumId: matched.albumId,
-        isOnline: true,
-      );
-      if (!mounted) return;
-      setState(() => _isRecognizing = false);
-      context.read<PlayerProvider>().playOnlinePlaylist([song], 0);
-      // 直接打开全屏播放页
-      Navigator.of(context).push(fullPlayerRoute(context));
-    } catch (e) {
-      print('[SongRecognition] 搜索播放失败: $e');
-      if (!mounted) return;
-      setState(() {
-        _isRecognizing = false;
-        _error = '播放失败: $e';
-      });
-    }
   }
 
   Widget _buildError(ColorScheme colorScheme, TextTheme textTheme) {
