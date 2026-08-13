@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 
@@ -88,6 +89,8 @@ class FloatingRecognitionService {
           break;
         case 'onServiceStopped':
           _isActive = false;
+          _attemptCount = 0;
+          _lastResult = null;
           _notify();
           break;
       }
@@ -132,6 +135,27 @@ class FloatingRecognitionService {
     _attemptCount = 0;
     _lastResult = null;
     _notify();
+  }
+
+  /// 推送当前主题色到原生悬浮窗（跟随设置页莫奈/动态取色）。
+  /// 服务运行时调用，原生侧刷新悬浮窗配色。
+  Future<void> pushThemeColors(ColorScheme cs) async {
+    final colors = <String, int>{
+      'surfaceContainerHighest': cs.surfaceContainerHighest.toARGB32(),
+      'onSurface': cs.onSurface.toARGB32(),
+      'onSurfaceVariant': cs.onSurfaceVariant.toARGB32(),
+      'primary': cs.primary.toARGB32(),
+      'onPrimary': cs.onPrimary.toARGB32(),
+      'tertiary': cs.tertiary.toARGB32(),
+      'onTertiary': cs.onTertiary.toARGB32(),
+      'primaryContainer': cs.primaryContainer.toARGB32(),
+      'onPrimaryContainer': cs.onPrimaryContainer.toARGB32(),
+      'surfaceContainer': cs.surfaceContainer.toARGB32(),
+      'outlineVariant': cs.outlineVariant.toARGB32(),
+    };
+    try {
+      await _channel.invokeMethod('setThemeColors', {'colors': colors});
+    } catch (_) {}
   }
 
   // ===================== 原生回调处理 =====================

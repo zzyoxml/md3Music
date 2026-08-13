@@ -313,11 +313,14 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "stop" -> {
-                    startService(
-                        Intent(this, FloatingRecognitionService::class.java).apply {
-                            action = FloatingRecognitionService.ACTION_STOP
-                        }
-                    )
+                    // 服务未运行时直接返回，避免 startService 复活已停止的悬浮窗
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_STOP
+                            }
+                        )
+                    }
                     result.success(true)
                 }
                 "requestProjection" -> {
@@ -326,43 +329,66 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
                 "continueCapture" -> {
-                    startService(
-                        Intent(this, FloatingRecognitionService::class.java).apply {
-                            action = FloatingRecognitionService.ACTION_CONTINUE
-                        }
-                    )
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_CONTINUE
+                            }
+                        )
+                    }
                     result.success(true)
                 }
                 "stopCapture" -> {
-                    startService(
-                        Intent(this, FloatingRecognitionService::class.java).apply {
-                            action = FloatingRecognitionService.ACTION_STOP_CAPTURE
-                        }
-                    )
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_STOP_CAPTURE
+                            }
+                        )
+                    }
                     result.success(true)
                 }
                 "setResult" -> {
-                    startService(
-                        Intent(this, FloatingRecognitionService::class.java).apply {
-                            action = FloatingRecognitionService.ACTION_SET_RESULT
-                            putExtra(
-                                FloatingRecognitionService.EXTRA_RESULT,
-                                call.argument<String>("result") ?: ""
-                            )
-                        }
-                    )
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_SET_RESULT
+                                putExtra(
+                                    FloatingRecognitionService.EXTRA_RESULT,
+                                    call.argument<String>("result") ?: ""
+                                )
+                            }
+                        )
+                    }
                     result.success(true)
                 }
                 "setStatus" -> {
-                    startService(
-                        Intent(this, FloatingRecognitionService::class.java).apply {
-                            action = FloatingRecognitionService.ACTION_SET_STATUS
-                            putExtra(
-                                FloatingRecognitionService.EXTRA_STATUS,
-                                call.argument<String>("status") ?: ""
-                            )
-                        }
-                    )
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_SET_STATUS
+                                putExtra(
+                                    FloatingRecognitionService.EXTRA_STATUS,
+                                    call.argument<String>("status") ?: ""
+                                )
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "setThemeColors" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_SET_THEME
+                                // Dart int（64 位）解码为 Long，用 Number 接收
+                                val colors = call.argument<HashMap<String, Number>>("colors")
+                                if (colors != null) {
+                                    putExtra(FloatingRecognitionService.EXTRA_THEME_COLORS, colors)
+                                }
+                            }
+                        )
+                    }
                     result.success(true)
                 }
                 else -> result.notImplemented()

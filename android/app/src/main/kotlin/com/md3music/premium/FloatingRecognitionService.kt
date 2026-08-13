@@ -1,5 +1,7 @@
 package com.md3music.premium
 
+import android.animation.ObjectAnimator
+import android.animation.ValueAnimator
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,7 +9,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioAttributes
@@ -26,8 +31,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
-import android.view.animation.AlphaAnimation
-import android.view.animation.Animation
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.LinearInterpolator
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -60,8 +65,10 @@ class FloatingRecognitionService : Service() {
         const val ACTION_STOP_CAPTURE = "com.md3music.premium.RECOG_STOP_CAPTURE"
         const val ACTION_SET_RESULT = "com.md3music.premium.RECOG_SET_RESULT"
         const val ACTION_SET_STATUS = "com.md3music.premium.RECOG_SET_STATUS"
+        const val ACTION_SET_THEME = "com.md3music.premium.RECOG_SET_THEME"
         const val EXTRA_RESULT = "result"
         const val EXTRA_STATUS = "status"
+        const val EXTRA_THEME_COLORS = "themeColors"
         const val DART_CHANNEL = "com.md3music.premium/floating_recognition"
 
         // 采集参数：8000Hz / 16bit / mono，8s = 128KB
@@ -77,6 +84,9 @@ class FloatingRecognitionService : Service() {
         @Volatile
         private var instance: FloatingRecognitionService? = null
 
+        /** 服务是否正在运行（MainActivity 用于避免误 startService 复活已停止的服务） */
+        fun isRunning(): Boolean = instance != null
+
         /** MainActivity 授权完成后注入 MediaProjection token（静态转发到服务实例） */
         fun onProjectionResult(resultCode: Int, data: Intent?) {
             instance?.handleProjectionResult(resultCode, data)
@@ -86,10 +96,17 @@ class FloatingRecognitionService : Service() {
     private var windowManager: WindowManager? = null
     private var rootView: LinearLayout? = null
     private var micButton: View? = null
+    private var musicNoteIconView: MusicNoteIconView? = null
     private var resultPanel: LinearLayout? = null
     private var songNameText: TextView? = null
     private var artistText: TextView? = null
     private var params: WindowManager.LayoutParams? = null
+
+    // 底部"拖到这里关闭"区域（独立 overlay，不可触摸）
+    private var closeZoneView: View? = null
+    private var closeZoneIcon: ImageView? = null
+    private var closeZoneParams: WindowManager.LayoutParams? = null
+    private var isOverCloseZone = false
 
     // touch/drag — 全方向拖动
     private var initialX = 0
@@ -115,7 +132,8 @@ class FloatingRecognitionService : Service() {
     private var stopRequested = false
     private var continueAllowed = false
 
-    private var pulseAnimation: Animation? = null
+    // 识别中音符图标旋转动画
+    private var spinAnimator: ObjectAnimator? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     @Volatile
     private var captureReleased = false
@@ -138,6 +156,7 @@ class FloatingRecognitionService : Service() {
             startForeground(NOTIFICATION_ID, createNotification())
         }
         createFloatingView()
+        createCloseZone()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -147,6 +166,7 @@ class FloatingRecognitionService : Service() {
             ACTION_STOP_CAPTURE -> stopCapture()
             ACTION_SET_RESULT -> showResult(intent.getStringExtra(EXTRA_RESULT) ?: "")
             ACTION_SET_STATUS -> showStatus(intent.getStringExtra(EXTRA_STATUS) ?: "")
+            ACTION_SET_THEME -> setThemeColors(intent)
             ACTION_STOP -> {
                 stopSelf()
                 return START_NOT_STICKY
@@ -155,7 +175,35 @@ class FloatingRecognitionService : Service() {
         return START_STICKY
     }
 
-    // ===================== 悬浮窗 UI =====================
+    // ===================== 悬浮窗 UI（MD3E 设计语言） =====================
+    //
+    // 色板参考 MD3E 深色主题 token：
+    //   surfaceContainer      #1D1B20（面板背景）
+    //   surfaceContainerHigh  #26242B（按钮空闲底）
+    //   onSurface             #E6E0E9 / onSurfaceVariant #CAC4D0
+    //   primary               #D0BCFF（聆听中）/ onPrimary #381E72
+    //   tertiary              #EFB8C8（识别中）/ onTertiary #492532
+    //   primaryContainer      #EADDFF（结果）/ onPrimaryContainer #21005D
+    // 形状：按钮全圆，面板 24dp 大圆角（MD3E expressive）
+    // 动效：聆听中 spring 脉冲缩放，结果面板淡入上滑
+
+    // 主题色：默认 MD3E 深色 token，Dart 侧推送设置页莫奈/动态取色（setThemeColors）后覆盖。
+    // 悬浮窗 UI 全部使用以下字段，保证配色与 App 主题一致。
+    private var cBtnIdleBg = 0xFF26242B.toInt()
+    private var cOnSurface = 0xFFE6E0E9.toInt()
+    private var cOnSurfaceVariant = 0xFFCAC4D0.toInt()
+    private var cListeningBg = 0xFFD0BCFF.toInt()
+    private var cListeningIcon = 0xFF381E72.toInt()
+    private var cRecognizingBg = 0xFFEFB8C8.toInt()
+    private var cRecognizingIcon = 0xFF492532.toInt()
+    private var cResultBg = 0xFFEADDFF.toInt()
+    private var cResultIcon = 0xFF21005D.toInt()
+    private var cPanelBg = 0xF21D1B20.toInt()
+    private var cPanelStroke = 0x4049454F.toInt()
+
+    // 面板/播放按钮背景引用：setThemeColors 时刷新
+    private var panelBgGd: GradientDrawable? = null
+    private var playBtnBgGd: GradientDrawable? = null
 
     private fun createFloatingView() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -166,7 +214,7 @@ class FloatingRecognitionService : Service() {
         }
         val root = rootView as LinearLayout
 
-        // 折叠态：圆形麦克风按钮
+        // 折叠态：圆形麦克风按钮（Canvas 绘制音符图标）
         micButton = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -174,48 +222,56 @@ class FloatingRecognitionService : Service() {
             layoutParams = LinearLayout.LayoutParams(size, size)
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
-                setColor(0xCC333333.toInt())
+                setColor(cBtnIdleBg)
             }
-            val mic = TextView(this@FloatingRecognitionService).apply {
-                text = "🎤"
-                textSize = 26f
-                gravity = Gravity.CENTER
-            }
-            addView(mic, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            // 悬浮窗级投影（API 21+）：深色半透明
+            elevation = dp(6).toFloat()
         }
+        val btn = micButton as LinearLayout
+        musicNoteIconView = MusicNoteIconView(this).apply {
+            setIconColor(cOnSurface)
+            layoutParams = LinearLayout.LayoutParams(dp(30), dp(34))
+        }
+        btn.addView(musicNoteIconView)
         root.addView(micButton)
 
-        // 结果态：歌名/歌手 + 播放/关闭按钮
+        // 结果态：MD3E 大圆角 surfaceContainer 面板
         resultPanel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
             visibility = View.GONE
+            alpha = 0f
             background = GradientDrawable().apply {
-                cornerRadius = dp(14).toFloat()
-                setColor(0xE6202020.toInt())
-            }
-            setPadding(dp(18), dp(12), dp(18), dp(10))
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(24).toFloat()
+                setColor(cPanelBg)
+                setStroke(dp(1), cPanelStroke)
+            }.also { panelBgGd = it }
+            setPadding(dp(20), dp(16), dp(20), dp(14))
             val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            lp.topMargin = dp(8)
+            lp.topMargin = dp(10)
             layoutParams = lp
         }
         val panel = resultPanel as LinearLayout
 
+        // 歌名/歌手：点击文字直接播放（不触发 rootView 的收起/拖动逻辑）
         songNameText = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 14f
+            setTextColor(cOnSurface)
+            textSize = sp(14f)
             typeface = android.graphics.Typeface.DEFAULT_BOLD
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             gravity = Gravity.CENTER
+            setOnClickListener { sendToDart("onFloatingAction", "play") }
         }
         artistText = TextView(this).apply {
-            setTextColor(0xFFAAAAAA.toInt())
-            textSize = 11f
+            setTextColor(cOnSurfaceVariant)
+            textSize = sp(12f)
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
             gravity = Gravity.CENTER
-            setPadding(0, dp(2), 0, 0)
+            setPadding(0, dp(3), 0, 0)
+            setOnClickListener { sendToDart("onFloatingAction", "play") }
         }
         panel.addView(songNameText)
         panel.addView(artistText)
@@ -223,16 +279,24 @@ class FloatingRecognitionService : Service() {
         val buttonRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER
-            setPadding(0, dp(8), 0, 0)
+            setPadding(0, dp(10), 0, 0)
         }
-        val playBtn = makeIconButton(android.R.drawable.ic_media_play) {
+        // 播放：primaryContainer 圆形按钮；关闭：透明 + onSurfaceVariant 图标
+        val playBtn = makeCircleIconButton(android.R.drawable.ic_media_play, cResultBg, cResultIcon) {
             sendToDart("onFloatingAction", "play")
         }
-        val closeBtn = makeIconButton(android.R.drawable.ic_menu_close_clear_cancel) {
+        (playBtn.background as? GradientDrawable)?.let { playBtnBgGd = it }
+        val closeBtn = makeCircleIconButton(
+            android.R.drawable.ic_menu_close_clear_cancel,
+            Color.TRANSPARENT,
+            cOnSurfaceVariant
+        ) {
             dismissResult()
         }
-        buttonRow.addView(playBtn)
-        buttonRow.addView(closeBtn)
+        val rowLp = LinearLayout.LayoutParams(dp(44), dp(44))
+        rowLp.setMargins(dp(8), 0, dp(8), 0)
+        buttonRow.addView(playBtn, rowLp)
+        buttonRow.addView(closeBtn, LinearLayout.LayoutParams(dp(44), dp(44)))
         panel.addView(buttonRow)
 
         root.addView(resultPanel)
@@ -262,13 +326,121 @@ class FloatingRecognitionService : Service() {
         windowManager?.addView(rootView, params)
     }
 
-    private fun makeIconButton(resId: Int, onClick: () -> Unit): ImageView {
+    /// MD3E 圆形图标按钮（全圆形状，可配置底色/图标色/尺寸）
+    private fun makeCircleIconButton(
+        resId: Int,
+        bgColor: Int,
+        iconColor: Int,
+        onClick: () -> Unit
+    ): ImageView {
         return ImageView(this).apply {
             setImageResource(resId)
-            setPadding(dp(10), dp(10), dp(10), dp(10))
-            setColorFilter(Color.WHITE)
+            setColorFilter(iconColor)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(bgColor)
+            }
+            setPadding(dp(11), dp(11), dp(11), dp(11))
             setOnClickListener { onClick() }
         }
+    }
+
+    // ===================== 底部拖拽关闭区域 =====================
+
+    /// 屏幕底部"拖到这里关闭"提示条（独立 overlay，点击穿透）。
+    /// 红色大垃圾桶图标居中；拖动悬浮窗过程中显示；拖入区域背景高亮，松手即关闭服务。
+    private fun createCloseZone() {
+        val wm = windowManager ?: return
+        val zone = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                setColor(0xE61D1B20.toInt())
+                // 顶部大圆角，底部贴边
+                cornerRadii = floatArrayOf(
+                    dp(24).toFloat(), dp(24).toFloat(),
+                    dp(24).toFloat(), dp(24).toFloat(),
+                    0f, 0f, 0f, 0f
+                )
+            }
+            setPadding(0, dp(8), 0, 0)
+        }
+        closeZoneIcon = ImageView(this).apply {
+            setImageResource(android.R.drawable.ic_menu_delete)
+            // 常驻 error 红（MD3E 深色主题 error #FFB4AB）
+            setColorFilter(0xFFFFB4AB.toInt())
+            val s = dp(40)
+            layoutParams = LinearLayout.LayoutParams(s, s)
+        }
+        zone.addView(closeZoneIcon)
+        closeZoneView = zone
+
+        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+        closeZoneParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            dp(110),
+            layoutType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.BOTTOM
+            x = 0
+            y = 0
+        }
+        wm.addView(zone, closeZoneParams)
+        zone.visibility = View.GONE
+    }
+
+    private fun showCloseZone() {
+        closeZoneView?.let { z ->
+            if (z.visibility != View.VISIBLE) {
+                z.visibility = View.VISIBLE
+                z.alpha = 0f
+                z.animate().alpha(1f).setDuration(160).start()
+            }
+        }
+    }
+
+    private fun hideCloseZone() {
+        closeZoneView?.let { z ->
+            z.animate().cancel()
+            z.visibility = View.GONE
+            resetCloseZoneHighlight()
+        }
+    }
+
+    private fun setCloseZoneHighlight(on: Boolean) {
+        if (isOverCloseZone == on) return
+        isOverCloseZone = on
+        val gd = closeZoneView?.background as? GradientDrawable ?: return
+        // 拖入：背景 error 红高亮；移出：恢复深色
+        gd.setColor(if (on) 0xE6B3261E.toInt() else 0xE61D1B20.toInt())
+    }
+
+    private fun resetCloseZoneHighlight() {
+        isOverCloseZone = false
+        val gd = closeZoneView?.background as? GradientDrawable ?: return
+        gd.setColor(0xE61D1B20.toInt())
+    }
+
+    /// 悬浮窗拖动中：判断悬浮窗底部是否进入关闭区域 → 高亮
+    private fun updateCloseZoneHighlight() {
+        val zone = closeZoneView ?: return
+        val root = rootView ?: return
+        val zoneLoc = IntArray(2)
+        val rootLoc = IntArray(2)
+        zone.getLocationOnScreen(zoneLoc)
+        root.getLocationOnScreen(rootLoc)
+        val rootBottom = rootLoc[1] + root.height
+        setCloseZoneHighlight(rootBottom >= zoneLoc[1])
     }
 
     /// 拖动 + 点击判定（结果面板按钮区域触摸被按钮自身拦截，不触发拖动）
@@ -291,13 +463,23 @@ class FloatingRecognitionService : Service() {
                         isDragging = true
                     }
                     if (isDragging) {
+                        // 拖动时显示底部关闭区域并检测是否拖入
+                        showCloseZone()
                         params?.x = initialX + dx.toInt()
                         params?.y = initialY + dy.toInt()
                         windowManager?.updateViewLayout(rootView, params)
+                        updateCloseZoneHighlight()
                     }
                     true
                 }
                 MotionEvent.ACTION_UP -> {
+                    val shouldClose = isOverCloseZone
+                    hideCloseZone()
+                    if (shouldClose) {
+                        // 拖入底部关闭区域：关闭悬浮窗服务
+                        stopSelf()
+                        return@setOnTouchListener true
+                    }
                     if (!isDragging && System.currentTimeMillis() - dragStartTime < 300) {
                         view.performClick()
                         onMicClick()
@@ -534,6 +716,35 @@ class FloatingRecognitionService : Service() {
         if (status.isNotEmpty()) toast(status)
     }
 
+    /// 接收 Dart 推送的主题色（设置页莫奈/动态取色），刷新悬浮窗配色
+    /// 注意：Dart int（64 位）经 MethodChannel 到 Android 解码为 Long，
+    /// 这里用 Number 接收并 toInt()，避免 Long→Integer ClassCastException
+    private fun setThemeColors(intent: Intent) {
+        @Suppress("UNCHECKED_CAST")
+        val map = intent.getSerializableExtra(EXTRA_THEME_COLORS) as? HashMap<String, Number> ?: return
+        map["surfaceContainerHighest"]?.toInt()?.let { cBtnIdleBg = it }
+        map["onSurface"]?.toInt()?.let { cOnSurface = it }
+        map["onSurfaceVariant"]?.toInt()?.let { cOnSurfaceVariant = it }
+        map["primary"]?.toInt()?.let { cListeningBg = it }
+        map["onPrimary"]?.toInt()?.let { cListeningIcon = it }
+        map["tertiary"]?.toInt()?.let { cRecognizingBg = it }
+        map["onTertiary"]?.toInt()?.let { cRecognizingIcon = it }
+        map["primaryContainer"]?.toInt()?.let { cResultBg = it }
+        map["onPrimaryContainer"]?.toInt()?.let { cResultIcon = it }
+        map["surfaceContainer"]?.toInt()?.let { cPanelBg = it }
+        map["outlineVariant"]?.toInt()?.let { cPanelStroke = it }
+        mainHandler.post {
+            // 刷新面板/按钮静态配色
+            panelBgGd?.setColor(cPanelBg)
+            panelBgGd?.setStroke(dp(1), cPanelStroke)
+            playBtnBgGd?.setColor(cResultBg)
+            songNameText?.setTextColor(cOnSurface)
+            artistText?.setTextColor(cOnSurfaceVariant)
+            // 刷新按钮/图标动态配色
+            updateUi()
+        }
+    }
+
     private fun setState(newState: Int) {
         if (state == newState) return
         state = newState
@@ -544,46 +755,67 @@ class FloatingRecognitionService : Service() {
         val btn = micButton ?: return
         val panel = resultPanel ?: return
         val gd = btn.background as? GradientDrawable ?: return
+        val icon = musicNoteIconView ?: return
         when (state) {
             STATE_IDLE -> {
-                gd.setColor(0xCC333333.toInt())
+                gd.setColor(cBtnIdleBg)
+                icon.setIconColor(cOnSurface)
                 panel.visibility = View.GONE
-                stopPulse()
+                stopSpin()
             }
             STATE_LISTENING -> {
-                gd.setColor(0xE53935)
+                gd.setColor(cListeningBg)
+                icon.setIconColor(cListeningIcon)
                 panel.visibility = View.GONE
-                startPulse()
+                startSpin()
             }
             STATE_RECOGNIZING -> {
-                gd.setColor(0xF59E0B)
+                gd.setColor(cRecognizingBg)
+                icon.setIconColor(cRecognizingIcon)
                 panel.visibility = View.GONE
-                stopPulse()
+                stopSpin()
             }
             STATE_RESULT -> {
-                gd.setColor(0xCC333333.toInt())
-                panel.visibility = View.VISIBLE
-                stopPulse()
+                gd.setColor(cResultBg)
+                icon.setIconColor(cResultIcon)
+                showResultPanel()
+                stopSpin()
             }
         }
     }
 
-    private fun startPulse() {
-        stopPulse()
-        val anim = AlphaAnimation(1f, 0.35f).apply {
-            duration = 600
-            repeatCount = Animation.INFINITE
-            repeatMode = Animation.REVERSE
-            fillAfter = true
-        }
-        micButton?.startAnimation(anim)
-        pulseAnimation = anim
+    /// 结果面板 MD3E 淡入上滑动效
+    private fun showResultPanel() {
+        val panel = resultPanel ?: return
+        panel.visibility = View.VISIBLE
+        panel.alpha = 0f
+        panel.translationY = dp(10).toFloat()
+        panel.animate()
+            .alpha(1f)
+            .translationY(0f)
+            .setDuration(260)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
     }
 
-    private fun stopPulse() {
-        pulseAnimation?.cancel()
-        micButton?.clearAnimation()
-        pulseAnimation = null
+    /// 聆听中：音符图标匀速旋转（识别中不停）
+    private fun startSpin() {
+        stopSpin()
+        val icon = musicNoteIconView ?: return
+        icon.pivotX = icon.width / 2f
+        icon.pivotY = icon.height / 2f
+        spinAnimator = ObjectAnimator.ofFloat(icon, "rotation", 0f, 360f).apply {
+            duration = 1200
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            start()
+        }
+    }
+
+    private fun stopSpin() {
+        spinAnimator?.cancel()
+        spinAnimator = null
+        musicNoteIconView?.rotation = 0f
     }
 
     // ===================== 通知 =====================
@@ -651,6 +883,8 @@ class FloatingRecognitionService : Service() {
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
+    private fun sp(v: Float): Float = v * resources.displayMetrics.scaledDensity
+
     override fun onDestroy() {
         super.onDestroy()
         // 停止采集线程并回收资源
@@ -664,6 +898,60 @@ class FloatingRecognitionService : Service() {
                 windowManager?.removeView(it)
             } catch (_: Exception) {}
         }
+        closeZoneView?.let {
+            try {
+                windowManager?.removeView(it)
+            } catch (_: Exception) {}
+        }
+        // 通知 Dart 服务已停止，同步悬浮窗开关状态（避免 Dart 误以为仍在运行）
+        sendToDart("onServiceStopped", null)
         instance = null
+    }
+}
+
+/// Canvas 绘制的音符图标（八分音符：符头椭圆 + 符杆 + 符尾旗）。
+/// 颜色可配置，随悬浮窗状态切换；识别中由外部 ObjectAnimator 旋转。
+class MusicNoteIconView(context: android.content.Context) : View(context) {
+    private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+    private val stemPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+    }
+    private val path = Path()
+    private var iconColor = Color.WHITE
+
+    fun setIconColor(color: Int) {
+        if (iconColor != color) {
+            iconColor = color
+            invalidate()
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0 || h <= 0) return
+        fillPaint.color = iconColor
+        stemPaint.color = iconColor
+        stemPaint.strokeWidth = w * 0.08f
+        path.reset()
+
+        // 符头：略微倾斜的椭圆（左上方向）
+        canvas.save()
+        canvas.rotate(-15f, w * 0.30f, h * 0.74f)
+        canvas.drawOval(w * 0.19f, h * 0.62f, w * 0.41f, h * 0.86f, fillPaint)
+        canvas.restore()
+
+        // 符杆：从符头右上竖直向上
+        canvas.drawLine(w * 0.41f, h * 0.72f, w * 0.41f, h * 0.16f, stemPaint)
+
+        // 符尾旗：从符杆顶端向下弯曲（两次贝塞尔）
+        path.moveTo(w * 0.41f, h * 0.16f)
+        path.quadTo(w * 0.63f, h * 0.26f, w * 0.50f, h * 0.44f)
+        path.quadTo(w * 0.44f, h * 0.54f, w * 0.53f, h * 0.62f)
+        canvas.drawPath(path, stemPaint)
     }
 }

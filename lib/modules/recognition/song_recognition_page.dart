@@ -304,6 +304,11 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
 
   @override
   Widget build(BuildContext context) {
+    // 悬浮窗运行中时同步最新主题色（跟随设置页莫奈/动态取色）
+    if (FloatingRecognitionService.instance.isActive) {
+      FloatingRecognitionService.instance
+          .pushThemeColors(Theme.of(context).colorScheme);
+    }
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
 
@@ -382,6 +387,9 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
     if (!mounted) return;
     switch (result) {
       case FloatingStartResult.started:
+        // 开启后立即同步当前主题色到悬浮窗
+        await svc.pushThemeColors(Theme.of(context).colorScheme);
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('悬浮窗识曲已开启，可返回任意界面点击悬浮按钮识别')),
         );
