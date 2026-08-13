@@ -25,14 +25,25 @@ const double kPlayerFlingVelocityThreshold = 900.0;
 /// 加速度阈值（px/s²）：强加速度（快速甩动）即使距离不足也展开。
 const double kPlayerAccelerationThreshold = 6000.0;
 
+/// 回拉速度阈值（px/s，向下为正）：松手瞬间手指仍向下运动的速度超过该值，
+/// 判定为用户「上滑后往回拉」（此时加速度方向同样向下），视为取消展开。
+const double kPlayerPullBackVelocityThreshold = 100.0;
+
 /// 松手判定：距离达标、速度达标、加速度达标三者任一即展开。
 /// 加速度取绝对值：快速甩动时起手加速、末端减速，两者都代表强甩动。
+///
+/// 回拉判定优先：松手瞬间手指仍在向下运动（velocity < -阈值）时，说明用户在
+/// 上滑后又往回拉（加速度向下）。此时即使累计上滑距离超过 20%，也不展开——
+/// 避免「滑上去又拉回来却仍进入 FullPlayer」的误触发。
+/// 不能用加速度符号代替：向上甩动末端的减速也是负加速度，只有速度符号才能
+/// 区分「末端减速的甩动」与「向下回拉」。
 bool shouldExpandPlayer({
   required double dragDistance, // 向上累计距离 px（≥0）
   required double screenHeight,
   required double velocity, // 向上为正 px/s
   required double acceleration, // 向上为正 px/s²（允许为负，末端减速）
 }) {
+  if (velocity < -kPlayerPullBackVelocityThreshold) return false;
   return dragDistance >= screenHeight * kPlayerExpandDistanceRatio ||
       velocity > kPlayerFlingVelocityThreshold ||
       acceleration.abs() > kPlayerAccelerationThreshold;
