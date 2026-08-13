@@ -26,15 +26,16 @@ const double kPlayerFlingVelocityThreshold = 900.0;
 const double kPlayerAccelerationThreshold = 6000.0;
 
 /// 松手判定：距离达标、速度达标、加速度达标三者任一即展开。
+/// 加速度取绝对值：快速甩动时起手加速、末端减速，两者都代表强甩动。
 bool shouldExpandPlayer({
   required double dragDistance, // 向上累计距离 px（≥0）
   required double screenHeight,
   required double velocity, // 向上为正 px/s
-  required double acceleration, // 向上为正 px/s²
+  required double acceleration, // 向上为正 px/s²（允许为负，末端减速）
 }) {
   return dragDistance >= screenHeight * kPlayerExpandDistanceRatio ||
       velocity > kPlayerFlingVelocityThreshold ||
-      acceleration > kPlayerAccelerationThreshold;
+      acceleration.abs() > kPlayerAccelerationThreshold;
 }
 
 /// 当前栈顶的播放器路由（拖拽复用 / 防重复 push）。
@@ -165,8 +166,6 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
     _isDismissing = true;
     _animStartValue = controller.value;
     _animDirection = -1;
-    // ignore: avoid_print
-    print('[Route] dismiss start=$_animStartValue');
     controller.reverse().then((_) {
       // 强制归零，避免 removeRoute 不触发 didPop 导致 playerExpansion 残留非零值
       // （didPop 只在系统 pop 时触发，dismiss 走 removeRoute 不触发）
@@ -176,8 +175,6 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
       if (navigator?.mounted ?? false) {
         navigator!.removeRoute(this);
       }
-      // ignore: avoid_print
-      print('[Route] dismiss removed');
     });
   }
 
@@ -189,8 +186,6 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
     if (_isDismissing) return;
     _animStartValue = controller.value;
     _animDirection = 1;
-    // ignore: avoid_print
-    print('[Route] settleToFull start=$_animStartValue');
     controller.forward();
   }
 
@@ -200,8 +195,6 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
     _isDismissing = false;
     controller.stop();
     controller.value = 0.0;
-    // ignore: avoid_print
-    print('[Route] beginDrag reset to 0');
   }
 
   /// Flutter 3.44 起 [TransitionRoute.createAnimationController] 不再接收
@@ -222,16 +215,15 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
 
   @override
   TickerFuture didPush() {
-    final future = super.didPush();
     if (isDragMode) {
-      // 拖拽模式：取消自动入场动画（super 已触发 forward，此处立即 stop），
-      // 进度完全由手势驱动；取消的 TickerFuture 由 navigator 的
-      // whenCompleteOrCancel 兜底，不影响路由入栈流程
+      // 拖拽模式：完全由手势接管，跳过 super.didPush() 触发的自动入场动画
+      // （forward 会与后续手势驱动/展开动画冲突，导致动画瞬跳、界面闪切）
+      activePlayerRoute = this;
       controller.stop();
       controller.value = 0.0;
-      // ignore: avoid_print
-      print('[Route] didPush dragMode stop at 0');
+      return TickerFuture.complete();
     }
+    final future = super.didPush();
     activePlayerRoute = this;
     return future;
   }
@@ -273,7 +265,11 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
     return AnimatedBuilder(
       animation: animation,
       builder: (context, _) {
-        final raw = animation.value.clamp(0.0, 1.0);
+        // 拖拽模式直接用 controller.value：路由 push 后首帧 animation（框架
+        // proxy）尚未与 controller 同步（会短暂为 1.0），用 controller 可避免
+        // 首帧误显示全屏，导致「先闪现播放页」的割裂感
+        final raw =
+            (isDragMode ? controller.value : animation.value).clamp(0.0, 1.0);
 
         // —— 拖拽模式（MiniPlayer 上滑展开）——
         // 位置与透明度独立映射：
@@ -291,8 +287,6 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
           if (pos != playerExpansion.value) {
             playerExpansion.value = pos;
           }
-          // ignore: avoid_print
-          print('[Route] dragBuild raw=$raw pos=$pos dy=$dy opacity=$opacity anim=${controller.isAnimating}');
           return Opacity(
             opacity: opacity,
             child: Transform.translate(offset: Offset(0, dy), child: child),

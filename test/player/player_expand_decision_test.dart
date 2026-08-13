@@ -67,6 +67,19 @@ void main() {
       );
     });
 
+    test('距离未达 20% 但末端减速（负加速度）超阈值 → 展开', () {
+      // 快速甩动末端手指减速，加速度为负，取绝对值后同样判定展开
+      expect(
+        shouldExpandPlayer(
+          dragDistance: 50,
+          screenHeight: screenHeight,
+          velocity: 0,
+          acceleration: -7000,
+        ),
+        isTrue,
+      );
+    });
+
     test('速度/加速度恰等于阈值 → 不展开（严格大于）', () {
       expect(
         shouldExpandPlayer(

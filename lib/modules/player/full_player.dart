@@ -440,6 +440,12 @@ class _FullPlayerState extends State<FullPlayer>
     if (enabled) {
       // 已开启频谱时注册降级监听
       SpectrumService.instance.simulatedNotifier.addListener(_onSpectrumSimulated);
+      if (_isDragOverlay) {
+        // 拖拽覆盖层（非路由）：只显示频谱 UI、不启动服务。
+        // 覆盖层销毁时会 dispose 并调用 _stopSpectrum（全局 stop），
+        // 若此处启动会与接管路由的频谱冲突，导致频谱卡住/失效
+        return;
+      }
       if (Platform.isAndroid) {
         // 确保权限已请求（可能用户上次未授权）
         await Permission.microphone.request();

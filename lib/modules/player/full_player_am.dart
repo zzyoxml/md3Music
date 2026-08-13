@@ -255,6 +255,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     });
     if (enabled) {
       SpectrumService.instance.simulatedNotifier.addListener(_onSpectrumSimulated);
+      if (_isDragOverlay) {
+        // 拖拽覆盖层（非路由）：只显示频谱 UI、不启动服务。
+        // 覆盖层销毁时会 dispose 并调用 _stopSpectrum（全局 stop），
+        // 若此处启动会与接管路由的频谱冲突，导致频谱卡住/失效
+        return;
+      }
       if (Platform.isAndroid) {
         await Permission.microphone.request();
       }

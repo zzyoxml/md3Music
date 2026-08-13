@@ -71,8 +71,6 @@ class _MiniPlayerState extends State<MiniPlayer>
   }
 
   void _onHorizontalDragStart(DragStartDetails details) {
-    // ignore: avoid_print
-    print('[HP] start activated=$_dragActivated local=${details.localPosition}');
     // 上滑展开已识别时屏蔽水平切歌，避免斜向滑动同时触发两种手势
     if (_dragActivated) return;
     // 取消正在进行的回弹动画，接管为手动拖动
@@ -81,8 +79,6 @@ class _MiniPlayerState extends State<MiniPlayer>
   }
 
   void _onHorizontalDragUpdate(DragUpdateDetails details) {
-    // ignore: avoid_print
-    print('[HP] update dx=${details.delta.dx} activated=$_dragActivated');
     if (_dragActivated) return;
     setState(() {
       _dragOffset += details.delta.dx;
@@ -90,8 +86,6 @@ class _MiniPlayerState extends State<MiniPlayer>
   }
 
   void _onHorizontalDragEnd(DragEndDetails details) {
-    // ignore: avoid_print
-    print('[HP] end offset=$_dragOffset vel=${details.primaryVelocity} activated=$_dragActivated');
     if (_dragActivated) return;
     final velocity = details.primaryVelocity ?? 0;
     final screenWidth = MediaQuery.sizeOf(context).width;
@@ -101,8 +95,6 @@ class _MiniPlayerState extends State<MiniPlayer>
 
     if (_dragOffset < -distanceThreshold || velocity < -_velocityThreshold) {
       // 向左滑 → 下一首
-      // ignore: avoid_print
-      print('[HP] NEXT offset=$_dragOffset vel=$velocity');
       _switchDirection = 1;
       _dragOffset = 0.0;
       playerProvider.next();
@@ -110,8 +102,6 @@ class _MiniPlayerState extends State<MiniPlayer>
     } else if (_dragOffset > distanceThreshold ||
         velocity > _velocityThreshold) {
       // 向右滑 → 上一首
-      // ignore: avoid_print
-      print('[HP] PREV offset=$_dragOffset vel=$velocity');
       _switchDirection = -1;
       _dragOffset = 0.0;
       playerProvider.previous();
@@ -183,8 +173,6 @@ class _MiniPlayerState extends State<MiniPlayer>
       _dragActivated = true;
       playerDragOriginTop = _miniTopY;
       playerDragActive.value = true; // 显示跟手覆盖层
-      // ignore: avoid_print
-      print('[MiniPlayer] drag ACTIVATE miniTopY=$_miniTopY');
     }
     _dragDistance = deltaY.clamp(0.0, double.infinity);
     // 速度/加速度估计：按事件时间戳差分
@@ -205,8 +193,6 @@ class _MiniPlayerState extends State<MiniPlayer>
     if (_miniTopY > 0.0) {
       playerExpansion.value = (_dragDistance / _miniTopY).clamp(0.0, 1.0);
     }
-    // ignore: avoid_print
-    print('[MiniPlayer] drag move dist=$_dragDistance progress=${playerExpansion.value}');
   }
 
   void _onRawUp(PointerUpEvent e) {
@@ -221,8 +207,6 @@ class _MiniPlayerState extends State<MiniPlayer>
       velocity: _lastVelocity ?? 0.0,
       acceleration: _lastAcceleration,
     );
-    // ignore: avoid_print
-    print('[MiniPlayer] drag UP dist=$_dragDistance vel=$_lastVelocity accel=$_lastAcceleration expand=$expand');
     if (expand) {
       _expandPlayerFromDrag();
     } else {
