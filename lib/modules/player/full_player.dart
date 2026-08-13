@@ -126,6 +126,14 @@ class _FullPlayerState extends State<FullPlayer>
   /// 覆盖层（非路由）场景从未修改，dispose 时无需恢复系统栏。
   bool _systemUiModified = false;
 
+  // ── 顶栏向下拖拽收起状态（与上滑展开镜像） ──
+  DraggablePlayerRoute? _topBarDragRoute; // 正在拖拽的路由
+  double _topBarDragDistance = 0.0; // 向下累计距离（px，≥0）
+  double _topBarDragTotal = 0.0; // 完整收起距离（px）
+  double? _topBarDragLastY; // 上次 Y（速度估计用）
+  Duration? _topBarDragLastTime;
+  double _topBarDragVelocity = 0.0; // 向下速度 px/s
+
   /// 上次的物理尺寸，用于 didChangeMetrics 方向变化防抖。
   /// 避免 immersiveSticky 下用户触摸边缘唤醒系统栏等 insets 抖动
   /// 引发无效的 applyImmersiveForOrientation 调用导致系统栏闪烁。
@@ -169,6 +177,98 @@ class _FullPlayerState extends State<FullPlayer>
       playerExpansion.value = 0.0;
     } else {
       Navigator.of(context).maybePop();
+    }
+  }
+
+  // ── 顶栏向下拖拽原路返回（与上滑展开镜像） ──
+
+  /// 顶栏向下拖拽开始：接管路由 controller（路由已存在，无 push 事件流风险）。
+  void _onTopBarDragStart(DragStartDetails details) {
+    final route = ModalRoute.of(context);
+    if (route is! DraggablePlayerRoute) return;
+    _topBarDragRoute = route;
+    // 停掉可能仍在进行的松手动画、重置 dismiss 标志，并从全屏开始拖拽：
+    // 1) 修复连续拖拽不跟手（手指已移动一段才收到首个 update，若不停动画
+    //    播放页会从动画中的位置跳变到拖拽位置）；
+    // 2) 修复上一次 dismiss 动画中再拖拽时 _isDismissing=true 残留，
+    //    导致松手 settleToFull 被吞掉、动画状态错乱。
+    route.beginDrag();
+    route.controller.value = 1.0;
+    // 完整收起距离：拖拽模式用 MiniPlayer 顶端；tap 模式（点击进入）用全局
+    // 记录的 MiniPlayer 顶端，让播放页沿「展开路径」原路下滑（1:1 跟手）
+    final total = route.dragOriginTop ?? playerDragOriginTop;
+    _topBarDragTotal = total > 0 ? total : MediaQuery.sizeOf(context).height;
+    route.topBarDragging = true;
+    route.topBarDragTotal = _topBarDragTotal;
+    _topBarDragDistance = 0.0;
+    _topBarDragLastY = details.globalPosition.dy;
+    _topBarDragLastTime = null;
+    _topBarDragVelocity = 0.0;
+  }
+
+  /// 顶栏向下拖拽：播放页跟随手指原路下滑（向下为正，向上忽略）。
+  void _onTopBarDragUpdate(DragUpdateDetails details) {
+    final route = _topBarDragRoute;
+    if (route == null) return;
+    _topBarDragDistance = (_topBarDragDistance + details.delta.dy).clamp(
+      0.0,
+      double.infinity,
+    );
+    // 速度估计（按事件时间戳差分，向下为正）
+    final ts = details.sourceTimeStamp;
+    if (ts != null && _topBarDragLastTime != null && _topBarDragLastY != null) {
+      final dt = (ts - _topBarDragLastTime!).inMicroseconds / 1e6;
+      if (dt > 0) {
+        _topBarDragVelocity =
+            (details.globalPosition.dy - _topBarDragLastY!) / dt;
+      }
+    }
+    _topBarDragLastY = details.globalPosition.dy;
+    _topBarDragLastTime = ts;
+    // 完整收起距离 = MiniPlayer 顶端（与展开镜像）；value 从 1（全屏）→ 0（MiniPlayer）
+    final total = _topBarDragTotal;
+    if (total <= 0) return;
+    final progress = (1.0 - _topBarDragDistance / total).clamp(0.0, 1.0);
+    route.controller.stop();
+    route.controller.value = progress;
+  }
+
+  /// 顶栏向下拖拽松手：下拉达标（距离/速度）收起，否则弹回全屏。
+  void _onTopBarDragEnd(DragEndDetails details) {
+    final route = _topBarDragRoute;
+    _topBarDragRoute = null;
+    if (route == null) return;
+    route.topBarDragging = false;
+    // 注意：不在此处清空 topBarDragTotal —— 松手动画（dismiss/settleToFull）
+    // 期间保持「原路返回映射」，由 settleToFull 在动画完成时恢复；dismiss 则
+    // 随路由销毁。避免映射切换导致播放页跳变、出现「两次下滑动画」
+    final threshold =
+        MediaQuery.sizeOf(context).height * kPlayerExpandDistanceRatio;
+    final downVelocity = details.primaryVelocity ?? _topBarDragVelocity;
+    final collapse =
+        _topBarDragDistance >= threshold ||
+        downVelocity > kPlayerFlingVelocityThreshold;
+    // ignore: avoid_print
+    print(
+      '[TopBar] end dist=$_topBarDragDistance thr=$threshold vel=$downVelocity collapse=$collapse v=${route.controller.value}',
+    );
+    if (collapse) {
+      route.dismiss(); // 原路返回：reverse 到 0 + removeRoute
+    } else {
+      route.settleToFull(); // 弹回全屏
+    }
+  }
+
+  /// 顶栏拖拽被系统取消（来电/手势中断等）：停在半途时弹回全屏，防御状态残留。
+  void _onTopBarDragCancel() {
+    final route = _topBarDragRoute;
+    _topBarDragRoute = null;
+    if (route == null) return;
+    route.topBarDragging = false;
+    if (route.controller.value < 1.0) {
+      route.settleToFull(); // 弹回动画结束时由路由恢复映射
+    } else {
+      route.topBarDragTotal = null; // 没拖，直接恢复原映射
     }
   }
 
@@ -439,7 +539,9 @@ class _FullPlayerState extends State<FullPlayer>
     });
     if (enabled) {
       // 已开启频谱时注册降级监听
-      SpectrumService.instance.simulatedNotifier.addListener(_onSpectrumSimulated);
+      SpectrumService.instance.simulatedNotifier.addListener(
+        _onSpectrumSimulated,
+      );
       if (_isDragOverlay) {
         // 拖拽覆盖层（非路由）：只显示频谱 UI、不启动服务。
         // 覆盖层销毁时会 dispose 并调用 _stopSpectrum（全局 stop），
@@ -501,9 +603,13 @@ class _FullPlayerState extends State<FullPlayer>
       final isPlaying = context.read<PlayerProvider>().isPlaying;
       await _tryStartSpectrum(isPlaying: isPlaying);
       // 监听降级模式通知
-      SpectrumService.instance.simulatedNotifier.addListener(_onSpectrumSimulated);
+      SpectrumService.instance.simulatedNotifier.addListener(
+        _onSpectrumSimulated,
+      );
     } else {
-      SpectrumService.instance.simulatedNotifier.removeListener(_onSpectrumSimulated);
+      SpectrumService.instance.simulatedNotifier.removeListener(
+        _onSpectrumSimulated,
+      );
       await _stopSpectrum();
     }
   }
@@ -662,7 +768,9 @@ class _FullPlayerState extends State<FullPlayer>
     _zenController.dispose();
     _tabController.dispose();
     // 退出播放器时停止频谱采集，释放原生 Visualizer
-    SpectrumService.instance.simulatedNotifier.removeListener(_onSpectrumSimulated);
+    SpectrumService.instance.simulatedNotifier.removeListener(
+      _onSpectrumSimulated,
+    );
     _stopSpectrum();
     // 退出播放器时恢复系统栏；若仍处于封面流页横屏沉浸（从封面流进入播放器后返回），
     // 则保持沉浸，避免返回后状态栏闪现。
@@ -1111,23 +1219,25 @@ class _FullPlayerState extends State<FullPlayer>
                                         children: [
                                           AnimatedScale(
                                             // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
-                                            scale: _spectrumEnabled &&
+                                            scale:
+                                                _spectrumEnabled &&
                                                     _spectrumStyle < 2
                                                 ? 1.0
                                                 : (playerProvider.isPlaying
-                                                    ? 1.0
-                                                    : 0.85),
+                                                      ? 1.0
+                                                      : 0.85),
                                             duration: const Duration(
                                               milliseconds: 500,
                                             ),
                                             curve: Curves.easeOutBack,
-                                            child: _buildCrossfadeArtworkWrapper(
-                                              currentSong,
-                                              colorScheme,
-                                              iconSize: 48,
-                                              isPlaying:
-                                                  playerProvider.isPlaying,
-                                            ),
+                                            child:
+                                                _buildCrossfadeArtworkWrapper(
+                                                  currentSong,
+                                                  colorScheme,
+                                                  iconSize: 48,
+                                                  isPlaying:
+                                                      playerProvider.isPlaying,
+                                                ),
                                           ),
                                           _buildZenLongPressHint(),
                                         ],
@@ -1346,23 +1456,25 @@ class _FullPlayerState extends State<FullPlayer>
                                           children: [
                                             AnimatedScale(
                                               // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
-                                              scale: _spectrumEnabled &&
+                                              scale:
+                                                  _spectrumEnabled &&
                                                       _spectrumStyle < 2
                                                   ? 1.0
                                                   : (playerProvider.isPlaying
-                                                      ? 1.0
-                                                      : 0.85),
+                                                        ? 1.0
+                                                        : 0.85),
                                               duration: const Duration(
                                                 milliseconds: 500,
                                               ),
                                               curve: Curves.easeOutBack,
-                                              child: _buildCrossfadeArtworkWrapper(
-                                                currentSong,
-                                                colorScheme,
-                                                iconSize: 48,
-                                                isPlaying:
-                                                    playerProvider.isPlaying,
-                                              ),
+                                              child:
+                                                  _buildCrossfadeArtworkWrapper(
+                                                    currentSong,
+                                                    colorScheme,
+                                                    iconSize: 48,
+                                                    isPlaying: playerProvider
+                                                        .isPlaying,
+                                                  ),
                                             ),
                                             _buildZenLongPressHint(),
                                           ],
@@ -1502,57 +1614,65 @@ class _FullPlayerState extends State<FullPlayer>
 
   Widget _buildTopBar(PlayerProvider playerProvider) {
     // 顶部栏：返回/音质/菜单分列两侧，无把手
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      child: Row(
-        children: [
-          IconButton(
-            icon: const Icon(Icons.keyboard_arrow_down),
-            onPressed: _collapseByButton,
-          ),
-          const Spacer(),
-          // MD3E v2: 顶部栏右侧 FLAC 质量徽章，点击复用 _showQualityDialog
-          _buildQualityPill(playerProvider),
-          // 睡眠药丸：用 ListenableBuilder 独立监听，确保每秒走字
-          ListenableBuilder(
-            listenable: playerProvider,
-            builder: (context, _) {
-              if (!playerProvider.isSleepTimerActive) {
-                return const SizedBox.shrink();
-              }
-              return _buildSleepTimerPill(playerProvider);
-            },
-          ),
-          // 音乐频谱环绕开关已收纳到右上角菜单（more_vert），与歌手写真背景一致
-          if (playerProvider.currentSong?.isOnline == true)
+    // 整个顶栏支持向下拖拽原路返回（点击按钮仍由子元素处理，竞技场自动区分）
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onVerticalDragStart: _onTopBarDragStart,
+      onVerticalDragUpdate: _onTopBarDragUpdate,
+      onVerticalDragEnd: _onTopBarDragEnd,
+      onVerticalDragCancel: _onTopBarDragCancel,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          children: [
             IconButton(
-              icon: const Icon(Icons.music_video_outlined),
-              tooltip: '查看 MV',
+              icon: const Icon(Icons.keyboard_arrow_down),
+              onPressed: _collapseByButton,
+            ),
+            const Spacer(),
+            // MD3E v2: 顶部栏右侧 FLAC 质量徽章，点击复用 _showQualityDialog
+            _buildQualityPill(playerProvider),
+            // 睡眠药丸：用 ListenableBuilder 独立监听，确保每秒走字
+            ListenableBuilder(
+              listenable: playerProvider,
+              builder: (context, _) {
+                if (!playerProvider.isSleepTimerActive) {
+                  return const SizedBox.shrink();
+                }
+                return _buildSleepTimerPill(playerProvider);
+              },
+            ),
+            // 音乐频谱环绕开关已收纳到右上角菜单（more_vert），与歌手写真背景一致
+            if (playerProvider.currentSong?.isOnline == true)
+              IconButton(
+                icon: const Icon(Icons.music_video_outlined),
+                tooltip: '查看 MV',
+                onPressed: () {
+                  final song = playerProvider.currentSong;
+                  if (song == null) return;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => MvPlayerPage(song: song)),
+                  );
+                },
+              ),
+            // 歌曲信息：频率/位深/码率/声道 + USB 独占开关
+            IconButton(
+              icon: const Icon(Icons.info_outline),
+              tooltip: '歌曲信息',
               onPressed: () {
-                final song = playerProvider.currentSong;
-                if (song == null) return;
                 Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => MvPlayerPage(song: song)),
+                  MaterialPageRoute(builder: (_) => const SongInfoPage()),
                 );
               },
             ),
-          // 歌曲信息：频率/位深/码率/声道 + USB 独占开关
-          IconButton(
-            icon: const Icon(Icons.info_outline),
-            tooltip: '歌曲信息',
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const SongInfoPage()),
-              );
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.more_vert),
-            onPressed: () => _showMoreMenu(context),
-          ),
-        ],
+            IconButton(
+              icon: const Icon(Icons.more_vert),
+              onPressed: () => _showMoreMenu(context),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1614,7 +1734,9 @@ class _FullPlayerState extends State<FullPlayer>
         bandCount: SpectrumService.instance.bandCount,
         style: _spectrumStyle,
         // 柱状图/曲线透明度分开记忆
-        opacity: _spectrumStyle == 1 ? _spectrumCurveOpacity : _spectrumBarOpacity,
+        opacity: _spectrumStyle == 1
+            ? _spectrumCurveOpacity
+            : _spectrumBarOpacity,
       );
     }
     return ClipRRect(
@@ -1842,9 +1964,10 @@ class _FullPlayerState extends State<FullPlayer>
           // P0: 进度条监听 positionNotifier（高频 200ms）+ provider（duration 等低频），
           // 不再因 positionStream 触发 _buildControls 整体重建
           ListenableBuilder(
-            listenable: Listenable.merge(
-              [playerProvider.positionNotifier, playerProvider],
-            ),
+            listenable: Listenable.merge([
+              playerProvider.positionNotifier,
+              playerProvider,
+            ]),
             builder: (context, _) => _buildProgressBar(
               playerProvider,
               playerProvider.position,
@@ -2286,10 +2409,13 @@ class _FullPlayerState extends State<FullPlayer>
                       // 模式标识：独占状态 / 普通状态
                       Container(
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
-                          color: (usbEnabled ? Colors.green : colorScheme.primary)
-                              .withValues(alpha: 0.12),
+                          color:
+                              (usbEnabled ? Colors.green : colorScheme.primary)
+                                  .withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Text(
@@ -2297,16 +2423,14 @@ class _FullPlayerState extends State<FullPlayer>
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: usbEnabled ? Colors.green : colorScheme.primary,
+                            color: usbEnabled
+                                ? Colors.green
+                                : colorScheme.primary,
                           ),
                         ),
                       ),
                       const SizedBox(height: 12),
-                      Icon(
-                        icon,
-                        size: 32,
-                        color: colorScheme.primary,
-                      ),
+                      Icon(icon, size: 32, color: colorScheme.primary),
                       const SizedBox(height: 8),
                       Slider(
                         value: volume,
@@ -2326,12 +2450,10 @@ class _FullPlayerState extends State<FullPlayer>
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        usbEnabled
-                            ? '与设置页「USB 音量」同步'
-                            : '普通播放音量（重启后保留）',
+                        usbEnabled ? '与设置页「USB 音量」同步' : '普通播放音量（重启后保留）',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: Theme.of(context).colorScheme.onSurfaceVariant,
-                            ),
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   );
@@ -2813,8 +2935,8 @@ class _FullPlayerState extends State<FullPlayer>
                     subtitle: Text(
                       _spectrumEnabled
                           ? SpectrumService.instance.isSimulated
-                              ? '已开启 · 模拟模式（设备不支持实时频谱）'
-                              : '已开启 · 实时频谱'
+                                ? '已开启 · 模拟模式（设备不支持实时频谱）'
+                                : '已开启 · 实时频谱'
                           : '封面裁圆旋转，频谱环绕跳动',
                     ),
                     value: _spectrumEnabled,
