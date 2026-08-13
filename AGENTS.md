@@ -60,7 +60,8 @@ md3Music/
 │
 ├── android/                      # Android 原生层
 │   ├── app/src/main/jniLibs/     # libkugou_server.so（arm64-v8a、armeabi-v7a、x86_64、x86）
-│   └── app/src/main/kotlin/      # Kotlin 原生代码（MediaSession、KugouApiService、桌面歌词等）
+│   ├── app/src/main/kotlin/      # Kotlin 原生代码（MediaSession、KugouApiService、桌面歌词等）
+│   └── app/src/main/cpp/         # USB 独占输出（usb-audio-output.cpp，UAC1 DAC 直写 usbdevfs ISO URB）
 │
 ├── assets/
 │   ├── fonts/                    # 内置字体（simhei.ttf）
@@ -78,6 +79,7 @@ md3Music/
 | `kugou_api_server/rust/` ↔ `networkapi/` | 两者代码完全独立，不再共享 util；networkapi 已退役（登录已改由 Rust 直连酷狗），仅作 JS 参考 |
 | `kugou_api_server/module/` 等 JS 文件 | 旧 Node 方案遗留，已被 Rust 取代，**不要**再修改 JS 版模块或重新打包 |
 | `android/app/src/main/jniLibs/` | 原生库目录，`libkugou_server.so` **已提交进 Git**（从 `rust/target/*/release/` 复制），无需下载 |
+| `android/app/src/main/cpp/` + `kotlin/.../premium/UsbAudio*.kt` + `third_party/just_audio` | **USB 独占输出**：绕过 AudioFlinger，经 usbdevfs ISO URB 直写 UAC1 DAC（参考 [decent-player](https://github.com/Ma145/decent-player) 的 bit-perfect 驱动思路）；释放恢复见 4.10 |
 | `assets/nodejs-project/` | 已从 `pubspec.yaml` 移除，不再打包；旧 `server_bundle.js` 仅作参考 |
 
 ---
@@ -217,6 +219,23 @@ env CC_aarch64_linux_android=$BIN/aarch64-linux-android21-clang \
 
 - `crate-type = ["cdylib", "rlib"]`，cdylib 用于导出 FFI/JNI 符号，rlib 用于测试
 - `[profile.release]`：`opt-level = "s"`（体积优先）、`lto = true`、`panic = "abort"`（Android 端 panic 即崩溃，务必避免在请求线程 panic——4.2 曾踩坑）
+
+### 4.10 USB 独占输出（UAC1 DAC 直写）
+
+**功能**：设置页「USB 独占输出」开启后，绕过 AudioFlinger/AudioTrack/AAudio/ALSA，直接经 `usbdevfs` ISO URB 把 PCM 写入 UAC1 DAC（思路参考 [decent-player](https://github.com/Ma145/decent-player) 的 bit-perfect USB Audio 驱动）。实现横跨三层：`cpp/usb-audio-output.cpp`（原生 URB 写入）、`kotlin/.../premium/UsbAudio*.kt`（设备枚举/claim/config 控制）、`third_party/just_audio` fork（`UsbAudioSinkController` 拦截音频流）。
+
+**释放路径（关闭独占后恢复系统声音）的关键实测结论**：
+
+1. **USBDEVFS_CONNECT 内核未实现**：头文件有定义但 devio.c 从未实现该分支 → 永远 ENOTTY(errno=25)。无法靠它恢复被 force-claim 断开的驱动。
+2. **USBDEVFS_RESET 不可用**：会让设备从 Android USB host 栈移除（`Removed device` 后无 `Added`），廉价 UAC1 DAC 不重新枚举，只能物理拔插。
+3. **唯一可靠恢复路径 = SETCONFIGURATION(0→current)**：先解配置（dev->config=NULL），再重配置 → USB core 为所有接口重新匹配驱动（snd-usb-audio 自动重绑）。设备全程不离开 host 栈，可再次开启独占。
+4. **SETCONFIGURATION(0) 会 EBUSY（errno=16）**：若设备存在未 claim 的接口（如 Highscreen 有 ifno 0/1/2/3，只 claim 了 0/1），**必须先对全部 8 个接口 USBDEVFS_DISCONNECT 再 config 切换**，否则驱动 busy。EBUSY 偶发时重试（5 次×500ms）。
+5. **读取当前 config**：UsbDeviceConnection 无 getConfiguration()，用标准控制请求 GET_CONFIGURATION（USBDEVFS_CONTROL，bRequestType=0x80, bRequest=0x08, wLength=1）。
+6. **disableExclusive 必须后台线程 + 互斥锁**：RESET/config 切换会阻塞；RESET 断开设备瞬间 Android 发 USB_DEVICE_DETACHED 广播会并发再调一次 disable（曾导致重复释放 + RESET FAILED errno=19）。拔插广播路径与 MethodChannel 路径共用 exclusiveLock + isEnabled 守卫。
+
+**其他已修坑**：设备扫描 5s TTL 缓存（UsbManager.getDeviceList 反复枚举廉价 DAC 每秒"滋"声）；enable 时勿 setPreferredDevice 强制路由；reconfigStream 锁内先置 NULL 再释放旧流（防 double-release UAF）；独占时 delegate 静音 + 音量透传，释放顺序：stop→drain→release→closeDevice→onUsbReleased。
+
+**独占时音量控制**：音频绕过 AudioFlinger，系统媒体音量键（STREAM_MUSIC）与播放器 setVolume 都需应用侧自行同步。DAC 音量% = 系统媒体音量% × 播放器音量，系统音量用 500ms 轮询，播放器音量经 `UsbAudioSinkController.setVolumeListener` 回调（setVolume 需同值节流）。硬件音量可用性需先 GET_CUR 逐声道探测（master/左/右，STALL 即不支持），软件音量必须同时覆盖 float `write()` 与整数 PCM 直写 `writeRaw()` 两条路径。
 
 ---
 

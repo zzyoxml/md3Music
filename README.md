@@ -54,6 +54,7 @@
 - **迷你播放器滑动切歌** - 左右滑动切换上/下一首
 - **后台播放** - Android 通知栏控制与状态栏播放
 - **音频焦点** - 来电/拔耳机等场景自动暂停与恢复
+- **USB 独占输出** - 绕过 AudioFlinger 直写 UAC1 DAC（bit-perfect），支持硬件/软件音量控制
 
 ### 📱 用户中心
 - **VIP 双签到** - 自动领取畅听 VIP + 升级概念版 VIP，签到日历可视化（进度环 + 徽章）
@@ -78,36 +79,36 @@
 
 ## 🏗️ 架构说明
 
-### 本地 + 云端混合架构
+### 全本地架构
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    MD3Music App                         │
-│  ┌─────────────────────┐  ┌────────────────────────       │
-│  │   Flutter UI        │  │  嵌入式 Rust API 服务器  │  │
-│  │   (Dart)            │   │  (127.0.0.1:8080)     │  │
-│  └──────────┬──────────┘  └──────────┬─────────────┘  │
-│             │                          │                  │
-│             └──────────┬───────────────┘                  │
-│                        │                                  │
-│             ──────────▼───────────────┐                  │
-│             │   本地数据 / 缓存         │                  │
-│             └──────────────────────────┘                  │
-└─────────────────────────────────────────────────────────┘
-                           │
-                           │ 仅登录/同步
-                           ▼
-              ┌────────────────────────────┐
-              │   云端 API (networkapi)     │
-              │   115.29.236.96:5621      │
-              └────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                     MD3Music App                         │
+│  ┌──────────────────┐  ┌──────────────────────────────┐  │
+│  │   Flutter UI     │  │  嵌入式 Rust API 服务器     │  │
+│  │     (Dart)       │  │  (127.0.0.1:<随机端口>)     │  │
+│  └────────┬─────────┘  └──────────┬───────────────────┘  │
+│           │                        │                      │
+│           └───────────┬────────────┘                      │
+│                       │                                   │
+│             ┌─────────▼───────────┐                       │
+│             │   本地数据 / 缓存     │                       │
+│             └─────────────────────┘                       │
+└──────────────────────────────────────────────────────────┘
+                          │
+                          │ 酷狗 API / 登录（直连上游）
+                          ▼
+             ┌────────────────────────────┐
+             │        酷狗音乐云端         │
+             │   (search/lyric/login/...) │
+             └────────────────────────────┘
 ```
 
 ### 核心特点
 
-- **嵌入式 Rust 服务器**：App 启动时通过 `libkugou_server.so`（JNI/MethodChannel）启动本地 tiny_http 服务器（127.0.0.1:8080），所有酷狗 API 请求都在本地处理
+- **嵌入式 Rust 服务器**：App 启动时通过 `libkugou_server.so`（JNI/MethodChannel + dart:ffi 兜底）启动本地 tiny_http 服务器，监听 `127.0.0.1` 的随机端口（`[10000, 60000]`，被占用自动换），所有酷狗 API 请求都在本地处理
+- **登录全本地化**：登录/注册/验证码端点由 Rust 本地设备身份（dfid/mid）直连酷狗上游，不依赖任何第三方云端
 - **高性能低资源**：Rust 实现取代旧 Node.js 方案，内存占用更低，启动更快
-- **流量优化**：仅有登录和同步功能走云端，其他所有功能都在本地运行，月流量 < 100MB
 - **无需外部服务器**：用户无需自行搭建 API 服务器
 - **多架构支持**：支持 armeabi-v7a（32位）、arm64-v8a（64位）、x86、x86_64（模拟器）
 
@@ -117,7 +118,7 @@
 
 项目已配置 GitHub Actions 自动构建，推送 `v*` 标签即可触发：
 
-- 自动构建 4 个架构的 APK（arm64-v8a、armeabi-v7a、x86、x86_64）
+- 自动构建并上传 3 个架构的 APK（arm64-v8a、armeabi-v7a、x86_64）
 - 自动创建 GitHub Release 并上传产物
 - 自动递增 versionCode 并生成 Changelog
 
@@ -233,7 +234,7 @@ flutter pub get
 cd kugou_api_server/rust
 cargo build --release
 
-# 安卓交叉编译（3 个 ABI，需要 NDK）
+# 安卓交叉编译（4 个 ABI，需要 NDK）
 ./build_android.sh
 ```
 
@@ -249,13 +250,14 @@ flutter run
 ### 5. 构建发布版 APK
 
 ```bash
-# 构建三个架构的 APK（分拆包）
+# 构建各架构的 APK（分拆包）
 flutter build apk --release --split-per-abi
 
-# 输出位置：
-# build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk  (32位)
-# build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   (64位)
-# build/app/outputs/flutter-apk/app-x86_64-release.apk      (模拟器)
+# 输出位置（build/app/outputs/flutter-apk/）：
+# app-armeabi-v7a-release.apk  (32位)
+# app-arm64-v8a-release.apk    (64位，推荐)
+# app-x86_64-release.apk       (64位模拟器)
+# app-x86-release.apk          (32位模拟器)
 ```
 
 ---
@@ -266,6 +268,7 @@ flutter build apk --release --split-per-abi
 
 - **arm64-v8a**：大多数现代 Android 设备（推荐）
 - **armeabi-v7a**：较旧的 32 位设备
+- **x86_64**：64 位 Android 模拟器
 - **x86**：32 位 Android 模拟器
 
 
@@ -303,7 +306,8 @@ md3Music/
 │   ├── providers/              # 状态管理
 │   ├── services/               # API 服务（元数据写入/下载管理）
 │   └── widgets/                # 公共组件
-│       └── apple_lyrics/       # Apple Music 风格歌词
+│       ├── apple_lyrics/       # Apple Music 风格歌词
+│       └── usb_exclusive_section.dart  # USB 独占输出设置项
 ├── kugou_api_server/           # 嵌入式 Rust API 服务器
 │   ├── rust/                   # Rust crate（tiny_http + ureq）
 │   │   ├── src/
@@ -317,7 +321,8 @@ md3Music/
 │   │   ├── build_android.sh    # 一键交叉编译脚本
 │   │   └── Cargo.toml
 │   └── module/                 # 旧 JS 模块（已废弃，仅供参考）
-── img/                        # 界面预览截图（README 用）
+├── third_party/just_audio/     # just_audio fork（UsbAudioSinkController 拦截音频流）
+├── img/                        # 界面预览截图（README 用）
 │   ├── phone/                  # 手机：md3 / applemusic / other
 │   └── pad/                    # 平板：md3 / applemusic / other
 ├── assets/                     # 资源文件
@@ -325,9 +330,10 @@ md3Music/
 │   └── fonts/                  # 字体文件
 ├── android/                    # Android 平台配置
 │   └── app/src/main/
-│       ├── kotlin/.../        # KugouApiService（启动本地服务器）
+│       ├── kotlin/.../        # KugouApiService、UsbAudio*（USB 独占输出）
+│       ├── cpp/               # usb-audio-output（UAC1 DAC 直写）
 │       └── jniLibs/           # libkugou_server.so（四个架构）
-├── networkapi/                 # 云端登录 API（Node.js，仅登录接口）
+├── networkapi/                 # 旧云端登录 API（Node.js，已退役，仅作参考）
 └── pubspec.yaml                # Flutter 配置
 ```
 
@@ -339,7 +345,7 @@ md3Music/
 |------|------|
 | **UI 框架** | Flutter 3.12+ |
 | **状态管理** | Provider |
-| **音频播放** | just_audio + just_audio_background |
+| **音频播放** | just_audio + just_audio_background（含 USB 独占输出 fork） |
 | **音频焦点** | audio_session |
 | **网络请求** | Dio |
 | **本地存储** | SharedPreferences + SQLite |
@@ -349,8 +355,9 @@ md3Music/
 | **元数据写入** | JAudioTagger (MP3/FLAC/M4A) |
 | **桌面歌词** | Lyricon Provider |
 | **音频均衡器** | just_audio 平台均衡器 |
+| **USB 独占输出** | C++（usbdevfs ISO URB 直写）+ UsbAudioPlugin |
 | **音乐源** | 酷狗音乐 API |
-| **云端登录** | networkapi (Node.js，仅登录接口) |
+| **登录** | Rust 本地直连酷狗上游（networkapi 已退役） |
 
 ---
 
@@ -358,11 +365,11 @@ md3Music/
 
 ### 嵌入式服务器
 
-应用启动时会自动启动本地 Rust 服务器（`libkugou_server.so`），监听 `127.0.0.1:8080`。无需任何配置。
+应用启动时会自动启动本地 Rust 服务器（`libkugou_server.so`），监听 `127.0.0.1` 上的随机端口（`[10000, 60000]`），无需任何配置。设置页「在线音乐 → 本地数据接口」可手动重启服务器。
 
-### 云端登录 API
+### 登录
 
-登录功能需要连接云端 API 服务器（`115.29.236.96:5621`）。如果有自己的部署，可以在代码中修改地址。
+登录/注册/验证码全部由本地 Rust 服务器使用设备身份（dfid/mid）直连酷狗上游完成，无需部署任何云端 API。旧 `networkapi`（`115.29.236.96:5621`）已退役。
 
 ### 音质设置
 
@@ -383,7 +390,7 @@ md3Music/
 
 ### Q: 登录功能无法使用？
 
-**A:** 登录功能需要连接云端 API。请确保设备可以访问 `115.29.236.96:5621`。
+**A:** 登录由本地 Rust 服务器直连酷狗上游完成。请检查设备网络是否正常、本地服务器是否成功启动（Logcat 搜索 "KugouApiService"），以及设备时间是否准确（影响签名校验）。登录不依赖任何第三方云端服务器。
 
 ### Q: 如何修改 API 服务器代码？
 
@@ -441,6 +448,7 @@ cargo test          # 本地测试（不依赖外网）
 - [tiny_http](https://github.com/tiny-http/tiny-http) - Rust HTTP 服务器
 - [ureq](https://github.com/algesten/ureq) - Rust HTTP 客户端
 - [JAudioTagger](https://www.jthink.net/jaudiotagger/) - 音频元数据读写
+- [decent-player](https://github.com/Ma145/decent-player) - USB 位完美（bit-perfect）音频输出驱动与集成库参考
 
 ---
 
