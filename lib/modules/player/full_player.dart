@@ -108,6 +108,24 @@ class _FullPlayerState extends State<FullPlayer>
   /// 防止 PopScope 回调与 dismiss() 重复触发。
   bool _isDismissing = false;
 
+  /// 拖拽展开模式下的源路由：展开完成前延迟应用沉浸模式，
+  /// 避免拖动过程系统栏提前切换造成闪烁。
+  DraggablePlayerRoute? _dragRoute;
+
+  /// 系统栏/沉浸模式初始化是否已完成。
+  /// 需在 [didChangeDependencies] 中执行一次（[ModalRoute.of] 依赖
+  /// `_ModalScopeStatus` inherited widget，initState 阶段不可用）。
+  bool _systemUiInitialized = false;
+
+  /// 是否为拖拽覆盖层（非路由）场景：拖拽期间由 Navigator 之上的
+  /// PlayerDragOverlay 渲染，无 ModalRoute；系统栏与收起行为需走覆盖层逻辑。
+  bool get _isDragOverlay =>
+      ModalRoute.of(context) == null && playerDragActive.value;
+
+  /// 是否已修改过系统栏（沉浸模式）。
+  /// 覆盖层（非路由）场景从未修改，dispose 时无需恢复系统栏。
+  bool _systemUiModified = false;
+
   /// 上次的物理尺寸，用于 didChangeMetrics 方向变化防抖。
   /// 避免 immersiveSticky 下用户触摸边缘唤醒系统栏等 insets 抖动
   /// 引发无效的 applyImmersiveForOrientation 调用导致系统栏闪烁。
@@ -144,9 +162,24 @@ class _FullPlayerState extends State<FullPlayer>
     if (route is DraggablePlayerRoute) {
       _isDismissing = true;
       route.dismiss();
+    } else if (route == null) {
+      // 拖拽覆盖层（非路由）：收起覆盖层，回到 MiniPlayer
+      _isDismissing = true;
+      playerDragActive.value = false;
+      playerExpansion.value = 0.0;
     } else {
       Navigator.of(context).maybePop();
     }
+  }
+
+  /// 拖拽展开完成：切换沉浸模式并移除监听。
+  void _onDragRouteStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
+    applyImmersiveForOrientation();
+    _systemUiModified = true;
+    _dragRoute?.controller.removeStatusListener(_onDragRouteStatus);
+    _dragRoute = null;
+    if (mounted) setState(() {});
   }
 
   /// 跳转到当前歌曲所在专辑页。
@@ -371,8 +404,6 @@ class _FullPlayerState extends State<FullPlayer>
       parent: _zenController,
       curve: Curves.easeInOut,
     );
-    // 进入播放器时会根据当前方向应用沉浸模式
-    applyImmersiveForOrientation();
     // 记录初始物理尺寸，避免首次 didChangeMetrics 因 _lastPhysicalSize==null 误判方向变化
     _lastPhysicalSize =
         WidgetsBinding.instance.platformDispatcher.views.first.physicalSize;
@@ -409,6 +440,12 @@ class _FullPlayerState extends State<FullPlayer>
     if (enabled) {
       // 已开启频谱时注册降级监听
       SpectrumService.instance.simulatedNotifier.addListener(_onSpectrumSimulated);
+      if (_isDragOverlay) {
+        // 拖拽覆盖层（非路由）：只显示频谱 UI、不启动服务。
+        // 覆盖层销毁时会 dispose 并调用 _stopSpectrum（全局 stop），
+        // 若此处启动会与接管路由的频谱冲突，导致频谱卡住/失效
+        return;
+      }
       if (Platform.isAndroid) {
         // 确保权限已请求（可能用户上次未授权）
         await Permission.microphone.request();
@@ -524,6 +561,26 @@ class _FullPlayerState extends State<FullPlayer>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _checkPadMode();
+    // 系统栏/沉浸模式初始化：只在首次依赖建立时执行一次。
+    // ModalRoute.of 依赖 _ModalScopeStatus（inherited widget），
+    // 不能在 initState 中调用，否则报 dependOnInheritedWidgetOfExactType 错误
+    if (_systemUiInitialized) return;
+    _systemUiInitialized = true;
+    final route = ModalRoute.of(context);
+    if (route is DraggablePlayerRoute && route.isDragMode) {
+      // 拖拽路由：延迟到展开完成后再切换沉浸，避免拖动过程系统栏提前闪烁
+      _dragRoute = route;
+      route.controller.addStatusListener(_onDragRouteStatus);
+    } else if (route == null) {
+      // 拖拽覆盖层（非路由）：不切换系统栏，展开后由路由接管
+      _dragRoute = null;
+      _systemUiModified = false;
+    } else {
+      // 点击打开 / 普通路由：立即应用沉浸模式
+      _dragRoute = null;
+      applyImmersiveForOrientation();
+      _systemUiModified = true;
+    }
   }
 
   @override
@@ -593,6 +650,8 @@ class _FullPlayerState extends State<FullPlayer>
 
   @override
   void dispose() {
+    // 未完成展开就收起时，移除拖拽展开的监听（未切换系统栏，无需恢复）
+    _dragRoute?.controller.removeStatusListener(_onDragRouteStatus);
     _zenLongPressTimer?.cancel();
     try {
       context.read<PlayerProvider>().removeListener(_onPlayerSongChanged);
@@ -607,10 +666,13 @@ class _FullPlayerState extends State<FullPlayer>
     _stopSpectrum();
     // 退出播放器时恢复系统栏；若仍处于封面流页横屏沉浸（从封面流进入播放器后返回），
     // 则保持沉浸，避免返回后状态栏闪现。
-    if (kCoverFlowImmersiveActive.value) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } else {
-      restoreSystemUi();
+    // 拖拽覆盖层（非路由）从未修改系统栏，无需恢复
+    if (_systemUiModified) {
+      if (kCoverFlowImmersiveActive.value) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      } else {
+        restoreSystemUi();
+      }
     }
     super.dispose();
   }
@@ -835,8 +897,11 @@ class _FullPlayerState extends State<FullPlayer>
     // 动画完成后用 removeRoute 移除路由（绕过 PopScope 避免死循环）。
     // 引用 kPlayerOverlayStyle 与 applyImmersiveForOrientation 共用同一 const 实例
     // 避免 SystemUiOverlayStyle 引用不等触发平台 channel 真实调用导致闪烁
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: kPlayerOverlayStyle,
+    // 拖拽展开模式下系统栏样式跟随展开进度，避免拖动过程提前切换（见 PlayerSystemUiScope）
+    return PlayerSystemUiScope(
+      dragRoute: _dragRoute,
+      // 拖拽覆盖层（非路由）期间系统栏恒为主页面样式
+      forceMainStyle: _isDragOverlay,
       child: PopScope(
         canPop: false,
         onPopInvokedWithResult: (didPop, _) {

@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -70,18 +71,22 @@ class _MiniPlayerState extends State<MiniPlayer>
   }
 
   void _onHorizontalDragStart(DragStartDetails details) {
+    // 上滑展开已识别时屏蔽水平切歌，避免斜向滑动同时触发两种手势
+    if (_dragActivated) return;
     // 取消正在进行的回弹动画，接管为手动拖动
     _snapController.stop();
     _dragOffset = 0.0;
   }
 
   void _onHorizontalDragUpdate(DragUpdateDetails details) {
+    if (_dragActivated) return;
     setState(() {
       _dragOffset += details.delta.dx;
     });
   }
 
   void _onHorizontalDragEnd(DragEndDetails details) {
+    if (_dragActivated) return;
     final velocity = details.primaryVelocity ?? 0;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final distanceThreshold = screenWidth * _distanceRatio;
@@ -122,6 +127,146 @@ class _MiniPlayerState extends State<MiniPlayer>
     _snapController.forward(from: 0.0);
   }
 
+  // ── 上滑展开 FullPlayer ──
+  // 关键约束：手势期间绝不 push 路由（实测 push 会立即切断整个事件流，
+  // 跟手失效）。跟手显示由 Navigator 之上的覆盖层（playerExpansion 驱动）
+  // 承担；松手后手势已结束，再 push 路由并让路由从当前进度继续展开。
+
+  /// 当前跟踪的 pointer（nil = 无拖拽）
+  int? _activePointer;
+  // 起点位置（用于判定垂直上滑与累计距离）
+  double _downY = 0.0;
+  double _downX = 0.0;
+  // 上滑累计距离 / 是否已确认展开手势 / 完整展开距离（MiniPlayer 顶端 Y）
+  double _dragDistance = 0.0;
+  bool _dragActivated = false;
+  double _miniTopY = 0.0;
+  // 速度/加速度估计：按事件时间戳差分（向上为正）
+  double? _lastVelocity;
+  double? _lastY;
+  Duration? _lastSampleTime;
+  double _lastAcceleration = 0.0;
+
+  void _onRawDown(PointerDownEvent e) {
+    if (_activePointer != null) return; // 已在跟踪其他手指
+    _activePointer = e.pointer;
+    _downY = e.position.dy;
+    _downX = e.position.dx;
+    _dragDistance = 0.0;
+    _dragActivated = false; // 新手势开始，重置上滑守卫
+    _lastVelocity = null;
+    _lastY = e.position.dy;
+    _lastSampleTime = e.timeStamp;
+    _lastAcceleration = 0.0;
+    // 预测量 MiniPlayer 顶端全局 Y（= FullPlayer 展开起点）
+    final box = context.findRenderObject() as RenderBox?;
+    _miniTopY = box?.localToGlobal(Offset.zero).dy ?? 0.0;
+  }
+
+  void _onRawMove(PointerMoveEvent e) {
+    if (e.pointer != _activePointer) return;
+    final deltaY = _downY - e.position.dy; // 向上为正
+    final deltaX = (e.position.dx - _downX).abs();
+    if (!_dragActivated) {
+      // 确认是垂直上滑：位移超过 touch slop 且垂直占主导（否则交给点击/水平切歌）
+      if (deltaY < kTouchSlop || deltaY <= deltaX) return;
+      _dragActivated = true;
+      playerDragOriginTop = _miniTopY;
+      playerDragActive.value = true; // 显示跟手覆盖层
+    }
+    _dragDistance = deltaY.clamp(0.0, double.infinity);
+    // 速度/加速度估计：按事件时间戳差分
+    final ts = e.timeStamp;
+    if (_lastSampleTime != null && _lastY != null) {
+      final dt = (ts - _lastSampleTime!).inMicroseconds / 1e6;
+      if (dt > 0) {
+        final v = (_lastY! - e.position.dy) / dt; // px/s，向上为正
+        if (_lastVelocity != null) {
+          _lastAcceleration = (v - _lastVelocity!) / dt;
+        }
+        _lastVelocity = v;
+      }
+    }
+    _lastY = e.position.dy;
+    _lastSampleTime = ts;
+    // 驱动跟手覆盖层：位置进度 = 上滑距离 / 完整展开距离
+    if (_miniTopY > 0.0) {
+      playerExpansion.value = (_dragDistance / _miniTopY).clamp(0.0, 1.0);
+    }
+  }
+
+  void _onRawUp(PointerUpEvent e) {
+    if (e.pointer != _activePointer) return;
+    _activePointer = null;
+    // 注意：不在此重置 _dragActivated——up 之后竞技场 sweep 仍会触发
+    // onHorizontalDragEnd，必须保持上滑守卫，直到下一次手势开始（_onRawDown）
+    if (!_dragActivated) return;
+    final expand = shouldExpandPlayer(
+      dragDistance: _dragDistance,
+      screenHeight: MediaQuery.sizeOf(context).height,
+      velocity: _lastVelocity ?? 0.0,
+      acceleration: _lastAcceleration,
+    );
+    if (expand) {
+      _expandPlayerFromDrag();
+    } else {
+      // 未达阈值：收起覆盖层，回到 MiniPlayer
+      playerDragActive.value = false;
+      playerExpansion.value = 0.0;
+    }
+  }
+
+  void _onRawCancel(PointerCancelEvent e) {
+    if (e.pointer != _activePointer) return;
+    _activePointer = null;
+    // 手势被系统打断：收起覆盖层（同样保持守卫到下一次 down）
+    if (_dragActivated) {
+      playerDragActive.value = false;
+      playerExpansion.value = 0.0;
+    }
+  }
+
+  /// 松手判定展开：push 拖拽路由并让路由从当前进度继续展开。
+  /// 此时手势已结束（up 已处理），push 不再影响事件流。
+  ///
+  /// 交接要点（避免松手闪烁）：
+  /// - 覆盖层在 Navigator 之上，路由渲染需要一帧；先 push 路由并停在当前
+  ///   进度（不立即动画），等路由渲染完成后再隐藏覆盖层并启动展开动画，
+  ///   保证「覆盖层 → 路由」无缝衔接
+  /// - 不重置 playerExpansion（覆盖层销毁后由路由 build 同步接管进度），
+  ///   避免 MiniPlayer 瞬间恢复全亮造成闪烁
+  void _expandPlayerFromDrag() {
+    final progress = playerExpansion.value;
+    if (_miniTopY <= 0.0 || progress <= 0.0) {
+      playerDragActive.value = false;
+      playerExpansion.value = 0.0;
+      return;
+    }
+    final route = fullPlayerRoute(
+      context,
+      dragOriginTop: _miniTopY,
+      screenHeight: MediaQuery.sizeOf(context).height,
+    );
+    Navigator.of(context).push(route);
+    route.controller.stop();
+    route.controller.value = progress; // 路由从当前手指位置开始显示
+    // 等待路由渲染（2 帧）后：隐藏覆盖层并启动展开动画
+    var frames = 0;
+    void tick() {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        frames++;
+        if (frames >= 2) {
+          playerDragActive.value = false;
+          route.settleToFull();
+        } else {
+          tick();
+        }
+      });
+    }
+
+    tick();
+  }
+
   @override
   Widget build(BuildContext context) {
     final playerProvider = context.watch<PlayerProvider>();
@@ -146,26 +291,41 @@ class _MiniPlayerState extends State<MiniPlayer>
       child: ValueListenableBuilder<bool>(
         // 滑动切歌开关关闭时，不注册水平拖动回调，仅保留点击展开
         valueListenable: miniPlayerSwipeSwitchEnabled,
-        builder: (context, swipeEnabled, _) => GestureDetector(
-          // 点击展开 FullPlayer
-          onTap: () => Navigator.of(context).push(fullPlayerRoute(context)),
-          onHorizontalDragStart:
-              swipeEnabled ? _onHorizontalDragStart : null,
-          onHorizontalDragUpdate:
-              swipeEnabled ? _onHorizontalDragUpdate : null,
-          onHorizontalDragEnd: swipeEnabled ? _onHorizontalDragEnd : null,
+        builder: (context, swipeEnabled, _) => Listener(
+          // 上滑展开：手势期间不 push（push 会切断事件流），
+          // 由 Navigator 之上的覆盖层跟手显示，松手后再 push 路由
           behavior: HitTestBehavior.opaque,
-          // P0: 进度只订阅 positionNotifier（高频 200ms），
-          // 不再因 positionStream 触发整个 MiniPlayer 重建（封面/标题不变）
-          child: ValueListenableBuilder<Duration>(
-            valueListenable: playerProvider.positionNotifier,
-            builder: (context, position, _) {
-              final progress = duration.inMilliseconds > 0
-                  ? position.inMilliseconds / duration.inMilliseconds
-                  : 0.0;
-              return _buildContent(
-                  context, playerProvider, currentSong, colorScheme, progress);
+          onPointerDown: _onRawDown,
+          onPointerMove: _onRawMove,
+          onPointerUp: _onRawUp,
+          onPointerCancel: _onRawCancel,
+          child: GestureDetector(
+            // 点击展开 FullPlayer（栈顶已有播放器路由时不重复 push）
+            onTap: () {
+              // 上滑展开识别后（含 up 后 sweep 阶段）不响应点击
+              if (_dragActivated) return;
+              if (activePlayerRoute?.isCurrent ?? false) return;
+              Navigator.of(context).push(fullPlayerRoute(context));
             },
+            // 水平滑动切歌（受设置开关控制）
+            onHorizontalDragStart:
+                swipeEnabled ? _onHorizontalDragStart : null,
+            onHorizontalDragUpdate:
+                swipeEnabled ? _onHorizontalDragUpdate : null,
+            onHorizontalDragEnd: swipeEnabled ? _onHorizontalDragEnd : null,
+            behavior: HitTestBehavior.opaque,
+            // P0: 进度只订阅 positionNotifier（高频 200ms），
+            // 不再因 positionStream 触发整个 MiniPlayer 重建（封面/标题不变）
+            child: ValueListenableBuilder<Duration>(
+              valueListenable: playerProvider.positionNotifier,
+              builder: (context, position, _) {
+                final progress = duration.inMilliseconds > 0
+                    ? position.inMilliseconds / duration.inMilliseconds
+                    : 0.0;
+                return _buildContent(
+                    context, playerProvider, currentSong, colorScheme, progress);
+              },
+            ),
           ),
         ),
       ),
