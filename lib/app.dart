@@ -9,6 +9,7 @@ import 'core/layout/responsive_layout.dart';
 import 'core/services/lyricon_provider_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/motion_constants.dart';
+import 'core/utils/artwork_color_extractor.dart';
 import 'data/models/playlist.dart';
 import 'main.dart'
     show
@@ -166,6 +167,13 @@ class _AppView extends StatefulWidget {
 }
 
 class _AppViewState extends State<_AppView> {
+  // 封面动态取色桥接：监听 PlayerProvider 切歌 → 提取封面主色 → 注入 ThemeProvider。
+  // 持有引用以便 dispose 时移除 listener（provider 销毁顺序晚于 _AppViewState）。
+  PlayerProvider? _playerProvider;
+  // 上一次已提取/正在提取的封面 url：同一首歌反复 notify 不重复提取，
+  // 且异步提取期间切歌时丢弃过期结果（参考 AM 歌词动态取色 _lastAccentUrl 模式）。
+  String? _lastCoverUrl;
+
   @override
   void initState() {
     super.initState();
@@ -199,6 +207,37 @@ class _AppViewState extends State<_AppView> {
         handleShortcut(type!);
       });
     }
+    // 延迟一帧再建立封面取色桥接：ChangeNotifierProvider 惰性 create，
+    // 此时 provider 实例已就绪，且不影响首帧渲染。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _setupCoverColorBridge();
+    });
+  }
+
+  /// 建立封面动态取色桥接：监听 PlayerProvider 切歌，把封面主色注入 ThemeProvider。
+  void _setupCoverColorBridge() {
+    final player = context.read<PlayerProvider>();
+    _playerProvider = player;
+    player.addListener(_onPlayerChanged);
+    // 启动时按当前歌曲提取一次（若 App 有恢复播放）
+    _onPlayerChanged();
+  }
+
+  /// 切歌回调：当前歌曲封面 url 变化时异步提取主色并注入 ThemeProvider。
+  Future<void> _onPlayerChanged() async {
+    final url = context.read<PlayerProvider>().currentSong?.artworkUri;
+    if (url == null || url == _lastCoverUrl) return;
+    _lastCoverUrl = url;
+    final color = await ArtworkColorExtractor.extract(url);
+    // 过期校验：提取期间已切歌则丢弃结果（参考 AM 歌词动态取色模式）
+    if (context.read<PlayerProvider>().currentSong?.artworkUri != url) return;
+    context.read<ThemeProvider>().setCoverSeedColor(color);
+  }
+
+  @override
+  void dispose() {
+    _playerProvider?.removeListener(_onPlayerChanged);
+    super.dispose();
   }
 
   @override
