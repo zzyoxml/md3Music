@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 悬浮窗识曲：Android 14+ 使用 MediaProjection 的前台服务必须声明此类型权限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -76,6 +78,12 @@
         <service
             android:name=".FloatingLyricService"
             android:foregroundServiceType="specialUse"
+            android:exported="false" />
+        <!-- 悬浮窗听歌识曲：AudioPlaybackCapture 采集系统音频识别，需前台服务保活；
+             mediaProjection 类型为 Android 14+ 使用 MediaProjection 的前台服务硬性要求 -->
+        <service
+            android:name=".FloatingRecognitionService"
+            android:foregroundServiceType="specialUse|mediaProjection"
             android:exported="false" />
         <!-- 桌面播放器小组件 -->
         <receiver

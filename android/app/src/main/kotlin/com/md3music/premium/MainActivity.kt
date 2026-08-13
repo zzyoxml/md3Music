@@ -23,13 +23,17 @@ class MainActivity : FlutterActivity() {
     private val FONT_PICKER_CHANNEL = "com.md3music.premium/font_picker"
     private val MEDIA_STORE_CHANNEL = "com.md3music.premium/media_store"
     private val HOME_WIDGET_CHANNEL = "com.md3music.premium/home_widget"
+    private val RECOGNITION_CHANNEL = "com.md3music.premium/floating_recognition"
     private var pendingDesktopLyricAction: String? = null
     private var folderPickerResult: MethodChannel.Result? = null
     private var fontPickerResult: MethodChannel.Result? = null
+    // 悬浮窗识曲 channel：MediaProjection 授权结果等原生→Dart 回调
+    private var recognitionChannel: MethodChannel? = null
 
     companion object {
         private const val FOLDER_PICKER_REQUEST_CODE = 9999
         private const val FONT_PICKER_REQUEST_CODE = 10000
+        private const val RECOGNITION_PROJECTION_REQUEST = 10001
 
         // 静态引用：让 Service 也能调用 MethodChannel（无 FlutterEngine 缓存时走这里）
         private var cachedEngine: FlutterEngine? = null
@@ -278,6 +282,119 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        // 注册悬浮窗识曲 MethodChannel：Dart 控制悬浮窗服务 + MediaProjection 授权
+        // （原生→Dart 回调 onProjectionResult/onSegmentCaptured/onFloatingAction
+        //  由 Service 经 FlutterEngineCache 直接 invokeMethod，见 FloatingRecognitionService）
+        val recognitionChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            RECOGNITION_CHANNEL
+        )
+        this.recognitionChannel = recognitionChannel
+        recognitionChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    if (Build.VERSION.SDK_INT < 29) {
+                        result.error("UNSUPPORTED", "仅支持 Android 10 及以上", null)
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:$packageName")
+                        )
+                        startActivity(intent)
+                        result.error("PERMISSION_DENIED", "需要悬浮窗权限", null)
+                    } else {
+                        val intent = Intent(this, FloatingRecognitionService::class.java)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(true)
+                    }
+                }
+                "stop" -> {
+                    // 服务未运行时直接返回，避免 startService 复活已停止的悬浮窗
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_STOP
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "requestProjection" -> {
+                    val pm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+                    startActivityForResult(pm.createScreenCaptureIntent(), RECOGNITION_PROJECTION_REQUEST)
+                    result.success(true)
+                }
+                "continueCapture" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_CONTINUE
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "stopCapture" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_STOP_CAPTURE
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "setResult" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_SET_RESULT
+                                putExtra(
+                                    FloatingRecognitionService.EXTRA_RESULT,
+                                    call.argument<String>("result") ?: ""
+                                )
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "setStatus" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_SET_STATUS
+                                putExtra(
+                                    FloatingRecognitionService.EXTRA_STATUS,
+                                    call.argument<String>("status") ?: ""
+                                )
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "setThemeColors" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_SET_THEME
+                                // Dart int（64 位）解码为 Long，用 Number 接收
+                                val colors = call.argument<HashMap<String, Number>>("colors")
+                                if (colors != null) {
+                                    putExtra(FloatingRecognitionService.EXTRA_THEME_COLORS, colors)
+                                }
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         // 注册 Lyricon Provider MethodChannel，让 Dart 端能控制 Lyricon 播放器
         // （逻辑与 AudioPlaybackService.setupHeadlessChannels 共用，见该函数）
         AudioPlaybackService.registerLyriconChannel(flutterEngine)
@@ -498,6 +615,11 @@ class MainActivity : FlutterActivity() {
                 fontPickerResult?.success(null)
                 fontPickerResult = null
             }
+        } else if (requestCode == RECOGNITION_PROJECTION_REQUEST) {
+            // 悬浮窗识曲：MediaProjection 授权结果 → 注入服务 + 通知 Dart
+            val granted = resultCode == RESULT_OK && data != null
+            recognitionChannel?.invokeMethod("onProjectionResult", granted)
+            FloatingRecognitionService.onProjectionResult(resultCode, data)
         }
     }
 
@@ -510,6 +632,7 @@ class MainActivity : FlutterActivity() {
         spectrumPlugin = null
         cachedEngine = null
         cachedChannel = null
+        recognitionChannel = null
         super.onDestroy()
     }
 }
