@@ -117,6 +117,15 @@ class _FullPlayerState extends State<FullPlayer>
   /// `_ModalScopeStatus` inherited widget，initState 阶段不可用）。
   bool _systemUiInitialized = false;
 
+  /// 是否为拖拽覆盖层（非路由）场景：拖拽期间由 Navigator 之上的
+  /// PlayerDragOverlay 渲染，无 ModalRoute；系统栏与收起行为需走覆盖层逻辑。
+  bool get _isDragOverlay =>
+      ModalRoute.of(context) == null && playerDragActive.value;
+
+  /// 是否已修改过系统栏（沉浸模式）。
+  /// 覆盖层（非路由）场景从未修改，dispose 时无需恢复系统栏。
+  bool _systemUiModified = false;
+
   /// 上次的物理尺寸，用于 didChangeMetrics 方向变化防抖。
   /// 避免 immersiveSticky 下用户触摸边缘唤醒系统栏等 insets 抖动
   /// 引发无效的 applyImmersiveForOrientation 调用导致系统栏闪烁。
@@ -153,6 +162,11 @@ class _FullPlayerState extends State<FullPlayer>
     if (route is DraggablePlayerRoute) {
       _isDismissing = true;
       route.dismiss();
+    } else if (route == null) {
+      // 拖拽覆盖层（非路由）：收起覆盖层，回到 MiniPlayer
+      _isDismissing = true;
+      playerDragActive.value = false;
+      playerExpansion.value = 0.0;
     } else {
       Navigator.of(context).maybePop();
     }
@@ -162,6 +176,7 @@ class _FullPlayerState extends State<FullPlayer>
   void _onDragRouteStatus(AnimationStatus status) {
     if (status != AnimationStatus.completed) return;
     applyImmersiveForOrientation();
+    _systemUiModified = true;
     _dragRoute?.controller.removeStatusListener(_onDragRouteStatus);
     _dragRoute = null;
     if (mounted) setState(() {});
@@ -545,15 +560,20 @@ class _FullPlayerState extends State<FullPlayer>
     // 不能在 initState 中调用，否则报 dependOnInheritedWidgetOfExactType 错误
     if (_systemUiInitialized) return;
     _systemUiInitialized = true;
-    // 进入播放器时会根据当前方向应用沉浸模式；
-    // 拖拽展开模式下延迟到展开完成后再切换，避免拖动过程系统栏提前闪烁
     final route = ModalRoute.of(context);
     if (route is DraggablePlayerRoute && route.isDragMode) {
+      // 拖拽路由：延迟到展开完成后再切换沉浸，避免拖动过程系统栏提前闪烁
       _dragRoute = route;
       route.controller.addStatusListener(_onDragRouteStatus);
+    } else if (route == null) {
+      // 拖拽覆盖层（非路由）：不切换系统栏，展开后由路由接管
+      _dragRoute = null;
+      _systemUiModified = false;
     } else {
+      // 点击打开 / 普通路由：立即应用沉浸模式
       _dragRoute = null;
       applyImmersiveForOrientation();
+      _systemUiModified = true;
     }
   }
 
@@ -640,10 +660,13 @@ class _FullPlayerState extends State<FullPlayer>
     _stopSpectrum();
     // 退出播放器时恢复系统栏；若仍处于封面流页横屏沉浸（从封面流进入播放器后返回），
     // 则保持沉浸，避免返回后状态栏闪现。
-    if (kCoverFlowImmersiveActive.value) {
-      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } else {
-      restoreSystemUi();
+    // 拖拽覆盖层（非路由）从未修改系统栏，无需恢复
+    if (_systemUiModified) {
+      if (kCoverFlowImmersiveActive.value) {
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+      } else {
+        restoreSystemUi();
+      }
     }
     super.dispose();
   }
@@ -871,6 +894,8 @@ class _FullPlayerState extends State<FullPlayer>
     // 拖拽展开模式下系统栏样式跟随展开进度，避免拖动过程提前切换（见 PlayerSystemUiScope）
     return PlayerSystemUiScope(
       dragRoute: _dragRoute,
+      // 拖拽覆盖层（非路由）期间系统栏恒为主页面样式
+      forceMainStyle: _isDragOverlay,
       child: PopScope(
         canPop: false,
         onPopInvokedWithResult: (didPop, _) {

@@ -1102,6 +1102,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
+        // 上滑拖拽展开中：返回键先收起覆盖层，回到 MiniPlayer
+        if (playerDragActive.value) {
+          playerDragActive.value = false;
+          playerExpansion.value = 0.0;
+          return;
+        }
         if (immersive) {
           kCoverFlowImmersive.value = false;
         } else {

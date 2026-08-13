@@ -244,6 +244,13 @@ class _MiniPlayerState extends State<MiniPlayer>
 
   /// 松手判定展开：push 拖拽路由并让路由从当前进度继续展开。
   /// 此时手势已结束（up 已处理），push 不再影响事件流。
+  ///
+  /// 交接要点（避免松手闪烁）：
+  /// - 覆盖层在 Navigator 之上，路由渲染需要一帧；先 push 路由并停在当前
+  ///   进度（不立即动画），等路由渲染完成后再隐藏覆盖层并启动展开动画，
+  ///   保证「覆盖层 → 路由」无缝衔接
+  /// - 不重置 playerExpansion（覆盖层销毁后由路由 build 同步接管进度），
+  ///   避免 MiniPlayer 瞬间恢复全亮造成闪烁
   void _expandPlayerFromDrag() {
     final progress = playerExpansion.value;
     if (_miniTopY <= 0.0 || progress <= 0.0) {
@@ -251,20 +258,29 @@ class _MiniPlayerState extends State<MiniPlayer>
       playerExpansion.value = 0.0;
       return;
     }
-    // 先隐藏覆盖层，再由路由从相同进度接管显示（位置/透明度一致）
-    playerDragActive.value = false;
-    playerExpansion.value = 0.0;
     final route = fullPlayerRoute(
       context,
       dragOriginTop: _miniTopY,
       screenHeight: MediaQuery.sizeOf(context).height,
     );
-    // ignore: avoid_print
-    print('[MiniPlayer] expand from drag progress=$progress');
     Navigator.of(context).push(route);
     route.controller.stop();
-    route.controller.value = progress; // 从当前手指位置继续
-    route.settleToFull();
+    route.controller.value = progress; // 路由从当前手指位置开始显示
+    // 等待路由渲染（2 帧）后：隐藏覆盖层并启动展开动画
+    var frames = 0;
+    void tick() {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        frames++;
+        if (frames >= 2) {
+          playerDragActive.value = false;
+          route.settleToFull();
+        } else {
+          tick();
+        }
+      });
+    }
+
+    tick();
   }
 
   @override

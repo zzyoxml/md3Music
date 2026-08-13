@@ -81,15 +81,20 @@ DraggablePlayerRoute<void> fullPlayerRoute(
 /// （[mainPageOverlayStyle]），完全展开后切换为播放器样式（[kPlayerOverlayStyle]），
 /// 避免拖拽过程中系统栏提前变成透明 + 浅色图标造成闪烁。
 /// 非拖拽模式（[dragRoute] 为 null）恒为播放器样式。
+/// [forceMainStyle]：拖拽覆盖层（非路由渲染的 FullPlayer）期间恒为主页面样式。
 class PlayerSystemUiScope extends StatelessWidget {
   const PlayerSystemUiScope({
     super.key,
     required this.dragRoute,
+    this.forceMainStyle = false,
     required this.child,
   });
 
   /// 拖拽展开模式下的源路由；非拖拽模式为 null。
   final DraggablePlayerRoute? dragRoute;
+
+  /// 覆盖层渲染场景（非路由）：拖拽期间系统栏保持主页面样式。
+  final bool forceMainStyle;
 
   final Widget child;
 
@@ -99,10 +104,10 @@ class PlayerSystemUiScope extends StatelessWidget {
       animation:
           dragRoute?.controller ?? const AlwaysStoppedAnimation<double>(1.0),
       builder: (context, _) {
-        final expanded =
-            dragRoute == null || dragRoute!.controller.value >= 1.0;
+        final expanded = dragRoute == null || dragRoute!.controller.value >= 1.0;
+        final useMain = forceMainStyle || (dragRoute != null && !expanded);
         return AnnotatedRegion<SystemUiOverlayStyle>(
-          value: expanded ? kPlayerOverlayStyle : mainPageOverlayStyle(context),
+          value: useMain ? mainPageOverlayStyle(context) : kPlayerOverlayStyle,
           child: child,
         );
       },
