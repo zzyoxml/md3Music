@@ -105,7 +105,8 @@ class PlayerSystemUiScope extends StatelessWidget {
       animation:
           dragRoute?.controller ?? const AlwaysStoppedAnimation<double>(1.0),
       builder: (context, _) {
-        final expanded = dragRoute == null || dragRoute!.controller.value >= 1.0;
+        final expanded =
+            dragRoute == null || dragRoute!.controller.value >= 1.0;
         final useMain = forceMainStyle || (dragRoute != null && !expanded);
         return AnnotatedRegion<SystemUiOverlayStyle>(
           value: useMain ? mainPageOverlayStyle(context) : kPlayerOverlayStyle,
@@ -143,6 +144,17 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
   /// 是否为拖拽模式（MiniPlayer 上滑展开）。
   bool get isDragMode => dragOriginTop != null && screenHeight != null;
 
+  /// 顶栏向下拖拽收起时的完整收起距离（px）。
+  /// 非空表示顶栏拖拽激活中（含 tap 模式点击进入的播放页）：
+  /// 播放页跟随手指沿「展开路径」原路下滑（dy = total*(1-pos)）。
+  /// 拖拽结束/取消时由调用方置回 null，恢复原有动画映射。
+  double? topBarDragTotal;
+
+  /// 顶栏拖拽是否激活中（松手动画期间保持 true）。
+  /// 用于防竞态：松手动画（settleToFull）完成时若用户已重新开始拖拽
+  /// （whenCompleteOrCancel 异步回调晚于 start 重新赋值），不得清空映射。
+  bool topBarDragging = false;
+
   /// 由 [createAnimationController] 赋值，外部手势可读取此字段直接驱动。
   /// 重写父类（[TransitionRoute]）的同名 getter（返回 `AnimationController?`），
   /// 收窄为非空类型，便于调用方直接使用而无需 null-check。
@@ -166,6 +178,10 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
     _isDismissing = true;
     _animStartValue = controller.value;
     _animDirection = -1;
+    // ignore: avoid_print
+    print(
+      '[Route] dismiss v=${controller.value} animating=${controller.isAnimating}',
+    );
     controller.reverse().then((_) {
       // 强制归零，避免 removeRoute 不触发 didPop 导致 playerExpansion 残留非零值
       // （didPop 只在系统 pop 时触发，dismiss 走 removeRoute 不触发）
@@ -186,13 +202,25 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
     if (_isDismissing) return;
     _animStartValue = controller.value;
     _animDirection = 1;
-    controller.forward();
+    // ignore: avoid_print
+    print(
+      '[Route] settleToFull v=${controller.value} animating=${controller.isAnimating}',
+    );
+    controller.forward().whenCompleteOrCancel(() {
+      // 松手动画结束（或被新的拖拽取消）时，若没有新拖拽激活则恢复原映射；
+      // 若用户在动画期间重新开始拖拽（topBarDragging=true，回调晚于 start
+      // 重新赋值 topBarDragTotal），则保留映射交给新拖拽管理
+      if (!topBarDragging) {
+        topBarDragTotal = null;
+      }
+    });
   }
 
   /// 拖拽接管已存在的路由（半途回拖场景）：
   /// 取消进行中的 dismiss、停止当前动画并从 0 重新开始。
   void beginDrag() {
     _isDismissing = false;
+    topBarDragging = false;
     controller.stop();
     controller.value = 0.0;
   }
@@ -237,8 +265,11 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
   }
 
   @override
-  Widget buildPage(BuildContext context, Animation<double> animation,
-      Animation<double> secondaryAnimation) {
+  Widget buildPage(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+  ) {
     return builder(context);
   }
 
@@ -260,30 +291,36 @@ class DraggablePlayerRoute<T> extends PageRoute<T> {
   }
 
   @override
-  Widget buildTransitions(BuildContext context, Animation<double> animation,
-      Animation<double> secondaryAnimation, Widget child) {
+  Widget buildTransitions(
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
     return AnimatedBuilder(
       animation: animation,
       builder: (context, _) {
-        // 拖拽模式直接用 controller.value：路由 push 后首帧 animation（框架
-        // proxy）尚未与 controller 同步（会短暂为 1.0），用 controller 可避免
-        // 首帧误显示全屏，导致「先闪现播放页」的割裂感
+        // 顶栏向下拖拽激活中（含 tap 模式点击进入的播放页）时，与拖拽模式一样
+        // 直接用 controller.value：路由 push 后首帧 animation（框架 proxy）尚未
+        // 与 controller 同步（会短暂为 1.0），用 controller 可避免首帧误显示全屏
+        final topBarDrag = topBarDragTotal != null;
         final raw =
-            (isDragMode ? controller.value : animation.value).clamp(0.0, 1.0);
+            (isDragMode || topBarDrag ? controller.value : animation.value)
+                .clamp(0.0, 1.0);
 
-        // —— 拖拽模式（MiniPlayer 上滑展开）——
+        // —— 原路返回映射（MiniPlayer 上滑展开 / 顶栏向下拖拽收起）——
         // 位置与透明度独立映射：
-        // 位置：dy = origin*(1-pos)，顶端从 MiniPlayer 顶端滑到屏幕顶端（1:1 跟手）
+        // 位置：dy = origin*(1-pos)，顶端沿「展开路径」1:1 跟手
         // 透明度：前 20% 屏高线性 0→1，之后保持 1
-        if (isDragMode) {
-          final height = screenHeight!;
-          final origin = dragOriginTop!;
-          final pos =
-              controller.isAnimating ? _easedPosition(raw) : raw;
+        // origin = 拖拽模式的 MiniPlayer 顶端；顶栏拖拽（含 tap 模式）用
+        // topBarDragTotal（= MiniPlayer 顶端），实现点击进入也能原路返回
+        if (isDragMode || topBarDrag) {
+          final height = screenHeight ?? MediaQuery.sizeOf(context).height;
+          final origin = topBarDragTotal ?? dragOriginTop!;
+          final pos = controller.isAnimating ? _easedPosition(raw) : raw;
           final dy = origin * (1 - pos);
-          final opacity =
-              (pos * origin / (kPlayerExpandDistanceRatio * height))
-                  .clamp(0.0, 1.0);
+          final opacity = (pos * origin / (kPlayerExpandDistanceRatio * height))
+              .clamp(0.0, 1.0);
           if (pos != playerExpansion.value) {
             playerExpansion.value = pos;
           }
