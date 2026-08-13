@@ -59,6 +59,8 @@ class _SettingsPageState extends State<SettingsPage>
   // 本地 API 服务器重启中（在线音乐区块显示加载态）
   bool _isRestarting = false;
   bool _useDynamicColor = false;
+  // 封面动态取色开关（与系统主题色独立、可叠加；开启时封面优先）
+  bool _useCoverSeedColor = false;
   // Apple Music 风格播放页开关（默认关闭，开启后用 AM 风格 FullPlayer）
   bool _useAmStylePlayer = false;
   bool _useGaussianBlur = true;
@@ -200,6 +202,8 @@ class _SettingsPageState extends State<SettingsPage>
     final autoReceiveVip = await _settingsRepository.getAutoReceiveVip();
     // 从 ThemeProvider 同步「使用系统主题色」开关状态
     final useDynamicColor = context.read<ThemeProvider>().useDynamicColor;
+    // 从 ThemeProvider 同步「封面动态取色」开关状态
+    final useCoverSeedColor = context.read<ThemeProvider>().useCoverSeedColor;
     // 从 ThemeProvider 同步「Apple Music 风格播放页」开关状态
     final useAmStylePlayer = context.read<ThemeProvider>().useAmStylePlayer;
     final lyricDoubleTapToJump = context
@@ -239,6 +243,7 @@ class _SettingsPageState extends State<SettingsPage>
       _defaultQuality = quality;
       _autoReceiveVip = autoReceiveVip;
       _useDynamicColor = useDynamicColor;
+      _useCoverSeedColor = useCoverSeedColor;
       _useAmStylePlayer = useAmStylePlayer;
       _lyricDoubleTapToJump = lyricDoubleTapToJump;
       _useArtistPhotoBackground = useArtistPhotoBackground;
@@ -734,14 +739,20 @@ class _SettingsPageState extends State<SettingsPage>
           onTap: () => _showFontSourceSheet(themeProvider),
         ),
         // 主题色入口：点击弹出 8 色预设面板。
-        // 系统色开启时用 IgnorePointer 禁用点击（不灰显，色块仍显示当前 effectiveSeedColor）。
+        // 系统主题色 / 封面动态取色开启时用 IgnorePointer 禁用点击
+        // （不灰显，色块仍显示当前 effectiveSeedColor）。
         IgnorePointer(
-          ignoring: themeProvider.useDynamicColor,
+          ignoring:
+              themeProvider.useDynamicColor || themeProvider.useCoverSeedColor,
           child: ListTile(
             leading: const Icon(Icons.palette),
             title: const Text('主题色'),
             subtitle: Text(
-              themeProvider.useDynamicColor ? '跟随系统壁纸取色' : '手动选择种子色',
+              themeProvider.useCoverSeedColor
+                  ? '跟随歌曲封面取色'
+                  : (themeProvider.useDynamicColor
+                      ? '跟随系统壁纸取色'
+                      : '手动选择种子色'),
             ),
             trailing: Container(
               width: 24,
@@ -763,6 +774,16 @@ class _SettingsPageState extends State<SettingsPage>
             HapticFeedback.lightImpact();
             setState(() => _useDynamicColor = v);
             context.read<ThemeProvider>().setUseDynamicColor(v);
+          },
+        ),
+        SwitchListTile(
+          title: const Text('封面动态取色'),
+          subtitle: const Text('根据当前播放歌曲封面动态改变主题色（可叠加系统主题色，封面优先）'),
+          value: _useCoverSeedColor,
+          onChanged: (v) {
+            HapticFeedback.lightImpact();
+            setState(() => _useCoverSeedColor = v);
+            context.read<ThemeProvider>().setUseCoverSeedColor(v);
           },
         ),
         // OLED 纯黑开关：light 模式禁用；dark 与 system 可勾选。

@@ -9,6 +9,7 @@ import '../core/theme/app_theme.dart';
 class ThemeProvider extends ChangeNotifier {
   static const String _key = 'theme_mode';
   static const String _dynamicKey = 'use_dynamic_color';
+  static const String _coverDynamicKey = 'use_cover_dynamic_color';
   static const String _amStylePlayerKey = 'use_am_style_player';
   static const String _manualSeedKey = 'manual_seed_color';
   static const String _oledBlackKey = 'use_oled_black';
@@ -23,6 +24,10 @@ class ThemeProvider extends ChangeNotifier {
   ThemeMode _themeMode = ThemeMode.system;
   bool _useDynamicColor = false;
   Color? _systemSeedColor;
+  // 封面动态取色：根据当前播放歌曲封面颜色动态改变全局主题色。
+  // 开启且提取成功时优先级高于系统壁纸色（见 effectiveSeedColor）。
+  bool _useCoverSeedColor = false;
+  Color? _coverSeedColor;
   bool _useAmStylePlayer = false;
   Color? _manualSeedColor;
   bool _useOledBlack = false;
@@ -42,6 +47,8 @@ class ThemeProvider extends ChangeNotifier {
   ThemeMode get themeMode => _themeMode;
   bool get useDynamicColor => _useDynamicColor;
   Color? get systemSeedColor => _systemSeedColor;
+  bool get useCoverSeedColor => _useCoverSeedColor;
+  Color? get coverSeedColor => _coverSeedColor;
   bool get useAmStylePlayer => _useAmStylePlayer;
   Color? get manualSeedColor => _manualSeedColor;
   bool get useOledBlack => _useOledBlack;
@@ -54,13 +61,22 @@ class ThemeProvider extends ChangeNotifier {
   bool get lyricDoubleTapToJump => _lyricDoubleTapToJump;
 
   /// 当前生效的种子色优先级：
-  /// 1. 启用系统主题色且成功取到 → 系统主色
-  /// 2. 用户手动选择非 null → 手动色
-  /// 3. 默认紫色种子（[AppTheme.defaultSeedColor]）
-  Color get effectiveSeedColor =>
-      _useDynamicColor && _systemSeedColor != null
-          ? _systemSeedColor!
-          : (_manualSeedColor ?? AppTheme.defaultSeedColor);
+  /// 1. 启用封面动态取色且提取成功 → 歌曲封面主色（可叠加系统主题色，封面优先）
+  /// 2. 启用系统主题色且成功取到 → 系统主色
+  /// 3. 用户手动选择非 null → 手动色
+  /// 4. 默认紫色种子（[AppTheme.defaultSeedColor]）
+  ///
+  /// 封面取色开启但提取失败（[_coverSeedColor] 为 null，如无封面/本地图损坏）
+  /// 时自然回落到后续级别，完成兜底。
+  Color get effectiveSeedColor {
+    if (_useCoverSeedColor && _coverSeedColor != null) {
+      return _coverSeedColor!;
+    }
+    if (_useDynamicColor && _systemSeedColor != null) {
+      return _systemSeedColor!;
+    }
+    return _manualSeedColor ?? AppTheme.defaultSeedColor;
+  }
 
   /// 当前生效的 fontFamily（传给 AppTheme）：
   /// - [FontSource.system]：返回 null（让 Flutter 走系统字体链）
@@ -81,6 +97,7 @@ class ThemeProvider extends ChangeNotifier {
   ThemeProvider() {
     _loadThemeMode();
     _loadDynamicColor();
+    _loadUseCoverSeedColor();
     _loadAmStylePlayer();
     _loadManualSeedColor();
     _loadOledBlack();
@@ -171,6 +188,36 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_dynamicKey, enabled);
+  }
+
+  /// 加载「封面动态取色」开关持久化值，默认关闭。
+  Future<void> _loadUseCoverSeedColor() async {
+    final prefs = await SharedPreferences.getInstance();
+    _useCoverSeedColor = prefs.getBool(_coverDynamicKey) ?? false;
+    notifyListeners();
+  }
+
+  /// 切换「封面动态取色」开关。
+  ///
+  /// 与「使用系统主题色」相互独立、可叠加；都开启时封面取色优先
+  /// （见 [effectiveSeedColor]）。关闭时不立即清空 [_coverSeedColor]，
+  /// 由优先级链天然忽略；切歌桥接仍会持续更新缓存色。
+  Future<void> setUseCoverSeedColor(bool enabled) async {
+    if (_useCoverSeedColor == enabled) return;
+    _useCoverSeedColor = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_coverDynamicKey, enabled);
+  }
+
+  /// 更新封面提取色（由切歌桥接调用）。
+  ///
+  /// 仅运行时保存、不落盘（颜色随歌曲变化）；传 null 表示提取失败/无封面，
+  /// effectiveSeedColor 自动回落到系统壁纸色/手动色/默认紫。
+  void setCoverSeedColor(Color? color) {
+    if (_coverSeedColor == color) return;
+    _coverSeedColor = color;
+    notifyListeners();
   }
 
   /// 加载「Apple Music 风格播放页」开关持久化值，默认关闭。
