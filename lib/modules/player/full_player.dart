@@ -183,9 +183,10 @@ class _FullPlayerState extends State<FullPlayer>
   // ── 顶栏向下拖拽原路返回（与上滑展开镜像） ──
 
   /// 顶栏向下拖拽开始：接管路由 controller（路由已存在，无 push 事件流风险）。
+  /// Zen 模式下禁用拖拽收起（退出需长按专辑图），避免误触直接关闭播放器。
   void _onTopBarDragStart(DragStartDetails details) {
     final route = ModalRoute.of(context);
-    if (route is! DraggablePlayerRoute) return;
+    if (route is! DraggablePlayerRoute || _zenMode) return;
     _topBarDragRoute = route;
     // 停掉可能仍在进行的松手动画、重置 dismiss 标志，并从全屏开始拖拽：
     // 1) 修复连续拖拽不跟手（手指已移动一段才收到首个 update，若不停动画
@@ -1095,6 +1096,11 @@ class _FullPlayerState extends State<FullPlayer>
                 GestureDetector(
                   onTap: () => _tabController.animateTo(1),
                   behavior: HitTestBehavior.opaque,
+                  // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
+                  onVerticalDragStart: _onTopBarDragStart,
+                  onVerticalDragUpdate: _onTopBarDragUpdate,
+                  onVerticalDragEnd: _onTopBarDragEnd,
+                  onVerticalDragCancel: _onTopBarDragCancel,
                   child: _buildArtworkView(
                     playerProvider,
                     currentSong,
@@ -1327,6 +1333,11 @@ class _FullPlayerState extends State<FullPlayer>
                               GestureDetector(
                                 onTap: () => _tabController.animateTo(1),
                                 behavior: HitTestBehavior.opaque,
+                                // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
+                                onVerticalDragStart: _onTopBarDragStart,
+                                onVerticalDragUpdate: _onTopBarDragUpdate,
+                                onVerticalDragEnd: _onTopBarDragEnd,
+                                onVerticalDragCancel: _onTopBarDragCancel,
                                 child: _buildSongInfo(
                                   playerProvider,
                                   currentSong,
@@ -1559,10 +1570,18 @@ class _FullPlayerState extends State<FullPlayer>
                           controller: _tabController,
                           children: [
                             if (!_isPadMode || _isPhoneLandscape)
-                              _buildSongInfo(
-                                playerProvider,
-                                currentSong,
-                                colorScheme,
+                              // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
+                              GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onVerticalDragStart: _onTopBarDragStart,
+                                onVerticalDragUpdate: _onTopBarDragUpdate,
+                                onVerticalDragEnd: _onTopBarDragEnd,
+                                onVerticalDragCancel: _onTopBarDragCancel,
+                                child: _buildSongInfo(
+                                  playerProvider,
+                                  currentSong,
+                                  colorScheme,
+                                ),
                               ),
                             _isLoadingLyrics
                                 ? const Center(child: MD3ELoadingIndicator())
