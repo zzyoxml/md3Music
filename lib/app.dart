@@ -26,6 +26,7 @@ import 'modules/user/favorites_page.dart';
 import 'modules/player/full_player.dart';
 import 'modules/player/full_player_route.dart';
 import 'modules/player/mini_player.dart';
+import 'modules/player/player_drag_overlay.dart';
 import 'modules/playlist/playlist_page.dart';
 import 'modules/search/search_page.dart';
 import 'modules/settings/settings_page.dart';
@@ -236,6 +237,8 @@ class _AppViewState extends State<_AppView> {
               children: [
                 child!,
                 const DlnaCastingOverlay(),
+                // 上滑拖拽跟手覆盖层（在 Navigator 之上，拖拽期间显示预览）
+                const PlayerDragOverlay(),
               ],
             ),
           ),

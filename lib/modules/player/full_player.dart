@@ -108,6 +108,15 @@ class _FullPlayerState extends State<FullPlayer>
   /// 防止 PopScope 回调与 dismiss() 重复触发。
   bool _isDismissing = false;
 
+  /// 拖拽展开模式下的源路由：展开完成前延迟应用沉浸模式，
+  /// 避免拖动过程系统栏提前切换造成闪烁。
+  DraggablePlayerRoute? _dragRoute;
+
+  /// 系统栏/沉浸模式初始化是否已完成。
+  /// 需在 [didChangeDependencies] 中执行一次（[ModalRoute.of] 依赖
+  /// `_ModalScopeStatus` inherited widget，initState 阶段不可用）。
+  bool _systemUiInitialized = false;
+
   /// 上次的物理尺寸，用于 didChangeMetrics 方向变化防抖。
   /// 避免 immersiveSticky 下用户触摸边缘唤醒系统栏等 insets 抖动
   /// 引发无效的 applyImmersiveForOrientation 调用导致系统栏闪烁。
@@ -147,6 +156,15 @@ class _FullPlayerState extends State<FullPlayer>
     } else {
       Navigator.of(context).maybePop();
     }
+  }
+
+  /// 拖拽展开完成：切换沉浸模式并移除监听。
+  void _onDragRouteStatus(AnimationStatus status) {
+    if (status != AnimationStatus.completed) return;
+    applyImmersiveForOrientation();
+    _dragRoute?.controller.removeStatusListener(_onDragRouteStatus);
+    _dragRoute = null;
+    if (mounted) setState(() {});
   }
 
   /// 跳转到当前歌曲所在专辑页。
@@ -371,8 +389,6 @@ class _FullPlayerState extends State<FullPlayer>
       parent: _zenController,
       curve: Curves.easeInOut,
     );
-    // 进入播放器时会根据当前方向应用沉浸模式
-    applyImmersiveForOrientation();
     // 记录初始物理尺寸，避免首次 didChangeMetrics 因 _lastPhysicalSize==null 误判方向变化
     _lastPhysicalSize =
         WidgetsBinding.instance.platformDispatcher.views.first.physicalSize;
@@ -524,6 +540,21 @@ class _FullPlayerState extends State<FullPlayer>
   void didChangeDependencies() {
     super.didChangeDependencies();
     _checkPadMode();
+    // 系统栏/沉浸模式初始化：只在首次依赖建立时执行一次。
+    // ModalRoute.of 依赖 _ModalScopeStatus（inherited widget），
+    // 不能在 initState 中调用，否则报 dependOnInheritedWidgetOfExactType 错误
+    if (_systemUiInitialized) return;
+    _systemUiInitialized = true;
+    // 进入播放器时会根据当前方向应用沉浸模式；
+    // 拖拽展开模式下延迟到展开完成后再切换，避免拖动过程系统栏提前闪烁
+    final route = ModalRoute.of(context);
+    if (route is DraggablePlayerRoute && route.isDragMode) {
+      _dragRoute = route;
+      route.controller.addStatusListener(_onDragRouteStatus);
+    } else {
+      _dragRoute = null;
+      applyImmersiveForOrientation();
+    }
   }
 
   @override
@@ -593,6 +624,8 @@ class _FullPlayerState extends State<FullPlayer>
 
   @override
   void dispose() {
+    // 未完成展开就收起时，移除拖拽展开的监听（未切换系统栏，无需恢复）
+    _dragRoute?.controller.removeStatusListener(_onDragRouteStatus);
     _zenLongPressTimer?.cancel();
     try {
       context.read<PlayerProvider>().removeListener(_onPlayerSongChanged);
@@ -835,8 +868,9 @@ class _FullPlayerState extends State<FullPlayer>
     // 动画完成后用 removeRoute 移除路由（绕过 PopScope 避免死循环）。
     // 引用 kPlayerOverlayStyle 与 applyImmersiveForOrientation 共用同一 const 实例
     // 避免 SystemUiOverlayStyle 引用不等触发平台 channel 真实调用导致闪烁
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: kPlayerOverlayStyle,
+    // 拖拽展开模式下系统栏样式跟随展开进度，避免拖动过程提前切换（见 PlayerSystemUiScope）
+    return PlayerSystemUiScope(
+      dragRoute: _dragRoute,
       child: PopScope(
         canPop: false,
         onPopInvokedWithResult: (didPop, _) {

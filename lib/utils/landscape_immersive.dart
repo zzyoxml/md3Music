@@ -17,6 +17,21 @@ const SystemUiOverlayStyle kPlayerOverlayStyle = SystemUiOverlayStyle(
   systemNavigationBarIconBrightness: Brightness.light,
 );
 
+/// 主页面（非播放器）系统栏样式：surface 背景 + 主题亮度图标。
+///
+/// 供全屏播放器拖拽展开期间使用：展开完成前保持主页面外观，
+/// 避免系统栏提前切换成播放器的透明 + 浅色图标样式造成闪烁。
+SystemUiOverlayStyle mainPageOverlayStyle(BuildContext context) {
+  final scheme = Theme.of(context).colorScheme;
+  final dark = Theme.of(context).brightness == Brightness.dark;
+  return SystemUiOverlayStyle(
+    statusBarColor: scheme.surface,
+    statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+    systemNavigationBarColor: scheme.surface,
+    systemNavigationBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+  );
+}
+
 /// 根据当前屏幕方向启用或禁用全屏沉浸模式。
 ///
 /// - 横屏（landscape）：启用 [SystemUiMode.immersiveSticky]，隐藏状态栏和导航栏。
