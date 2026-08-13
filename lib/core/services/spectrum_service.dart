@@ -28,8 +28,10 @@ class SpectrumService {
   int bandCount = 40;
 
   /// 频谱数据广播流：每个元素是 [bandCount] 段归一化幅值（0..1）。
+  /// 同步分发（sync:true）：listener 在 add() 调用期间同步消费数据，
+  /// 从而允许复用输出缓冲（见 [_outBuf]），避免每帧分配新 List。
   final StreamController<List<double>> _controller =
-      StreamController<List<double>>.broadcast();
+      StreamController<List<double>>.broadcast(sync: true);
 
   Stream<List<double>> get spectrumStream => _controller.stream;
 
@@ -60,6 +62,10 @@ class SpectrumService {
     80,
     (i) => 0.5 + 0.5 * math.exp(-i * 0.05) + _rng.nextDouble() * 0.2,
   );
+
+  // 复用输出缓冲：避免每帧分配新 List（broadcast 流同步分发，复用安全）
+  List<double> _outBuf = List.filled(0, 0.0);
+  List<double> _nativeBuf = List.filled(0, 0.0);
 
   /// 当前播放状态（模拟模式用：播放时生成数据，暂停时静止）
   bool _isPlaying = false;
@@ -111,9 +117,22 @@ class SpectrumService {
 
   bool _receivedFft = false;
 
+  /// 暂停门控：暂停时强制频谱复位为 0。
+  /// 原因：ExoPlayer 暂停时会 flush 剩余 PCM（尾音），handleBuffer 仍被调用，
+  /// 真实 FFT 数据继续到达导致暂停时频谱抽搐。暂停时置 true，丢弃真实数据发全 0。
+  bool _gateZero = false;
+
   /// 设置播放状态（模拟模式用）
   void setPlaying(bool playing) {
     _isPlaying = playing;
+    _gateZero = !playing;
+    if (!playing) {
+      // 暂停：立即发一次全 0，让 UI 复位
+      final n = bandCount;
+      if (_outBuf.length != n) _outBuf = List<double>.filled(n, 0.0);
+      _outBuf.fillRange(0, n, 0.0);
+      if (!_controller.isClosed) _controller.add(_outBuf);
+    }
   }
 
   /// 启动模拟频谱生成器
@@ -126,22 +145,25 @@ class SpectrumService {
     _simulateTimer = Timer.periodic(const Duration(milliseconds: 50), (_) {
       if (!_running || _controller.isClosed) return;
       final n = bandCount;
+      // 复用输出缓冲，避免每帧分配
+      if (_outBuf.length != n) _outBuf = List<double>.filled(n, 0.0);
+      final bands = _outBuf;
       if (!_isPlaying) {
         // 暂停时：发送静止低柱（与无数据降级一致）
-        final bands = List<double>.filled(n, 0.0);
-        if (!_controller.isClosed) _controller.add(bands);
+        bands.fillRange(0, n, 0.0);
+        _controller.add(bands);
         return;
       }
       _simulateTime += 0.05;
-      final bands = List<double>.generate(n, (i) {
+      for (int i = 0; i < n; i++) {
         // sin 波动 + 随机噪声 + 频段衰减
         final phase = _phases[i % _phases.length];
         final decay = _decays[i % _decays.length];
         final wave = (math.sin((_simulateTime * 2.0 + phase) * 2 * math.pi) + 1) / 2;
         final noise = _rng.nextDouble() * 0.3;
-        return (wave * decay * 0.7 + noise * decay * 0.3).clamp(0.05, 1.0);
-      });
-      if (!_controller.isClosed) _controller.add(bands);
+        bands[i] = (wave * decay * 0.7 + noise * decay * 0.3).clamp(0.05, 1.0);
+      }
+      _controller.add(bands);
     });
   }
 
@@ -174,13 +196,18 @@ class SpectrumService {
         _receivedFft = true;
         // 收到真实 FFT 数据，停止模拟模式
         if (_simulated) _stopSimulated();
-        // 解析原生 40 段数据
-        final native = List<double>.filled(raw.length, 0.0);
+        // 暂停门控：暂停时丢弃真实数据（UI 已收到全 0 复位，不再更新）
+        if (_gateZero) return null;
+        // 复用原生缓冲解析，避免每帧分配
+        if (_nativeBuf.length != raw.length) {
+          _nativeBuf = List<double>.filled(raw.length, 0.0);
+        }
+        final native = _nativeBuf;
         for (int i = 0; i < native.length; i++) {
           final v = raw[i];
-          if (v is num) native[i] = v.toDouble().clamp(0.0, 1.0);
+          native[i] = v is num ? v.toDouble().clamp(0.0, 1.0) : 0.0;
         }
-        // 重采样到用户配置的 bandCount
+        // 重采样到用户配置的 bandCount（长度相等时直接复用 native）
         final bands = _resample(native, bandCount);
         if (!_controller.isClosed) _controller.add(bands);
       }
@@ -189,10 +216,15 @@ class SpectrumService {
   }
 
   /// 线性插值重采样：将 [input] 重采样到 [targetCount] 段。
+  /// 长度相等时直接返回 [input]（复用缓冲，无分配）。
   List<double> _resample(List<double> input, int targetCount) {
     if (input.isEmpty) return List<double>.filled(targetCount, 0.0);
     if (input.length == targetCount) return input;
-    final result = List<double>.filled(targetCount, 0.0);
+    // 复用输出缓冲
+    if (_outBuf.length != targetCount) {
+      _outBuf = List<double>.filled(targetCount, 0.0);
+    }
+    final result = _outBuf;
     for (int i = 0; i < targetCount; i++) {
       final srcIdx = i * (input.length - 1) / (targetCount - 1);
       final lo = srcIdx.floor();

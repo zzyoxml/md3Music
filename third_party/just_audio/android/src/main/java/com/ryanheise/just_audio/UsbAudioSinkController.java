@@ -65,6 +65,26 @@ public final class UsbAudioSinkController {
         return lastPlayerVolume;
     }
 
+    // ── PCM 频谱捕获（MD3Music 频谱功能用） ────────────────────────
+    // 无论是否 USB 独占，都在 handleBuffer 截取解码后的原始 PCM 快照。
+    // 该数据在 AudioFlinger 混音之前，不受系统媒体音量影响 —— 静音播放时
+    // 频谱依然有真实数据（Visualizer 做不到这点）。
+    public interface PcmCaptureListener {
+        /**
+         * @param buffer      当前块 PCM（position 指向读取起点，调用方勿改动原始 buffer）
+         * @param encoding    C.ENCODING_PCM_16BIT / PCM_24BIT / PCM_32BIT / PCM_FLOAT
+         * @param sampleRate  解码采样率（Hz）
+         * @param channelCount 声道数
+         */
+        void onPcm(java.nio.ByteBuffer buffer, int encoding, int sampleRate, int channelCount);
+    }
+
+    private static volatile PcmCaptureListener pcmCaptureListener = null;
+
+    public static void setPcmCaptureListener(PcmCaptureListener listener) {
+        pcmCaptureListener = listener;
+    }
+
     /** 所有存活包装器（应用可能创建多个播放器实例）。 */
     private static final List<UsbInterceptAudioSink> liveSinks = new CopyOnWriteArrayList<>();
 
@@ -272,6 +292,17 @@ public final class UsbAudioSinkController {
         @Override
         public boolean handleBuffer(ByteBuffer buffer, long presentationTimeUs, int encodedAccessUnitCount)
                 throws InitializationException, WriteException {
+            // ── 频谱 PCM 捕获：无论是否 USB 独占都截取（解码后、混音前，静音也有数据） ──
+            PcmCaptureListener pcmListener = pcmCaptureListener;
+            if (pcmListener != null && currentSampleRate > 0 && buffer != null && buffer.remaining() > 0) {
+                try {
+                    pcmListener.onPcm(
+                            buffer.duplicate().order(buffer.order()),
+                            currentEncoding, currentSampleRate, currentChannelCount);
+                } catch (Exception e) {
+                    Log.w(TAG, "pcm capture listener threw: " + e.getMessage());
+                }
+            }
             UsbAudioSink stream = activeStream;
             if (exclusiveEnabled && stream != null && stream.isAlive()) {
                 muteDelegateIfNeeded();

@@ -33,6 +33,7 @@ import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/apple_lyrics/preview/lyrics_preview_page.dart';
 import '../../widgets/seed_color_picker.dart';
 import '../../widgets/usb_exclusive_section.dart';
+import '../player/mini_player.dart';
 import 'equalizer_settings_page.dart';
 
 /// CI compile-time version injection via --dart-define=APP_VERSION=X
@@ -49,7 +50,8 @@ class SettingsPage extends StatefulWidget {
   State<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+class _SettingsPageState extends State<SettingsPage>
+    with SingleTickerProviderStateMixin {
   final SettingsRepository _settingsRepository = SettingsRepository();
   ThemeMode _themeMode = ThemeMode.system;
   String _defaultQuality = '128';
@@ -88,6 +90,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _pauseFadeEnabled = false;
   // 播放时保持屏幕常亮开关
   bool _keepScreenOn = false;
+  // MiniPlayer 滑动切歌开关（默认开启）
+  bool _miniPlayerSwipeSwitch = true;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
   // 音乐频谱环绕显示开关（默认关闭，仅 Android 生效）
@@ -99,10 +103,23 @@ class _SettingsPageState extends State<SettingsPage> {
   // 频谱背景层参数（仅 style=2 时使用）
   double _spectrumBgOpacity = 0.4;
   double _spectrumBgHeight = 0.4;
+  // 环绕频谱透明度（style 0/1 分开记忆，默认不透明）
+  double _spectrumBarOpacity = 1.0;
+  double _spectrumCurveOpacity = 1.0;
+  // 频谱动态取色独立开关（默认关闭）：AM 播放器频谱颜色取封面主色 50/50 混合
+  bool _spectrumDynamicColor = false;
 
   @override
   void initState() {
     super.initState();
+    // 页面切换过渡控制器：fade 0→1。切换流程 = 先 reverse 淡出旧页 →
+    // 完成回调中切换内容 → 再 forward 淡入新页（严格串行，不重叠）。
+    // 每段 120ms（总 ~240ms），过渡轻快。
+    _sectionTransition = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+      value: 1.0,
+    );
     _loadSettings();
     _loadVersion();
     _loadLyriconSettings();
@@ -113,6 +130,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   void dispose() {
+    _sectionTransition.dispose();
     LyriconProviderService.instance.removeListener(_onLyriconStateChanged);
     DesktopLyricService.instance.removeListener(_onDesktopLyricChanged);
     super.dispose();
@@ -210,6 +228,11 @@ class _SettingsPageState extends State<SettingsPage> {
     final spectrumStyle = await _settingsRepository.getSpectrumStyle();
     final spectrumBgOpacity = await _settingsRepository.getSpectrumBgOpacity();
     final spectrumBgHeight = await _settingsRepository.getSpectrumBgHeight();
+    final spectrumBarOpacity = await _settingsRepository.getSpectrumBarOpacity();
+    final spectrumCurveOpacity = await _settingsRepository.getSpectrumCurveOpacity();
+    final spectrumDynamicColor = await _settingsRepository.getSpectrumDynamicColor();
+    final miniPlayerSwipeSwitch = await _settingsRepository
+        .getMiniPlayerSwipeSwitchEnabled();
 
     setState(() {
       _themeMode = themeMode;
@@ -238,7 +261,13 @@ class _SettingsPageState extends State<SettingsPage> {
       _spectrumStyle = spectrumStyle;
       _spectrumBgOpacity = spectrumBgOpacity;
       _spectrumBgHeight = spectrumBgHeight;
+      _spectrumBarOpacity = spectrumBarOpacity;
+      _spectrumCurveOpacity = spectrumCurveOpacity;
+      _spectrumDynamicColor = spectrumDynamicColor;
+      _miniPlayerSwipeSwitch = miniPlayerSwipeSwitch;
     });
+    // 同步到全局开关，让已挂载的 MiniPlayer 实例实时响应
+    miniPlayerSwipeSwitchEnabled.value = miniPlayerSwipeSwitch;
   }
 
   Future<void> _loadVersion() async {
@@ -261,54 +290,132 @@ class _SettingsPageState extends State<SettingsPage> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    // 是否处于二级页面（分类详情）
+    final inSubpage = _activeSection != null;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
-      body: ListView(
-        children: [
-          _buildSectionHeader('外观'),
-          _buildSettingsCard(_buildAppearanceSection(colorScheme)),
-          _buildSectionHeader('播放页样式'),
-          _buildSettingsCard(_buildPlayerStyleSection(colorScheme)),
-          _buildSectionHeader('歌词'),
-          _buildSettingsCard(_buildLyricSection(colorScheme)),
-          _buildSectionHeader('播放'),
-          _buildSettingsCard(_buildPlaybackSection(colorScheme)),
-          _buildSectionHeader('USB 独占'),
-          _buildSettingsCard(
-            UsbExclusiveSection(
-              // 拔线时自动暂停播放（与歌曲信息页行为一致）
-              onAutoPause: () => context.read<PlayerProvider>().pause(),
-            ),
+    return PopScope(
+      // 二级页面时拦截系统返回键：先回到分类总览，而非直接退出设置页
+      canPop: !inSubpage,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        _closeSection();
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: inSubpage
+              ? IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: _closeSection,
+                )
+              : null,
+          title: Text(inSubpage ? _activeSection! : '设置'),
+        ),
+        // 页面切换过渡：先淡出旧页 → 切换内容 → 再淡入新页（严格串行）。
+        // 淡入方向按页面层级区分：进入二级页自右侧推进、返回总览自左侧退回。
+        body: FadeTransition(
+          opacity: _sectionTransition,
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: Offset(inSubpage ? 0.03 : -0.03, 0),
+              end: Offset.zero,
+            ).animate(_sectionTransition),
+            child: inSubpage
+                ? ListView(
+                    children: [
+                      _buildSettingsCard(_buildActiveSectionContent(colorScheme)),
+                      const SizedBox(height: 32),
+                    ],
+                  )
+                : ListView(
+                    children: [
+                      ..._buildCategoryEntries(colorScheme),
+                      const SizedBox(height: 32),
+                    ],
+                  ),
           ),
-          _buildSectionHeader('主页管理'),
-          _buildSettingsCard(_buildTabManagementSection(colorScheme)),
-          _buildSectionHeader('边听边存'),
-          _buildSettingsCard(_buildStreamCacheSection(colorScheme)),
-          _buildSectionHeader('下载'),
-          _buildSettingsCard(_buildDownloadSection(colorScheme)),
-          _buildSectionHeader('在线音乐'),
-          _buildSettingsCard(_buildOnlineMusicSection(colorScheme)),
-          _buildSectionHeader('缓存与数据'),
-          _buildSettingsCard(_buildCacheSection(colorScheme)),
-          _buildSectionHeader('关于'),
-          _buildSettingsCard(_buildAboutSection(colorScheme)),
-          const SizedBox(height: 32),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildSectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-          color: Theme.of(context).colorScheme.primary,
+  /// 当前激活的二级页面标题；null 表示分类总览页
+  String? _activeSection;
+
+  /// 页面切换过渡控制器（fade 0→1，见 initState）
+  late AnimationController _sectionTransition;
+
+  /// 进入分类二级页面：先快速淡出总览，切换内容后再淡入（严格串行）
+  void _openSection(String title) {
+    if (_sectionTransition.isAnimating || _activeSection == title) return;
+    // 已在二级页面（理论上不会发生，防御性处理）：直接切换内容
+    if (_activeSection != null) {
+      setState(() => _activeSection = title);
+      return;
+    }
+    // 淡出更快（90ms），淡入稍长（160ms）带层次，整体跟手
+    _sectionTransition.duration = const Duration(milliseconds: 90);
+    _sectionTransition.reverse().whenComplete(() {
+      if (!mounted) return;
+      setState(() => _activeSection = title);
+      _sectionTransition.duration = const Duration(milliseconds: 160);
+      _sectionTransition.forward();
+    });
+  }
+
+  /// 返回分类总览：先快速淡出二级页，切换回总览后再淡入（严格串行）
+  void _closeSection() {
+    if (_sectionTransition.isAnimating || _activeSection == null) return;
+    _sectionTransition.duration = const Duration(milliseconds: 90);
+    _sectionTransition.reverse().whenComplete(() {
+      if (!mounted) return;
+      setState(() => _activeSection = null);
+      _sectionTransition.duration = const Duration(milliseconds: 160);
+      _sectionTransition.forward();
+    });
+  }
+
+  /// 分类条目：图标 + 标题 + 二级页面内容构建器
+  List<(String, IconData, Widget Function(ColorScheme))> get _categories => [
+        ('外观', Icons.palette_outlined, _buildAppearanceSection),
+        ('播放页样式', Icons.music_note_outlined, _buildPlayerStyleSection),
+        ('歌词', Icons.lyrics_outlined, _buildLyricSection),
+        ('播放', Icons.play_circle_outline, _buildPlaybackSection),
+        (
+          'USB 独占',
+          Icons.usb,
+          (colorScheme) => UsbExclusiveSection(
+            onAutoPause: () => context.read<PlayerProvider>().pause(),
+          ),
         ),
-      ),
-    );
+        ('主页管理', Icons.tab_outlined, _buildTabManagementSection),
+        ('边听边存', Icons.download_outlined, _buildStreamCacheSection),
+        ('下载', Icons.file_download_outlined, _buildDownloadSection),
+        ('在线音乐', Icons.cloud_outlined, _buildOnlineMusicSection),
+        ('缓存与数据', Icons.storage_outlined, _buildCacheSection),
+        ('关于', Icons.info_outline, _buildAboutSection),
+      ];
+
+  /// 二级页面内容：根据 _activeSection 匹配分类构建器
+  Widget _buildActiveSectionContent(ColorScheme colorScheme) {
+    for (final (title, _, builder) in _categories) {
+      if (title == _activeSection) {
+        return builder(colorScheme);
+      }
+    }
+    return const SizedBox.shrink();
+  }
+
+  /// 分类总览条目列表
+  List<Widget> _buildCategoryEntries(ColorScheme colorScheme) {
+    return [
+      for (final (title, icon, _) in _categories)
+        ListTile(
+          leading: Icon(icon),
+          title: Text(title),
+          trailing: const Icon(Icons.chevron_right, size: 20),
+          onTap: () => _openSection(title),
+        ),
+    ];
   }
 
   /// 将 section 内容包裹在圆角矩形卡片内，提升视觉分组。
@@ -931,6 +1038,56 @@ class _SettingsPageState extends State<SettingsPage> {
               ],
             ),
           ),
+        // 频谱动态取色：AM 播放器频谱颜色取封面主色（50% 白 + 50% 取色混合）
+        if (_spectrumEnabled && Platform.isAndroid)
+          SwitchListTile(
+            title: const Text('频谱动态取色'),
+            subtitle: const Text('AM 播放器频谱颜色取自封面主色（白色与取色各半混合，深色自动提亮）'),
+            value: _spectrumDynamicColor,
+            onChanged: (v) {
+              setState(() => _spectrumDynamicColor = v);
+              _settingsRepository.setSpectrumDynamicColor(v);
+            },
+          ),
+        // 频谱透明度滑块：按当前样式显示对应项（三个分开记忆）
+        if (_spectrumEnabled && Platform.isAndroid)
+          // style 0：柱状图透明度；style 1：曲线透明度
+          if (_spectrumStyle == 0)
+            ListTile(
+              title: const Text('频谱柱状图透明度'),
+              subtitle: Slider(
+                value: _spectrumBarOpacity,
+                min: 0.1,
+                max: 1.0,
+                divisions: 9,
+                label: '${(_spectrumBarOpacity * 100).round()}%',
+                onChanged: (v) {
+                  setState(() => _spectrumBarOpacity = v);
+                },
+                onChangeEnd: (v) {
+                  _settingsRepository.setSpectrumBarOpacity(v);
+                },
+              ),
+              trailing: Text('${(_spectrumBarOpacity * 100).round()}%'),
+            )
+          else if (_spectrumStyle == 1)
+            ListTile(
+              title: const Text('频谱曲线透明度'),
+              subtitle: Slider(
+                value: _spectrumCurveOpacity,
+                min: 0.1,
+                max: 1.0,
+                divisions: 9,
+                label: '${(_spectrumCurveOpacity * 100).round()}%',
+                onChanged: (v) {
+                  setState(() => _spectrumCurveOpacity = v);
+                },
+                onChangeEnd: (v) {
+                  _settingsRepository.setSpectrumCurveOpacity(v);
+                },
+              ),
+              trailing: Text('${(_spectrumCurveOpacity * 100).round()}%'),
+            ),
         // 背景层参数：仅 style=2 时显示
         if (_spectrumEnabled && _spectrumStyle == 2 && Platform.isAndroid) ...[
           ListTile(
@@ -1189,6 +1346,20 @@ class _SettingsPageState extends State<SettingsPage> {
             });
             _settingsRepository.setKeepScreenOn(value);
             WakelockService.instance.setSettingEnabled(value);
+          },
+        ),
+        SwitchListTile(
+          title: const Text('MiniPlayer 滑动切歌'),
+          subtitle: const Text('在迷你播放条上左右滑动切换上一首/下一首'),
+          value: _miniPlayerSwipeSwitch,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            setState(() {
+              _miniPlayerSwipeSwitch = value;
+            });
+            // 同步到全局开关，让已挂载的 MiniPlayer 实例实时生效
+            miniPlayerSwipeSwitchEnabled.value = value;
+            _settingsRepository.setMiniPlayerSwipeSwitchEnabled(value);
           },
         ),
       ],

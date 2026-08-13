@@ -4,10 +4,17 @@ import 'package:provider/provider.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/theme/motion_constants.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/smart_artwork_image.dart';
 import 'full_player_route.dart';
+
+/// 全局开关：MiniPlayer 是否支持水平滑动切歌（设置页可切换，默认开启）。
+/// 用全局 ValueNotifier 而非 State 局部状态，保证各页面 MiniPlayer 实例
+/// 在设置变更后实时响应。
+final ValueNotifier<bool> miniPlayerSwipeSwitchEnabled =
+    ValueNotifier<bool>(true);
 
 /// 底部常驻迷你播放条。
 ///
@@ -46,6 +53,14 @@ class _MiniPlayerState extends State<MiniPlayer>
       vsync: this,
       duration: const Duration(milliseconds: 250),
     );
+    // 从本地持久化读取「滑动切歌」开关，覆盖默认值（默认开启）
+    _loadSwipeSwitchSetting();
+  }
+
+  /// 读取本地「MiniPlayer 滑动切歌」设置并同步到全局开关
+  Future<void> _loadSwipeSwitchSetting() async {
+    final enabled = await SettingsRepository().getMiniPlayerSwipeSwitchEnabled();
+    miniPlayerSwipeSwitchEnabled.value = enabled;
   }
 
   @override
@@ -128,24 +143,30 @@ class _MiniPlayerState extends State<MiniPlayer>
           child: Opacity(opacity: opacity, child: child),
         );
       },
-      child: GestureDetector(
-        // 点击展开 FullPlayer
-        onTap: () => Navigator.of(context).push(fullPlayerRoute(context)),
-        onHorizontalDragStart: _onHorizontalDragStart,
-        onHorizontalDragUpdate: _onHorizontalDragUpdate,
-        onHorizontalDragEnd: _onHorizontalDragEnd,
-        behavior: HitTestBehavior.opaque,
-        // P0: 进度只订阅 positionNotifier（高频 200ms），
-        // 不再因 positionStream 触发整个 MiniPlayer 重建（封面/标题不变）
-        child: ValueListenableBuilder<Duration>(
-          valueListenable: playerProvider.positionNotifier,
-          builder: (context, position, _) {
-            final progress = duration.inMilliseconds > 0
-                ? position.inMilliseconds / duration.inMilliseconds
-                : 0.0;
-            return _buildContent(
-                context, playerProvider, currentSong, colorScheme, progress);
-          },
+      child: ValueListenableBuilder<bool>(
+        // 滑动切歌开关关闭时，不注册水平拖动回调，仅保留点击展开
+        valueListenable: miniPlayerSwipeSwitchEnabled,
+        builder: (context, swipeEnabled, _) => GestureDetector(
+          // 点击展开 FullPlayer
+          onTap: () => Navigator.of(context).push(fullPlayerRoute(context)),
+          onHorizontalDragStart:
+              swipeEnabled ? _onHorizontalDragStart : null,
+          onHorizontalDragUpdate:
+              swipeEnabled ? _onHorizontalDragUpdate : null,
+          onHorizontalDragEnd: swipeEnabled ? _onHorizontalDragEnd : null,
+          behavior: HitTestBehavior.opaque,
+          // P0: 进度只订阅 positionNotifier（高频 200ms），
+          // 不再因 positionStream 触发整个 MiniPlayer 重建（封面/标题不变）
+          child: ValueListenableBuilder<Duration>(
+            valueListenable: playerProvider.positionNotifier,
+            builder: (context, position, _) {
+              final progress = duration.inMilliseconds > 0
+                  ? position.inMilliseconds / duration.inMilliseconds
+                  : 0.0;
+              return _buildContent(
+                  context, playerProvider, currentSong, colorScheme, progress);
+            },
+          ),
         ),
       ),
     );

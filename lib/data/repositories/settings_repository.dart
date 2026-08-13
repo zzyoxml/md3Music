@@ -389,6 +389,61 @@ class SettingsRepository {
     await prefs.setDouble(_keySpectrumBgHeight, value);
   }
 
+  // ── 环绕频谱透明度（柱状图 / 曲线，分开记忆） ──
+  static const String _keySpectrumBarOpacity = 'settings_spectrum_bar_opacity';
+  static const String _keySpectrumCurveOpacity = 'settings_spectrum_curve_opacity';
+
+  /// 频谱动态取色（独立开关，默认关闭）：开启后 AM 播放器频谱颜色取封面主色
+  /// 与白色 50/50 混合（与歌词动态取色无关）。
+  static const String _keySpectrumDynamicColor = 'settings_spectrum_dynamic_color';
+
+  /// 柱状图频谱透明度（0.1~1.0，默认 1.0 不透明）。
+  Future<double> getSpectrumBarOpacity() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_keySpectrumBarOpacity) ?? 1.0;
+  }
+
+  Future<void> setSpectrumBarOpacity(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keySpectrumBarOpacity, value);
+  }
+
+  /// 曲线频谱透明度（0.1~1.0，默认 1.0 不透明）。
+  Future<double> getSpectrumCurveOpacity() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_keySpectrumCurveOpacity) ?? 1.0;
+  }
+
+  Future<void> setSpectrumCurveOpacity(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keySpectrumCurveOpacity, value);
+  }
+
+  /// 频谱动态取色开关（默认关闭）。
+  Future<bool> getSpectrumDynamicColor() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keySpectrumDynamicColor) ?? false;
+  }
+
+  Future<void> setSpectrumDynamicColor(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keySpectrumDynamicColor, value);
+  }
+
+  // ===== MiniPlayer 滑动切歌 =====
+  static const String _keyMiniPlayerSwipeSwitch = 'settings_mini_player_swipe_switch';
+
+  /// MiniPlayer 是否支持水平滑动切歌，默认开启。
+  Future<bool> getMiniPlayerSwipeSwitchEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyMiniPlayerSwipeSwitch) ?? true;
+  }
+
+  Future<void> setMiniPlayerSwipeSwitchEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyMiniPlayerSwipeSwitch, value);
+  }
+
   // ===== 主页 Tab 配置 =====
   static const String _keyTabOrder = 'settings_tab_order';
   static const String _keyHiddenTabs = 'settings_hidden_tabs';
