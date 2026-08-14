@@ -24,6 +24,7 @@ import '../onboarding/onboarding_page.dart';
 import '../onboarding/user_agreement_page.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../providers/shortcut_config_provider.dart';
 import '../../providers/tab_config_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/kugou_server.dart';
@@ -393,6 +394,11 @@ class _SettingsPageState extends State<SettingsPage>
           ),
         ),
         ('主页管理', Icons.tab_outlined, _buildTabManagementSection),
+        (
+          '桌面快捷方式',
+          Icons.bolt_outlined,
+          _buildDesktopShortcutSection,
+        ),
         ('边听边存', Icons.download_outlined, _buildStreamCacheSection),
         ('下载', Icons.file_download_outlined, _buildDownloadSection),
         ('在线音乐', Icons.cloud_outlined, _buildOnlineMusicSection),
@@ -1412,6 +1418,31 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
+  /// 桌面快捷方式 section：Android 长按应用图标快捷入口的显示/隐藏、排序
+  Widget _buildDesktopShortcutSection(ColorScheme colorScheme) {
+    return Column(
+      children: [
+        ListTile(
+          leading: const Icon(Icons.bolt),
+          title: const Text('桌面快捷方式'),
+          subtitle: const Text('长按应用图标的快捷入口，显示/隐藏、拖拽排序'),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => _showDesktopShortcutSheet(),
+        ),
+      ],
+    );
+  }
+
+  /// 弹出桌面快捷方式管理面板：支持拖拽排序 + 显示/隐藏开关。
+  void _showDesktopShortcutSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => const _DesktopShortcutPanel(),
+    );
+  }
+
   /// 边听边存 section：开关、容量上限、缓存可视化、清理按钮
   Widget _buildStreamCacheSection(ColorScheme colorScheme) {
     return Column(
@@ -2199,7 +2230,7 @@ class _TabManagementPanel extends StatelessWidget {
                   return ListTile(
                     key: ValueKey(tab.id),
                     leading: Icon(
-                      _getTabIcon(tab.id),
+                      _tabIconForId(tab.id),
                       color: isHidden
                           ? colorScheme.onSurfaceVariant
                           : colorScheme.primary,
@@ -2246,47 +2277,146 @@ class _TabManagementPanel extends StatelessWidget {
       ),
     );
   }
+}
 
-  IconData _getTabIcon(String tabId) {
-    switch (tabId) {
-      case 'launchpad':
-        // 与主页 tab 图标保持一致（见 app.dart 的 launchpad case）
-        return Icons.grid_view;
-      case 'discover':
-        return Icons.explore;
-      case 'coverflow':
-        // 与主页 tab 图标保持一致（见 app.dart 的 coverflow case）
-        return Icons.album;
-      case 'library':
-        return Icons.library_music;
-      case 'favorites':
-        return Icons.favorite;
-      case 'fm':
-        return Icons.radio;
-      case 'search':
-        return Icons.search;
-      case 'charts':
-        return Icons.leaderboard;
-      case 'ip':
-        return Icons.edit_note;
-      case 'recognition':
-        return Icons.mic;
-      case 'audiobook':
-        return Icons.auto_stories;
-      case 'scene':
-        // 与主页 tab 图标保持一致（见 app.dart 的 scene case）
-        return Icons.landscape;
-      case 'channel':
-        // 与主页 tab 图标保持一致（见 app.dart 的 channel case）
-        return Icons.dynamic_feed;
-      case 'settings':
-        // 与主页 tab 图标保持一致（见 app.dart 的 settings case）
-        return Icons.settings;
-      case 'user':
-        return Icons.person;
-      default:
-        return Icons.circle;
-    }
+/// 主页 tab / 桌面快捷方式的图标映射（与 app.dart / launchpad 保持一致）。
+IconData _tabIconForId(String tabId) {
+  switch (tabId) {
+    case 'launchpad':
+      // 与主页 tab 图标保持一致（见 app.dart 的 launchpad case）
+      return Icons.grid_view;
+    case 'discover':
+      return Icons.explore;
+    case 'coverflow':
+      // 与主页 tab 图标保持一致（见 app.dart 的 coverflow case）
+      return Icons.album;
+    case 'library':
+      return Icons.library_music;
+    case 'favorites':
+      return Icons.favorite;
+    case 'fm':
+      return Icons.radio;
+    case 'search':
+      return Icons.search;
+    case 'charts':
+      return Icons.leaderboard;
+    case 'ip':
+      return Icons.edit_note;
+    case 'recognition':
+      return Icons.mic;
+    case 'audiobook':
+      return Icons.auto_stories;
+    case 'scene':
+      // 与主页 tab 图标保持一致（见 app.dart 的 scene case）
+      return Icons.landscape;
+    case 'channel':
+      // 与主页 tab 图标保持一致（见 app.dart 的 channel case）
+      return Icons.dynamic_feed;
+    case 'settings':
+      // 与主页 tab 图标保持一致（见 app.dart 的 settings case）
+      return Icons.settings;
+    case 'user':
+      return Icons.person;
+    default:
+      return Icons.circle;
+  }
+}
+
+/// 桌面快捷方式管理面板：支持拖拽排序 + 显示/隐藏开关。
+///
+/// 配置持久化由 [ShortcutConfigProvider] 负责，变更后 _AppView 会重新
+/// 注册 Android 长按应用图标快捷入口。
+class _DesktopShortcutPanel extends StatelessWidget {
+  const _DesktopShortcutPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final shortcutConfig = context.watch<ShortcutConfigProvider>();
+    final allShortcuts = shortcutConfig.allShortcuts;
+    final hiddenIds = shortcutConfig.hiddenIds;
+
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.85,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '桌面快捷方式',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => shortcutConfig.resetToDefault(),
+                    child: const Text('重置'),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                '长按应用图标弹出；拖拽排序、开关显示/隐藏',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ReorderableListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                itemCount: allShortcuts.length,
+                onReorder: (oldIndex, newIndex) {
+                  shortcutConfig.reorderShortcuts(oldIndex, newIndex);
+                },
+                itemBuilder: (context, index) {
+                  final shortcut = allShortcuts[index];
+                  final isHidden = hiddenIds.contains(shortcut.id);
+                  return ListTile(
+                    key: ValueKey(shortcut.id),
+                    leading: Icon(
+                      _tabIconForId(shortcut.id),
+                      color: isHidden
+                          ? colorScheme.onSurfaceVariant
+                          : colorScheme.primary,
+                    ),
+                    title: Text(
+                      shortcut.label,
+                      style: TextStyle(
+                        color: isHidden ? colorScheme.onSurfaceVariant : null,
+                      ),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Switch(
+                          value: !isHidden,
+                          onChanged: (_) {
+                            HapticFeedback.lightImpact();
+                            shortcutConfig.toggleShortcutVisibility(shortcut.id);
+                          },
+                        ),
+                        Icon(
+                          Icons.drag_handle,
+                          size: 20,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

@@ -42,8 +42,9 @@ import '../../widgets/md3_lyric_preferences_panel.dart';
 import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_transport_row.dart';
+import '../../widgets/menu_action_cell.dart';
 import '../../widgets/player_artwork_image.dart';
-import '../../widgets/player_playlist_dialog.dart';
+import '../../widgets/player_playlist_view.dart';
 import '../../widgets/spectrum_artwork.dart';
 import '../../widgets/spectrum_background.dart';
 import 'dlna_cast_sheet.dart';
@@ -99,7 +100,7 @@ class _FullPlayerState extends State<FullPlayer>
 
   // Pad 模式：左侧已有封面，隐藏"封面"Tab，只保留 2 个 Tab
   bool _isPadMode = false;
-  int _currentTabLength = 3;
+  int _currentTabLength = 4;
   // 手机横屏模式：保留封面Tab，但隐藏左侧歌曲信息
   bool _isPhoneLandscape = false;
   // 写真背景是否实际有图片可显示：写真无图时不隐藏左侧封面，避免封面消失
@@ -482,7 +483,7 @@ class _FullPlayerState extends State<FullPlayer>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this, initialIndex: 1);
     // 桌面歌词状态变化时刷新 UI（同步歌词按钮 icon）
     _onDesktopLyricChanged = () {
       if (mounted) setState(() {});
@@ -638,22 +639,24 @@ class _FullPlayerState extends State<FullPlayer>
     final shouldBePadMode = deviceIsPad || width >= 600;
     // 手机横屏：宽度 >= 600 但设备不是 Pad
     final shouldBePhoneLandscape = !deviceIsPad && width >= 600;
-    final newTabLength = shouldBePadMode ? 2 : 3;
+    // 播放列表为最左 tab（index 0），封面仅在非 Pad（或手机横屏）时作为 tab。
+    // 手机竖屏/横屏：4 tab [播放列表, 封面, 歌词, 评论]；Pad：3 tab [播放列表, 歌词, 评论]。
+    final newTabLength = (shouldBePadMode && !shouldBePhoneLandscape) ? 3 : 4;
 
     if (_currentTabLength != newTabLength) {
       final currentIndex = _tabController.index.clamp(0, newTabLength - 1);
       _tabController.dispose();
       _currentTabLength = newTabLength;
-      // Pad 模式首次进入时（从 3 tab 切到 2 tab）默认打开歌词。
-      // 注意：children 列表在 pad 模式被 `if (!_isPadMode)` 跳过 SongInfo，
-      // 所以 children 实际只有 2 个：index 0 = LyricsView, index 1 = CommentsView。
-      // 因此歌词在 pad 模式下的 index 是 0，不是 1。
+      // Pad 模式首次进入时（从 4 tab 切到 3 tab）默认打开歌词。
+      // 注意：children 列表在 pad 模式被 `if (!_isPadMode)` 跳过封面，
+      // 所以 children 实际只有 3 个：index 0 = 播放列表, index 1 = LyricsView, index 2 = CommentsView。
+      // 因此歌词在 pad 模式下的 index 是 1，不是 2。
       // 后续用户手动切换 tab 后不强制重置，保留用户当前选择。
-      final isFirstEnterPad = shouldBePadMode && newTabLength == 2;
+      final isFirstEnterPad = shouldBePadMode && newTabLength == 3;
       _tabController = TabController(
         length: newTabLength,
         vsync: this,
-        initialIndex: isFirstEnterPad ? 0 : currentIndex,
+        initialIndex: isFirstEnterPad ? 1 : currentIndex,
       );
       _isPadMode = shouldBePadMode;
       _isPhoneLandscape = shouldBePhoneLandscape;
@@ -809,10 +812,14 @@ class _FullPlayerState extends State<FullPlayer>
   void _onArtworkLongPressStart() {
     if (!_zenMode) return;
     _zenLongPressActive = true;
+    // 轻震：提示用户已开始长按倒计时
+    HapticFeedback.lightImpact();
     setState(() {}); // 触发文字提示显示
     _zenLongPressTimer = Timer(const Duration(milliseconds: 2000), () {
       if (_zenLongPressActive && _zenMode) {
         _zenLongPressActive = false;
+        // 中震：确认长按达到 2000ms，Zen 模式退出
+        HapticFeedback.mediumImpact();
         _exitZenMode();
       }
     });
@@ -828,26 +835,30 @@ class _FullPlayerState extends State<FullPlayer>
   }
 
   /// Zen 模式长按退出提示层：覆盖在封面上，半透明黑色背景 + 文字提示。
-  /// 仅在长按激活时显示，IgnorePointer 避免拦截指针事件。
+  /// 通过 AnimatedOpacity 淡入淡出（200ms），IgnorePointer 避免拦截指针事件。
   Widget _buildZenLongPressHint() {
-    if (!_zenLongPressActive) return const SizedBox.shrink();
     return Positioned.fill(
       child: IgnorePointer(
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(16),
-          child: Container(
-            color: Colors.black.withValues(alpha: 0.6),
-            alignment: Alignment.center,
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.exit_to_app, color: Colors.white, size: 32),
-                SizedBox(height: 8),
-                Text(
-                  '继续长按退出 Zen 模式',
-                  style: TextStyle(color: Colors.white, fontSize: 14),
-                ),
-              ],
+        child: AnimatedOpacity(
+          opacity: _zenLongPressActive ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeInOut,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              color: Colors.black.withValues(alpha: 0.6),
+              alignment: Alignment.center,
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.exit_to_app, color: Colors.white, size: 32),
+                  SizedBox(height: 8),
+                  Text(
+                    '继续长按退出 Zen 模式',
+                    style: TextStyle(color: Colors.white, fontSize: 14),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1093,8 +1104,10 @@ class _FullPlayerState extends State<FullPlayer>
             child: TabBarView(
               controller: _tabController,
               children: [
+                // 播放列表面板（index 0，最左侧，与 AM 一致）
+                const PlayerPlaylistView(useAmColors: false),
                 GestureDetector(
-                  onTap: () => _tabController.animateTo(1),
+                  onTap: () => _tabController.animateTo(2),
                   behavior: HitTestBehavior.opaque,
                   // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
                   onVerticalDragStart: _onTopBarDragStart,
@@ -1109,7 +1122,7 @@ class _FullPlayerState extends State<FullPlayer>
                   ),
                 ),
                 GestureDetector(
-                  onTap: () => _tabController.animateTo(0),
+                  onTap: () => _tabController.animateTo(1),
                   behavior: HitTestBehavior.translucent,
                   child: _isLoadingLyrics
                       ? const Center(child: MD3ELoadingIndicator())
@@ -1323,15 +1336,17 @@ class _FullPlayerState extends State<FullPlayer>
                   flex: 6,
                   child: Column(
                     children: [
-                      // 内容区（歌词 / 评论 / 封面信息）
+                      // 内容区（播放列表 / 封面信息 / 歌词 / 评论）
                       // Pad模式下无封面Tab；手机横屏保留封面Tab
                       Expanded(
                         child: TabBarView(
                           controller: _tabController,
                           children: [
+                            // 播放列表面板（index 0，最左侧，与 AM 一致）
+                            const PlayerPlaylistView(useAmColors: false),
                             if (!_isPadMode || _isPhoneLandscape)
                               GestureDetector(
-                                onTap: () => _tabController.animateTo(1),
+                                onTap: () => _tabController.animateTo(2),
                                 behavior: HitTestBehavior.opaque,
                                 // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
                                 onVerticalDragStart: _onTopBarDragStart,
@@ -1569,6 +1584,8 @@ class _FullPlayerState extends State<FullPlayer>
                         child: TabBarView(
                           controller: _tabController,
                           children: [
+                            // 播放列表面板（index 0，最左侧，与 AM 一致）
+                            const PlayerPlaylistView(useAmColors: false),
                             if (!_isPadMode || _isPhoneLandscape)
                               // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
                               GestureDetector(
@@ -1661,20 +1678,6 @@ class _FullPlayerState extends State<FullPlayer>
                 return _buildSleepTimerPill(playerProvider);
               },
             ),
-            // 音乐频谱环绕开关已收纳到右上角菜单（more_vert），与歌手写真背景一致
-            if (playerProvider.currentSong?.isOnline == true)
-              IconButton(
-                icon: const Icon(Icons.music_video_outlined),
-                tooltip: '查看 MV',
-                onPressed: () {
-                  final song = playerProvider.currentSong;
-                  if (song == null) return;
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => MvPlayerPage(song: song)),
-                  );
-                },
-              ),
             // 歌曲信息：频率/位深/码率/声道 + USB 独占开关
             IconButton(
               icon: const Icon(Icons.info_outline),
@@ -2255,10 +2258,14 @@ class _FullPlayerState extends State<FullPlayer>
                 ),
               ),
             ),
-            // 2. 播放列表 — 弹出播放队列
+            // 2. 播放列表 — 切换到播放列表 tab（index 0，最左侧）
             Expanded(
               child: InkWell(
-                onTap: () => _showPlaylist(playerProvider),
+                onTap: () {
+                  if (_tabController.index != 0) {
+                    _tabController.animateTo(0);
+                  }
+                },
                 onLongPress: _enterZenMode,
                 child: Center(
                   child: Icon(
@@ -2273,8 +2280,8 @@ class _FullPlayerState extends State<FullPlayer>
             Expanded(
               child: InkWell(
                 onTap: () {
-                  if (_tabController.index != 0) {
-                    _tabController.animateTo(0);
+                  if (_tabController.index != 1) {
+                    _tabController.animateTo(1);
                   }
                 },
                 onLongPress: song != null && isOnline
@@ -2293,8 +2300,8 @@ class _FullPlayerState extends State<FullPlayer>
             Expanded(
               child: InkWell(
                 onTap: () {
-                  if (_tabController.index != 1) {
-                    _tabController.animateTo(1);
+                  if (_tabController.index != 2) {
+                    _tabController.animateTo(2);
                   }
                 },
                 onLongPress: () async {
@@ -2343,8 +2350,8 @@ class _FullPlayerState extends State<FullPlayer>
             Expanded(
               child: InkWell(
                 onTap: () {
-                  if (_tabController.index != 2) {
-                    _tabController.animateTo(2);
+                  if (_tabController.index != 3) {
+                    _tabController.animateTo(3);
                   }
                 },
                 child: Center(
@@ -2809,91 +2816,27 @@ class _FullPlayerState extends State<FullPlayer>
       context: rootContext,
       isScrollControlled: true,
       builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
         return SafeArea(
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                ListTile(
-                  leading: const Icon(Icons.lyrics),
-                  title: const Text('歌词显示设置'),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _showLyricPreferencesSheet(rootContext);
-                  },
-                ),
-                ListenableBuilder(
-                  listenable: context.read<CommentDisplayProvider>(),
-                  builder: (context, _) {
-                    final display = context.read<CommentDisplayProvider>();
-                    return ListTile(
-                      leading: const Icon(Icons.comment_outlined),
-                      title: const Text('评论显示设置'),
-                      subtitle: Text(
-                        '楼主 ${display.commentFontSize.toStringAsFixed(0)} 号 · 楼中楼 ${display.commentReplyFontSize.toStringAsFixed(0)} 号',
-                      ),
-                      onTap: () {
-                        Navigator.pop(sheetContext);
-                        _showCommentDisplaySheet(rootContext);
-                      },
-                    );
-                  },
-                ),
-                ListenableBuilder(
-                  listenable: EqualizerService.instance,
-                  builder: (context, _) {
-                    final eq = EqualizerService.instance;
-                    return ListTile(
-                      leading: Icon(
-                        Icons.graphic_eq,
-                        color: eq.enabled
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
-                      ),
-                      title: const Text('均衡器'),
-                      subtitle: Text(
-                        eq.enabled ? '已开启 · ${eq.currentPreset}' : '未开启',
-                      ),
-                      onTap: () {
-                        Navigator.pop(sheetContext);
-                        Navigator.push(
-                          rootContext,
-                          MaterialPageRoute(
-                            builder: (_) => const EqualizerSettingsPage(),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-                ListenableBuilder(
-                  listenable: context.read<PlayerProvider>(),
-                  builder: (context, _) {
-                    final player = context.read<PlayerProvider>();
-                    final remaining = player.sleepTimerRemaining;
-                    return ListTile(
-                      leading: const Icon(Icons.timer_outlined),
-                      title: const Text('定时关闭'),
-                      subtitle: Text(
-                        remaining == null
-                            ? '未设置'
-                            : '还剩 ${_formatSleepTime(remaining)}',
-                      ),
-                      onTap: () {
-                        Navigator.pop(sheetContext);
-                        _showSleepTimerSheet(rootContext, player);
-                      },
-                    );
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.cast),
-                  title: const Text('投屏'),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _showDlnaCastSheet(rootContext);
-                  },
-                ),
+                // 查看 MV：仅在线歌曲显示（原顶栏按钮收纳到菜单，置顶）
+                if (song.isOnline == true)
+                  ListTile(
+                    leading: const Icon(Icons.music_video_outlined),
+                    title: const Text('查看 MV'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      Navigator.push(
+                        rootContext,
+                        MaterialPageRoute(
+                          builder: (_) => MvPlayerPage(song: song),
+                        ),
+                      );
+                    },
+                  ),
                 ListTile(
                   leading: const Icon(Icons.album),
                   title: Text(
@@ -2926,17 +2869,145 @@ class _FullPlayerState extends State<FullPlayer>
                     _showAddToPlaylistDialog(rootContext, song);
                   },
                 ),
+                // 均衡器 / 定时关闭 / 投屏：同一行三格宫格，上方 icon 下方文字
+                Container(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.5,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Row(
+                    children: [
+                      ListenableBuilder(
+                        listenable: EqualizerService.instance,
+                        builder: (context, _) {
+                          final eq = EqualizerService.instance;
+                          return MenuActionCell(
+                            icon: Icons.graphic_eq,
+                            label: '均衡器',
+                            active: eq.enabled,
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              Navigator.push(
+                                rootContext,
+                                MaterialPageRoute(
+                                  builder: (_) => const EqualizerSettingsPage(),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                      ListenableBuilder(
+                        listenable: context.read<PlayerProvider>(),
+                        builder: (context, _) {
+                          final player = context.read<PlayerProvider>();
+                          return MenuActionCell(
+                            icon: Icons.timer_outlined,
+                            label: '定时关闭',
+                            active: player.isSleepTimerActive,
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              _showSleepTimerSheet(rootContext, player);
+                            },
+                          );
+                        },
+                      ),
+                      MenuActionCell(
+                        icon: Icons.cast,
+                        label: '投屏',
+                        active: false,
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _showDlnaCastSheet(rootContext);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                // 置底：界面设置入口 → 打开二级菜单
                 ListTile(
-                  leading: const Icon(Icons.share),
-                  title: const Text('分享'),
+                  leading: const Icon(Icons.tune),
+                  title: const Text('界面设置'),
+                  trailing: const Icon(Icons.chevron_right),
                   onTap: () {
                     Navigator.pop(sheetContext);
-                    // TODO: 实现分享功能
-                    ScaffoldMessenger.of(
-                      rootContext,
-                    ).showSnackBar(const SnackBar(content: Text('分享功能开发中')));
+                    _showMoreSettingsSheet(rootContext);
                   },
                 ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 界面设置：二级菜单弹层（歌词显示设置 / 评论设置 / 音乐频谱）。
+  void _showMoreSettingsSheet(BuildContext rootContext) {
+    showModalBottomSheet(
+      context: rootContext,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // MD3E 拖拽把手
+                Container(
+                  width: 32,
+                  height: 4,
+                  margin: const EdgeInsets.only(top: 12, bottom: 4),
+                  decoration: BoxDecoration(
+                    color: colorScheme.outline.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '界面设置',
+                      style: Theme.of(sheetContext).textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.lyrics),
+                  title: const Text('歌词显示设置'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _showLyricPreferencesSheet(rootContext);
+                  },
+                ),
+                ListenableBuilder(
+                  listenable: context.read<CommentDisplayProvider>(),
+                  builder: (context, _) {
+                    final display = context.read<CommentDisplayProvider>();
+                    return ListTile(
+                      leading: const Icon(Icons.comment_outlined),
+                      title: const Text('评论设置'),
+                      subtitle: Text(
+                        '楼主 ${display.commentFontSize.toStringAsFixed(0)} 号 · 楼中楼 ${display.commentReplyFontSize.toStringAsFixed(0)} 号',
+                      ),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _showCommentDisplaySheet(rootContext);
+                      },
+                    );
+                  },
+                ),
+                // 歌手写真背景（原一级菜单开关收纳到二级菜单）
                 SwitchListTile(
                   title: const Text('歌手写真背景'),
                   value: context.read<ThemeProvider>().useArtistPhotoBackground,
@@ -2947,7 +3018,7 @@ class _FullPlayerState extends State<FullPlayer>
                     Navigator.pop(sheetContext);
                   },
                 ),
-                // 音乐频谱环绕：仅 Android 显示，与歌手写真背景样式一致
+                // 音乐频谱环绕：仅 Android 显示
                 if (Platform.isAndroid)
                   SwitchListTile(
                     title: const Text('音乐频谱环绕'),
@@ -3579,18 +3650,6 @@ class _FullPlayerState extends State<FullPlayer>
         .catchError((_) {
           // 网络错误等，同样静默处理
         });
-  }
-
-  // MD3E v2: 原 _buildSecondaryControls 已替换为 _buildActionBar，
-  // 此方法现在由 ActionBar 第2位"播放列表"按钮调用。
-  void _showPlaylist(PlayerProvider playerProvider) {
-    showDialog(
-      context: context,
-      // 透明 barrier：横屏时点击左半边不关闭对话框（仍可操作播放器）
-      barrierColor: Colors.transparent,
-      builder: (dialogContext) =>
-          const PlayerPlaylistDialog(useDisplayName: true),
-    );
   }
 }
 

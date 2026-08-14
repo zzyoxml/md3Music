@@ -472,6 +472,36 @@ class SettingsRepository {
     await prefs.setStringList(_keyHiddenTabs, hidden.toList());
   }
 
+  // ===== 桌面快捷方式配置 =====
+  static const String _keyDesktopShortcutOrder =
+      'settings_desktop_shortcut_order';
+  static const String _keyHiddenDesktopShortcuts =
+      'settings_hidden_desktop_shortcuts';
+
+  /// 读取桌面快捷方式排序（存储为快捷方式 id 列表）。
+  /// 返回 null 表示使用默认顺序。
+  Future<List<String>?> getDesktopShortcutOrder() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_keyDesktopShortcutOrder);
+  }
+
+  Future<void> setDesktopShortcutOrder(List<String> order) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyDesktopShortcutOrder, order);
+  }
+
+  /// 读取关闭（隐藏）的桌面快捷方式 id 集合。
+  Future<Set<String>> getHiddenDesktopShortcuts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_keyHiddenDesktopShortcuts);
+    return list != null ? Set<String>.from(list) : {};
+  }
+
+  Future<void> setHiddenDesktopShortcuts(Set<String> hidden) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyHiddenDesktopShortcuts, hidden.toList());
+  }
+
   // ===== Pad 端网格列数 =====
 
   /// 读取 Pad 端网格页面列数偏好，默认 4。

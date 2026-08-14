@@ -103,10 +103,6 @@
         <meta-data android:name="lyricon_module_author" android:value="𝒗𝒄𝒆𝒙𝒎𝒍 &amp; Little-White3110" />
         <meta-data android:name="lyricon_module_description" android:value="MD3Music Lyricon Provider" />
         <meta-data android:name="lyricon_module_tags" android:resource="@array/lyricon_module_tags" />
-        <!-- 静态 App Shortcuts：长按桌面图标显示快捷方式 -->
-        <meta-data
-            android:name="android.app.shortcuts"
-            android:resource="@xml/shortcuts" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

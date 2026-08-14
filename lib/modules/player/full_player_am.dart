@@ -45,6 +45,7 @@ import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/ai_recommend_sheet.dart';
+import '../../widgets/menu_action_cell.dart';
 import '../../widgets/player_artwork_image.dart';
 import '../../widgets/spectrum_artwork.dart';
 import '../../widgets/spectrum_background.dart';
@@ -1966,22 +1967,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 return _buildSleepTimerPill(playerProvider);
               },
             ),
-            if (playerProvider.currentSong?.isOnline == true)
-              IconButton(
-                icon: const Icon(
-                  Icons.music_video_outlined,
-                  color: Colors.white,
-                ),
-                tooltip: '查看 MV',
-                onPressed: () {
-                  final song = playerProvider.currentSong;
-                  if (song == null) return;
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => MvPlayerPage(song: song)),
-                  );
-                },
-              ),
             // 歌曲信息：频率/位深/码率/声道 + USB 独占开关
             IconButton(
               icon: const Icon(Icons.info_outline, color: Colors.white),
@@ -3174,112 +3159,27 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       context: rootContext,
       isScrollControlled: true,
       builder: (sheetContext) {
-        // 歌词类型标签：KRC / LRC 逐字 / LRC 行级 / 静态 / 未加载
-        // LRC 内部细分：任意一行含字级时间戳即视为"逐字"，否则为"行级"
-        final hasWordTiming = _parsedLyrics.any((line) => line.hasWordTiming);
-        final lyricTypeLabel = switch (_lyricFormat) {
-          LyricFormat.krc => 'KRC 逐字歌词',
-          LyricFormat.lrc => hasWordTiming ? 'LRC 逐字歌词' : 'LRC 行级歌词',
-          LyricFormat.plaintext => '静态歌词',
-          null => _isLoadingLyrics ? '歌词加载中' : '未加载',
-        };
+        final colorScheme = Theme.of(sheetContext).colorScheme;
         return SafeArea(
           child: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // 歌词类型展示（只读，trailing 显示类型，点击无操作）
-                ListTile(
-                  leading: const Icon(Icons.label_outline),
-                  title: const Text('歌词类型'),
-                  trailing: Text(
-                    lyricTypeLabel,
-                    style: Theme.of(sheetContext).textTheme.bodyMedium
-                        ?.copyWith(
-                          color: Theme.of(sheetContext).colorScheme.primary,
+                // 查看 MV：仅在线歌曲显示（原顶栏按钮收纳到菜单，置顶）
+                if (song.isOnline == true)
+                  ListTile(
+                    leading: const Icon(Icons.music_video_outlined),
+                    title: const Text('查看 MV'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      Navigator.push(
+                        rootContext,
+                        MaterialPageRoute(
+                          builder: (_) => MvPlayerPage(song: song),
                         ),
+                      );
+                    },
                   ),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.lyrics),
-                  title: const Text('歌词显示设置'),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _showLyricPreferencesSheet(rootContext);
-                  },
-                ),
-                ListenableBuilder(
-                  listenable: context.read<CommentDisplayProvider>(),
-                  builder: (context, _) {
-                    final display = context.read<CommentDisplayProvider>();
-                    return ListTile(
-                      leading: const Icon(Icons.comment_outlined),
-                      title: const Text('评论显示设置'),
-                      subtitle: Text(
-                        '楼主 ${display.commentFontSize.toStringAsFixed(0)} 号 · 楼中楼 ${display.commentReplyFontSize.toStringAsFixed(0)} 号',
-                      ),
-                      onTap: () {
-                        Navigator.pop(sheetContext);
-                        _showCommentDisplaySheet(rootContext);
-                      },
-                    );
-                  },
-                ),
-                ListenableBuilder(
-                  listenable: EqualizerService.instance,
-                  builder: (context, _) {
-                    final eq = EqualizerService.instance;
-                    return ListTile(
-                      leading: Icon(
-                        Icons.graphic_eq,
-                        color: eq.enabled
-                            ? Theme.of(context).colorScheme.primary
-                            : null,
-                      ),
-                      title: const Text('均衡器'),
-                      subtitle: Text(
-                        eq.enabled ? '已开启 · ${eq.currentPreset}' : '未开启',
-                      ),
-                      onTap: () {
-                        Navigator.pop(sheetContext);
-                        Navigator.push(
-                          rootContext,
-                          MaterialPageRoute(
-                            builder: (_) => const EqualizerSettingsPage(),
-                          ),
-                        );
-                      },
-                    );
-                  },
-                ),
-                ListenableBuilder(
-                  listenable: context.read<PlayerProvider>(),
-                  builder: (context, _) {
-                    final player = context.read<PlayerProvider>();
-                    final remaining = player.sleepTimerRemaining;
-                    return ListTile(
-                      leading: const Icon(Icons.timer_outlined),
-                      title: const Text('定时关闭'),
-                      subtitle: Text(
-                        remaining == null
-                            ? '未设置'
-                            : '还剩 ${_formatSleepTime(remaining)}',
-                      ),
-                      onTap: () {
-                        Navigator.pop(sheetContext);
-                        _showSleepTimerSheet(rootContext, player);
-                      },
-                    );
-                  },
-                ),
-                ListTile(
-                  leading: const Icon(Icons.cast),
-                  title: const Text('投屏'),
-                  onTap: () {
-                    Navigator.pop(sheetContext);
-                    _showDlnaCastSheet(rootContext);
-                  },
-                ),
                 ListTile(
                   leading: const Icon(Icons.album),
                   title: Text(
@@ -3312,18 +3212,166 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     _showAddToPlaylistDialog(rootContext, song);
                   },
                 ),
+                // 均衡器 / 定时关闭 / 投屏：同一行三格宫格，上方 icon 下方文字
+                Container(
+                  margin: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colorScheme.surfaceContainerHighest.withValues(
+                      alpha: 0.5,
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  child: Row(
+                    children: [
+                      ListenableBuilder(
+                        listenable: EqualizerService.instance,
+                        builder: (context, _) {
+                          final eq = EqualizerService.instance;
+                          return MenuActionCell(
+                            icon: Icons.graphic_eq,
+                            label: '均衡器',
+                            active: eq.enabled,
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              Navigator.push(
+                                rootContext,
+                                MaterialPageRoute(
+                                  builder: (_) => const EqualizerSettingsPage(),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
+                      ListenableBuilder(
+                        listenable: context.read<PlayerProvider>(),
+                        builder: (context, _) {
+                          final player = context.read<PlayerProvider>();
+                          return MenuActionCell(
+                            icon: Icons.timer_outlined,
+                            label: '定时关闭',
+                            active: player.isSleepTimerActive,
+                            onTap: () {
+                              Navigator.pop(sheetContext);
+                              _showSleepTimerSheet(rootContext, player);
+                            },
+                          );
+                        },
+                      ),
+                      MenuActionCell(
+                        icon: Icons.cast,
+                        label: '投屏',
+                        active: false,
+                        onTap: () {
+                          Navigator.pop(sheetContext);
+                          _showDlnaCastSheet(rootContext);
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                // 置底：界面设置入口 → 打开二级菜单
                 ListTile(
-                  leading: const Icon(Icons.share),
-                  title: const Text('分享'),
+                  leading: const Icon(Icons.tune),
+                  title: const Text('界面设置'),
+                  trailing: const Icon(Icons.chevron_right),
                   onTap: () {
                     Navigator.pop(sheetContext);
-                    // TODO: 实现分享功能
-                    ScaffoldMessenger.of(
-                      rootContext,
-                    ).showSnackBar(const SnackBar(content: Text('分享功能开发中')));
+                    _showMoreSettingsSheet(rootContext);
                   },
                 ),
-                // 音乐频谱环绕：仅 Android 显示，与 MD 风格一致
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 界面设置：二级菜单弹层（歌词类型 / 歌词显示设置 / 评论设置 / 音乐频谱）。
+  void _showMoreSettingsSheet(BuildContext rootContext) {
+    showModalBottomSheet(
+      context: rootContext,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final colorScheme = Theme.of(sheetContext).colorScheme;
+        // 歌词类型标签：KRC / LRC 逐字 / LRC 行级 / 静态 / 未加载
+        // LRC 内部细分：任意一行含字级时间戳即视为"逐字"，否则为"行级"
+        final hasWordTiming = _parsedLyrics.any((line) => line.hasWordTiming);
+        final lyricTypeLabel = switch (_lyricFormat) {
+          LyricFormat.krc => 'KRC 逐字歌词',
+          LyricFormat.lrc => hasWordTiming ? 'LRC 逐字歌词' : 'LRC 行级歌词',
+          LyricFormat.plaintext => '静态歌词',
+          null => _isLoadingLyrics ? '歌词加载中' : '未加载',
+        };
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // MD3E 拖拽把手
+                Container(
+                  width: 32,
+                  height: 4,
+                  margin: const EdgeInsets.only(top: 12, bottom: 4),
+                  decoration: BoxDecoration(
+                    color: colorScheme.outline.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '界面设置',
+                      style: Theme.of(sheetContext).textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                // 歌词类型展示（只读，trailing 显示类型，点击无操作）
+                ListTile(
+                  leading: const Icon(Icons.label_outline),
+                  title: const Text('歌词类型'),
+                  trailing: Text(
+                    lyricTypeLabel,
+                    style: Theme.of(sheetContext).textTheme.bodyMedium
+                        ?.copyWith(
+                          color: Theme.of(sheetContext).colorScheme.primary,
+                        ),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.lyrics),
+                  title: const Text('歌词显示设置'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _showLyricPreferencesSheet(rootContext);
+                  },
+                ),
+                ListenableBuilder(
+                  listenable: context.read<CommentDisplayProvider>(),
+                  builder: (context, _) {
+                    final display = context.read<CommentDisplayProvider>();
+                    return ListTile(
+                      leading: const Icon(Icons.comment_outlined),
+                      title: const Text('评论设置'),
+                      subtitle: Text(
+                        '楼主 ${display.commentFontSize.toStringAsFixed(0)} 号 · 楼中楼 ${display.commentReplyFontSize.toStringAsFixed(0)} 号',
+                      ),
+                      onTap: () {
+                        Navigator.pop(sheetContext);
+                        _showCommentDisplaySheet(rootContext);
+                      },
+                    );
+                  },
+                ),
+                // 音乐频谱环绕：仅 Android 显示
                 if (Platform.isAndroid)
                   SwitchListTile(
                     title: const Text('音乐频谱环绕'),
