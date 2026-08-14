@@ -43,7 +43,7 @@ import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_transport_row.dart';
 import '../../widgets/player_artwork_image.dart';
-import '../../widgets/player_playlist_dialog.dart';
+import '../../widgets/player_playlist_view.dart';
 import '../../widgets/spectrum_artwork.dart';
 import '../../widgets/spectrum_background.dart';
 import 'dlna_cast_sheet.dart';
@@ -99,7 +99,7 @@ class _FullPlayerState extends State<FullPlayer>
 
   // Pad 模式：左侧已有封面，隐藏"封面"Tab，只保留 2 个 Tab
   bool _isPadMode = false;
-  int _currentTabLength = 3;
+  int _currentTabLength = 4;
   // 手机横屏模式：保留封面Tab，但隐藏左侧歌曲信息
   bool _isPhoneLandscape = false;
   // 写真背景是否实际有图片可显示：写真无图时不隐藏左侧封面，避免封面消失
@@ -482,7 +482,7 @@ class _FullPlayerState extends State<FullPlayer>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this, initialIndex: 1);
     // 桌面歌词状态变化时刷新 UI（同步歌词按钮 icon）
     _onDesktopLyricChanged = () {
       if (mounted) setState(() {});
@@ -638,22 +638,24 @@ class _FullPlayerState extends State<FullPlayer>
     final shouldBePadMode = deviceIsPad || width >= 600;
     // 手机横屏：宽度 >= 600 但设备不是 Pad
     final shouldBePhoneLandscape = !deviceIsPad && width >= 600;
-    final newTabLength = shouldBePadMode ? 2 : 3;
+    // 播放列表为最左 tab（index 0），封面仅在非 Pad（或手机横屏）时作为 tab。
+    // 手机竖屏/横屏：4 tab [播放列表, 封面, 歌词, 评论]；Pad：3 tab [播放列表, 歌词, 评论]。
+    final newTabLength = (shouldBePadMode && !shouldBePhoneLandscape) ? 3 : 4;
 
     if (_currentTabLength != newTabLength) {
       final currentIndex = _tabController.index.clamp(0, newTabLength - 1);
       _tabController.dispose();
       _currentTabLength = newTabLength;
-      // Pad 模式首次进入时（从 3 tab 切到 2 tab）默认打开歌词。
-      // 注意：children 列表在 pad 模式被 `if (!_isPadMode)` 跳过 SongInfo，
-      // 所以 children 实际只有 2 个：index 0 = LyricsView, index 1 = CommentsView。
-      // 因此歌词在 pad 模式下的 index 是 0，不是 1。
+      // Pad 模式首次进入时（从 4 tab 切到 3 tab）默认打开歌词。
+      // 注意：children 列表在 pad 模式被 `if (!_isPadMode)` 跳过封面，
+      // 所以 children 实际只有 3 个：index 0 = 播放列表, index 1 = LyricsView, index 2 = CommentsView。
+      // 因此歌词在 pad 模式下的 index 是 1，不是 2。
       // 后续用户手动切换 tab 后不强制重置，保留用户当前选择。
-      final isFirstEnterPad = shouldBePadMode && newTabLength == 2;
+      final isFirstEnterPad = shouldBePadMode && newTabLength == 3;
       _tabController = TabController(
         length: newTabLength,
         vsync: this,
-        initialIndex: isFirstEnterPad ? 0 : currentIndex,
+        initialIndex: isFirstEnterPad ? 1 : currentIndex,
       );
       _isPadMode = shouldBePadMode;
       _isPhoneLandscape = shouldBePhoneLandscape;
@@ -1093,8 +1095,10 @@ class _FullPlayerState extends State<FullPlayer>
             child: TabBarView(
               controller: _tabController,
               children: [
+                // 播放列表面板（index 0，最左侧，与 AM 一致）
+                const PlayerPlaylistView(useAmColors: false),
                 GestureDetector(
-                  onTap: () => _tabController.animateTo(1),
+                  onTap: () => _tabController.animateTo(2),
                   behavior: HitTestBehavior.opaque,
                   // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
                   onVerticalDragStart: _onTopBarDragStart,
@@ -1109,7 +1113,7 @@ class _FullPlayerState extends State<FullPlayer>
                   ),
                 ),
                 GestureDetector(
-                  onTap: () => _tabController.animateTo(0),
+                  onTap: () => _tabController.animateTo(1),
                   behavior: HitTestBehavior.translucent,
                   child: _isLoadingLyrics
                       ? const Center(child: MD3ELoadingIndicator())
@@ -1323,15 +1327,17 @@ class _FullPlayerState extends State<FullPlayer>
                   flex: 6,
                   child: Column(
                     children: [
-                      // 内容区（歌词 / 评论 / 封面信息）
+                      // 内容区（播放列表 / 封面信息 / 歌词 / 评论）
                       // Pad模式下无封面Tab；手机横屏保留封面Tab
                       Expanded(
                         child: TabBarView(
                           controller: _tabController,
                           children: [
+                            // 播放列表面板（index 0，最左侧，与 AM 一致）
+                            const PlayerPlaylistView(useAmColors: false),
                             if (!_isPadMode || _isPhoneLandscape)
                               GestureDetector(
-                                onTap: () => _tabController.animateTo(1),
+                                onTap: () => _tabController.animateTo(2),
                                 behavior: HitTestBehavior.opaque,
                                 // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
                                 onVerticalDragStart: _onTopBarDragStart,
@@ -1569,6 +1575,8 @@ class _FullPlayerState extends State<FullPlayer>
                         child: TabBarView(
                           controller: _tabController,
                           children: [
+                            // 播放列表面板（index 0，最左侧，与 AM 一致）
+                            const PlayerPlaylistView(useAmColors: false),
                             if (!_isPadMode || _isPhoneLandscape)
                               // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
                               GestureDetector(
@@ -2255,10 +2263,14 @@ class _FullPlayerState extends State<FullPlayer>
                 ),
               ),
             ),
-            // 2. 播放列表 — 弹出播放队列
+            // 2. 播放列表 — 切换到播放列表 tab（index 0，最左侧）
             Expanded(
               child: InkWell(
-                onTap: () => _showPlaylist(playerProvider),
+                onTap: () {
+                  if (_tabController.index != 0) {
+                    _tabController.animateTo(0);
+                  }
+                },
                 onLongPress: _enterZenMode,
                 child: Center(
                   child: Icon(
@@ -2273,8 +2285,8 @@ class _FullPlayerState extends State<FullPlayer>
             Expanded(
               child: InkWell(
                 onTap: () {
-                  if (_tabController.index != 0) {
-                    _tabController.animateTo(0);
+                  if (_tabController.index != 1) {
+                    _tabController.animateTo(1);
                   }
                 },
                 onLongPress: song != null && isOnline
@@ -2293,8 +2305,8 @@ class _FullPlayerState extends State<FullPlayer>
             Expanded(
               child: InkWell(
                 onTap: () {
-                  if (_tabController.index != 1) {
-                    _tabController.animateTo(1);
+                  if (_tabController.index != 2) {
+                    _tabController.animateTo(2);
                   }
                 },
                 onLongPress: () async {
@@ -2343,8 +2355,8 @@ class _FullPlayerState extends State<FullPlayer>
             Expanded(
               child: InkWell(
                 onTap: () {
-                  if (_tabController.index != 2) {
-                    _tabController.animateTo(2);
+                  if (_tabController.index != 3) {
+                    _tabController.animateTo(3);
                   }
                 },
                 child: Center(
@@ -3579,18 +3591,6 @@ class _FullPlayerState extends State<FullPlayer>
         .catchError((_) {
           // 网络错误等，同样静默处理
         });
-  }
-
-  // MD3E v2: 原 _buildSecondaryControls 已替换为 _buildActionBar，
-  // 此方法现在由 ActionBar 第2位"播放列表"按钮调用。
-  void _showPlaylist(PlayerProvider playerProvider) {
-    showDialog(
-      context: context,
-      // 透明 barrier：横屏时点击左半边不关闭对话框（仍可操作播放器）
-      barrierColor: Colors.transparent,
-      builder: (dialogContext) =>
-          const PlayerPlaylistDialog(useDisplayName: true),
-    );
   }
 }
 

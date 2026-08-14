@@ -143,14 +143,22 @@ class _RightSwipeOnlyRecognizer extends OneSequenceGestureRecognizer {
 /// 3. 打开时自动滚动定位当前播放歌曲
 ///
 /// 与弹窗版差异：
-/// - 文字颜色参照评论区 AM 风格：正文 Colors.white / 次要 Color(0xB3FFFFFF)
+/// - 文字颜色默认参照评论区 AM 风格：正文 Colors.white / 次要 Color(0xB3FFFFFF)
 /// - 每个列表项显示专辑封面（[PlayerArtworkImage]）
 /// - 无"关闭"按钮（Tab 左右滑动即可切换）
 class PlayerPlaylistView extends StatefulWidget {
   /// 是否使用 displayName（剥离 .mp3 等后缀）显示标题
   final bool useDisplayName;
 
-  const PlayerPlaylistView({super.key, this.useDisplayName = true});
+  /// 配色模式：true 用 AM 白色文字（为深色背景设计）；
+  /// false 用主题莫奈色（为 MD3 风格 tab/浅色背景设计）。
+  final bool useAmColors;
+
+  const PlayerPlaylistView({
+    super.key,
+    this.useDisplayName = true,
+    this.useAmColors = true,
+  });
 
   @override
   State<PlayerPlaylistView> createState() => _PlayerPlaylistViewState();
@@ -228,6 +236,17 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
       ),
       builder: (context, data, _) {
         final playlist = playerProvider.playlist;
+        // 配色：AM 白色（深色背景） vs MD 莫奈色（主题色）
+        final colorScheme = Theme.of(context).colorScheme;
+        final useAm = widget.useAmColors;
+        final titleColor = useAm ? Colors.white : colorScheme.onSurface;
+        final secondaryColor =
+            useAm ? const Color(0xB3FFFFFF) : colorScheme.onSurfaceVariant;
+        final clearEnabledColor =
+            useAm ? const Color(0xB3FFFFFF) : colorScheme.primary;
+        final clearDisabledColor = useAm
+            ? const Color(0x40FFFFFF)
+            : colorScheme.onSurface.withValues(alpha: 0.38);
         return Column(
           children: [
             // 顶部标题行：标题 + 清空
@@ -239,7 +258,7 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
                     child: Text(
                       '播放列表',
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        color: Colors.white,
+                        color: titleColor,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -252,8 +271,8 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
                       '清空',
                       style: TextStyle(
                         color: playlist.isEmpty
-                            ? const Color(0x40FFFFFF)
-                            : const Color(0xB3FFFFFF),
+                            ? clearDisabledColor
+                            : clearEnabledColor,
                       ),
                     ),
                   ),
@@ -267,7 +286,7 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
                       child: Text(
                         '播放列表为空',
                         style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: const Color(0xB3FFFFFF),
+                          color: secondaryColor,
                         ),
                       ),
                     )
@@ -386,6 +405,20 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
     final dx = _dragExtent[song.id] ?? 0.0;
     final thresholdReached = dx >= _deleteThreshold;
     final reverting = _reverting[song.id] ?? false;
+    // 配色：AM 白色（深色背景） vs MD 莫奈色（主题色）
+    final colorScheme = Theme.of(context).colorScheme;
+    final useAm = widget.useAmColors;
+    final titleColor = useAm ? Colors.white : colorScheme.onSurface;
+    final secondaryColor =
+        useAm ? const Color(0xB3FFFFFF) : colorScheme.onSurfaceVariant;
+    final artworkBg =
+        useAm ? Colors.white12 : colorScheme.surfaceContainerHighest;
+    final artworkIcon =
+        useAm ? Colors.white54 : colorScheme.onSurfaceVariant;
+    final spectrumColor = useAm ? Colors.white : colorScheme.primary;
+    final deleteBg = useAm ? Colors.redAccent : colorScheme.errorContainer;
+    final deleteIconOn = useAm ? Colors.white : colorScheme.onErrorContainer;
+    final deleteIconOff = useAm ? Colors.white54 : colorScheme.error;
 
     // 列表项本体：长按 700ms 拖拽 + 点击切歌
     final item = Material(
@@ -403,8 +436,8 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
                 artworkUri: song.artworkUri,
                 fallbackFilePath: song.localPath,
                 fit: BoxFit.cover,
-                backgroundColor: Colors.white12,
-                iconColor: Colors.white54,
+                backgroundColor: artworkBg,
+                iconColor: artworkIcon,
               ),
             ),
           ),
@@ -413,8 +446,8 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-              // AM 风格：正文纯白，当前歌曲加粗
-              color: Colors.white,
+              // 正文纯色，当前歌曲加粗
+              color: titleColor,
               fontWeight: isCurrent ? FontWeight.bold : null,
             ),
           ),
@@ -423,20 +456,19 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              // 参照评论区次要文字色（白色 70%）
-              color: const Color(0xB3FFFFFF),
+              color: secondaryColor,
             ),
           ),
           // 正在播放的歌曲右侧：歌单同款三柱起伏波形（暂停时 ticker 停止保留最后一帧）
           trailing: isCurrent
               ? PlayingSpectrumIndicator(
-                  color: Colors.white,
+                  color: spectrumColor,
                   size: 14,
                   isPlaying: isPlaying,
                 )
               : const SizedBox.shrink(),
           onTap: () {
-            // 点击切歌（不关闭面板，留在 tab）
+            // 点击切歌（不关闭面板，留在容器）
             playerProvider.playSongAt(index);
           },
         ),
@@ -463,13 +495,13 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
             child: AnimatedContainer(
               duration: _fadeDuration,
               curve: Curves.easeOut,
-              // 阈值前完全透明（不可见），阈值后显示红色
-              color: thresholdReached ? Colors.redAccent : Colors.transparent,
+              // 阈值前完全透明（不可见），阈值后显示删除底色
+              color: thresholdReached ? deleteBg : Colors.transparent,
               alignment: Alignment.centerLeft,
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Icon(
                 Icons.delete_outline,
-                color: thresholdReached ? Colors.white : Colors.white54,
+                color: thresholdReached ? deleteIconOn : deleteIconOff,
                 size: 28,
               ),
             ),
