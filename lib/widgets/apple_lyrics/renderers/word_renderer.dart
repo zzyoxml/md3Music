@@ -451,8 +451,14 @@ class WordRenderer {
       }
 
       // === 强调辉光效果 ===
-      // 字级判定（含正则匹配）在 _ensureBound 时已缓存，此处仅 O(1) 数组读取
-      if (!skipLineEmphasis && _wordEmphasisFlags[i]) {
+      // 字级判定（含正则匹配）在 _ensureBound 时已缓存，此处仅 O(1) 数组读取。
+      // computeState 是纯函数，仅当 t=(now-start)/duration ∈ [0,1] 时返回非 idle，
+      // 即只有当前字可能非 idle（其余字 t 必在 [0,1] 外、必然返回 idle）。
+      // 故仅对当前字调用 computeState，其余直接置 idle，避免每帧 N-1 次无效
+      // bezier/sqrt/pow 计算与对象分配。字切换进入新字窗口的那一帧该字恰为
+      // currentWordIdx，仍会正常计算，无辉光丢失（行为逐帧等价）。
+      final bool isCurrentWord = i == currentWordIdx;
+      if (!skipLineEmphasis && _wordEmphasisFlags[i] && isCurrentWord) {
         _emphasizeStates[i] = _emphasizeEffect!.computeState(
           word: words[i],
           currentTimeMs: currentTimeMs,

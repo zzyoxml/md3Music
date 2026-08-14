@@ -750,16 +750,21 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     if (_reusedPerLineOffsets.length != len) {
       _reusedPerLineOffsets = List<double>.filled(len, 0.0);
     } else if (_currentLineIndex > 0) {
-      // 性能优化：上方行无 spring（永远 0），清零当前行上方的残留值
-      // 当前行下方由后续循环覆盖，无需清零
-      for (int i = 0; i < _currentLineIndex && i < len; i++) {
+      // 性能优化：上方行无 spring（永远 0），清零当前行上方且落在视口内的残留值。
+      // 视口外（< currentLineIndex - overscan）的偏移值从不被 _buildBlurLayers 读取，
+      // 无需清零，收窄遍历减少 O(N) 开销。
+      final int clearStart = math.max(0, _currentLineIndex - _overscan);
+      for (int i = clearStart; i < _currentLineIndex && i < len; i++) {
         _reusedPerLineOffsets[i] = 0.0;
       }
     }
     // 性能优化：_perLineSprings 只为当前行下方的行设置 spring（见 _onTick 行切换逻辑），
-    // 上方行永远返回 0。跳过上方行减少无意义遍历（200+ 行 → 仅遍历当前行到末尾）。
+    // 上方行永远返回 0。且 perLineOffsets 仅被 _buildBlurLayers 消费（只遍历视口内
+    // _cachedBlurLevels），故填充只需覆盖到 currentLineIndex + overscan，
+    // 视口外值不被读取，跳过减少 O(N) 遍历。
     final int startI = math.max(0, _currentLineIndex);
-    for (int i = startI; i < len; i++) {
+    final int endI = math.min(len, _currentLineIndex + _overscan);
+    for (int i = startI; i < endI; i++) {
       _reusedPerLineOffsets[i] = _perLineSprings[i]?.position ?? 0.0;
     }
     _perLineOffsetsGeneration++;
