@@ -207,6 +207,15 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   // P0: 间奏点动画降频（30fps）用的帧时间累积器
   double _interludeAccumulator = 0;
 
+  /// 逐字动画平滑时间的权威位置校正：
+  ///
+  /// - [_smoothPosSeekJumpMs]：权威位置跳变超过此值视为 seek/大跳变，直接吸附。
+  /// - [_smoothPosCorrRate]：正常 position 更新时平滑逼近权威位置的速率（指数衰减系数）。
+  ///   平滑逼近而非硬跳，避免音频时钟与帧时钟漂移导致权威位置硬跳跨过逐字边界、
+  ///   字切换来回抖动（英文歌字短、边界密集时更明显，表现为"下一个字闪一下"）。
+  static const int _smoothPosSeekJumpMs = 500;
+  static const double _smoothPosCorrRate = 20.0;
+
   // ============== 歌词省电模式（60fps 限帧，默认关闭） ==============
   // 开启后歌词渲染推进频率锁定 60fps（_ecoFrameInterval），
   // 用户上下滑动歌词（拖动/惯性/等待回弹/回弹动画）时解锁，
@@ -446,6 +455,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   // 字体缓存：字体变化时强制重算行高 + 失效所有模糊图片缓存
   // （TextPainter 用 fontFamily 测量，旧缓存会与新字体渲染尺寸不一致）
   String? _cachedFontFamily;
+  // 字重缓存：字重变化时同样需强制重算行高 + 失效模糊图片缓存
+  int _cachedFontWeight = -1;
   // 翻译副行缓存：当前行变化或 showTranslation 开关切换时，
   // 当前行高度需重算（副行高度仅计入当前行）
   // displayMode 切换也需重算（虽副行高度不变，但需触发重绘）
@@ -480,6 +491,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   void _recomputeLineHeightsIfNeeded(double fontSize, double viewportWidth) {
     final identitySame = identical(_cleanedLines, _cachedLinesRef);
     final currentFontFamily = LyricLayout.fontFamily;
+    final currentFontWeight = LyricLayout.fontWeight.value;
     final currentShowTranslation = LyricPreferences.instance.showTranslation;
     final currentDisplayMode = LyricPreferences.instance.displayMode;
     if (fontSize == _cachedFontSize &&
@@ -488,6 +500,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         identitySame &&
         _lineHeights.length == _cleanedLines.length &&
         currentFontFamily == _cachedFontFamily &&
+        currentFontWeight == _cachedFontWeight &&
         _currentLineIndex == _cachedCurrentLineIndex &&
         currentShowTranslation == _cachedShowTranslation &&
         currentDisplayMode == _cachedDisplayMode) {
@@ -498,6 +511,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _cachedLinesLength = _cleanedLines.length;
     _cachedLinesRef = _cleanedLines;
     _cachedFontFamily = currentFontFamily;
+    _cachedFontWeight = currentFontWeight;
     _cachedCurrentLineIndex = _currentLineIndex;
     _cachedShowTranslation = currentShowTranslation;
     _cachedDisplayMode = currentDisplayMode;
@@ -641,11 +655,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// - WordRenderer/LineRenderer 内部绑定：清空 _wordRenderers/_lineRenderers,
   ///   让它们用新字体重新测量 word 宽度（_ensureBound）并重置 alpha 状态
   void _onPreferencesChanged() {
-    // 字体变化时失效所有依赖字体测量的缓存
+    // 字体/字重变化时失效所有依赖字体测量的缓存
     final currentFontFamily = LyricLayout.fontFamily;
-    if (currentFontFamily != _cachedFontFamily) {
+    final currentFontWeight = LyricLayout.fontWeight.value;
+    if (currentFontFamily != _cachedFontFamily ||
+        currentFontWeight != _cachedFontWeight) {
       // 失效行高缓存（让 _recomputeLineHeightsIfNeeded 重算）
       _cachedFontFamily = null;
+      _cachedFontWeight = -1;
       // 失效模糊图片缓存（dispose 图片资源 + 清空 Map）
       for (final entry in _lineBlurImages.values) {
         entry.$1.dispose();
@@ -733,16 +750,21 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     if (_reusedPerLineOffsets.length != len) {
       _reusedPerLineOffsets = List<double>.filled(len, 0.0);
     } else if (_currentLineIndex > 0) {
-      // 性能优化：上方行无 spring（永远 0），清零当前行上方的残留值
-      // 当前行下方由后续循环覆盖，无需清零
-      for (int i = 0; i < _currentLineIndex && i < len; i++) {
+      // 性能优化：上方行无 spring（永远 0），清零当前行上方且落在视口内的残留值。
+      // 视口外（< currentLineIndex - overscan）的偏移值从不被 _buildBlurLayers 读取，
+      // 无需清零，收窄遍历减少 O(N) 开销。
+      final int clearStart = math.max(0, _currentLineIndex - _overscan);
+      for (int i = clearStart; i < _currentLineIndex && i < len; i++) {
         _reusedPerLineOffsets[i] = 0.0;
       }
     }
     // 性能优化：_perLineSprings 只为当前行下方的行设置 spring（见 _onTick 行切换逻辑），
-    // 上方行永远返回 0。跳过上方行减少无意义遍历（200+ 行 → 仅遍历当前行到末尾）。
+    // 上方行永远返回 0。且 perLineOffsets 仅被 _buildBlurLayers 消费（只遍历视口内
+    // _cachedBlurLevels），故填充只需覆盖到 currentLineIndex + overscan，
+    // 视口外值不被读取，跳过减少 O(N) 遍历。
     final int startI = math.max(0, _currentLineIndex);
-    for (int i = startI; i < len; i++) {
+    final int endI = math.min(len, _currentLineIndex + _overscan);
+    for (int i = startI; i < endI; i++) {
       _reusedPerLineOffsets[i] = _perLineSprings[i]?.position ?? 0.0;
     }
     _perLineOffsetsGeneration++;
@@ -790,13 +812,25 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // P0: 推进逐字动画平滑时间（上浮/字内渐变的进度来源）。
     // positionStream 每 ~200ms 才给一个权威位置，播放中若直接用它会
     // 造成动画"追到旧目标后冻结 ~120ms"的卡顿；这里用帧时钟每帧推进，
-    // 收到新权威位置时对齐校正（偏差一般 <20ms，不可见）。
-    // 暂停时冻结在权威位置；seek/切歌等大跳变随权威位置直接吸附。
+    // 收到新权威位置时对齐校正。
+    //
+    // 校正策略：正常 position 更新用**平滑逼近**而非硬跳。音频时钟与帧时钟
+    // 存在漂移，若权威位置硬跳跨过逐字边界，字切换会来回抖动（英文歌字短、
+    // 边界密集时更明显，表现为"下一个字闪一下"）。seek/切歌等大跳变仍直接吸附。
+    // 暂停时冻结在权威位置。
     if (widget.isPlaying) {
       _smoothPosMs += dt * 1000;
       if (widget.currentTimeMs != _lastAuthorityPosMs) {
+        final int jump = (widget.currentTimeMs - _lastAuthorityPosMs).abs();
         _lastAuthorityPosMs = widget.currentTimeMs;
-        _smoothPosMs = widget.currentTimeMs.toDouble();
+        if (jump > _smoothPosSeekJumpMs) {
+          // seek/大跳变：直接吸附，避免平滑拖尾
+          _smoothPosMs = widget.currentTimeMs.toDouble();
+        } else {
+          // 正常 position 更新：平滑逼近权威，避免硬跳跨字边界造成闪烁
+          final double corr = 1.0 - math.exp(-_smoothPosCorrRate * dt);
+          _smoothPosMs += (widget.currentTimeMs - _smoothPosMs) * corr;
+        }
       } else if ((_smoothPosMs - _lastAuthorityPosMs).abs() > 300) {
         // 兜底：权威位置长时间不更新（缓冲等）时防止平滑值漂移过大
         _smoothPosMs = _lastAuthorityPosMs.toDouble();
@@ -1679,6 +1713,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           // 显式注入歌词 fontFamily，与清晰层保持一致，
           // 否则模糊层尺寸与清晰层不匹配
           fontFamily: LyricLayout.fontFamily,
+          fontWeight: LyricLayout.fontWeight,
         ),
       );
       textPainter.layout(maxWidth: maxTextWidth);

@@ -35,7 +35,7 @@ class Md3LyricPreferences extends ChangeNotifier {
   static const double minFontSize = 12;
 
   /// 字号最大值（px）
-  static const double maxFontSize = 30;
+  static const double maxFontSize = 50;
 
   /// 字号默认值（px）— 未持久化时新用户使用的字号。
   static const double defaultUserFontSize = 22;
@@ -49,10 +49,22 @@ class Md3LyricPreferences extends ChangeNotifier {
   /// 行间距系数默认值
   static const double defaultLineSpacing = 2.0;
 
+  /// 字重最小值（FontWeight.value，细体）
+  static const int minFontWeight = 300;
+
+  /// 字重最大值（FontWeight.value，黑体）
+  static const int maxFontWeight = 900;
+
+  /// 字重默认值（FontWeight.value，常规）
+  ///
+  /// 作为当前行字重；非当前行自动细两档（下限 [minFontWeight]）。
+  static const int defaultFontWeight = 600;
+
   // ============== SharedPreferences keys（独立于 Apple Music 版本） ==============
 
   static const String _keyFontSize = 'md3_lyric_font_size';
   static const String _keyLineSpacing = 'md3_lyric_line_spacing';
+  static const String _keyFontWeight = 'md3_lyric_font_weight';
   static const String _keyFontSource = 'md3_lyric_font_source';
   static const String _keyCustomFontPath = 'md3_lyric_custom_font_path';
 
@@ -60,6 +72,7 @@ class Md3LyricPreferences extends ChangeNotifier {
 
   double _fontSize = defaultUserFontSize;
   double _lineSpacing = defaultLineSpacing;
+  int _fontWeight = defaultFontWeight;
   Md3LyricFontSource _fontSource = Md3LyricFontSource.system;
   String? _customFontPath;
   // 运行时加载成功后填充的 family（仅 custom 模式且加载成功时非 null）
@@ -68,6 +81,16 @@ class Md3LyricPreferences extends ChangeNotifier {
 
   double get fontSize => _fontSize;
   double get lineSpacing => _lineSpacing;
+
+  /// 当前行字重（FontWeight.value 数值，范围 [minFontWeight]~[maxFontWeight]）。
+  int get fontWeightValue => _fontWeight;
+
+  /// 当前行字重对应 [FontWeight]（供 TextStyle 使用）。
+  FontWeight get fontWeight => FontWeight(_fontWeight);
+
+  /// 非当前行字重：当前行字重细两档（下限 [minFontWeight]），保留主次对比。
+  FontWeight get otherFontWeight =>
+      FontWeight((_fontWeight - 200).clamp(minFontWeight, maxFontWeight));
   Md3LyricFontSource get fontSource => _fontSource;
   String? get customFontPath => _customFontPath;
 
@@ -98,6 +121,9 @@ class Md3LyricPreferences extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _fontSize = prefs.getDouble(_keyFontSize) ?? defaultUserFontSize;
     _lineSpacing = prefs.getDouble(_keyLineSpacing) ?? defaultLineSpacing;
+    _fontWeight =
+        (prefs.getInt(_keyFontWeight) ?? defaultFontWeight)
+            .clamp(minFontWeight, maxFontWeight);
     _fontSource = _fontSourceFromName(prefs.getString(_keyFontSource));
     _customFontPath = prefs.getString(_keyCustomFontPath);
     _loaded = true;
@@ -128,6 +154,16 @@ class Md3LyricPreferences extends ChangeNotifier {
     await prefs.setDouble(_keyLineSpacing, _lineSpacing);
   }
 
+  /// 设置字重并持久化。会触发 [notifyListeners]。
+  Future<void> setFontWeight(int value) async {
+    final clamped = value.clamp(minFontWeight, maxFontWeight);
+    if (clamped == _fontWeight) return;
+    _fontWeight = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyFontWeight, _fontWeight);
+  }
+
   /// 设置字体来源并持久化。
   Future<void> setFontSource(Md3LyricFontSource source) async {
     if (_fontSource == source) return;
@@ -156,6 +192,7 @@ class Md3LyricPreferences extends ChangeNotifier {
   Future<void> reset() async {
     _fontSize = defaultUserFontSize;
     _lineSpacing = defaultLineSpacing;
+    _fontWeight = defaultFontWeight;
     _fontSource = Md3LyricFontSource.system;
     _customFontPath = null;
     _loadedCustomFontFamily = null;
@@ -163,6 +200,7 @@ class Md3LyricPreferences extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyFontSize, _fontSize);
     await prefs.setDouble(_keyLineSpacing, _lineSpacing);
+    await prefs.remove(_keyFontWeight);
     await prefs.remove(_keyFontSource);
     await prefs.remove(_keyCustomFontPath);
   }
