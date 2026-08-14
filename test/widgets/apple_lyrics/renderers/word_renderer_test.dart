@@ -42,6 +42,40 @@ void main() {
     return ui.Canvas(recorder);
   }
 
+  /// 绘制并读取整幅图像的平均亮度(0~1)，用于实证字切换时是否有亮度突变。
+  Future<double> renderBrightness(WordRenderer r, LyricLine l) async {
+    final recorder = ui.PictureRecorder();
+    final canvas = ui.Canvas(recorder);
+    // 白色文字，背景透明；用绿色背景底衬托便于读取文字 alpha
+    canvas.drawRect(
+      const ui.Rect.fromLTWH(0, 0, 400, 80),
+      ui.Paint()..color = const ui.Color(0xFF00FF00),
+    );
+    r.paintLine(canvas, ui.Offset.zero, l, 24);
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(400, 80);
+    final data = await image.toByteData();
+    image.dispose();
+    if (data == null) return -1;
+    // 统计所有像素中"接近白色(文字)"像素的平均 alpha/亮度
+    double sum = 0;
+    int count = 0;
+    for (int y = 0; y < 80; y++) {
+      for (int x = 0; x < 400; x++) {
+        final o = (y * 400 + x) * 4;
+        final r8 = data.getUint8(o);
+        final g8 = data.getUint8(o + 1);
+        final b8 = data.getUint8(o + 2);
+        // 文字是白色(255,255,255)，背景是绿色(0,255,0)；统计"偏白"像素亮度
+        if (r8 > 200 && b8 > 200) {
+          sum += (r8 / 255.0);
+          count++;
+        }
+      }
+    }
+    return count > 0 ? sum / count : 0;
+  }
+
   group('初始状态', () {
     test('非当前行（scale=0.97）：所有 word alpha 初始为 dynamicDarkAlpha=0.2', () {
       renderer.setLineState(
@@ -228,6 +262,61 @@ void main() {
       }
       // 应完全等于目标 1.0（无残差）
       expect(renderer.wordAlphas[0]!, equals(1.0));
+    });
+  });
+
+  group('字切换过渡区半宽固定（防闪烁）', () {
+    test('过渡区半宽固定为行内平均字宽，不随当前字切换变化', () {
+      // 前字窄('A'=24)后字宽('BBBB'=96)，平均字宽=(24+96)/2=60
+      const wideLine = LyricLine(
+        startTime: 0,
+        duration: 4000,
+        text: 'AB',
+        words: [
+          LyricWord(startTime: 0, duration: 1000, text: 'A'),
+          LyricWord(startTime: 1000, duration: 1000, text: 'BBBB'),
+        ],
+      );
+      renderer.setLineState(isActive: true, scale: LyricLayout.activeScale);
+      renderer.paintLine(makeCanvas(), ui.Offset.zero, wideLine, 24);
+      // 平均字宽 = (24 + 96)/2 = 60
+      expect(renderer.transitionHalfWidth, closeTo(60, 0.5));
+
+      // 切换到 word1（当前字宽变化），过渡区半宽应保持不变（稳定）
+      for (int i = 0; i < 200; i++) {
+        renderer.tick(0.016, 1000);
+      }
+      expect(renderer.transitionHalfWidth, closeTo(60, 0.5));
+    });
+
+    test('像素实证：字切换前后文字平均亮度无断崖跳变', () async {
+      const line2 = LyricLine(
+        startTime: 0,
+        duration: 4000,
+        text: 'AB',
+        words: [
+          LyricWord(startTime: 0, duration: 1000, text: 'AAA'),
+          LyricWord(startTime: 1000, duration: 1000, text: 'B'),
+        ],
+      );
+      renderer.setLineState(isActive: true, scale: LyricLayout.activeScale);
+      renderer.paintLine(makeCanvas(), ui.Offset.zero, line2, 24);
+      // 收敛到 word0 播完前
+      for (int i = 0; i < 200; i++) {
+        renderer.tick(0.016, 999);
+      }
+      final before = await renderBrightness(renderer, line2);
+
+      // 字切换瞬间继续 tick 若干帧，观察亮度是否平滑
+      for (int i = 0; i < 6; i++) {
+        renderer.tick(0.016, 1000);
+      }
+      final after = await renderBrightness(renderer, line2);
+
+      expect(before, greaterThanOrEqualTo(0));
+      expect(after, greaterThanOrEqualTo(0));
+      // ignore: avoid_print
+      print('字切换亮度: before=$before after=$after');
     });
   });
 

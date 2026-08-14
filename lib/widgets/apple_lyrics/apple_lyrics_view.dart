@@ -207,6 +207,15 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   // P0: 间奏点动画降频（30fps）用的帧时间累积器
   double _interludeAccumulator = 0;
 
+  /// 逐字动画平滑时间的权威位置校正：
+  ///
+  /// - [_smoothPosSeekJumpMs]：权威位置跳变超过此值视为 seek/大跳变，直接吸附。
+  /// - [_smoothPosCorrRate]：正常 position 更新时平滑逼近权威位置的速率（指数衰减系数）。
+  ///   平滑逼近而非硬跳，避免音频时钟与帧时钟漂移导致权威位置硬跳跨过逐字边界、
+  ///   字切换来回抖动（英文歌字短、边界密集时更明显，表现为"下一个字闪一下"）。
+  static const int _smoothPosSeekJumpMs = 500;
+  static const double _smoothPosCorrRate = 20.0;
+
   // ============== 歌词省电模式（60fps 限帧，默认关闭） ==============
   // 开启后歌词渲染推进频率锁定 60fps（_ecoFrameInterval），
   // 用户上下滑动歌词（拖动/惯性/等待回弹/回弹动画）时解锁，
@@ -798,13 +807,25 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // P0: 推进逐字动画平滑时间（上浮/字内渐变的进度来源）。
     // positionStream 每 ~200ms 才给一个权威位置，播放中若直接用它会
     // 造成动画"追到旧目标后冻结 ~120ms"的卡顿；这里用帧时钟每帧推进，
-    // 收到新权威位置时对齐校正（偏差一般 <20ms，不可见）。
-    // 暂停时冻结在权威位置；seek/切歌等大跳变随权威位置直接吸附。
+    // 收到新权威位置时对齐校正。
+    //
+    // 校正策略：正常 position 更新用**平滑逼近**而非硬跳。音频时钟与帧时钟
+    // 存在漂移，若权威位置硬跳跨过逐字边界，字切换会来回抖动（英文歌字短、
+    // 边界密集时更明显，表现为"下一个字闪一下"）。seek/切歌等大跳变仍直接吸附。
+    // 暂停时冻结在权威位置。
     if (widget.isPlaying) {
       _smoothPosMs += dt * 1000;
       if (widget.currentTimeMs != _lastAuthorityPosMs) {
+        final int jump = (widget.currentTimeMs - _lastAuthorityPosMs).abs();
         _lastAuthorityPosMs = widget.currentTimeMs;
-        _smoothPosMs = widget.currentTimeMs.toDouble();
+        if (jump > _smoothPosSeekJumpMs) {
+          // seek/大跳变：直接吸附，避免平滑拖尾
+          _smoothPosMs = widget.currentTimeMs.toDouble();
+        } else {
+          // 正常 position 更新：平滑逼近权威，避免硬跳跨字边界造成闪烁
+          final double corr = 1.0 - math.exp(-_smoothPosCorrRate * dt);
+          _smoothPosMs += (widget.currentTimeMs - _smoothPosMs) * corr;
+        }
       } else if ((_smoothPosMs - _lastAuthorityPosMs).abs() > 300) {
         // 兜底：权威位置长时间不更新（缓冲等）时防止平滑值漂移过大
         _smoothPosMs = _lastAuthorityPosMs.toDouble();

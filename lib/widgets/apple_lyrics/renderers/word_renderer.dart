@@ -167,6 +167,16 @@ class WordRenderer {
   /// -1 表示无效（非当前行），double.infinity 表示已播完。
   double _maskX = -1.0;
 
+  /// 过渡区半宽（固定值，行内字宽的平均）。
+  ///
+  /// 渐变过渡区宽度 = 2 × 半宽。**必须固定、不随当前字变化**：
+  /// - 若直接用当前字宽，字切换瞬间半宽突变 → 过渡区尺寸瞬变，边缘字 alpha 断崖（闪）。
+  /// - 若对半宽做平滑逼近，字切换瞬间过渡区短暂取上一字宽（偏大），下一个字整个处于
+  ///   过渡区（偏亮"亮一下"），随后过渡区收缩（右边缘转暗"暗下来"），再随演唱变亮——
+  ///   呈现"亮-暗-亮"的闪烁。
+  /// 固定为行内平均字宽：字切换时过渡区尺寸恒定，消除上述两种闪烁。
+  double _transitionHalfWidth = 0;
+
   /// 预计算的每个 word 在行内的起始 X 坐标（相对于行首）。
   /// 在 [_ensureBound] 时一次性计算，避免每帧 O(n²) 循环累加。
   List<double> _wordStartXs = const <double>[];
@@ -184,6 +194,32 @@ class WordRenderer {
   /// 保持测试接口兼容。仅测试调用，非热路径。
   @visibleForTesting
   Map<int, double> get wordAlphas => _wordAlphas.asMap();
+
+  /// 当前行级渐变 mask 位置（供测试断言字切换时的连续性）。
+  @visibleForTesting
+  double get maskX => _maskX;
+
+  /// 当前演唱字索引（供测试断言）。
+  @visibleForTesting
+  int get currentWordIdx => _currentWordIdx;
+
+  /// 过渡区半宽固定值（供测试断言字切换时的稳定性）。
+  @visibleForTesting
+  double get transitionHalfWidth => _transitionHalfWidth;
+
+  /// 每个 word 的行内起始 X（供测试断言过渡区计算）。
+  @visibleForTesting
+  List<double> get wordStartXsRef => _wordStartXs;
+
+  /// 每个 word 的宽度（供测试断言过渡区计算）。
+  @visibleForTesting
+  List<double> get wordWidthsRef => _wordWidths;
+
+  /// 转发 [alphaAtX] 供测试断言绘制 alpha 的连续性。
+  @visibleForTesting
+  double debugAlphaAtX(
+          double x, double start, double span, double bright, double dark) =>
+      _alphaAtX(x, start, span, bright, dark);
 
   /// 当前 scale 对应的 factor（0~1）。
   ///
@@ -334,6 +370,9 @@ class WordRenderer {
     // maskX = 已播字总宽度 + 当前字内进度 × 当前字宽
     // 渐变边界随演唱进度从行首移动到行尾，跨越多个 word。
     // 长字上停留久（速度慢），短字上快速掠过。
+    //
+    // 注意：_wordStartXs 是累计宽度，字切换时 wordStartXs[i+1] == wordEndXs[i]，
+    // 故 maskX 天然连续，无需额外平滑。
     if (currentWordIdx < 0) {
       _maskX = -1.0; // 无效，全 dark
     } else if (currentWordIdx >= wordCount) {
@@ -507,7 +546,7 @@ class WordRenderer {
     final double transitionHalfWidth = useGradient &&
             _currentWordIdx >= 0 &&
             _currentWordIdx < _wordWidths.length
-        ? _wordWidths[_currentWordIdx]
+        ? _transitionHalfWidth
         : 0.0;
     final double transitionStart = _maskX - transitionHalfWidth;
     final double transitionEnd = _maskX + transitionHalfWidth;
@@ -1009,6 +1048,16 @@ class WordRenderer {
       _wordEmphasisFlags[i] = EmphasizeEffect.shouldEmphasize(line.words[i]);
       // _lastSetAlphas[i] 不设置（默认 null），下次 paintLine 会重新 set text + layout
     }
+    // 过渡区半宽固定为行内平均字宽（稳定，不随当前字变化，避免字切换闪烁）
+    if (_wordWidths.isEmpty) {
+      _transitionHalfWidth = 0;
+    } else {
+      double sum = 0;
+      for (final w in _wordWidths) {
+        sum += w;
+      }
+      _transitionHalfWidth = sum / _wordWidths.length;
+    }
   }
 
   /// 重置状态：清空 alpha map、Y 偏移、归零 progress、scale 回到 inactive、isActive=false、解绑 line。
@@ -1028,6 +1077,7 @@ class WordRenderer {
     _currentWordIdx = -1;
     _intraWordProgress = 0.0;
     _maskX = -1.0;
+    _transitionHalfWidth = 0;
     // 清理辉光判定缓存
     _wordEmphasisFlags = const <bool>[];
     _isMetadataLine = false;
