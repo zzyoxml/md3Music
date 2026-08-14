@@ -53,6 +53,7 @@ import 'providers/player_provider.dart';
 import 'providers/playlist_collection_notifier.dart';
 import 'providers/device_provider.dart';
 import 'providers/grid_columns_provider.dart';
+import 'providers/shortcut_config_provider.dart';
 import 'providers/tab_config_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/comment_display_provider.dart';
@@ -143,6 +144,8 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => PlaylistCollectionNotifier()),
         // 主页 Tab 配置（显示/隐藏、排序）
         ChangeNotifierProvider(create: (_) => TabConfigProvider()),
+        // 桌面快捷方式配置（Android 长按图标入口的显示/隐藏、排序）
+        ChangeNotifierProvider(create: (_) => ShortcutConfigProvider()),
         // DLNA 投屏
         ChangeNotifierProvider(create: (_) => DlnaProvider()),
         // 评论显示设置（字号等）
@@ -173,29 +176,19 @@ class _AppViewState extends State<_AppView> {
   // 上一次已提取/正在提取的封面 url：同一首歌反复 notify 不重复提取，
   // 且异步提取期间切歌时丢弃过期结果（参考 AM 歌词动态取色 _lastAccentUrl 模式）。
   String? _lastCoverUrl;
+  // 桌面快捷方式配置：监听变更 → 重新注册 Android 长按图标快捷入口。
+  ShortcutConfigProvider? _shortcutConfig;
 
   @override
   void initState() {
     super.initState();
-    // 注册 Android 长按应用图标 Shortcut items
-    const quickActions = QuickActions();
-    quickActions.setShortcutItems(const [
-      ShortcutItem(
-        type: 'action_open_favorites',
-        localizedTitle: '我的收藏',
-        icon: 'ic_shortcut_favorite',
-      ),
-      ShortcutItem(
-        type: 'action_open_recognition',
-        localizedTitle: '听歌识曲',
-        icon: 'ic_shortcut_mic',
-      ),
-      ShortcutItem(
-        type: 'action_open_search',
-        localizedTitle: '搜索',
-        icon: 'ic_shortcut_search',
-      ),
-    ]);
+    // 桌面快捷方式由 ShortcutConfigProvider 配置驱动（支持排序+开关），
+    // 监听其变更并重新注册 Android 长按应用图标 Shortcut items。
+    // 冷启动时 provider 可能尚未异步加载完成，先按默认配置应用一次，
+    // 加载完成后 notifyListeners 会再次触发重应用。
+    _shortcutConfig = context.read<ShortcutConfigProvider>();
+    _shortcutConfig!.addListener(_applyDesktopShortcuts);
+    _applyDesktopShortcuts();
     // 处理冷启动时缓存的 shortcut 类型：
     // QuickActions.initialize 在 runApp 之前注册，但此时 Navigator 尚未就绪，
     // 因此 main.dart 把 shortcut 类型暂存到 pendingShortcutType，
@@ -212,6 +205,21 @@ class _AppViewState extends State<_AppView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupCoverColorBridge();
     });
+  }
+
+  /// 根据 ShortcutConfigProvider 当前配置，整体替换 Android 桌面快捷方式列表。
+  /// type 统一为 `action_open_<tabId>`，由 main.dart handleShortcut 路由到对应页。
+  void _applyDesktopShortcuts() {
+    final config = context.read<ShortcutConfigProvider>();
+    const quickActions = QuickActions();
+    quickActions.setShortcutItems([
+      for (final s in config.visibleShortcuts)
+        ShortcutItem(
+          type: 'action_open_${s.id}',
+          localizedTitle: s.label,
+          icon: s.iconResource,
+        ),
+    ]);
   }
 
   /// 建立封面动态取色桥接：监听 PlayerProvider 切歌，把封面主色注入 ThemeProvider。
@@ -236,6 +244,7 @@ class _AppViewState extends State<_AppView> {
 
   @override
   void dispose() {
+    _shortcutConfig?.removeListener(_applyDesktopShortcuts);
     _playerProvider?.removeListener(_onPlayerChanged);
     super.dispose();
   }
@@ -908,12 +917,20 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     setState(() {});
   }
 
-  /// 处理 shortcut 入口的 tab 切换请求
+  /// 处理 shortcut 入口的 tab 切换请求。
+  /// 按 tab id 解析实际索引（tab 可排序/隐藏）：
+  /// - tab 可见：切主 tab；
+  /// - tab 被隐藏：以二级页面路由打开（与 LaunchPad 隐藏 tab 点击行为一致）。
   void _handleShortcutTabRequest() {
-    final index = shortcutTabRequest.value;
-    if (index == null) return;
+    final tabId = shortcutTabRequest.value;
+    if (tabId == null || tabId.isEmpty) return;
     shortcutTabRequest.value = null;
-    setState(() => _selectedIndex = index);
+    final tabConfig = context.read<TabConfigProvider>();
+    if (tabConfig.visibleIndexOf(tabId) >= 0) {
+      _switchToTab(tabId);
+    } else {
+      _openTabAsPage(tabId);
+    }
   }
 
   /// LaunchPad 导航：切换到指定 tab（仅对已可见的 tab 生效）。

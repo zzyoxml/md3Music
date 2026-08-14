@@ -18,8 +18,6 @@ import 'core/services/usb_audio_service.dart';
 import 'core/services/wakelock_service.dart';
 import 'data/repositories/settings_repository.dart';
 import 'modules/onboarding/user_agreement_page.dart';
-import 'modules/recognition/song_recognition_page.dart';
-import 'modules/search/search_page.dart';
 import 'services/kugou_server.dart';
 import 'widgets/apple_lyrics/layout/lyric_preferences.dart';
 import 'widgets/md3_lyric_preferences.dart';
@@ -34,11 +32,11 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 /// 因此把 shortcut 类型暂存到该字段，由 _AppView 在首帧处理后清空。
 String? pendingShortcutType;
 
-/// 用于通知 _MainLayout 切换底部 tab。
-/// shortcut 入口「我的收藏」需要切换到主页第 3 个 tab（index=2），
-/// 而非 push 一个新的 FavoritesPage 路由（避免页面重复）。
-/// _MainLayout 在 initState 中监听此 notifier，收到非 null 值后切换 tab 并清空。
-final ValueNotifier<int?> shortcutTabRequest = ValueNotifier<int?>(null);
+/// 用于通知 _MainLayout 切换到指定 tab（携带 tab id，而非写死索引）。
+/// shortcut 入口按 tab id 解析实际索引：tab 可见则切主 tab，被隐藏则以
+/// 二级页面打开（避免依赖固定索引导致 tab 排序/隐藏后跳错）。
+/// _MainLayout 在 initState 中监听此 notifier，收到非 null 值后处理并清空。
+final ValueNotifier<String?> shortcutTabRequest = ValueNotifier<String?>(null);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -140,21 +138,17 @@ Future<void> _restoreBluetoothLyricPref() async {
 
 /// 根据 shortcut 类型路由到对应页面。
 /// 通过全局 [appNavigatorKey] 获取 NavigatorState，避免依赖具体 BuildContext。
+///
+/// 快捷方式类型统一为 `action_open_<tabId>`（与现有
+/// action_open_favorites/recognition/search 兼容）。这里只把 tab id 交给
+/// _MainLayout，由它按当前 tab 配置解析：可见 → 切主 tab；隐藏 → 二级页打开。
 void handleShortcut(String shortcutType) {
   final nav = appNavigatorKey.currentState;
   if (nav == null) return;
-  switch (shortcutType) {
-    case 'action_open_favorites':
-      // 切换到主页底部 tab index=2（我的收藏），而非 push 新路由
-      shortcutTabRequest.value = 2;
-      break;
-    case 'action_open_recognition':
-      nav.push(MaterialPageRoute(builder: (_) => const SongRecognitionPage()));
-      break;
-    case 'action_open_search':
-      nav.push(MaterialPageRoute(builder: (_) => const SearchPage()));
-      break;
-  }
+  if (!shortcutType.startsWith('action_open_')) return;
+  final tabId = shortcutType.substring('action_open_'.length);
+  if (tabId.isEmpty) return;
+  shortcutTabRequest.value = tabId;
 }
 
 Future<void> _requestPermissions() async {
