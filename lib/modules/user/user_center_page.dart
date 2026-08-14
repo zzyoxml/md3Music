@@ -14,6 +14,7 @@ import 'cloud_music_page.dart';
 import 'downloads_page.dart';
 import 'listen_ranking_page.dart';
 import 'play_history_page.dart';
+import 'vip_status.dart';
 
 class UserCenterPage extends StatefulWidget {
   const UserCenterPage({super.key});
@@ -114,9 +115,10 @@ class _UserCenterPageState extends State<UserCenterPage> {
               controller: _scrollController,
               slivers: [
                 _buildUserHeader(cs, tt, kugou),
-                _buildVipCard(cs, tt, kugou),
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),
                 _buildActionGrid(cs),
+                const SliverToBoxAdapter(child: SizedBox(height: 16)),
+                _buildVipCard(cs, tt, kugou),
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),
                 _buildVipCalendar(cs, tt, kugou, context),
                 const SliverToBoxAdapter(child: SizedBox(height: 80)),
@@ -248,7 +250,9 @@ class _UserCenterPageState extends State<UserCenterPage> {
 
   Widget _buildVipCard(ColorScheme cs, TextTheme tt, KugouProvider kugou) {
     final vip = kugou.vipInfo;
-    final isVip = vip?.isVip == true;
+    final busiList = vip?.busiVipList;
+    final tvip = findActiveBusiVip(busiList, 'tvip');
+    final svip = findActiveBusiVip(busiList, 'svip');
     return SliverToBoxAdapter(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -257,48 +261,102 @@ class _UserCenterPageState extends State<UserCenterPage> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: cs.outlineVariant),
         ),
-        child: Row(
+        child: Column(
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: isVip
-                    ? cs.secondaryContainer
-                    : cs.surfaceContainerHighest,
-              ),
-              child: Icon(
-                isVip
-                    ? Icons.workspace_premium
-                    : Icons.workspace_premium_outlined,
-                color: isVip ? cs.onSecondaryContainer : cs.onSurfaceVariant,
-              ),
+            _buildVipRow(
+              cs: cs,
+              tt: tt,
+              active: tvip,
+              title: '畅听会员',
+              icon: Icons.headphones,
+              iconBg: cs.secondaryContainer,
+              iconFg: cs.onSecondaryContainer,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    isVip
-                        ? (kugou.isTodayYouthVip ? '概念版VIP会员' : 'VIP会员')
-                        : '开通VIP会员',
-                    style: tt.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    isVip
-                        ? '概念版VIP 有效期至: ${vip?.conceptExpireTime ?? vip?.expireTime ?? '永久'}'
-                        : '畅享无损音质、个性皮肤等',
-                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                  ),
-                ],
-              ),
+            const SizedBox(height: 12),
+            _buildVipRow(
+              cs: cs,
+              tt: tt,
+              active: svip,
+              title: '概念会员',
+              icon: Icons.workspace_premium,
+              iconBg: cs.primaryContainer,
+              iconFg: cs.onPrimaryContainer,
             ),
           ],
         ),
       ),
+    );
+  }
+
+  /// 单行会员状态（移植自 EchoMusic Profile.vue「会员状态」卡片）：
+  /// 已开通显示相对到期时间 + 具体到期时间，未开通显示「未开通」。
+  Widget _buildVipRow({
+    required ColorScheme cs,
+    required TextTheme tt,
+    required Map<String, dynamic>? active,
+    required String title,
+    required IconData icon,
+    required Color iconBg,
+    required Color iconFg,
+  }) {
+    final endTime = active?['vip_end_time']?.toString();
+    // 相对到期时间（如"5天后到期"），解析失败时为 null
+    final relText = active != null ? formatVipExpireText(endTime) : null;
+    // 具体到期时间（yyyy-MM-dd HH:mm）
+    final absText = active != null ? formatVipDateTime(endTime) : null;
+    final dimmed = active == null;
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            color: dimmed ? cs.surfaceContainerHighest : iconBg,
+          ),
+          child: Icon(icon, color: dimmed ? cs.onSurfaceVariant : iconFg),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: tt.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: dimmed ? cs.onSurfaceVariant : null,
+                ),
+              ),
+              if (active != null) ...[
+                if (relText != null)
+                  Text(
+                    relText,
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                Text(
+                  '$absText',
+                  style: tt.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+                  ),
+                ),
+              ] else
+                Text(
+                  '未开通',
+                  style: tt.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Icon(
+          dimmed ? Icons.radio_button_unchecked : Icons.check_circle,
+          size: 18,
+          color: dimmed
+              ? cs.onSurfaceVariant.withValues(alpha: 0.5)
+              : iconFg,
+        ),
+      ],
     );
   }
 
@@ -490,11 +548,6 @@ class _UserCenterPageState extends State<UserCenterPage> {
                 color: cs.onSurfaceVariant,
                 onPressed: () {},
               ),
-              // 概念版会员徽章 —— 今天签到后显示
-              if (kugou.isTodayYouthVip) ...[
-                const SizedBox(width: 4),
-                _buildConceptVipBadge(cs, tt),
-              ],
               const SizedBox(width: 4),
               Flexible(
                 child: FilledButton.tonalIcon(
@@ -572,37 +625,6 @@ class _UserCenterPageState extends State<UserCenterPage> {
           Text(
             '仅签到异常时点击',
             style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 概念版会员徽章 —— 显示在签到按钮左侧，仅今天已签时显示
-  Widget _buildConceptVipBadge(ColorScheme cs, TextTheme tt) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        // 金/紫色调 —— Material 3 expressive：primary + tertiary 渐变近似
-        gradient: LinearGradient(
-          colors: [
-            cs.primary.withValues(alpha: 0.85),
-            cs.tertiary.withValues(alpha: 0.85),
-          ],
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.workspace_premium, size: 12, color: cs.onPrimary),
-          const SizedBox(width: 3),
-          Text(
-            '概念版',
-            style: tt.labelSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: cs.onPrimary,
-            ),
           ),
         ],
       ),
