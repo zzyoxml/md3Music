@@ -446,6 +446,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   // 字体缓存：字体变化时强制重算行高 + 失效所有模糊图片缓存
   // （TextPainter 用 fontFamily 测量，旧缓存会与新字体渲染尺寸不一致）
   String? _cachedFontFamily;
+  // 字重缓存：字重变化时同样需强制重算行高 + 失效模糊图片缓存
+  int _cachedFontWeight = -1;
   // 翻译副行缓存：当前行变化或 showTranslation 开关切换时，
   // 当前行高度需重算（副行高度仅计入当前行）
   // displayMode 切换也需重算（虽副行高度不变，但需触发重绘）
@@ -480,6 +482,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   void _recomputeLineHeightsIfNeeded(double fontSize, double viewportWidth) {
     final identitySame = identical(_cleanedLines, _cachedLinesRef);
     final currentFontFamily = LyricLayout.fontFamily;
+    final currentFontWeight = LyricLayout.fontWeight.value;
     final currentShowTranslation = LyricPreferences.instance.showTranslation;
     final currentDisplayMode = LyricPreferences.instance.displayMode;
     if (fontSize == _cachedFontSize &&
@@ -488,6 +491,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         identitySame &&
         _lineHeights.length == _cleanedLines.length &&
         currentFontFamily == _cachedFontFamily &&
+        currentFontWeight == _cachedFontWeight &&
         _currentLineIndex == _cachedCurrentLineIndex &&
         currentShowTranslation == _cachedShowTranslation &&
         currentDisplayMode == _cachedDisplayMode) {
@@ -498,6 +502,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _cachedLinesLength = _cleanedLines.length;
     _cachedLinesRef = _cleanedLines;
     _cachedFontFamily = currentFontFamily;
+    _cachedFontWeight = currentFontWeight;
     _cachedCurrentLineIndex = _currentLineIndex;
     _cachedShowTranslation = currentShowTranslation;
     _cachedDisplayMode = currentDisplayMode;
@@ -641,11 +646,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// - WordRenderer/LineRenderer 内部绑定：清空 _wordRenderers/_lineRenderers,
   ///   让它们用新字体重新测量 word 宽度（_ensureBound）并重置 alpha 状态
   void _onPreferencesChanged() {
-    // 字体变化时失效所有依赖字体测量的缓存
+    // 字体/字重变化时失效所有依赖字体测量的缓存
     final currentFontFamily = LyricLayout.fontFamily;
-    if (currentFontFamily != _cachedFontFamily) {
+    final currentFontWeight = LyricLayout.fontWeight.value;
+    if (currentFontFamily != _cachedFontFamily ||
+        currentFontWeight != _cachedFontWeight) {
       // 失效行高缓存（让 _recomputeLineHeightsIfNeeded 重算）
       _cachedFontFamily = null;
+      _cachedFontWeight = -1;
       // 失效模糊图片缓存（dispose 图片资源 + 清空 Map）
       for (final entry in _lineBlurImages.values) {
         entry.$1.dispose();
@@ -1679,6 +1687,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           // 显式注入歌词 fontFamily，与清晰层保持一致，
           // 否则模糊层尺寸与清晰层不匹配
           fontFamily: LyricLayout.fontFamily,
+          fontWeight: LyricLayout.fontWeight,
         ),
       );
       textPainter.layout(maxWidth: maxTextWidth);

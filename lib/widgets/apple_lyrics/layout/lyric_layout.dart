@@ -44,6 +44,12 @@ class LyricLayout {
   /// - 'LyricUserCustomFont'：用户通过 SAF 选择并加载的自定义字体
   static String? get fontFamily => LyricPreferences.instance.effectiveFontFamily;
 
+  /// 歌词字重：返回用户偏好的字重。
+  ///
+  /// 所有歌词渲染/测量路径的 [TextStyle] 必须显式传入此值，
+  /// 否则 TextPainter + Canvas 直接绘制路径不会继承 `TextStyle.fontWeight`。
+  static FontWeight get fontWeight => LyricPreferences.instance.fontWeight;
+
   // ============== 行 wrapper 间距 ==============
 
   /// 行 wrapper padding（垂直 0.4em，水平 1em）
@@ -105,7 +111,7 @@ class LyricLayout {
           text: line.text,
           // 显式注入歌词 fontFamily，必须与 line_renderer 渲染路径一致，
           // 否则行高测量与实际渲染不匹配会导致跳动
-          style: TextStyle(fontSize: fontSize, height: lineHeight, fontFamily: fontFamily),
+          style: TextStyle(fontSize: fontSize, height: lineHeight, fontFamily: fontFamily, fontWeight: fontWeight),
         ),
         textDirection: TextDirection.ltr,
       )..layout(maxWidth: maxWidth);
@@ -123,7 +129,7 @@ class LyricLayout {
           text: TextSpan(
             text: word.text,
             // 显式注入歌词 fontFamily，必须与 word_renderer 测量路径一致
-            style: TextStyle(fontSize: fontSize, height: lineHeight, fontFamily: fontFamily),
+            style: TextStyle(fontSize: fontSize, height: lineHeight, fontFamily: fontFamily, fontWeight: fontWeight),
           ),
           textDirection: TextDirection.ltr,
         )..layout();

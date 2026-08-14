@@ -57,6 +57,18 @@ class Md3LyricPreferencesPanel extends StatelessWidget {
                 onChanged: prefs.setFontSize,
               ),
               const SizedBox(height: 8),
+              // 字重滑块
+              Text('字重：${_fontWeightLabel(prefs.fontWeightValue)}'),
+              Slider(
+                min: Md3LyricPreferences.minFontWeight.toDouble(),
+                max: Md3LyricPreferences.maxFontWeight.toDouble(),
+                divisions: ((Md3LyricPreferences.maxFontWeight -
+                        Md3LyricPreferences.minFontWeight) ~/
+                    100),
+                value: prefs.fontWeightValue.toDouble(),
+                onChanged: (v) => prefs.setFontWeight(v.round()),
+              ),
+              const SizedBox(height: 8),
               // 行间距滑块
               Text('行间距：${prefs.lineSpacing.toStringAsFixed(1)} ×'),
               Slider(
@@ -90,6 +102,28 @@ class Md3LyricPreferencesPanel extends StatelessWidget {
         );
       },
     );
+  }
+
+  /// 字重数值 → 中文标签。
+  String _fontWeightLabel(int value) {
+    switch (value) {
+      case 300:
+        return '细体';
+      case 400:
+        return '常规';
+      case 500:
+        return '中等';
+      case 600:
+        return '半粗';
+      case 700:
+        return '粗体';
+      case 800:
+        return '特粗';
+      case 900:
+        return '黑体';
+      default:
+        return '$value';
+    }
   }
 
   /// 字体来源中文标签。

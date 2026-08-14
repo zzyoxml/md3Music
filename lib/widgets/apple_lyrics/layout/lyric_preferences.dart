@@ -47,7 +47,7 @@ class LyricPreferences extends ChangeNotifier {
   static const double minFontSize = 12;
 
   /// 字号最大值（px）
-  static const double maxFontSize = 30;
+  static const double maxFontSize = 50;
 
   /// 字号默认值（px）
   ///
@@ -72,10 +72,22 @@ class LyricPreferences extends ChangeNotifier {
   /// 行间距系数默认值
   static const double defaultLineSpacing = 1.5;
 
+  /// 字重最小值（FontWeight.value，细体）
+  static const int minFontWeight = 300;
+
+  /// 字重最大值（FontWeight.value，黑体）
+  static const int maxFontWeight = 900;
+
+  /// 字重默认值（FontWeight.value，常规）
+  ///
+  /// 与当前未设置字重时的渲染外观（Flutter 默认 FontWeight.normal=400）一致。
+  static const int defaultFontWeight = 400;
+
   // ============== SharedPreferences keys ==============
 
   static const String _keyFontSize = 'lyric_font_size';
   static const String _keyLineSpacing = 'lyric_line_spacing';
+  static const String _keyFontWeight = 'lyric_font_weight';
   static const String _keyUseGaussianBlur = 'lyric_use_gaussian_blur';
   static const String _keyUseGlowEffect = 'lyric_use_glow_effect';
   static const String _keyUseFlowingBackground = 'lyric_use_flowing_background';
@@ -91,6 +103,7 @@ class LyricPreferences extends ChangeNotifier {
 
   double _fontSize = defaultUserFontSize;
   double _lineSpacing = defaultLineSpacing;
+  int _fontWeight = defaultFontWeight;
   bool _useGaussianBlur = true;
   bool _useGlowEffect = true;
   bool _useFlowingBackground = true;
@@ -109,6 +122,12 @@ class LyricPreferences extends ChangeNotifier {
 
   double get fontSize => _fontSize;
   double get lineSpacing => _lineSpacing;
+
+  /// 歌词字重（FontWeight.value 数值，范围 [minFontWeight]~[maxFontWeight]）。
+  int get fontWeightValue => _fontWeight;
+
+  /// 歌词字重对应 [FontWeight]（供 TextStyle 使用）。
+  FontWeight get fontWeight => FontWeight(_fontWeight);
   bool get useGaussianBlur => _useGaussianBlur;
   bool get useGlowEffect => _useGlowEffect;
   bool get useFlowingBackground => _useFlowingBackground;
@@ -156,6 +175,9 @@ class LyricPreferences extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _fontSize = prefs.getDouble(_keyFontSize) ?? defaultUserFontSize;
     _lineSpacing = prefs.getDouble(_keyLineSpacing) ?? defaultLineSpacing;
+    _fontWeight =
+        (prefs.getInt(_keyFontWeight) ?? defaultFontWeight)
+            .clamp(minFontWeight, maxFontWeight);
     _useGaussianBlur = prefs.getBool(_keyUseGaussianBlur) ?? true;
     _useGlowEffect = prefs.getBool(_keyUseGlowEffect) ?? true;
     _useFlowingBackground = prefs.getBool(_keyUseFlowingBackground) ?? true;
@@ -192,6 +214,16 @@ class LyricPreferences extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyLineSpacing, _lineSpacing);
+  }
+
+  /// 设置字重并持久化。会触发 [notifyListeners]。
+  Future<void> setFontWeight(int value) async {
+    final clamped = value.clamp(minFontWeight, maxFontWeight);
+    if (clamped == _fontWeight) return;
+    _fontWeight = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyFontWeight, _fontWeight);
   }
 
   /// 设置高斯模糊开关并持久化。
@@ -349,6 +381,7 @@ class LyricPreferences extends ChangeNotifier {
   Future<void> reset() async {
     _fontSize = defaultUserFontSize;
     _lineSpacing = defaultLineSpacing;
+    _fontWeight = defaultFontWeight;
     _useGaussianBlur = true;
     _useGlowEffect = true;
     _useFlowingBackground = true;
@@ -364,6 +397,7 @@ class LyricPreferences extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyFontSize, _fontSize);
     await prefs.setDouble(_keyLineSpacing, _lineSpacing);
+    await prefs.remove(_keyFontWeight);
     await prefs.setBool(_keyUseGaussianBlur, _useGaussianBlur);
     await prefs.setBool(_keyUseGlowEffect, _useGlowEffect);
     await prefs.setBool(_keyUseFlowingBackground, _useFlowingBackground);

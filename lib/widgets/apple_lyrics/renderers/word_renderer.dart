@@ -46,6 +46,9 @@ class WordRenderer {
   /// 缓存的字号（用于检测 fontSize 变化时重新测量 word 宽度）。
   double _boundFontSize = -1;
 
+  /// 缓存的字重（用于检测 fontWeight 变化时重新测量 word 宽度）。
+  int _boundFontWeight = -1;
+
   /// 每个 word 的缓存宽度（在 [_ensureBound] 时一次性测量）。
   ///
   /// **性能优化**：之前每帧 paintLine 都为每个 word 创建 TextPainter + layout
@@ -592,6 +595,7 @@ class WordRenderer {
               fontSize: fontSize,
               height: lineHeight,
               fontFamily: LyricLayout.fontFamily,
+              fontWeight: LyricLayout.fontWeight,
             ),
           );
           painter.layout();
@@ -608,6 +612,7 @@ class WordRenderer {
               fontSize: fontSize,
               height: lineHeight,
               fontFamily: LyricLayout.fontFamily,
+              fontWeight: LyricLayout.fontWeight,
             ),
           );
           painter.layout();
@@ -714,6 +719,7 @@ class WordRenderer {
           fontSize: transFontSize,
           height: LyricLayout.translationLineHeight,
           fontFamily: LyricLayout.fontFamily,
+          fontWeight: LyricLayout.fontWeight,
         ),
       );
       _translationPainter.layout(
@@ -829,6 +835,7 @@ class WordRenderer {
         height: LyricLayout.lineHeight,
         // 显式注入歌词 fontFamily，与 paintLine 路径保持一致
         fontFamily: LyricLayout.fontFamily,
+        fontWeight: LyricLayout.fontWeight,
       ),
     );
     painter.layout(
@@ -889,6 +896,7 @@ class WordRenderer {
             fontSize: fontSize,
             height: LyricLayout.lineHeight,
             fontFamily: LyricLayout.fontFamily,
+            fontWeight: LyricLayout.fontWeight,
           ),
         )
         ..layout();
@@ -931,11 +939,17 @@ class WordRenderer {
   void _ensureBound(LyricLine line, double fontSize) {
     final sameLine = identical(_boundLine, line);
     final sameFontSize = _boundFontSize == fontSize;
-    if (sameLine && sameFontSize && _wordPainters.length == line.words.length) {
+    final sameFontWeight =
+        _boundFontWeight == LyricPreferences.instance.fontWeightValue;
+    if (sameLine &&
+        sameFontSize &&
+        sameFontWeight &&
+        _wordPainters.length == line.words.length) {
       return; // 缓存命中
     }
     _boundLine = line;
     _boundFontSize = fontSize;
+    _boundFontWeight = LyricPreferences.instance.fontWeightValue;
     // 注意：_wordAlphas/_wordYOffsets/_lastSetAlphas 不能用 .clear()，
     // 因为它们可能被 const <T>[] 初始化（不可修改）。后面会直接重新赋值，无需 clear。
     _emphasizeStates.clear();
@@ -983,6 +997,7 @@ class WordRenderer {
           // 显式注入歌词 fontFamily，必须与 paintLine 渲染路径一致，
           // 否则 word 宽度测量会出错导致换行错位
           fontFamily: LyricLayout.fontFamily,
+          fontWeight: LyricLayout.fontWeight,
         ),
       );
       _wordPainters[i].layout();
@@ -1005,6 +1020,7 @@ class WordRenderer {
     _boundLine = null;
     _activeColorValue = null;
     _boundFontSize = -1;
+    _boundFontWeight = -1;
     _wordWidths = const <double>[];
     _wordStartXs = const <double>[];
     _cachedMaxWidth = -1;

@@ -77,6 +77,9 @@ class LineRenderer {
   /// 主题切换时 textColorValue 变化，需强制重建 TextSpan。
   int _lastTextColorValue = -1;
 
+  /// 上次 set text 时使用的字重。字重变化时需强制重建 TextSpan。
+  FontWeight _lastFontWeight = FontWeight.normal;
+
   /// 当前行专用的文字颜色（ARGB int，仅 [_isActive] 时生效）。
   /// 动态字体颜色：由封面提取色按「70% 白 + 30% 提取色」混色得到，
   /// null 表示不使用（回退到 LyricLayout.textColorValue）。
@@ -241,11 +244,14 @@ class LineRenderer {
     final bool lineChanged = !identical(_boundLine, line);
     // alignment 变化时也强制重建（避免 _painter 缓存旧 textAlign 影响多行对齐）
     final bool alignChanged = _lastAlignment != alignment;
+    // 字重变化时也强制重建（字重影响字形宽度/换行）
+    final bool fontWeightChanged = LyricLayout.fontWeight != _lastFontWeight;
     if (lineChanged ||
         (_currentAlpha - _lastSetAlpha).abs() > 0.001 ||
         maxWidth != _lastSetMaxWidth ||
         colorChanged ||
-        alignChanged) {
+        alignChanged ||
+        fontWeightChanged) {
       _painter.text = TextSpan(
         text: line.text,
         style: TextStyle(
@@ -256,6 +262,7 @@ class LineRenderer {
           height: LyricLayout.lineHeight,
           // 显式注入歌词 fontFamily（system 模式为 null，走系统字体链）
           fontFamily: LyricLayout.fontFamily,
+          fontWeight: LyricLayout.fontWeight,
         ),
       );
       _painter.layout(
@@ -265,6 +272,7 @@ class LineRenderer {
       _lastTextColorValue = textColorValue;
       _boundLine = line;
       _lastAlignment = alignment;
+      _lastFontWeight = LyricLayout.fontWeight;
     }
     // 用 _alignX 计算文本起始 x，与 WordRenderer 一致。
     // 单行：直接用 _painter.width（layout 后的整体宽度）计算 x。
@@ -304,6 +312,7 @@ class LineRenderer {
           fontSize: transFontSize,
           height: LyricLayout.translationLineHeight,
           fontFamily: LyricLayout.fontFamily,
+          fontWeight: LyricLayout.fontWeight,
         ),
       );
       _translationPainter.layout(
@@ -351,6 +360,7 @@ class LineRenderer {
           fontSize: fontSize,
           height: LyricLayout.lineHeight,
           fontFamily: LyricLayout.fontFamily,
+          fontWeight: LyricLayout.fontWeight,
         ),
       );
       _lineMeasurer.layout(maxWidth: double.infinity);
@@ -403,6 +413,7 @@ class LineRenderer {
     _lastSetAlpha = -1;
     _lastSetMaxWidth = -1;
     _lastTextColorValue = -1;
+    _lastFontWeight = FontWeight.normal;
     _boundLine = null;
     _activeColorValue = null;
     _lastAlignment = DuetAlignment.defaultAlign;
