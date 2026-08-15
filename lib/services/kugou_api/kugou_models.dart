@@ -1506,6 +1506,62 @@ class KugouUserVipDetail {
   }
 }
 
+/// 听歌等级信息（/user/grade/info，v2/lite 协议）。
+class KugouGradeInfo {
+  /// 服务器当前累计听歌时长（秒）
+  final int? dSec;
+
+  /// 时长（秒，与 d_sec 近似，取其一展示）
+  final int? duration;
+
+  /// 当前等级（如 3）
+  final int? pGrade;
+
+  /// 当前成长值/积分
+  final int? pCurrentPoint;
+
+  /// 本级所需成长值（升到本级时）
+  final int? pGradePoint;
+
+  /// 下一等级
+  final int? pNextGrade;
+
+  /// 升到下一级所需成长值
+  final int? pNextGradePoint;
+
+  /// 服务器时间（字符串）
+  final String? serverTime;
+
+  const KugouGradeInfo({
+    this.dSec,
+    this.duration,
+    this.pGrade,
+    this.pCurrentPoint,
+    this.pGradePoint,
+    this.pNextGrade,
+    this.pNextGradePoint,
+    this.serverTime,
+  });
+
+  factory KugouGradeInfo.fromJson(Map<String, dynamic> json) {
+    final data = json['data'] as Map<String, dynamic>? ?? json;
+    return KugouGradeInfo(
+      dSec: _parseInt(data['d_sec'] ?? data['dSec']),
+      duration: _parseInt(data['duration']),
+      pGrade: _parseInt(data['p_grade'] ?? data['pGrade']),
+      pCurrentPoint: _parseInt(
+        data['p_current_point'] ?? data['pCurrentPoint'],
+      ),
+      pGradePoint: _parseInt(data['p_grade_point'] ?? data['pGradePoint']),
+      pNextGrade: _parseInt(data['p_next_grade'] ?? data['pNextGrade']),
+      pNextGradePoint: _parseInt(
+        data['p_next_grade_point'] ?? data['pNextGradePoint'],
+      ),
+      serverTime: _strNull(data['servertime'] ?? data['serverTime']),
+    );
+  }
+}
+
 class KugouSongClimax {
   final String? climaxStart;
   final String? climaxEnd;

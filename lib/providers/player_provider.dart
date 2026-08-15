@@ -12,6 +12,7 @@ import '../core/services/audio_service.dart';
 import '../core/services/desktop_lyric_service.dart';
 import '../core/services/home_widget_service.dart';
 import '../core/services/lyricon_provider_service.dart';
+import '../core/services/listening_grade_service.dart';
 import '../core/services/media_notification_service.dart';
 import '../core/services/wakelock_service.dart';
 import '../core/services/media_store_service.dart';
@@ -191,10 +192,21 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _initAudioService();
     // 监听自身变化检测切歌 → 推送 Lyricon（仅 enabled 时实际推送）
     addListener(_handleLyriconSongChange);
+    // 同步「是否正在播放在线歌曲」到听歌等级服务（累计本地听歌时长用）
+    addListener(_syncListeningGradeOnline);
     // 监听 Lyricon 连接状态：headless 唤醒等场景下 auto_restored/connected
     // 事件到达时可能晚于状态恢复的 notifyListeners，这里补推当前歌曲，
     // 否则词幕不会自动连接显示（PlayerProvider 自己监听自己无法感知 Lyricon 启用）。
     LyriconProviderService.instance.addListener(_handleLyriconEnabledChanged);
+  }
+
+  /// 推送当前「在线歌曲播放中」状态到听歌等级服务。
+  /// notifyListeners 在播放/暂停/切歌时触发（高频位置更新走 positionNotifier，
+  /// 不触发全量通知），此方法开销极小。
+  void _syncListeningGradeOnline() {
+    ListeningGradeService.instance.setListeningOnline(
+      (_currentSong?.isOnline ?? false) && _isPlaying,
+    );
   }
 
   Future<void> _initAudioService() async {

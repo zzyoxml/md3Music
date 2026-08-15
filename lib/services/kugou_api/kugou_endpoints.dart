@@ -161,6 +161,7 @@ class KugouEndpoints {
   // User
   static const String userDetail = '/user/detail';
   static const String userVipDetail = '/user/vip/detail';
+  static const String userGradeInfo = '/user/grade/info';
   static const String userPlaylist = '/user/playlist';
   static const String userFollow = '/user/follow';
   static const String userFollowMessage = '/user/follow/message';

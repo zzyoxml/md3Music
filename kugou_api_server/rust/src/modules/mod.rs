@@ -99,6 +99,7 @@ pub fn register(routes: &mut Vec<(&'static str, ModuleFn)>) {
     routes.push(("/user/history", user::handle_history));
     routes.push(("/user/follow/message", user::handle_follow_message));
     routes.push(("/user/follow", user::handle_follow));
+    routes.push(("/user/grade/info", user::handle_grade_info));
     routes.push(("/user/detail", user::handle_detail));
     routes.push(("/user/cloud/upload", user::handle_cloud_upload));
     routes.push(("/user/cloud/del", user::handle_cloud_del));

@@ -2549,6 +2549,24 @@ class KugouApiClient {
     }
   }
 
+  /// 查询/上报听歌等级信息（v2/lite 协议）。
+  /// [dSec]/[diffSec] 同时传入时进入上报模式（同步本地累计时长）；都为空时为查询。
+  /// noCache 默认 true：避免 Rust apicache 命中旧值（等级/时长需要实时）。
+  Future<Map<String, dynamic>?> getGradeInfo({
+    int? dSec,
+    int? diffSec,
+    bool noCache = true,
+  }) async {
+    final params = <String, dynamic>{};
+    if (dSec != null) params['d_sec'] = dSec;
+    if (diffSec != null) params['diff_sec'] = diffSec;
+    return await _get(
+      KugouEndpoints.userGradeInfo,
+      queryParameters: params,
+      noCache: noCache,
+    );
+  }
+
   Future<Map<String, dynamic>?> getUserPlaylist({
     int page = 1,
     int pagesize = 30,
