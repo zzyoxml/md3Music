@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../data/models/kugou_account.dart';
 import '../../data/models/mv_models.dart';
 import 'kugou_endpoints.dart';
 import 'kugou_models.dart';
@@ -82,6 +83,34 @@ class KugouApiClient {
   bool _isInitialized = false;
   Completer<void>? _initCompleter;
 
+  // ==================== 多账号管理 ====================
+  /// 账号列表持久化键：JSON 序列化的 [KugouAccount] 数组。
+  static const String _kAccountsKey = 'kugou_accounts';
+
+  /// 等待 `_initFromStorage` 完成。
+  ///
+  /// `_initFromStorage` 在构造函数中异步启动（fire-and-forget），其旧版兼容
+  /// 分支会重写内存 `_token`/`_userid`。若在初始化完成前调用登录/切换等方法，
+  /// 会被随后完成的初始化覆盖。此处统一等待初始化完成后再操作，消除竞态。
+  Future<void> _ensureInitialized() async {
+    if (!_isInitialized) {
+      await _initCompleter?.future;
+    }
+  }
+
+  /// 已保存的账号摘要列表（按最近登录时间倒序）。
+  final List<KugouAccount> _accounts = [];
+
+  /// 只读暴露账号列表（调用方不得直接修改）。
+  List<KugouAccount> get savedAccounts => List.unmodifiable(_accounts);
+
+  /// 最近登录时间倒序排序后的账号列表（供 UI 展示与自动切换）。
+  List<KugouAccount> get sortedAccounts {
+    final list = List<KugouAccount>.of(_accounts)
+      ..sort((a, b) => b.loginTime.compareTo(a.loginTime));
+    return list;
+  }
+
   /// 本地 API 服务器（Rust）就绪信号。
   ///
   /// P0: main.dart 已改为「runApp 不等待服务器启动」——so 加载与 UI 首帧并行。
@@ -129,6 +158,11 @@ class KugouApiClient {
         authParts.add('vip_token=$_vipToken');
       }
       options.headers['Authorization'] = authParts.join(';');
+
+      // 已认证的请求绕过 Rust apicache：其缓存 key 不含 token，
+      // 切账号后用户态接口会命中旧账号缓存（昵称/头像/VIP/歌单等串号）。
+      options.headers['x-apicache-bypass'] = '1';
+      options.headers['Cache-Control'] = 'no-cache';
     } else {
       // 未登录或 /images 路径，清除 Authorization 头
       options.headers.remove('Authorization');
@@ -199,6 +233,43 @@ class KugouApiClient {
       return null;
     } catch (e) {
       print('[API _get] Error: $e');
+      return null;
+    }
+  }
+
+  /// 允许非 200 状态码的 GET（用于登录等场景：Rust 服务端把上游业务错误
+  /// 如"手机号多账号"（error_code=34175）包装成 HTTP 502，但 body 里带
+  /// `data.info_list` 账号列表，需读取而非丢弃）。
+  Future<Map<String, dynamic>?> _getAllowNonOk(
+    String path, {
+    Map<String, dynamic>? queryParameters,
+    bool noCache = false,
+  }) async {
+    try {
+      final response = await _dio.get(
+        path,
+        queryParameters: queryParameters,
+        options: Options(
+          extra: {'noCache': noCache},
+          validateStatus: (_) => true,
+        ),
+      );
+      if (response.data is Map<String, dynamic>) {
+        return response.data as Map<String, dynamic>;
+      }
+      return null;
+    } on DioException catch (e) {
+      // 连接类错误无响应体 → null；有响应体则返回（如 502 业务包装）
+      final body = e.response?.data;
+      if (body is Map<String, dynamic>) {
+        return body;
+      }
+      print(
+        '[API _getAllowNonOk] DioException: ${e.type} ${e.message} response=${e.response?.statusCode}',
+      );
+      return null;
+    } catch (e) {
+      print('[API _getAllowNonOk] Error: $e');
       return null;
     }
   }
@@ -297,6 +368,11 @@ class KugouApiClient {
     try {
       final prefs = await SharedPreferences.getInstance();
 
+      // 读取已保存的账号列表（多账号）
+      _accounts
+        ..clear()
+        ..addAll(KugouAccount.decodeList(prefs.getString(_kAccountsKey)));
+
       // 先读取当前登录的用户ID
       final currentUserid = prefs.getString('kugou_current_userid');
 
@@ -323,6 +399,25 @@ class KugouApiClient {
         _token = prefs.getString('kugou_token');
         _userid = prefs.getString('kugou_userid');
         _vipToken = prefs.getString('kugou_vip_token');
+
+        // 旧版本迁移：全局凭证存在且账号列表为空时，播种一个账号条目，
+        // 保证老用户升级后账号出现在「账号管理」列表（昵称/头像留空，
+        // 待 _autoConnect 拉取用户信息后回填）。
+        if (_token != null &&
+            _userid != null &&
+            _userid!.isNotEmpty &&
+            _accounts.isEmpty) {
+          _accounts.add(
+            KugouAccount(
+              userid: _userid!,
+              loginTime: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+            ),
+          );
+          await prefs.setString(
+            _kAccountsKey,
+            KugouAccount.encodeList(_accounts),
+          );
+        }
       }
 
       _dfid = prefs.getString('kugou_dfid');
@@ -339,18 +434,20 @@ class KugouApiClient {
     String userid, {
     String? vipToken,
   }) async {
-    // 关键修复：先清除旧的用户数据，再设置新的
-    await clearCookies();
+    // 多账号：登录新账号时**不再**清除其他账号的凭证，
+    // 只把该账号写入按 userid 隔离的键，并维护账号列表与当前账号。
+
+    // 等待 _initFromStorage 完成，避免其旧版分支覆盖本方法刚写入的内存凭证
+    await _ensureInitialized();
 
     _token = token;
     _userid = userid;
     _vipToken = vipToken;
 
-    // 使用用户隔离的键名，避免多用户数据混乱
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      // 清除所有可能的旧键（兼容旧版本）
+      // 仅清除旧版本全局键（一次性迁移清理，不碰其他账号的按用户键）
       await prefs.remove('kugou_token');
       await prefs.remove('kugou_userid');
       await prefs.remove('kugou_vip_token');
@@ -370,8 +467,92 @@ class KugouApiClient {
 
       // 记录当前登录的用户ID
       await prefs.setString(currentUserKey, userid);
+
+      // 维护账号列表：已存在则更新登录时间，否则新增条目
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final idx = _accounts.indexWhere((a) => a.userid == userid);
+      if (idx >= 0) {
+        _accounts[idx] = _accounts[idx].copyWith(loginTime: now);
+      } else {
+        _accounts.add(KugouAccount(userid: userid, loginTime: now));
+      }
+      await prefs.setString(_kAccountsKey, KugouAccount.encodeList(_accounts));
     } catch (e) {
       print('❌ [Auth] 保存登录状态失败: $e');
+    }
+  }
+
+  /// 切换到指定账号（读取其按 userid 隔离的凭证写入内存 + 更新当前账号）。
+  /// 返回是否切换成功（凭证不完整时返回 false）。
+  Future<bool> switchToUser(String userid) async {
+    await _ensureInitialized();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userTokenKey = 'kugou_token_$userid';
+      final userIdKey = 'kugou_userid_$userid';
+      final userVipKey = 'kugou_vip_token_$userid';
+
+      final token = prefs.getString(userTokenKey);
+      final uid = prefs.getString(userIdKey);
+      if (token == null || uid == null || uid.isEmpty) return false;
+
+      _token = token;
+      _userid = uid;
+      _vipToken = prefs.getString(userVipKey);
+
+      await prefs.setString('kugou_current_userid', uid);
+      return true;
+    } catch (e) {
+      print('❌ [Auth] 切换账号失败: $e');
+      return false;
+    }
+  }
+
+  /// 更新账号列表中的昵称/头像（用于登录后回填展示信息）。
+  Future<void> updateAccountProfile(
+    String userid, {
+    String? nickname,
+    String? avatar,
+  }) async {
+    if (userid.isEmpty) return;
+    await _ensureInitialized();
+    final idx = _accounts.indexWhere((a) => a.userid == userid);
+    if (idx < 0) return;
+    final current = _accounts[idx];
+    if ((nickname == null || nickname == current.nickname) &&
+        (avatar == null || avatar == current.avatar)) {
+      return;
+    }
+    _accounts[idx] = current.copyWith(nickname: nickname, avatar: avatar);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kAccountsKey, KugouAccount.encodeList(_accounts));
+    } catch (e) {
+      print('❌ [Auth] 保存账号资料失败: $e');
+    }
+  }
+
+  /// 删除指定账号：移除其按 userid 隔离的凭证与账号列表条目。
+  /// 若删除的是当前账号，同时清空内存凭证与 `kugou_current_userid`。
+  Future<void> removeAccount(String userid) async {
+    await _ensureInitialized();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('kugou_token_$userid');
+      await prefs.remove('kugou_userid_$userid');
+      await prefs.remove('kugou_vip_token_$userid');
+
+      _accounts.removeWhere((a) => a.userid == userid);
+      await prefs.setString(_kAccountsKey, KugouAccount.encodeList(_accounts));
+
+      if (_userid == userid) {
+        _token = null;
+        _userid = null;
+        _vipToken = null;
+        await prefs.remove('kugou_current_userid');
+      }
+    } catch (e) {
+      print('❌ [Auth] 删除账号失败: $e');
     }
   }
 
@@ -399,6 +580,10 @@ class KugouApiClient {
       await prefs.remove('kugou_vip_token');
       await prefs.remove('kugou_dfid');
       await prefs.remove('kugou_current_userid');
+
+      // 多账号：全清时同时清空账号列表
+      _accounts.clear();
+      await prefs.remove(_kAccountsKey);
     } catch (e) {
       print('❌ [Auth] 清除登录状态失败: $e');
     }
@@ -2187,7 +2372,12 @@ class KugouApiClient {
   }) async {
     final params = <String, dynamic>{'mobile': mobile, 'code': code};
     if (userid != null) params['userid'] = userid;
-    return await _get(KugouEndpoints.loginCellphone, queryParameters: params);
+    // 使用 _getAllowNonOk：Rust 服务端把多账号响应（error_code=34175）
+    // 包装成 HTTP 502，但 body 里带 data.info_list 账号列表，需读取。
+    return await _getAllowNonOk(
+      KugouEndpoints.loginCellphone,
+      queryParameters: params,
+    );
   }
 
   Future<Map<String, dynamic>?> loginByUsername(
@@ -2326,11 +2516,25 @@ class KugouApiClient {
   // ==================== User ====================
 
   Future<KugouUserDetail?> getUserDetail() async {
-    final json = await _get(KugouEndpoints.userDetail);
+    // 使用 noCache：Rust 端 apicache key 不含 token，切账号后
+    // /user/detail 会命中旧账号的缓存，返回错误昵称/头像。
+    // 用 _getAllowNonOk：Rust 端偶发把上游业务错误包装为 HTTP 502，
+    // 但 body 里仍带 data 用户信息；若用 _get 会抛 badResponse 丢数据。
+    final json = await _getAllowNonOk(
+      KugouEndpoints.userDetail,
+      noCache: true,
+    );
     if (json == null) return null;
     try {
-      return KugouUserDetail.fromJson(json);
+      final detail = KugouUserDetail.fromJson(json);
+      // ignore: avoid_print
+      print(
+        '[USER_DETAIL] userid=${detail.userid} nickname=${detail.nickname} raw=${json['data']}',
+      );
+      return detail;
     } catch (e) {
+      // ignore: avoid_print
+      print('[USER_DETAIL] parse error: $e json=$json');
       return null;
     }
   }

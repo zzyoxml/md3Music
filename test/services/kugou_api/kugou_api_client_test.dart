@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:md3music/services/kugou_api/kugou_api_client.dart';
 import 'package:md3music/services/kugou_api/kugou_models.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// KugouApiClient.getLyric 双请求（LRC + KRC）合并逻辑测试。
 ///
@@ -11,6 +12,8 @@ import 'package:md3music/services/kugou_api/kugou_models.dart';
 /// 它是 getLyric 双请求路径的核心逻辑（Future.wait 后调用）。
 /// 覆盖 spec.md "Requirement: KRC 双请求与降级" 的 5 种场景。
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('KugouApiClient.mergeLyricResponses', () {
     // 模拟 LRC 响应 data 节点：decodeContent 为 LRC 明文
     const lrcText = '[00:01.00]Hello LRC\n[00:03.00]World';
@@ -189,6 +192,79 @@ void main() {
       // roma 应是第一个多元素条目（汉字拟声词），按 ??= 语义保留首个
       expect(lyric.romaContent, contains('啊'));
       expect(lyric.romaContent, contains('哦'));
+    });
+  });
+
+  group('KugouApiClient 多账号存储', () {
+    late KugouApiClient client;
+
+    setUp(() async {
+      SharedPreferences.setMockInitialValues({});
+      KugouApiClient.markServerReady();
+      client = KugouApiClient();
+      // 清除之前测试组残留的单例内存状态
+      await client.clearCookies();
+    });
+
+    test('setLoginCookies 后保存账号列表，setLoginCookies(B) 时不丢失 A', () async {
+      await client.setLoginCookies('token_a', 'user_a', vipToken: 'vip_a');
+      expect(client.savedAccounts.length, 1);
+      expect(client.savedAccounts.first.userid, 'user_a');
+      expect(client.isLoggedIn, true);
+
+      // 保存第二个账号
+      await client.setLoginCookies('token_b', 'user_b', vipToken: 'vip_b');
+      expect(client.savedAccounts.length, 2);
+      // 仍然可以读取 user_a 的凭证（通过 switchToUser）
+      final switched = await client.switchToUser('user_a');
+      expect(switched, true);
+      expect(client.token, 'token_a');
+      expect(client.userid, 'user_a');
+    });
+
+    test('switchToUser 切换凭证', () async {
+      await client.setLoginCookies('token_a', 'user_a');
+      await client.setLoginCookies('token_b', 'user_b');
+      expect(client.userid, 'user_b');
+
+      // 切回 A
+      expect(await client.switchToUser('user_a'), true);
+      expect(client.token, 'token_a');
+      expect(client.userid, 'user_a');
+
+      // 不存在的用户
+      expect(await client.switchToUser('nonexistent'), false);
+    });
+
+    test('removeAccount 删除账号及凭证', () async {
+      await client.setLoginCookies('token_a', 'user_a');
+      await client.setLoginCookies('token_b', 'user_b');
+
+      // 删除非当前账号
+      await client.removeAccount('user_a');
+      expect(client.savedAccounts.length, 1);
+      // user_a 凭证仍在存储中，但已从列表移除
+      expect(await client.switchToUser('user_a'), false);
+
+      // 删除当前账号
+      await client.removeAccount('user_b');
+      expect(client.savedAccounts.length, 0);
+      expect(client.isLoggedIn, false);
+      expect(client.userid, null);
+    });
+
+    test('updateAccountProfile 更新昵称/头像', () async {
+      await client.setLoginCookies('token', 'user1');
+      await client.updateAccountProfile('user1', nickname: '测试用户', avatar: 'http://example.com/avatar.png');
+      final saved = client.savedAccounts.first;
+      expect(saved.nickname, '测试用户');
+      expect(saved.avatar, 'http://example.com/avatar.png');
+
+      // 昵称/头像已持久化到 prefs 的账号列表
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('kugou_accounts');
+      expect(raw, isNotNull);
+      expect(raw, contains('测试用户'));
     });
   });
 }

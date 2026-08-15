@@ -5,6 +5,7 @@ import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 
 import '../data/models/album.dart';
 import '../data/models/artist.dart';
+import '../data/models/kugou_account.dart';
 import '../data/models/playlist.dart';
 import '../data/models/song.dart';
 import '../data/repositories/settings_repository.dart';
@@ -27,6 +28,25 @@ class VerifyCaptchaRequest {
     required this.txappid,
     required this.completer,
   });
+}
+
+/// 手机验证码登录结果状态。
+enum PhoneLoginStatus {
+  /// 登录成功
+  success,
+
+  /// 手机号绑定多个账号，需用户选择（见 [KugouProvider.pendingLoginAccounts]）
+  needChooseAccount,
+
+  /// 登录失败（错误信息见 [KugouProvider.error]）
+  failed,
+}
+
+/// 手机验证码登录结果。
+class PhoneLoginResult {
+  final PhoneLoginStatus status;
+
+  const PhoneLoginResult(this.status);
 }
 
 class KugouProvider extends ChangeNotifier {
@@ -66,6 +86,10 @@ class KugouProvider extends ChangeNotifier {
 
       if (_apiClient.isLoggedIn) {
         _isLoggedIn = true;
+        // 重启后按当前账号重载签到日历（构造函数里的首次加载可能在
+        // _initFromStorage 完成前，此时 userid 尚不可用）
+        _localSignedDays.clear();
+        await _loadLocalSignedDays();
         await _fetchUserInfo();
         await autoReceiveVipIfNeeded();
       }
@@ -98,6 +122,9 @@ class KugouProvider extends ChangeNotifier {
   KugouUserDetail? _userInfo;
   List<KugouSongDetail> _rankSongs = [];
   List<KugouSongDetail> _currentPlaylistSongs = [];
+
+  /// 手机验证码登录时，手机号绑定多个账号的待选择候选列表。
+  List<KugouLoginAccount> _pendingLoginAccounts = [];
 
   Map<String, dynamic>? _yuekuData;
   Map<String, dynamic>? _yuekuBanner;
@@ -266,6 +293,8 @@ class KugouProvider extends ChangeNotifier {
   bool get isLoggedIn => _isLoggedIn;
   String? get userid => _apiClient.userid;
   KugouUserDetail? get userInfo => _userInfo;
+  /// 手机号绑定多个账号时的待选择候选列表（needChooseAccount 时读取）
+  List<KugouLoginAccount> get pendingLoginAccounts => _pendingLoginAccounts;
   List<KugouSongDetail> get rankSongs => _rankSongs;
   List<KugouSongDetail> get currentPlaylistSongs => _currentPlaylistSongs;
   Map<String, dynamic>? get yuekuData => _yuekuData;
@@ -995,22 +1024,59 @@ class KugouProvider extends ChangeNotifier {
     }
   }
 
-  // 手机号+验证码登录
-  Future<bool> loginByPhone(String mobile, String code) async {
+  // 手机号+验证码登录（支持一个手机号绑定多个账号：返回 info_list/user_list
+  // 时需用户选择，见 pendingLoginAccounts）
+  Future<PhoneLoginResult> loginByPhone(String mobile, String code) async {
     try {
       final res = await _apiClient.loginByCellphone(mobile, code);
+      final data = res?['data'] as Map?;
+      final token = data?['token']?.toString();
+      final userid = data?['userid']?.toString();
+
+      // 单账号：直接登录成功
+      if (res?['status'] == 1 && token != null && userid != null) {
+        await _completePhoneLogin(data);
+        return const PhoneLoginResult(PhoneLoginStatus.success);
+      }
+
+      // 多账号：data 里带账号列表（info_list / user_list），需用户选择。
+      // 注意：该场景 Rust 服务端包装为 HTTP 502 + status=0 + error_code=34175，
+      // 故不能仅凭 status==1 判断，需检查账号列表是否存在。
+      final candidates = _parseLoginUserList(data);
+      if (candidates.isNotEmpty) {
+        _pendingLoginAccounts = candidates;
+        notifyListeners();
+        return const PhoneLoginResult(PhoneLoginStatus.needChooseAccount);
+      }
+
+      _error = res?['error_msg']?.toString() ?? '登录失败';
+      notifyListeners();
+      return const PhoneLoginResult(PhoneLoginStatus.failed);
+    } catch (e) {
+      _error = '登录失败: ${e.toString()}';
+      notifyListeners();
+      return const PhoneLoginResult(PhoneLoginStatus.failed);
+    }
+  }
+
+  /// 多账号选择后的二次登录：携带选中账号的 userid 重新请求验证码登录。
+  Future<bool> loginByPhoneWithAccount(
+    String mobile,
+    String code,
+    String userid,
+  ) async {
+    try {
+      final res = await _apiClient.loginByCellphone(
+        mobile,
+        code,
+        userid: userid,
+      );
       if (res?['status'] == 1) {
         final data = res?['data'] as Map?;
         final token = data?['token']?.toString();
-        final userid = data?['userid']?.toString();
-        final vipToken = data?['vip_token']?.toString();
-        if (token != null && userid != null) {
-          // 登录新用户前，清除旧用户的头像缓存
-          await _clearAvatarCacheIfUserChanged(userid);
-          await _apiClient.setLoginCookies(token, userid, vipToken: vipToken);
-          _isLoggedIn = true;
-          await _fetchUserInfo();
-          notifyListeners();
+        final uid = data?['userid']?.toString();
+        if (token != null && uid != null) {
+          await _completePhoneLogin(data);
           return true;
         }
       }
@@ -1024,11 +1090,57 @@ class KugouProvider extends ChangeNotifier {
     }
   }
 
+  /// 手机验证码登录成功后的公共收尾：清头像缓存 → 保存凭证 → 拉取用户信息。
+  Future<void> _completePhoneLogin(Map? data) async {
+    final token = data?['token']?.toString();
+    final userid = data?['userid']?.toString();
+    final vipToken = data?['vip_token']?.toString();
+    if (token == null || userid == null) return;
+
+    _pendingLoginAccounts = [];
+    // 登录新用户前，清除旧用户的头像缓存
+    await _clearAvatarCacheIfUserChanged(userid);
+    await _apiClient.setLoginCookies(token, userid, vipToken: vipToken);
+    _isLoggedIn = true;
+    // 关键：登录新账号前清空当前用户内存缓存（与 switchAccount 一致）。
+    // 否则 getUserDetail 失败时 _userInfo 残留旧账号，用户中心顶部显示旧昵称。
+    _userInfo = null;
+    _vipInfo = null;
+    _vipMonthRecord = null;
+    _qrKey = null;
+    _qrData = null;
+    await _fetchUserInfo();
+    print('✅ [Account] 登录新账号: $userid, userInfo=${_userInfo?.nickname}');
+    notifyListeners();
+  }
+
+  /// 解析多账号响应中的账号列表（兼容 info_list / user_list 等字段名）。
+  List<KugouLoginAccount> _parseLoginUserList(Map? data) {
+    if (data == null) return [];
+    final raw = data['info_list'] ??
+        data['user_list'] ??
+        data['userList'] ??
+        data['lists'] ??
+        data['list'];
+    if (raw is! List || raw.isEmpty) return [];
+    return raw
+        .whereType<Map>()
+        .map((e) => KugouLoginAccount.fromJson(Map<String, dynamic>.from(e)))
+        .where((a) => a.userid.isNotEmpty)
+        .toList();
+  }
+
   Future<void> refreshUserInfo() async {
     try {
       final userInfo = await _apiClient.getUserDetail();
       if (userInfo != null) {
         _userInfo = userInfo;
+        // 回填账号列表中的昵称/头像（多账号展示）
+        await _apiClient.updateAccountProfile(
+          userInfo.userid ?? _apiClient.userid ?? '',
+          nickname: userInfo.nickname,
+          avatar: userInfo.avatar,
+        );
         notifyListeners();
       }
     } catch (_) {}
@@ -1037,8 +1149,20 @@ class KugouProvider extends ChangeNotifier {
   // 内部调用, 保留为下划线形式仅在类内使用
   Future<void> _fetchUserInfo() => refreshUserInfo();
 
-  void logout() {
-    _isLoggedIn = false;
+  // ==================== 多账号管理 ====================
+
+  /// 已保存的账号列表（供「账号管理」UI 展示）。
+  List<KugouAccount> get savedAccounts => _apiClient.savedAccounts;
+
+  /// 切换到指定账号：切换内存凭证 + 重载该账号的用户信息与签到日历。
+  /// 返回是否切换成功。
+  Future<bool> switchAccount(String userid) async {
+    final ok = await _apiClient.switchToUser(userid);
+    if (!ok) return false;
+
+    _isLoggedIn = _apiClient.isLoggedIn;
+
+    // 切换账号后清除旧账号的用户级内存缓存
     _userInfo = null;
     _qrKey = null;
     _qrData = null;
@@ -1047,22 +1171,73 @@ class KugouProvider extends ChangeNotifier {
     _userHistoryData = null;
     _everydayHistory = null;
 
-    // 清除所有用户相关的内存缓存
-    clearMemoryCache();
+    // 头像缓存按账号隔离：账号变化时清空
+    _clearAvatarCacheIfUserChanged(userid);
 
-    // 清除API客户端的认证信息
-    _apiClient.clearCookies();
+    // 重载新账号的签到日历
+    _localSignedDays.clear();
+    await _loadLocalSignedDays();
 
-    // 清除头像缓存
-    _clearAvatarCache();
+    if (_isLoggedIn) {
+      await _fetchUserInfo();
+    }
 
-    print('✅ [Logout] 用户已退出登录，所有用户数据已清除');
+    print('✅ [Account] 已切换到账号: $userid');
     notifyListeners();
+    return true;
+  }
+
+  /// 删除指定账号。若删除的是当前账号，自动切换到最近登录的其他账号；
+  /// 无其他账号时回到未登录态。
+  Future<void> removeAccount(String userid) async {
+    final wasCurrent = userid == _apiClient.userid;
+    await _apiClient.removeAccount(userid);
+
+    if (wasCurrent) {
+      // 重置当前用户缓存
+      _userInfo = null;
+      _qrKey = null;
+      _qrData = null;
+      _vipInfo = null;
+      _vipMonthRecord = null;
+      _userHistoryData = null;
+      _everydayHistory = null;
+      _localSignedDays.clear();
+
+      final remaining = _apiClient.sortedAccounts;
+      if (remaining.isNotEmpty) {
+        // 自动切换到最近登录的其他账号
+        _isLoggedIn = false;
+        await switchAccount(remaining.first.userid);
+        notifyListeners();
+        return;
+      }
+      _isLoggedIn = false;
+      await _loadLocalSignedDays();
+      _clearAvatarCache();
+    }
+
+    print('✅ [Account] 已删除账号: $userid');
+    notifyListeners();
+  }
+
+  Future<void> logout() async {
+    // 多账号：退出当前账号；若还有其他账号则自动切换过去
+    final uid = _apiClient.userid;
+    if (uid == null) {
+      _isLoggedIn = false;
+      notifyListeners();
+      return;
+    }
+    _isLoggedIn = false;
+    await removeAccount(uid);
   }
 
   void _clearAvatarCache() {
     try {
-      DefaultCacheManager().emptyCache();
+      // emptyCache 返回 Future，异步错误需用 catchError 捕获，
+      // 否则会冒泡为未处理异常（测试环境无 path_provider 插件时尤为明显）
+      DefaultCacheManager().emptyCache().catchError((_) {});
     } catch (_) {}
   }
 

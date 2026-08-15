@@ -84,4 +84,30 @@ void main() {
       expect(lyric.displayKrcLyric, isNull);
     });
   });
+
+  group('KugouLoginAccount.fromJson', () {
+    test('解析 user_list 字段名兼容', () {
+      // 酷狗接口返回的多种字段名
+      final a1 = KugouLoginAccount.fromJson({
+        'userid': '123', 'nickname': '测试用户', 'avatar': 'https://example.com/avatar.jpg',
+      });
+      expect(a1.userid, '123');
+      expect(a1.nickname, '测试用户');
+      expect(a1.avatar, 'https://example.com/avatar.jpg');
+
+      // 驼峰字段名
+      final a2 = KugouLoginAccount.fromJson({
+        'userId': '456', 'user_name': '用户B', 'pic': 'http://example.com/pic.jpg',
+      });
+      expect(a2.userid, '456');
+      expect(a2.nickname, '用户B');
+      expect(a2.avatar, 'http://example.com/pic.jpg');
+
+      // 空字段
+      final a3 = KugouLoginAccount.fromJson({'id': '789'});
+      expect(a3.userid, '789');
+      expect(a3.nickname, isNull);
+      expect(a3.avatar, isNull);
+    });
+  });
 }

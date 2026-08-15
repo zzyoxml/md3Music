@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../data/models/kugou_account.dart';
+import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_refresh_indicator.dart';
@@ -14,6 +16,7 @@ import 'cloud_music_page.dart';
 import 'downloads_page.dart';
 import 'listen_ranking_page.dart';
 import 'play_history_page.dart';
+import 'vip_status.dart';
 
 class UserCenterPage extends StatefulWidget {
   const UserCenterPage({super.key});
@@ -67,26 +70,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
             builder: (context, kugou, _) => IconButton(
               icon: Icon(kugou.isLoggedIn ? Icons.logout : Icons.login),
               onPressed: kugou.isLoggedIn
-                  ? () => showDialog(
-                      context: context,
-                      builder: (ctx) => AlertDialog(
-                        title: const Text('退出登录'),
-                        content: const Text('确定要退出登录吗？'),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(ctx),
-                            child: const Text('取消'),
-                          ),
-                          TextButton(
-                            onPressed: () {
-                              kugou.logout();
-                              Navigator.pop(ctx);
-                            },
-                            child: const Text('确定'),
-                          ),
-                        ],
-                      ),
-                    )
+                  ? () => _confirmLogout(context, kugou)
                   : () => Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const LoginPage()),
                     ),
@@ -114,9 +98,10 @@ class _UserCenterPageState extends State<UserCenterPage> {
               controller: _scrollController,
               slivers: [
                 _buildUserHeader(cs, tt, kugou),
-                _buildVipCard(cs, tt, kugou),
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),
                 _buildActionGrid(cs),
+                const SliverToBoxAdapter(child: SizedBox(height: 16)),
+                _buildVipCard(cs, tt, kugou),
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),
                 _buildVipCalendar(cs, tt, kugou, context),
                 const SliverToBoxAdapter(child: SizedBox(height: 80)),
@@ -208,47 +193,340 @@ class _UserCenterPageState extends State<UserCenterPage> {
 
   Widget _buildUserHeader(ColorScheme cs, TextTheme tt, KugouProvider kugou) {
     return SliverToBoxAdapter(
-      child: Container(
-        margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(20),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Material(
           color: cs.primaryContainer,
-        ),
-        child: Row(
-          children: [
-            _buildUserAvatar(kugou, cs),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+          borderRadius: BorderRadius.circular(20),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(20),
+            onTap: () => _showAccountManager(context, kugou),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
                 children: [
-                  Text(
-                    kugou.userInfo?.nickname ?? '用户',
-                    style: tt.titleLarge?.copyWith(
-                      color: cs.onPrimaryContainer,
+                  _buildUserAvatar(kugou, cs),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          kugou.userInfo?.nickname ?? '用户',
+                          style: tt.titleLarge?.copyWith(
+                            color: cs.onPrimaryContainer,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'ID: ${kugou.userid ?? ''}',
+                          style: tt.labelSmall?.copyWith(
+                            color: cs.onPrimaryContainer.withValues(alpha: 0.7),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'ID: ${kugou.userid ?? ''}',
-                    style: tt.labelSmall?.copyWith(
-                      color: cs.onPrimaryContainer.withValues(alpha: 0.7),
-                    ),
-                  ),
+                  Icon(Icons.chevron_right, color: cs.onPrimaryContainer),
                 ],
               ),
             ),
-            Icon(Icons.chevron_right, color: cs.onPrimaryContainer),
-          ],
+          ),
         ),
       ),
     );
   }
 
+  // ==================== 多账号管理 ====================
+
+  /// 登出确认（多账号感知：有其他账号时提示会自动切换）
+  Future<void> _confirmLogout(BuildContext context, KugouProvider kugou) async {
+    final hasOthers = kugou.savedAccounts.length > 1;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('退出当前账号'),
+        content: Text(
+          hasOthers ? '将退出当前账号，并自动切换到其他账号。确定？' : '确定要退出登录吗？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    await kugou.logout();
+    if (!context.mounted) return;
+    // 退出/切换后重新同步「我喜欢的」
+    context.read<FavoritesProvider>().loadFavorites();
+  }
+
+  /// 打开「账号管理」底部面板：展示已保存账号、支持切换/删除/登录新账号
+  void _showAccountManager(BuildContext context, KugouProvider kugou) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      backgroundColor: Theme.of(context).colorScheme.surfaceContainerLow,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+            child: Consumer<KugouProvider>(
+              builder: (context, provider, _) {
+                final cs = Theme.of(context).colorScheme;
+                final tt = Theme.of(context).textTheme;
+                final accounts = provider.savedAccounts;
+                return ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxHeight: MediaQuery.of(context).size.height * 0.7,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            '账号管理',
+                            style: tt.titleLarge?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const Spacer(),
+                          if (accounts.length > 1)
+                            Text(
+                              '${accounts.length} 个账号',
+                              style: tt.bodySmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      if (accounts.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 32),
+                          child: Column(
+                            children: [
+                              Icon(
+                                Icons.person_outline,
+                                size: 48,
+                                color: cs.onSurfaceVariant.withValues(
+                                  alpha: 0.4,
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                '暂无已保存的账号',
+                                style: tt.bodyMedium?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        Flexible(
+                          child: ListView.separated(
+                            shrinkWrap: true,
+                            itemCount: accounts.length,
+                            separatorBuilder: (_, index) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) => _buildAccountTile(
+                              context,
+                              accounts[index],
+                              provider,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 12),
+                      FilledButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute(builder: (_) => const LoginPage()),
+                        ),
+                        icon: const Icon(Icons.add),
+                        label: const Text('登录新账号'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// 单个已保存账号的行
+  Widget _buildAccountTile(
+    BuildContext context,
+    KugouAccount account,
+    KugouProvider kugou,
+  ) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final isCurrent = account.userid == kugou.userid;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+      leading: _accountAvatar(account, cs),
+      title: Text(
+        (account.nickname != null && account.nickname!.isNotEmpty)
+            ? account.nickname!
+            : '用户 ${account.userid}',
+        style: tt.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Text('ID: ${account.userid}', style: tt.bodySmall),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (isCurrent)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Icon(Icons.check_circle, color: cs.primary, size: 20),
+            ),
+          IconButton(
+            tooltip: '删除账号',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: () => _confirmRemoveAccount(context, account, kugou),
+          ),
+        ],
+      ),
+      onTap: isCurrent ? null : () => _switchToAccount(context, account, kugou),
+    );
+  }
+
+  /// 账号头像：有头像用缓存图，无则显示昵称首字
+  Widget _accountAvatar(KugouAccount account, ColorScheme cs) {
+    final avatarUrl = account.avatar;
+    final nickname = account.nickname;
+    final fallback = Text(
+      (nickname != null && nickname.isNotEmpty)
+          ? nickname.characters.first
+          : '?',
+      style: TextStyle(color: cs.onPrimaryContainer, fontSize: 16),
+    );
+    if (avatarUrl == null || avatarUrl.isEmpty) {
+      return CircleAvatar(
+        backgroundColor: cs.primary.withValues(alpha: 0.15),
+        child: fallback,
+      );
+    }
+    final safeUserId = account.userid.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    return CircleAvatar(
+      backgroundColor: cs.primary.withValues(alpha: 0.15),
+      child: ClipOval(
+        child: CachedNetworkImage(
+          imageUrl: avatarUrl,
+          memCacheWidth: 96,
+          memCacheHeight: 96,
+          cacheKey: 'avatar_$safeUserId',
+          width: 40,
+          height: 40,
+          fit: BoxFit.cover,
+          errorWidget: (c, u, e) => fallback,
+        ),
+      ),
+    );
+  }
+
+  /// 切换账号（确认 → 切换 → 重载收藏 → 关闭面板）
+  Future<void> _switchToAccount(
+    BuildContext context,
+    KugouAccount account,
+    KugouProvider kugou,
+  ) async {
+    final navigator = Navigator.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('切换账号'),
+        content: Text('切换到「${account.nickname ?? account.userid}」？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('切换'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final ok = await kugou.switchAccount(account.userid);
+    if (!context.mounted) return;
+    if (ok) {
+      navigator.pop(); // 关闭账号管理面板
+      context.read<FavoritesProvider>().loadFavorites();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('已切换到 ${account.nickname ?? account.userid}')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('切换失败，该账号凭证已失效')),
+      );
+    }
+  }
+
+  /// 删除账号（确认 → 删除 → 若为当前账号则重载收藏 → 关闭面板）
+  Future<void> _confirmRemoveAccount(
+    BuildContext context,
+    KugouAccount account,
+    KugouProvider kugou,
+  ) async {
+    final isCurrent = account.userid == kugou.userid;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('删除账号'),
+        content: Text(
+          isCurrent
+              ? '将删除当前账号并退出登录（若有其他账号会自动切换）。确定？'
+              : '确定删除该账号？其登录态将被清除。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    await kugou.removeAccount(account.userid);
+    if (!context.mounted) return;
+    if (isCurrent) {
+      context.read<FavoritesProvider>().loadFavorites();
+    }
+    Navigator.of(context).pop(); // 关闭账号管理面板
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('已删除账号 ${account.nickname ?? account.userid}')),
+    );
+  }
+
   Widget _buildVipCard(ColorScheme cs, TextTheme tt, KugouProvider kugou) {
     final vip = kugou.vipInfo;
-    final isVip = vip?.isVip == true;
+    final busiList = vip?.busiVipList;
+    final tvip = findActiveBusiVip(busiList, 'tvip');
+    final svip = findActiveBusiVip(busiList, 'svip');
     return SliverToBoxAdapter(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 16),
@@ -257,48 +535,102 @@ class _UserCenterPageState extends State<UserCenterPage> {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: cs.outlineVariant),
         ),
-        child: Row(
+        child: Column(
           children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: isVip
-                    ? cs.secondaryContainer
-                    : cs.surfaceContainerHighest,
-              ),
-              child: Icon(
-                isVip
-                    ? Icons.workspace_premium
-                    : Icons.workspace_premium_outlined,
-                color: isVip ? cs.onSecondaryContainer : cs.onSurfaceVariant,
-              ),
+            _buildVipRow(
+              cs: cs,
+              tt: tt,
+              active: tvip,
+              title: '畅听会员',
+              icon: Icons.headphones,
+              iconBg: cs.secondaryContainer,
+              iconFg: cs.onSecondaryContainer,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    isVip
-                        ? (kugou.isTodayYouthVip ? '概念版VIP会员' : 'VIP会员')
-                        : '开通VIP会员',
-                    style: tt.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    isVip
-                        ? '概念版VIP 有效期至: ${vip?.conceptExpireTime ?? vip?.expireTime ?? '永久'}'
-                        : '畅享无损音质、个性皮肤等',
-                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                  ),
-                ],
-              ),
+            const SizedBox(height: 12),
+            _buildVipRow(
+              cs: cs,
+              tt: tt,
+              active: svip,
+              title: '概念会员',
+              icon: Icons.workspace_premium,
+              iconBg: cs.primaryContainer,
+              iconFg: cs.onPrimaryContainer,
             ),
           ],
         ),
       ),
+    );
+  }
+
+  /// 单行会员状态（移植自 EchoMusic Profile.vue「会员状态」卡片）：
+  /// 已开通显示相对到期时间 + 具体到期时间，未开通显示「未开通」。
+  Widget _buildVipRow({
+    required ColorScheme cs,
+    required TextTheme tt,
+    required Map<String, dynamic>? active,
+    required String title,
+    required IconData icon,
+    required Color iconBg,
+    required Color iconFg,
+  }) {
+    final endTime = active?['vip_end_time']?.toString();
+    // 相对到期时间（如"5天后到期"），解析失败时为 null
+    final relText = active != null ? formatVipExpireText(endTime) : null;
+    // 具体到期时间（yyyy-MM-dd HH:mm）
+    final absText = active != null ? formatVipDateTime(endTime) : null;
+    final dimmed = active == null;
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            color: dimmed ? cs.surfaceContainerHighest : iconBg,
+          ),
+          child: Icon(icon, color: dimmed ? cs.onSurfaceVariant : iconFg),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: tt.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: dimmed ? cs.onSurfaceVariant : null,
+                ),
+              ),
+              if (active != null) ...[
+                if (relText != null)
+                  Text(
+                    relText,
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                Text(
+                  '$absText',
+                  style: tt.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+                  ),
+                ),
+              ] else
+                Text(
+                  '未开通',
+                  style: tt.bodySmall?.copyWith(
+                    color: cs.onSurfaceVariant.withValues(alpha: 0.7),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        Icon(
+          dimmed ? Icons.radio_button_unchecked : Icons.check_circle,
+          size: 18,
+          color: dimmed
+              ? cs.onSurfaceVariant.withValues(alpha: 0.5)
+              : iconFg,
+        ),
+      ],
     );
   }
 
@@ -490,11 +822,6 @@ class _UserCenterPageState extends State<UserCenterPage> {
                 color: cs.onSurfaceVariant,
                 onPressed: () {},
               ),
-              // 概念版会员徽章 —— 今天签到后显示
-              if (kugou.isTodayYouthVip) ...[
-                const SizedBox(width: 4),
-                _buildConceptVipBadge(cs, tt),
-              ],
               const SizedBox(width: 4),
               Flexible(
                 child: FilledButton.tonalIcon(
@@ -572,37 +899,6 @@ class _UserCenterPageState extends State<UserCenterPage> {
           Text(
             '仅签到异常时点击',
             style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// 概念版会员徽章 —— 显示在签到按钮左侧，仅今天已签时显示
-  Widget _buildConceptVipBadge(ColorScheme cs, TextTheme tt) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(999),
-        // 金/紫色调 —— Material 3 expressive：primary + tertiary 渐变近似
-        gradient: LinearGradient(
-          colors: [
-            cs.primary.withValues(alpha: 0.85),
-            cs.tertiary.withValues(alpha: 0.85),
-          ],
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.workspace_premium, size: 12, color: cs.onPrimary),
-          const SizedBox(width: 3),
-          Text(
-            '概念版',
-            style: tt.labelSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: cs.onPrimary,
-            ),
           ),
         ],
       ),

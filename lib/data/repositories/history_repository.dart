@@ -2,13 +2,24 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../services/kugou_api/kugou_api_client.dart';
 import '../models/song.dart';
 
 class HistoryRepository {
-  static const String _key = 'play_history';
-  static const String _playCountsKey = 'play_history_counts';
-  static const String _lastPlayTimesKey = 'play_history_times';
+  static const String _baseKey = 'play_history';
+  static const String _basePlayCountsKey = 'play_history_counts';
+  static const String _baseLastPlayTimesKey = 'play_history_times';
   static const int _maxCount = 100;
+
+  /// 播放历史键后缀：登录时按账号隔离（`_$userid`），未登录用全局键。
+  String get _suffix {
+    final uid = KugouApiClient().userid;
+    return uid == null ? '' : '_$uid';
+  }
+
+  String get _key => '$_baseKey$_suffix';
+  String get _playCountsKey => '$_basePlayCountsKey$_suffix';
+  String get _lastPlayTimesKey => '$_baseLastPlayTimesKey$_suffix';
 
   Future<void> addHistory(Song song) async {
     final prefs = await SharedPreferences.getInstance();
