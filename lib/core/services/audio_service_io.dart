@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:just_audio/just_audio.dart';
 import 'package:audio_session/audio_session.dart';
 
@@ -67,6 +69,22 @@ class AudioService {
   bool _pausedByInterruption = false;
   bool get wasPausedByInterruption => _pausedByInterruption;
 
+  /// 恢复中的互斥锁：焦点事件流与就绪兜底流可能并发触发恢复，
+  /// 用该标志防止重复进入 [play]，避免恢复瞬间的状态抖动。
+  bool _resumeInProgress = false;
+
+  /// 是否响应 duck 压低音量（导航 / 游戏等会短暂压低背景音乐的场景）。
+  /// 默认关闭：荣耀平板 V8 Pro 在频繁 duck/unduck 时音量忽高忽低，
+  /// 开启后 duck 会把音量压到 [_duckVolume]，结束恢复 [1.0]。
+  bool _duckEnabled = false;
+  final double _duckVolume = 0.5;
+  void setDuckEnabled(bool value) => _duckEnabled = value;
+
+  /// 各事件流的订阅句柄，dispose 时统一取消，避免单例长期持有泄漏。
+  StreamSubscription<PlayerState>? _resumeSub;
+  StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
+  StreamSubscription<void>? _noisySub;
+
   Future<void> init() async {
     await _player.setLoopMode(LoopMode.off);
     await _configureAudioSession();
@@ -76,7 +94,7 @@ class AudioService {
   /// 兜底恢复：当 [tryResumeAfterFocusLoss] 因播放器未 ready 跳过时，
   /// 监听播放器状态变为 ready 后自动尝试恢复。
   void _setupResumeOnReady() {
-    _player.playerStateStream.listen((state) {
+    _resumeSub = _player.playerStateStream.listen((state) {
       if (_pausedByInterruption &&
           state.processingState == ProcessingState.ready) {
         // ignore: discarded_futures
@@ -89,13 +107,16 @@ class AudioService {
     try {
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration.music());
-      session.interruptionEventStream.listen((event) {
+      _interruptionSub = session.interruptionEventStream.listen((event) {
         if (event.begin) {
           switch (event.type) {
             case AudioInterruptionType.duck:
-              // 修复荣耀平板 V8 Pro 音量忽高忽低问题
-              // 不再降低音量，而是保持原音量（避免频繁 duck/unduck 导致波动）
-              // _player.setVolume(0.5);  // 注释掉：会导致音量波动
+              if (_duckEnabled && _player.playing) {
+                // 仅在显式开启 duck 时压低音量；默认忽略以
+                // 避免荣耀平板 V8 Pro 频繁 duck/unduck 音量波动。
+                // ignore: discarded_futures
+                _player.setVolume(_duckVolume);
+              }
               break;
             case AudioInterruptionType.pause:
             case AudioInterruptionType.unknown:
@@ -108,8 +129,10 @@ class AudioService {
         } else {
           switch (event.type) {
             case AudioInterruptionType.duck:
-              // 恢复时也不再调整音量，保持 1.0
-              // _player.setVolume(1.0);  // 注释掉：避免音量波动
+              if (_duckEnabled) {
+                // ignore: discarded_futures
+                _player.setVolume(1.0);
+              }
               break;
             case AudioInterruptionType.pause:
               // 焦点恢复：仅在是被动暂停时尝试恢复（不覆盖用户主动暂停）
@@ -126,7 +149,7 @@ class AudioService {
       });
       // 拔耳机 / 蓝牙断开：通常伴随系统焦点变更，但 just_audio 也会收到
       // becomingNoisyEvent。统一标记为「中断暂停」以便外层恢复逻辑复用。
-      session.becomingNoisyEventStream.listen((_) {
+      _noisySub = session.becomingNoisyEventStream.listen((_) {
         if (_player.playing) {
           _pausedByInterruption = true;
           pause();
@@ -142,13 +165,19 @@ class AudioService {
   /// 2) 播放器已 ready（processingState == ready）
   /// 时才会调 play()，避免与用户主动暂停冲突。
   Future<void> tryResumeAfterFocusLoss() async {
+    if (_resumeInProgress) return; // 防并发恢复
     if (!_pausedByInterruption) return;
     if (_player.processingState != ProcessingState.ready) {
-      // 还没 ready，留着标志位等下次 playingStream 变化再试
+      // 还没 ready，留着标志位等下次状态变化再试
       return;
     }
-    _pausedByInterruption = false;
-    await play();
+    _resumeInProgress = true;
+    try {
+      _pausedByInterruption = false;
+      await play();
+    } finally {
+      _resumeInProgress = false;
+    }
   }
 
   Future<void> play() async {
@@ -227,7 +256,12 @@ class AudioService {
   }
 
   Future<void> dispose() async {
+    await _resumeSub?.cancel();
+    await _interruptionSub?.cancel();
+    await _noisySub?.cancel();
     await _player.dispose();
+    _pausedByInterruption = false;
+    _resumeInProgress = false;
   }
 }
 
