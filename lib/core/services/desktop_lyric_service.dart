@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -39,6 +40,14 @@ class DesktopLyricService {
   // 不弹出悬浮窗。元数据替换（title→歌词，artist→「作者 - 标题」）由原生端处理。
   bool _bluetoothLyricEnabled = false;
   bool get bluetoothLyricEnabled => _bluetoothLyricEnabled;
+
+  // LyricInfo 歌词转发开关：通过 MediaSession extras.lyricInfo 发布整首歌词
+  // （LRC/ELRC），供 ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取。
+  // 复用本服务的定时器与歌词解析管线，歌词加载完成后构造 JSON 推送一次。
+  bool _lyricInfoEnabled = false;
+  bool get lyricInfoEnabled => _lyricInfoEnabled;
+  // 当前歌曲是否已推送过 lyricInfo（避免每 250ms tick 重复推送）
+  bool _lyricInfoPushed = false;
 
   String? _currentSongId;
   String? _currentLrcText;
@@ -257,8 +266,32 @@ class DesktopLyricService {
     }
   }
 
-  /// 定时器是否需要运行：悬浮窗或蓝牙歌词任一开启即需运行
-  bool _shouldTick() => _enabled || _bluetoothLyricEnabled;
+  /// LyricInfo 歌词转发开关：独立于悬浮窗/蓝牙歌词。开启后定时器运行以获取
+  /// 当前歌词并构造 JSON 推送（写入 MediaSession extras）；关闭时移除 lyricInfo。
+  Future<void> setLyricInfoEnabled(bool enabled) async {
+    if (_lyricInfoEnabled == enabled) return;
+    _lyricInfoEnabled = enabled;
+    _bindProvidersFromContext();
+    if (enabled) {
+      _lyricInfoPushed = false;
+      _updateTicker();
+      // 启用时若已有歌词立即推送一次（无需等下一个 tick）
+      if (_lines.isNotEmpty) {
+        _maybePushLyricInfo();
+      }
+    } else {
+      _lyricInfoPushed = false;
+      _updateTicker();
+      // 关闭时移除 lyricInfo，让原生端元数据不再携带
+      try {
+        await MediaNotificationService.removeLyricInfo();
+      } catch (_) {}
+    }
+    _notify();
+  }
+
+  /// 定时器是否需要运行：悬浮窗、蓝牙歌词或 LyricInfo 任一开启即需运行
+  bool _shouldTick() => _enabled || _bluetoothLyricEnabled || _lyricInfoEnabled;
 
   /// 根据开关状态启停定时器（250ms tick：逐行歌词足够检测切行）
   void _updateTicker() {
@@ -366,6 +399,11 @@ class DesktopLyricService {
       _lastPushedPosMs = null;
       _pushPlaying(_player!.isPlaying);
       _pushLyric('歌词加载中...', '', -1);
+      // LyricInfo：切歌时立即移除上一首的 lyricInfo，避免旧歌词短暂匹配到新歌
+      if (_lyricInfoEnabled) {
+        _lyricInfoPushed = false;
+        MediaNotificationService.removeLyricInfo();
+      }
       _fetchLyricFor(song);
       return;
     }
@@ -413,6 +451,9 @@ class DesktopLyricService {
         }
       }
     }
+
+    // LyricInfo：歌词加载完成后推送一次整首歌词（_lyricInfoPushed 去重）
+    _maybePushLyricInfo();
 
     // Sync progress (500ms throttle)
     final pos = _player!.position;
@@ -504,6 +545,95 @@ class DesktopLyricService {
         await MediaNotificationService.updateBluetoothLyric(btText);
       } catch (_) {}
     }
+  }
+
+  /// LyricInfo：歌词就绪后推送一次整首歌词（_lyricInfoPushed 去重，每首歌 1 次）。
+  void _maybePushLyricInfo() {
+    if (!_lyricInfoEnabled || _lyricInfoPushed) return;
+    if (_lines.isEmpty) return;
+    _lyricInfoPushed = true;
+    _pushLyricInfo();
+  }
+
+  /// 构造并推送 lyricInfo JSON（ColorOS Live Lyrics / LyricInfo 协议）。
+  ///
+  /// 写入 MediaSession extras.lyricInfo，供第三方系统读取：
+  /// - lyric：行级 LRC（[mm:ss.xx]行文本）
+  /// - rawLyric：逐字时间轴（[mm:ss.xxx]字...，无逐字时用整行文本），
+  ///   翻译以同时间戳独立行追加，供双语分组识别
+  void _pushLyricInfo() {
+    if (!_lyricInfoEnabled || _player == null) return;
+    final song = _player!.currentSong;
+    if (song == null) return;
+
+    final lyricBuf = StringBuffer();
+    final rawBuf = StringBuffer();
+    for (final line in _lines) {
+      if (line.text.isEmpty) continue;
+      // lyric：行级 LRC
+      lyricBuf
+        ..write(_lrcTag(line.startTime))
+        ..write(line.text)
+        ..write('\n');
+      // rawLyric：逐字时间轴（有字级时间戳用逐字，否则用整行文本）。
+      // 逐字格式与 KrcParser.toWordLevelLrc 一致：`[wordStart]字[wordStart]字...`。
+      // 第一个字 startTime 即行开始时间（KRC offset 从 0 起），自然形成
+      // `[lineStart]首字...`，与 ColorOS rawLyric 协议示例一致。
+      // 注意：勿再单独写行前缀 `[lineStart]`，否则第一个字会变成双重时间戳，
+      // 破坏外部逐字解析。
+      if (line.hasWordTiming) {
+        for (final w in line.words) {
+          rawBuf
+            ..write(_lrcTagMs(w.startTime))
+            ..write(w.text);
+        }
+      } else {
+        rawBuf
+          ..write(_lrcTagMs(line.startTime))
+          ..write(line.text);
+      }
+      rawBuf.write('\n');
+      // 翻译：同时间戳追加为独立行
+      final t = line.translation;
+      if (t != null && t.isNotEmpty) {
+        rawBuf
+          ..write(_lrcTagMs(line.startTime))
+          ..write(t)
+          ..write('\n');
+      }
+    }
+
+    if (lyricBuf.isEmpty) {
+      // 无有效歌词行：不推送（保持移除状态）
+      return;
+    }
+
+    final lyric = lyricBuf.toString().trimRight();
+    final rawLyric = rawBuf.toString().trimRight();
+    final json = jsonEncode({
+      'songName': song.displayName,
+      'artist': song.artist,
+      'songId': song.id,
+      'lyric': lyric,
+      'rawLyric': rawLyric,
+    });
+    MediaNotificationService.updateLyricInfo(json);
+  }
+
+  /// 毫秒 → LRC 行级时间标签 [mm:ss.xx]（厘秒）
+  static String _lrcTag(int ms) {
+    final m = ms ~/ 60000;
+    final s = (ms % 60000) ~/ 1000;
+    final cs = (ms % 1000) ~/ 10;
+    return '[${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}.${cs.toString().padLeft(2, '0')}]';
+  }
+
+  /// 毫秒 → 逐字毫秒时间标签 [mm:ss.xxx]
+  static String _lrcTagMs(int ms) {
+    final m = ms ~/ 60000;
+    final s = (ms % 60000) ~/ 1000;
+    final msPart = ms % 1000;
+    return '[${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}.${msPart.toString().padLeft(3, '0')}]';
   }
 
   /// 二分查找当前播放位置对应的歌词行 index。

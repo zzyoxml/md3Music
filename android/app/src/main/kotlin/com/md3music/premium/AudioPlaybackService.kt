@@ -65,6 +65,9 @@ class AudioPlaybackService : Service() {
         const val EXTRA_IS_FAVORITED = "isFavorited"
         const val EXTRA_BT_LYRIC_TEXT = "btLyricText"
         const val EXTRA_BT_LYRIC_ENABLED = "btLyricEnabled"
+        // LyricInfo 歌词转发：通过 MediaSession 元数据 extras.lyricInfo 发布整首歌词
+        const val ACTION_UPDATE_LYRIC_INFO = "com.md3music.premium.ACTION_UPDATE_LYRIC_INFO"
+        const val EXTRA_LYRIC_INFO = "lyricInfo"
         // 桌面小组件按钮动作（由 MusicWidgetProvider 转发）
         const val ACTION_WIDGET_PLAY_PAUSE = "com.md3music.premium.ACTION_WIDGET_PLAY_PAUSE"
         const val ACTION_WIDGET_NEXT = "com.md3music.premium.ACTION_WIDGET_NEXT"
@@ -384,6 +387,12 @@ class AudioPlaybackService : Service() {
     private var currentBtLyricText = ""
     private var originalTitle = ""
     private var originalArtist = ""
+    // LyricInfo 歌词转发：缓存整首歌词 JSON（空 = 不发布），
+    // 写入 MediaSession 元数据 extras.lyricInfo 供第三方系统读取
+    @Volatile
+    private var currentLyricInfo = ""
+    // 上次已写入元数据的 lyricInfo，用于 refreshMetadata 判断是否需强制刷新
+    private var lastShownLyricInfo = ""
     // 封面缓存：后台封面线程写入，主线程 refreshMetadata（蓝牙歌词）读取，
     // 必须 @Volatile 保证跨线程可见性
     @Volatile
@@ -562,6 +571,11 @@ class AudioPlaybackService : Service() {
             }
             ACTION_SET_BT_LYRIC_ENABLED -> {
                 bluetoothLyricEnabled = intent?.getBooleanExtra(EXTRA_BT_LYRIC_ENABLED, false) ?: false
+                refreshMetadata()
+                return START_STICKY
+            }
+            ACTION_UPDATE_LYRIC_INFO -> {
+                currentLyricInfo = intent?.getStringExtra(EXTRA_LYRIC_INFO) ?: ""
                 refreshMetadata()
                 return START_STICKY
             }
@@ -1240,6 +1254,11 @@ class AudioPlaybackService : Service() {
         if (!artUri.isNullOrEmpty()) {
             metaBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artUri)
         }
+        // LyricInfo 歌词转发：发布整首歌词 JSON 到 MediaMetadata.extras，
+        // 供 ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取（空则不发布）
+        if (currentLyricInfo.isNotEmpty()) {
+            metaBuilder.putString(EXTRA_LYRIC_INFO, currentLyricInfo)
+        }
         mediaSession?.setMetadata(metaBuilder.build())
     }
 
@@ -1259,10 +1278,15 @@ class AudioPlaybackService : Service() {
             displayArtist = originalArtist
         }
 
-        // P0: 文本未变化（歌词行未变 / 开关未切换）时直接跳过，避免无效刷新
-        if (displayTitle == lastShownBtLyricTitle && displayArtist == lastShownBtLyricArtist) return
+        // P0: 文本未变化（歌词行未变 / 开关未切换）时直接跳过，避免无效刷新。
+        // 但 LyricInfo 歌词转发（currentLyricInfo 变化）不依赖 title/artist 变化，
+        // 即使 title/artist 未变也需要更新 MediaSession 元数据以写入 extras.lyricInfo，
+        // 因此本跳过逻辑仅在 lyricInfo 不变时生效。
+        val lyricInfoChanged = currentLyricInfo != lastShownLyricInfo
+        if (displayTitle == lastShownBtLyricTitle && displayArtist == lastShownBtLyricArtist && !lyricInfoChanged) return
         lastShownBtLyricTitle = displayTitle
         lastShownBtLyricArtist = displayArtist
+        lastShownLyricInfo = currentLyricInfo
 
         // P0: 通知重建节流：逐字歌词每句（50-100ms）都会走到这里，
         // 通知栏重建限制为最少 500ms 一次（车机 AVRCP 歌词读的是 MediaSession，不受节流影响）
@@ -1314,6 +1338,10 @@ class AudioPlaybackService : Service() {
         }
         if (!lastArtUrl.isNullOrEmpty()) {
             metaBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, lastArtUrl)
+        }
+        // LyricInfo 歌词转发：蓝牙歌词刷新路径也保留 lyricInfo（空则不发布）
+        if (currentLyricInfo.isNotEmpty()) {
+            metaBuilder.putString(EXTRA_LYRIC_INFO, currentLyricInfo)
         }
         mediaSession?.setMetadata(metaBuilder.build())
     }

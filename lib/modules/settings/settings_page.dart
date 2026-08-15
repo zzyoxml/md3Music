@@ -84,6 +84,8 @@ class _SettingsPageState extends State<SettingsPage>
   bool _lyriconPreferTranslation = true;
   // 蓝牙歌词开关：通过 MediaSession 元数据替换在车机等设备显示歌词
   bool _bluetoothLyricEnabled = false;
+  // LyricInfo 歌词转发开关：通过 MediaSession extras.lyricInfo 发布歌词
+  bool _lyricInfoEnabled = false;
   // 自定义下载目录：null/空 表示使用默认目录
   String? _downloadDir;
   // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
@@ -224,6 +226,8 @@ class _SettingsPageState extends State<SettingsPage>
     // 读取蓝牙歌词开关
     final bluetoothLyricEnabled = await _settingsRepository
         .getBluetoothLyricEnabled();
+    // 读取 LyricInfo 歌词转发开关
+    final lyricInfoEnabled = await _settingsRepository.getLyricInfoEnabled();
     final downloadWordLevelLyrics = await _settingsRepository
         .getDownloadWordLevelLyrics();
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
@@ -260,6 +264,7 @@ class _SettingsPageState extends State<SettingsPage>
       _downloadWordLevelLyrics = downloadWordLevelLyrics;
       _uiScale = uiScale;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
+      _lyricInfoEnabled = lyricInfoEnabled;
       _pauseFadeEnabled = pauseFadeEnabled;
       _keepScreenOn = keepScreenOn;
       _spectrumEnabled = spectrumEnabled;
@@ -557,6 +562,20 @@ class _SettingsPageState extends State<SettingsPage>
             // 同步到歌词服务（启停定时器）和原生端（元数据替换开关）
             DesktopLyricService.instance.setBluetoothLyricEnabled(value);
             MediaNotificationService.setBluetoothLyricEnabled(value);
+          },
+        ),
+        // LyricInfo 歌词转发：写入 MediaSession extras.lyricInfo，
+        // 供 ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取
+        SwitchListTile(
+          title: const Text('LyricInfo 歌词转发'),
+          subtitle: const Text('向 ColorOS 桌面歌词 / LyricInfo 模块等系统提供整首歌词（写入媒体会话元数据）'),
+          value: _lyricInfoEnabled,
+          onChanged: (value) async {
+            HapticFeedback.lightImpact();
+            setState(() => _lyricInfoEnabled = value);
+            await _settingsRepository.setLyricInfoEnabled(value);
+            // 同步到歌词服务（启用定时器拉取歌词构造 JSON，关闭时移除）
+            await DesktopLyricService.instance.setLyricInfoEnabled(value);
           },
         ),
       ],

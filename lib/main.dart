@@ -57,6 +57,8 @@ Future<void> main() async {
     // 恢复蓝牙歌词开关状态：让歌词服务定时器在需要时启动。
     // 原生端 AudioPlaybackService.onCreate 会自行从 SharedPreferences 恢复开关。
     _restoreBluetoothLyricPref(),
+    // 恢复 LyricInfo 歌词转发开关：开启后歌词服务定时器运行以构造 JSON 推送
+    _restoreLyricInfoPref(),
   ]);
 
   // 注册通知栏/悬浮窗回调（悬浮窗内按钮 → DesktopLyricService；通知栏桌面歌词按钮 → toggle）
@@ -133,6 +135,16 @@ Future<void> _restoreBluetoothLyricPref() async {
     final settings = SettingsRepository();
     final btLyricEnabled = await settings.getBluetoothLyricEnabled();
     await DesktopLyricService.instance.setBluetoothLyricEnabled(btLyricEnabled);
+  } catch (_) {}
+}
+
+/// 恢复 LyricInfo 歌词转发开关：从 SettingsRepository 读取并同步到歌词服务，
+/// 让歌词服务定时器在需要时启动、歌词加载后自动构造 JSON 推送。
+Future<void> _restoreLyricInfoPref() async {
+  try {
+    final settings = SettingsRepository();
+    final enabled = await settings.getLyricInfoEnabled();
+    await DesktopLyricService.instance.setLyricInfoEnabled(enabled);
   } catch (_) {}
 }
 

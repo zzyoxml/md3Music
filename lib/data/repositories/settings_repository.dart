@@ -293,6 +293,21 @@ class SettingsRepository {
     await prefs.setBool(_keyBluetoothLyricEnabled, v);
   }
 
+  // ===== LyricInfo 歌词转发 =====
+  // 通过 MediaSession 元数据 extras.lyricInfo 发布整首歌词（LRC/ELRC），
+  // 供 ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取。
+  static const String _keyLyricInfoEnabled = 'settings_lyric_info_enabled';
+
+  Future<bool> getLyricInfoEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyLyricInfoEnabled) ?? false;
+  }
+
+  Future<void> setLyricInfoEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyLyricInfoEnabled, v);
+  }
+
   // ===== UI 缩放 =====
 
   Future<double> getUiScale() async {
