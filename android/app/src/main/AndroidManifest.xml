@@ -12,10 +12,16 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- 悬浮窗识曲：Android 14+ 使用 MediaProjection 的前台服务必须声明此类型权限 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Android 15+（API 35+）：MediaProjection 前台服务还需 PROJECT_MEDIA 权限，
+         否则 targetSDK 35 在 Android 15/16 上 startForeground 抛 SecurityException；
+         低版本不认识此权限名会自动忽略，声明无害 -->
+    <uses-permission android:name="com.android.permission.PROJECT_MEDIA" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 悬浮窗识曲：拖拽悬浮窗到底部删除时提供震动反馈 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.MEDIA_AUDIO_UPLOAD" />
     <uses-permission android:name="android.permission.MEDIA_VIDEO_UPLOAD" />
