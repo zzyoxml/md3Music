@@ -148,8 +148,12 @@ class DlnaService {
     };
 
     try {
-      // 部分设备状态机要求先 Stop 再换流，best-effort 发送 Stop（失败忽略）
-      await device.stop().timeout(_opTimeout);
+      // 部分设备状态机要求先 Stop 再换流；但设备已处于 STOPPED 状态时
+      // 再发 Stop 会返回 500/701（Transition not available）。
+      // 因此 Stop 必须独立 try/catch 真正吞掉错误，失败不影响后续换流。
+      try {
+        await device.stop().timeout(_opTimeout);
+      } catch (_) {}
       await device.setUrl(url, title: title ?? '', type: playType)
           .timeout(_opTimeout);
       await device.play().timeout(_opTimeout);
