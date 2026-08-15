@@ -291,6 +291,18 @@ class MainActivity : FlutterActivity() {
                     startService(intent)
                     result.success(true)
                 }
+                // 锁屏歌词：开关 / 数据推送（headless 唤醒场景由 AudioPlaybackService 兜底）
+                "showLockScreenLyric" -> {
+                    result.success(true)
+                }
+                "hideLockScreenLyric" -> {
+                    LockScreenLyricActivity.dismiss()
+                    result.success(true)
+                }
+                "updateLockScreenLyric" -> {
+                    LockScreenLyricActivity.applyCall(call)
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }

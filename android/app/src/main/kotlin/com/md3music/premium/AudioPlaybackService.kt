@@ -90,6 +90,10 @@ class AudioPlaybackService : Service() {
         @Volatile
         var playerReadyReceived = false
 
+        /// 当前是否正在播放（供 LockScreenLyricReceiver 判断锁屏时是否拉起歌词界面）。
+        @Volatile
+        var isNowPlaying = false
+
         fun setFlutterEngine(engine: FlutterEngine) {
             staticFlutterEngine = engine
         }
@@ -444,6 +448,7 @@ class AudioPlaybackService : Service() {
     private var mediaSession: MediaSessionCompat? = null
     private var notificationManager: NotificationManager? = null
     private var receiver: BroadcastReceiver? = null
+    private var lockScreenReceiver: BroadcastReceiver? = null
     private var flutterEngine: FlutterEngine? = null
     // Lyricon Provider 是否已 register（restoreLyriconStateIfNeeded 可能被调用多次，需幂等）
     private var lyriconRegistered = false
@@ -513,6 +518,19 @@ class AudioPlaybackService : Service() {
         notificationManager = getSystemService(NotificationManager::class.java)
         initMediaSession()
         registerReceiver()
+        // 锁屏歌词：动态注册 SCREEN_OFF/SCREEN_ON 广播（前台服务存活期间注册，
+        // 比 manifest 静态广播在 MIUI 等 ROM 上更可靠）
+        try {
+            lockScreenReceiver = LockScreenLyricReceiver()
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+            }
+            registerReceiver(lockScreenReceiver, filter)
+            android.util.Log.i("LockScreenLyric", "AudioPlaybackService.onCreate: lock screen receiver registered")
+        } catch (e: Exception) {
+            android.util.Log.e("LockScreenLyric", "register lock screen receiver failed: $e")
+        }
         // P0: 不再在 onCreate 无条件持有 WakeLock（此时未必在播放）。
         // 仅当 onStartCommand 收到 isPlaying=true 时才持有，暂停时释放。
 
@@ -619,6 +637,9 @@ class AudioPlaybackService : Service() {
             ACTION_STOP -> {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 releaseWakeLock()
+                isNowPlaying = false
+                // 停止播放/退出 App 后锁屏歌词不应残留
+                LockScreenLyricActivity.dismiss()
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -939,6 +960,8 @@ class AudioPlaybackService : Service() {
                     "hideNotification" -> {
                         stopForeground(STOP_FOREGROUND_REMOVE)
                         releaseWakeLock()
+                        isNowPlaying = false
+                        LockScreenLyricActivity.dismiss()
                         stopSelf()
                         result.success(true)
                     }
@@ -950,6 +973,18 @@ class AudioPlaybackService : Service() {
                     "setBluetoothLyricEnabled" -> {
                         bluetoothLyricEnabled = call.argument<Boolean>("enabled") ?: false
                         refreshMetadata()
+                        result.success(true)
+                    }
+                    // 锁屏歌词：开关 / 数据推送（正常启动走 MainActivity，headless 在此兜底）
+                    "showLockScreenLyric" -> {
+                        result.success(true)
+                    }
+                    "hideLockScreenLyric" -> {
+                        LockScreenLyricActivity.dismiss()
+                        result.success(true)
+                    }
+                    "updateLockScreenLyric" -> {
+                        LockScreenLyricActivity.applyCall(call)
                         result.success(true)
                     }
                     else -> result.notImplemented()
@@ -1175,6 +1210,8 @@ class AudioPlaybackService : Service() {
         originalArtist = artist
         lastArtUrl = artUrl
         lastIsPlaying = isPlaying
+        // 同步「正在播放」状态，供锁屏歌词广播（ACTION_SCREEN_OFF）判断
+        isNowPlaying = isPlaying
         lastDesktopLyricEnabled = desktopLyricEnabled
         lastIsFavorited = isFavorited
         lastDuration = duration
@@ -1425,6 +1462,12 @@ class AudioPlaybackService : Service() {
                 unregisterReceiver(it)
             } catch (_: Exception) {}
         }
+        lockScreenReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (_: Exception) {}
+        }
+        lockScreenReceiver = null
         mediaSession?.release()
         // 释放 Lyricon Provider
         try {

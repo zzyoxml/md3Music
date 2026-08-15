@@ -15,4 +15,10 @@
     <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">?android:colorBackground</item>
     </style>
+
+    <!-- 锁屏歌词主题：暗色全屏无标题栏，不透明遮住锁屏时钟，作为纯展示层 -->
+    <style name="Theme.MD3Music.LockScreen" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">#FF000000</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
 </resources>

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/kugou_api/kugou_api_client.dart';
+import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 
 class SettingsRepository {
   static const String _keyThemeMode = 'settings_theme_mode';
@@ -374,6 +375,47 @@ class SettingsRepository {
   Future<void> setLyricInfoEnabled(bool v) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyLyricInfoEnabled, v);
+  }
+
+  // ===== 锁屏歌词 =====
+  // 锁屏时全屏显示逐字歌词（覆盖在系统锁屏上方），默认关闭。
+  static const String _keyLockScreenLyricEnabled = 'settings_lock_screen_lyric_enabled';
+
+  Future<bool> getLockScreenLyricEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyLockScreenLyricEnabled) ?? false;
+  }
+
+  Future<void> setLockScreenLyricEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyLockScreenLyricEnabled, v);
+  }
+
+  // ===== 锁屏歌词字体 =====
+  // 字号/粗细独立于 App 内歌词设置；默认跟随 AM 歌词偏好（未单独设置过时一致）。
+  static const String _keyLockScreenLyricFontSize = 'settings_lock_screen_lyric_font_size';
+  static const String _keyLockScreenLyricFontWeight = 'settings_lock_screen_lyric_font_weight';
+
+  Future<double> getLockScreenLyricFontSize() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_keyLockScreenLyricFontSize) ??
+        LyricPreferences.instance.fontSize;
+  }
+
+  Future<void> setLockScreenLyricFontSize(double v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyLockScreenLyricFontSize, v);
+  }
+
+  Future<int> getLockScreenLyricFontWeight() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keyLockScreenLyricFontWeight) ??
+        LyricPreferences.instance.fontWeightValue;
+  }
+
+  Future<void> setLockScreenLyricFontWeight(int v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyLockScreenLyricFontWeight, v);
   }
 
   // ===== UI 缩放 =====

@@ -90,6 +90,15 @@
             android:name=".FloatingRecognitionService"
             android:foregroundServiceType="specialUse|mediaProjection"
             android:exported="false" />
+        <!-- 锁屏歌词：全屏覆盖在锁屏上方，显示逐字歌词 -->
+        <activity
+            android:name=".LockScreenLyricActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.MD3Music.LockScreen" />
         <!-- 桌面播放器小组件 -->
         <receiver
             android:name=".MusicWidgetProvider"

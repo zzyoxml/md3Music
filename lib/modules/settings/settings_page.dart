@@ -90,6 +90,11 @@ class _SettingsPageState extends State<SettingsPage>
       _androidSdkVersion == null || _androidSdkVersion! >= 26;
   // 蓝牙歌词开关：通过 MediaSession 元数据替换在车机等设备显示歌词
   bool _bluetoothLyricEnabled = false;
+  // 锁屏歌词开关：锁屏时全屏显示逐字歌词（覆盖在系统锁屏上方），默认关闭
+  bool _lockScreenLyricEnabled = false;
+  // 锁屏歌词独立字号/粗细（默认跟随 AM 歌词偏好）
+  double _lockScreenLyricFontSize = 22;
+  int _lockScreenLyricFontWeight = 400;
   // 自定义下载目录：null/空 表示使用默认目录
   String? _downloadDir;
   // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
@@ -243,6 +248,14 @@ class _SettingsPageState extends State<SettingsPage>
     // 读取蓝牙歌词开关
     final bluetoothLyricEnabled = await _settingsRepository
         .getBluetoothLyricEnabled();
+    // 读取锁屏歌词开关
+    final lockScreenLyricEnabled = await _settingsRepository
+        .getLockScreenLyricEnabled();
+    // 读取锁屏歌词独立字号/粗细
+    final lockScreenLyricFontSize = await _settingsRepository
+        .getLockScreenLyricFontSize();
+    final lockScreenLyricFontWeight = await _settingsRepository
+        .getLockScreenLyricFontWeight();
     final downloadWordLevelLyrics = await _settingsRepository
         .getDownloadWordLevelLyrics();
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
@@ -279,6 +292,9 @@ class _SettingsPageState extends State<SettingsPage>
       _downloadWordLevelLyrics = downloadWordLevelLyrics;
       _uiScale = uiScale;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
+      _lockScreenLyricEnabled = lockScreenLyricEnabled;
+      _lockScreenLyricFontSize = lockScreenLyricFontSize;
+      _lockScreenLyricFontWeight = lockScreenLyricFontWeight;
       _pauseFadeEnabled = pauseFadeEnabled;
       _keepScreenOn = keepScreenOn;
       _spectrumEnabled = spectrumEnabled;
@@ -611,6 +627,61 @@ class _SettingsPageState extends State<SettingsPage>
             DesktopLyricService.instance.setBluetoothLyricEnabled(value);
             MediaNotificationService.setBluetoothLyricEnabled(value);
           },
+        ),
+        // 锁屏歌词（独立开关）：锁屏时全屏显示逐字歌词
+        SwitchListTile(
+          title: const Text('锁屏歌词'),
+          subtitle: const Text('锁屏时全屏显示逐字歌词（熄灭屏幕后点亮，覆盖在系统锁屏上方；解锁自动关闭）'),
+          value: _lockScreenLyricEnabled,
+          onChanged: (value) async {
+            HapticFeedback.lightImpact();
+            setState(() => _lockScreenLyricEnabled = value);
+            await _settingsRepository.setLockScreenLyricEnabled(value);
+            // 同步到歌词服务（启停定时器）与原生端（开关状态/关闭界面）
+            await DesktopLyricService.instance.setLockScreenLyricEnabled(value);
+          },
+        ),
+        // 锁屏歌词字号（独立于 App 内歌词）
+        ListTile(
+          title: const Text('锁屏歌词字号'),
+          subtitle: Slider(
+            value: _lockScreenLyricFontSize,
+            min: 14,
+            max: 50,
+            divisions: 36,
+            label: '${_lockScreenLyricFontSize.round()}',
+            onChanged: (v) {
+              setState(() => _lockScreenLyricFontSize = v);
+            },
+            onChangeEnd: (v) {
+              final size = v.roundToDouble();
+              setState(() => _lockScreenLyricFontSize = size);
+              _settingsRepository.setLockScreenLyricFontSize(size);
+              DesktopLyricService.instance.setLockScreenLyricFontSize(size);
+            },
+          ),
+          trailing: Text('${_lockScreenLyricFontSize.round()}'),
+        ),
+        // 锁屏歌词粗细（独立于 App 内歌词）
+        ListTile(
+          title: const Text('锁屏歌词粗细'),
+          subtitle: Slider(
+            value: _lockScreenLyricFontWeight.toDouble(),
+            min: 300,
+            max: 900,
+            divisions: 6,
+            label: '$_lockScreenLyricFontWeight',
+            onChanged: (v) {
+              setState(() => _lockScreenLyricFontWeight = v.round());
+            },
+            onChangeEnd: (v) {
+              final w = v.round();
+              setState(() => _lockScreenLyricFontWeight = w);
+              _settingsRepository.setLockScreenLyricFontWeight(w);
+              DesktopLyricService.instance.setLockScreenLyricFontWeight(w);
+            },
+          ),
+          trailing: Text('$_lockScreenLyricFontWeight'),
         ),
       ],
     );

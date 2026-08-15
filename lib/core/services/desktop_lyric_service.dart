@@ -49,6 +49,15 @@ class DesktopLyricService {
   // 当前歌曲是否已推送过 lyricInfo（避免每 250ms tick 重复推送）
   bool _lyricInfoPushed = false;
 
+  // 锁屏歌词开关：独立于悬浮窗/蓝牙歌词/LyricInfo。开启时定时器运行
+  // 以获取当前行逐字数据，推送原生 LockScreenLyricActivity（锁屏全屏歌词）。
+  bool _lockScreenLyricEnabled = false;
+  bool get lockScreenLyricEnabled => _lockScreenLyricEnabled;
+
+  // 锁屏歌词独立字体（设置页可单独调；启动时从 SettingsRepository 恢复）
+  double _lockScreenFontSize = 22;
+  int _lockScreenFontWeight = 400;
+
   // SuperLyric 歌词推送开关：基于 Binder 的系统级实时歌词 API。
   // 复用本服务的定时器与歌词解析管线，在切歌 / 歌词行变化时推送当前行
   // （text/words/翻译/副歌词 + title/artist）；播放/暂停由 SuperLyric 自动
@@ -327,6 +336,44 @@ class DesktopLyricService {
     _notify();
   }
 
+  /// 锁屏歌词开关：独立于悬浮窗/蓝牙歌词/LyricInfo/SuperLyric。
+  /// 开启后定时器运行以推送当前行逐字数据到原生锁屏歌词界面
+  /// （LockScreenLyricActivity，锁屏全屏显示）；关闭时关闭该界面。
+  Future<void> setLockScreenLyricEnabled(bool enabled) async {
+    if (_lockScreenLyricEnabled == enabled) return;
+    _lockScreenLyricEnabled = enabled;
+    _bindProvidersFromContext();
+    _updateTicker();
+    if (enabled) {
+      // 启用时重置切歌检测状态，让下个 tick 立即拉取歌词并推送
+      _currentSongId = null;
+      _currentLrcText = null;
+      _lines = const [];
+      _currentLineIndex = -1;
+      _awaitingLyric = false;
+      // 通知原生端开关已开启（原生端后续由 ACTION_SCREEN_OFF 广播拉起界面）
+      try {
+        await MediaNotificationService.showLockScreenLyric();
+      } catch (_) {}
+    } else {
+      // 关闭时关闭锁屏歌词界面
+      try {
+        await MediaNotificationService.hideLockScreenLyric();
+      } catch (_) {}
+    }
+    _notify();
+  }
+
+  /// 锁屏歌词字号（独立于 App 内歌词，设置页可单独调）。
+  void setLockScreenLyricFontSize(double v) {
+    _lockScreenFontSize = v;
+  }
+
+  /// 锁屏歌词粗细（独立于 App 内歌词，设置页可单独调）。
+  void setLockScreenLyricFontWeight(int v) {
+    _lockScreenFontWeight = v;
+  }
+
   /// 设置共用的推送偏好（翻译/罗马音/优先翻译），并让过滤立即生效：
   /// - SuperLyric：重推当前行
   /// - LyricInfo：重建并重推整首歌词 JSON
@@ -356,9 +403,13 @@ class DesktopLyricService {
     }
   }
 
-  /// 定时器是否需要运行：悬浮窗、蓝牙歌词、LyricInfo 或 SuperLyric 任一开启即需运行
+  /// 定时器是否需要运行：悬浮窗、蓝牙歌词、LyricInfo、SuperLyric 或锁屏歌词任一开启即需运行
   bool _shouldTick() =>
-      _enabled || _bluetoothLyricEnabled || _lyricInfoEnabled || _superLyricEnabled;
+      _enabled ||
+      _bluetoothLyricEnabled ||
+      _lyricInfoEnabled ||
+      _superLyricEnabled ||
+      _lockScreenLyricEnabled;
 
   /// 根据开关状态启停定时器（250ms tick：逐行歌词足够检测切行）
   void _updateTicker() {
@@ -455,6 +506,22 @@ class DesktopLyricService {
       _currentLrcText = null;
       _lines = const [];
       _currentLineIndex = -1;
+      // 锁屏歌词：清空界面，避免残留上一首歌词
+      if (_lockScreenLyricEnabled) {
+        MediaNotificationService.updateLockScreenLyric(
+          lineText: '',
+          prevText: '',
+          nextText: '',
+          words: const [],
+          wordStartTimes: const [],
+          wordDurations: const [],
+          currentPositionMs: 0,
+          durationMs: 0,
+          isPlaying: false,
+          title: '',
+          artist: '',
+        );
+      }
       return;
     }
 
@@ -476,6 +543,22 @@ class DesktopLyricService {
       if (_lyricInfoEnabled) {
         _lyricInfoPushed = false;
         MediaNotificationService.removeLyricInfo();
+      }
+      // 锁屏歌词：切歌时推占位文本，避免残留上一首歌词
+      if (_lockScreenLyricEnabled) {
+        MediaNotificationService.updateLockScreenLyric(
+          lineText: '歌词加载中...',
+          prevText: '',
+          nextText: '',
+          words: const [],
+          wordStartTimes: const [],
+          wordDurations: const [],
+          currentPositionMs: _player!.position.inMilliseconds,
+          durationMs: _player!.duration?.inMilliseconds ?? 0,
+          isPlaying: _player!.isPlaying,
+          title: song.displayName,
+          artist: song.artist,
+        );
       }
       _fetchLyricFor(song);
       return;
@@ -555,6 +638,9 @@ class DesktopLyricService {
         _pushSuperLyricLine(newIndex >= 0 ? _lines[newIndex] : null);
       }
     }
+
+    // 锁屏歌词：每 tick 推送当前行逐字数据（不依赖行切换，逐字连续更新）
+    _pushLockScreenLyric();
   }
 
   Future<void> _fetchLyricFor(dynamic song) async {
@@ -685,6 +771,44 @@ class DesktopLyricService {
     try {
       await _superLyricChannel.invokeMethod('sendLyric', args);
     } catch (_) {}
+  }
+
+  /// 推送当前行逐字数据到原生锁屏歌词界面（LockScreenLyricActivity）。
+  ///
+  /// 每 tick（250ms）调用一次，逐字连续更新；原生侧 Choreographer 帧循环
+  /// 在两次推送之间按真实时间平滑推进位置。LRC/纯文本（words 为空）时
+  /// 原生侧整行显示。上一行/下一行传纯文本用于上下文展示。
+  void _pushLockScreenLyric() {
+    if (!_lockScreenLyricEnabled) return;
+    if (_player == null) return;
+    final song = _player!.currentSong;
+    if (song == null) return;
+    final posMs = _player!.position.inMilliseconds;
+    final idx = _findLineIndex(posMs);
+    if (idx < 0 || idx >= _lines.length) return;
+    final line = _lines[idx];
+    // 上一行 / 下一行纯文本（无字级）
+    final prev = idx > 0 ? _lines[idx - 1].text : '';
+    final next = idx + 1 < _lines.length ? _lines[idx + 1].text : '';
+    MediaNotificationService.updateLockScreenLyric(
+      lineText: line.text,
+      prevText: prev,
+      nextText: next,
+      words: line.words.map((w) => w.text).toList(),
+      wordStartTimes: line.words.map((w) => w.startTime).toList(),
+      wordDurations: line.words.map((w) => w.duration).toList(),
+      currentPositionMs: posMs,
+      durationMs: _player!.duration?.inMilliseconds ?? 0,
+      isPlaying: _player!.isPlaying,
+      title: song.displayName,
+      artist: song.artist,
+      // 锁屏背景模糊封面：在线取封面 URL，本地取音频路径（读内嵌封面）
+      artUrl: song.artworkUri,
+      fallbackFilePath: song.localPath,
+      // 锁屏歌词独立字体（设置页可单独调，默认跟随 AM 歌词偏好）
+      fontSize: _lockScreenFontSize,
+      fontWeight: _lockScreenFontWeight,
+    );
   }
 
   /// LyricInfo：歌词就绪后推送一次整首歌词（_lyricInfoPushed 去重，每首歌 1 次）。

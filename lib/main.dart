@@ -137,6 +137,17 @@ Future<void> _restoreLyricPushPref() async {
     final btLyricEnabled = await settings.getBluetoothLyricEnabled();
     await DesktopLyricService.instance.setBluetoothLyricEnabled(btLyricEnabled);
 
+    // 锁屏歌词（独立开关）：开启后歌词服务定时器运行以推送逐字数据
+    final lockScreenLyricEnabled = await settings.getLockScreenLyricEnabled();
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setLockScreenLyricEnabled(lockScreenLyricEnabled);
+
+    // 锁屏歌词独立字体（字号/粗细，默认跟随 AM 歌词偏好）
+    final lockScreenLyricFontSize = await settings.getLockScreenLyricFontSize();
+    DesktopLyricService.instance.setLockScreenLyricFontSize(lockScreenLyricFontSize);
+    final lockScreenLyricFontWeight = await settings.getLockScreenLyricFontWeight();
+    DesktopLyricService.instance.setLockScreenLyricFontWeight(lockScreenLyricFontWeight);
+
     // 实时歌词推送协议
     final protocol = await settings.getLyricPushProtocol();
     final translation = await settings.getLyricPushTranslation();
