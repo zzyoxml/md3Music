@@ -1,6 +1,11 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:md3music/providers/kugou_provider.dart';
+import 'package:md3music/services/kugou_api/kugou_api_client.dart';
 import 'package:md3music/services/kugou_api/kugou_models.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 /// KugouProvider 歌词 getter 行为测试（Task 16）。
 ///
@@ -111,6 +116,79 @@ void main() {
       expect(krcOnlyLyric.displayLyric, krcText);
       expect(krcOnlyLyric.displayKrcLyric, krcText);
       expect(krcOnlyLyric.displayLrcLyric, isNull);
+    });
+  });
+
+  group('KugouProvider 多账号管理', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+
+    late KugouProvider provider;
+
+    setUp(() async {
+      // 重置本地存储 + 标记本地服务器就绪（避免测试内等待 8s / 真实网络）
+      SharedPreferences.setMockInitialValues({});
+      KugouApiClient.markServerReady();
+
+      // mock path_provider：logout/switch 会触发 DefaultCacheManager 清头像缓存，
+      // 其内部用 path_provider 拿临时目录，测试环境无插件实现会抛未处理异常
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('plugins.flutter.io/path_provider'),
+        (call) async => switch (call.method) {
+          'getTemporaryDirectory' ||
+          'getApplicationSupportDirectory' ||
+          'getApplicationDocumentsDirectory' ||
+          'getDownloadsDirectory' =>
+            Directory.systemTemp.path,
+          _ => null,
+        },
+      );
+
+      provider = KugouProvider();
+      // 清除之前测试残留的单例内存账号列表（_accounts 跨测试共享）
+      await provider.apiClient.clearCookies();
+    });
+
+    tearDown(() {
+      provider.dispose();
+    });
+
+    test('savedAccounts 暴露已保存的账号列表', () async {
+      await provider.apiClient.setLoginCookies('token_a', 'user_a');
+      await provider.apiClient.setLoginCookies('token_b', 'user_b');
+      expect(provider.savedAccounts.length, 2);
+      expect(provider.savedAccounts.any((a) => a.userid == 'user_a'), isTrue);
+      expect(provider.savedAccounts.any((a) => a.userid == 'user_b'), isTrue);
+    });
+
+    test('logout 只有一个账号时回到未登录态', () async {
+      await provider.apiClient.setLoginCookies('token_a', 'user_a');
+      expect(provider.apiClient.isLoggedIn, isTrue);
+      await provider.logout();
+      expect(provider.isLoggedIn, isFalse);
+      expect(provider.savedAccounts, isEmpty);
+      expect(provider.apiClient.userid, isNull);
+    });
+
+    test('logout 有多个账号时自动切换到剩余账号', () async {
+      await provider.apiClient.setLoginCookies('token_a', 'user_a');
+      await provider.apiClient.setLoginCookies('token_b', 'user_b');
+      // 当前为 user_b，logout 应删除 user_b 并自动切换到 user_a
+      await provider.logout();
+      expect(provider.apiClient.userid, 'user_a');
+      expect(provider.apiClient.token, 'token_a');
+      expect(provider.isLoggedIn, isTrue);
+      expect(provider.savedAccounts.any((a) => a.userid == 'user_a'), isTrue);
+      expect(provider.savedAccounts.any((a) => a.userid == 'user_b'), isFalse);
+    });
+
+    test('switchAccount 切换到指定账号并更新当前账号', () async {
+      await provider.apiClient.setLoginCookies('token_a', 'user_a');
+      await provider.apiClient.setLoginCookies('token_b', 'user_b');
+      final ok = await provider.switchAccount('user_a');
+      expect(ok, isTrue);
+      expect(provider.apiClient.userid, 'user_a');
+      expect(provider.isLoggedIn, isTrue);
     });
   });
 }

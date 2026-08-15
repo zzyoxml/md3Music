@@ -1944,3 +1944,32 @@ class KugouLongAudioAudio {
     );
   }
 }
+
+/// 手机验证码登录的多账号候选（酷狗 `/v7/login_by_verifycode` 返回的
+/// `data.user_list` 条目）。一个手机号绑定多个账号时，需展示此列表让用户
+/// 选择，再携带选中账号的 [userid] 二次请求完成登录。
+class KugouLoginAccount {
+  final String userid;
+  final String? nickname;
+  final String? avatar;
+
+  const KugouLoginAccount({
+    required this.userid,
+    this.nickname,
+    this.avatar,
+  });
+
+  factory KugouLoginAccount.fromJson(Map<String, dynamic> json) {
+    return KugouLoginAccount(
+      userid: _str(
+        json['userid'] ?? json['userId'] ?? json['id'] ?? json['user_id'],
+      ),
+      nickname: _strNull(
+        json['nickname'] ?? json['user_name'] ?? json['name'],
+      ),
+      avatar: _resolveArtworkUri(
+        json['avatar'] ?? json['pic'] ?? json['img'] ?? json['imgurl'],
+      ),
+    );
+  }
+}

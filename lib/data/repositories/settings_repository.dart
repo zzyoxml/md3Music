@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../services/kugou_api/kugou_api_client.dart';
+
 class SettingsRepository {
   static const String _keyThemeMode = 'settings_theme_mode';
   static const String _keyDefaultQuality = 'settings_default_quality';
@@ -12,7 +14,6 @@ class SettingsRepository {
   static const String _keyAutoPlay = 'settings_auto_play';
   static const String _keyShowLyrics = 'settings_show_lyrics';
   static const String _keyAutoReceiveVip = 'settings_auto_receive_vip';
-  static const String _keySignedDays = 'settings_signed_days';
   // 自定义下载目录：空字符串表示使用默认目录（应用私有 documents/downloads）
   static const String _keyDownloadDir = 'settings_download_dir';
   // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
@@ -21,17 +22,24 @@ class SettingsRepository {
   // Pad 端网格页面列数偏好
   static const String _keyGridColumns = 'grid_columns';
 
+  /// 签到日历键：登录时按账号隔离（`settings_signed_days_$userid`），
+  /// 未登录（游客）用全局键。
+  String get _signedDaysKey {
+    final uid = KugouApiClient().userid;
+    return uid == null ? 'settings_signed_days' : 'settings_signed_days_$uid';
+  }
+
   /// 读取本地打卡日期集合（格式 yyyy-MM-dd）
   Future<Set<String>> getSignedDays() async {
     final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList(_keySignedDays);
+    final list = prefs.getStringList(_signedDaysKey);
     return list != null ? Set<String>.from(list) : {};
   }
 
   /// 持久化本地打卡日期集合
   Future<void> setSignedDays(Set<String> days) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_keySignedDays, days.toList());
+    await prefs.setStringList(_signedDaysKey, days.toList());
   }
 
   Future<ThemeMode> getThemeMode() async {

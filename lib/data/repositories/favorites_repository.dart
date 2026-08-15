@@ -2,11 +2,18 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../services/kugou_api/kugou_api_client.dart';
 import '../models/song.dart';
 
 class FavoritesRepository {
-  static const String _key = 'favorite_songs';
+  static const String _baseKey = 'favorite_songs';
   static const int _maxCount = 500;
+
+  /// 收藏键：登录时按账号隔离（`favorite_songs_$userid`），未登录用全局键。
+  String get _key {
+    final uid = KugouApiClient().userid;
+    return uid == null ? _baseKey : '${_baseKey}_$uid';
+  }
 
   Future<void> addFavorite(Song song) async {
     final prefs = await SharedPreferences.getInstance();
