@@ -167,17 +167,36 @@ class FloatingRecognitionService {
       return;
     }
 
+    // 优先用本地 Rust 服务器做静音检测 + 增益归一化（原生已按 8000Hz 输出，免降采样），
+    // 全程网络 IO + Rust 计算，不占用 UI isolate；服务器不可用时降级回 Dart 实现。
+    final rustResult = await processPcmWithRust(
+      input: pcm,
+      fromHz: 8000,
+      toHz: 8000,
+    );
+    Uint8List normalizedPcm;
+    int maxAmplitude;
+    if (rustResult != null) {
+      normalizedPcm = rustResult.pcm;
+      maxAmplitude = rustResult.maxAmplitude;
+      print('[FloatingRecognition] 第 $_attemptCount 段 rust maxAmplitude=$maxAmplitude');
+    } else {
+      // 降级：Dart 实现（原逻辑）
+      maxAmplitude = computeMaxAmplitude(pcm);
+      print('[FloatingRecognition] 第 $_attemptCount 段 maxAmplitude=$maxAmplitude');
+      normalizedPcm = maxAmplitude >= kSilenceAmplitudeThreshold
+          ? normalizeGain(pcm, maxAmplitude)
+          : pcm;
+    }
+
     // 静音检测
-    final maxAmplitude = computeMaxAmplitude(pcm);
-    print('[FloatingRecognition] 第 $_attemptCount 段 maxAmplitude=$maxAmplitude');
-    if (maxAmplitude < 100) {
+    if (maxAmplitude < kSilenceAmplitudeThreshold) {
       print('[FloatingRecognition] 本段为静音，跳过');
       _continueOrFail();
       return;
     }
 
-    // 增益归一化后调用酷狗指纹识别（原生已按 8000Hz 输出，免降采样）
-    final normalizedPcm = normalizeGain(pcm, maxAmplitude);
+    // 增益归一化后调用酷狗指纹识别
     try {
       final api = KugouApiClient();
       final response = await api.audioMatch(normalizedPcm);

@@ -724,11 +724,14 @@ pub fn handle_grade_info(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleR
     // 模拟客户端随机 KG-THash（固定 7 位 hex，与 handle_cloud_upload 一致）
     let thash = format!("{:07x}", (now_epoch_secs() as u64) & 0x0FFF_FFFF);
 
+    // 先序列化 body（dm 随后被 move 进 body，日志复用该字符串）
+    let body_str = json_stringify(&Value::Object(dm));
+
     let opts = RequestOptions::new("/v2/get_grade_info")
         .base_url("http://userinfo.user.kugou.com")
         .post("/v2/get_grade_info")
         .params(json!({ "dfid": dfid }))
-        .string_body(json_stringify(&Value::Object(dm)))
+        .string_body(body_str.clone())
         .cookie(q_cookie(q))
         .header("Content-Type", "text/plain; charset=ISO-8859-1")
         .header("User-Agent", "Android15-1070-11440-201-0-get_user_grade_info-wifi")
@@ -737,5 +740,17 @@ pub fn handle_grade_info(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleR
         .header("KG-RC", "1")
         .clear_default_params(true)
         .not_signature(true);
-    ctx.send(&opts)
+
+    // 调试日志：确认上报/查询请求与上游返回（听歌时长不生效排查用）
+    eprintln!(
+        "[GRADE-DEBUG] is_report={} userid={} mid={} dfid={} body={}",
+        is_report, userid, mid, dfid, body_str,
+    );
+    let res = ctx.send(&opts)?;
+    eprintln!(
+        "[GRADE-DEBUG] status={} body={}",
+        res.status,
+        json_stringify(&res.body.to_json()),
+    );
+    Ok(res)
 }

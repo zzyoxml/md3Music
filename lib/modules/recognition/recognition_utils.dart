@@ -1,15 +1,74 @@
-import 'dart:typed_data';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
+import '../../services/kugou_api/kugou_endpoints.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../player/full_player_route.dart';
 
-// ===================== PCM 处理（识曲公共链路） =====================
+// ===================== Rust 本地 PCM 前处理（P0 性能优化） =====================
+
+/// 静音检测阈值（最大振幅低于此值判为静音，跳过识别）。
+/// 录音使用 autoGain:false + unprocessed 原始信号源，振幅普遍偏小
+/// （正常放歌约 167、静音约 60~90），原阈值 100 偏高会把弱信号误判静音，
+/// 导致中间轮次不触发识别，故下调到 30。
+const int kSilenceAmplitudeThreshold = 30;
+
+/// Rust 前处理结果：处理后的 PCM 与静音检测用最大振幅。
+class PcmProcessResult {
+  /// 处理后的 16bit 小端 PCM（8000Hz mono），可直接用于 audioMatch。
+  final Uint8List pcm;
+
+  /// 未做增益前的最大振幅（静音检测用，语义与 [computeMaxAmplitude] 一致）。
+  final int maxAmplitude;
+
+  const PcmProcessResult({required this.pcm, required this.maxAmplitude});
+}
+
+/// 调用本地 Rust 服务器 `/extras/pcm-process` 完成 PCM 前处理：
+/// WAV 解析（可选）→ 降采样 → 静音检测 → 增益归一化。
+///
+/// - [input]：完整 WAV 字节（自动解析采样率）或纯 PCM16 字节（采样率取 [fromHz]）
+/// - [fromHz]/[toHz]：源/目标采样率（默认 8000）
+///
+/// 成功返回 [PcmProcessResult]；服务器不可用/失败返回 null，调用方降级到 Dart 实现。
+/// 全程网络 IO + Rust 计算，不占用 UI isolate。
+Future<PcmProcessResult?> processPcmWithRust({
+  required Uint8List input,
+  required int fromHz,
+  required int toHz,
+}) async {
+  if (kIsWeb || input.isEmpty) return null;
+  try {
+    final url =
+        '${KugouEndpoints.baseUrl}${KugouEndpoints.pcmProcess}?fromHz=$fromHz&toHz=$toHz';
+    final resp = await http
+        .post(
+          Uri.parse(url),
+          headers: const {
+            'Content-Type': 'application/octet-stream',
+            // 该端点结果依赖 body（每次不同），必须绕过 apicache 缓存
+            'x-apicache-bypass': '1',
+          },
+          body: input,
+        )
+        .timeout(const Duration(seconds: 10));
+    if (resp.statusCode != 200) return null;
+    final pcm = resp.bodyBytes;
+    if (pcm.isEmpty) return null;
+    final maxAmplitude =
+        int.tryParse(resp.headers['x-max-amplitude'] ?? '') ?? 0;
+    return PcmProcessResult(pcm: pcm, maxAmplitude: maxAmplitude);
+  } catch (_) {
+    return null;
+  }
+}
+
+// ===================== PCM 处理（识曲公共链路，Dart 兜底实现） =====================
 
 /// 计算 PCM 最大振幅（16bit 小端采样），用于静音检测。
 int computeMaxAmplitude(Uint8List pcm) {

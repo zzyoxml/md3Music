@@ -23,6 +23,7 @@ pub mod login;
 pub mod longaudio;
 pub mod lyric;
 pub mod misc;
+pub mod pcm;
 pub mod playlist;
 pub mod rank;
 pub mod register_dev;
@@ -231,6 +232,7 @@ pub fn register(routes: &mut Vec<(&'static str, ModuleFn)>) {
     routes.push(("/lyric", lyric::handle));
     routes.push(("/comment/music", comment_music::handle));
     routes.push(("/audio/match", audio_match::handle));
+    routes.push(("/extras/pcm-process", pcm::handle));
     routes.push(("/audio", audio::handle));
     routes.push(("/ip", ip::handle));
 }
