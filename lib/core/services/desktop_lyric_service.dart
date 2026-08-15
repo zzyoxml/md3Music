@@ -555,48 +555,42 @@ class DesktopLyricService {
     _pushLyricInfo();
   }
 
-  /// 构造并推送 lyricInfo JSON（ColorOS Live Lyrics / LyricInfo 协议）。
+  /// 构造并推送 lyricInfo JSON（LyricInfo 协议标准格式）。
   ///
-  /// 写入 MediaSession extras.lyricInfo，供第三方系统读取：
-  /// - lyric：行级 LRC（[mm:ss.xx]行文本）
-  /// - rawLyric：逐字时间轴（[mm:ss.xxx]字...，无逐字时用整行文本），
-  ///   翻译以同时间戳独立行追加，供双语分组识别
+  /// 写入 MediaSession extras.lyricInfo，供第三方系统读取。
+  /// 遵循 LyricInfo 模块（HyperLyric 等）标准格式：
+  /// - lyric：ELRC 逐字（[行时间]<字时间>字<字时间>字...），无逐字的行整行作一个词
+  /// - format："elrc"（消费方据此启用逐字解析，否则按纯 LRC 处理）
+  /// - translation："lrc"（存在翻译行时设置；翻译行为与主行相同时间戳的 LRC 行，
+  ///   消费方据此把相邻同时间戳行识别为翻译）
   void _pushLyricInfo() {
     if (!_lyricInfoEnabled || _player == null) return;
     final song = _player!.currentSong;
     if (song == null) return;
 
     final lyricBuf = StringBuffer();
-    final rawBuf = StringBuffer();
+    var hasTranslation = false;
     for (final line in _lines) {
       if (line.text.isEmpty) continue;
-      // lyric：行级 LRC
-      lyricBuf
-        ..write(_lrcTag(line.startTime))
-        ..write(line.text)
-        ..write('\n');
-      // rawLyric：逐字时间轴（有字级时间戳用逐字，否则用整行文本）。
-      // 逐字格式与 KrcParser.toWordLevelLrc 一致：`[wordStart]字[wordStart]字...`。
-      // 第一个字 startTime 即行开始时间（KRC offset 从 0 起），自然形成
-      // `[lineStart]首字...`，与 ColorOS rawLyric 协议示例一致。
-      // 注意：勿再单独写行前缀 `[lineStart]`，否则第一个字会变成双重时间戳，
-      // 破坏外部逐字解析。
+      // 主行：ELRC 逐字（有字级时间戳用逐字，否则整行作一个词）
+      lyricBuf.write(_lrcTagMs(line.startTime));
       if (line.hasWordTiming) {
         for (final w in line.words) {
-          rawBuf
-            ..write(_lrcTagMs(w.startTime))
+          lyricBuf
+            ..write(_elrcWordTag(w.startTime))
             ..write(w.text);
         }
       } else {
-        rawBuf
-          ..write(_lrcTagMs(line.startTime))
+        lyricBuf
+          ..write(_elrcWordTag(line.startTime))
           ..write(line.text);
       }
-      rawBuf.write('\n');
-      // 翻译：同时间戳追加为独立行
+      lyricBuf.write('\n');
+      // 翻译行：与主行相同时间戳的 LRC 行（HyperLyric 据此识别翻译）
       final t = line.translation;
       if (t != null && t.isNotEmpty) {
-        rawBuf
+        hasTranslation = true;
+        lyricBuf
           ..write(_lrcTagMs(line.startTime))
           ..write(t)
           ..write('\n');
@@ -608,32 +602,32 @@ class DesktopLyricService {
       return;
     }
 
-    final lyric = lyricBuf.toString().trimRight();
-    final rawLyric = rawBuf.toString().trimRight();
+    final lyricOut = lyricBuf.toString().trimRight();
     final json = jsonEncode({
       'songName': song.displayName,
       'artist': song.artist,
       'songId': song.id,
-      'lyric': lyric,
-      'rawLyric': rawLyric,
+      'lyric': lyricOut,
+      'format': 'elrc',
+      if (hasTranslation) 'translation': 'lrc',
     });
     MediaNotificationService.updateLyricInfo(json);
   }
 
-  /// 毫秒 → LRC 行级时间标签 [mm:ss.xx]（厘秒）
-  static String _lrcTag(int ms) {
-    final m = ms ~/ 60000;
-    final s = (ms % 60000) ~/ 1000;
-    final cs = (ms % 1000) ~/ 10;
-    return '[${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}.${cs.toString().padLeft(2, '0')}]';
-  }
-
-  /// 毫秒 → 逐字毫秒时间标签 [mm:ss.xxx]
+  /// 毫秒 → LRC 行级时间标签 [mm:ss.xxx]
   static String _lrcTagMs(int ms) {
     final m = ms ~/ 60000;
     final s = (ms % 60000) ~/ 1000;
     final msPart = ms % 1000;
     return '[${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}.${msPart.toString().padLeft(3, '0')}]';
+  }
+
+  /// 毫秒 → ELRC 词级时间标签 <mm:ss.xxx>
+  static String _elrcWordTag(int ms) {
+    final m = ms ~/ 60000;
+    final s = (ms % 60000) ~/ 1000;
+    final msPart = ms % 1000;
+    return '<${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}.${msPart.toString().padLeft(3, '0')}>';
   }
 
   /// 二分查找当前播放位置对应的歌词行 index。
