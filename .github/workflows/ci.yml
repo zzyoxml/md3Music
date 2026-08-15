@@ -102,7 +102,7 @@ jobs:
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
-      # 构建 Release APK（按 ABI 拆分）
+      # 构建 Release APK（按 ABI 拆分；PR 与 push 均编译各 ABI 的 release）
       - name: Flutter build APK (release, split per ABI)
         run: |
           flutter build apk --release --split-per-abi \
@@ -122,7 +122,7 @@ jobs:
             fi
           done
 
-      # 上传构建产物（每个 APK 单独一个 artifact，方便下载）
+      # 上传构建产物（每个 ABI 单独一个 artifact，方便下载）
       - name: Upload arm64-v8a APK
         uses: actions/upload-artifact@v4
         with:
