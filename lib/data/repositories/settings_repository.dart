@@ -22,6 +22,8 @@ class SettingsRepository {
   static const String _keyUiScale = 'settings_ui_scale';
   // Pad 端网格页面列数偏好
   static const String _keyGridColumns = 'grid_columns';
+  // MV 画中画：按 Home 自动进入画中画（默认关闭，手动按钮不受影响）
+  static const String _keyAutoPip = 'settings_auto_pip';
 
   /// 签到日历键：登录时按账号隔离（`settings_signed_days_$userid`），
   /// 未登录（游客）用全局键。
@@ -127,6 +129,17 @@ class SettingsRepository {
   Future<void> setAutoReceiveVip(bool autoReceive) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyAutoReceiveVip, autoReceive);
+  }
+
+  /// MV 画中画：按 Home 自动进入画中画是否开启（默认关闭）。
+  Future<bool> getAutoPipEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyAutoPip) ?? false;
+  }
+
+  Future<void> setAutoPipEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAutoPip, value);
   }
 
   /// 读取用户配置的自定义下载目录。
