@@ -133,6 +133,9 @@ Future<void> main() async {
 Future<void> _restoreLyricPushPref() async {
   try {
     final settings = SettingsRepository();
+    // 逐字歌词时间偏移：加载到内存缓存（播放页每帧读取），默认 0
+    await settings.getLyricTimeOffset();
+
     // 蓝牙歌词（独立开关）
     final btLyricEnabled = await settings.getBluetoothLyricEnabled();
     await DesktopLyricService.instance.setBluetoothLyricEnabled(btLyricEnabled);

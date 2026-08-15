@@ -837,6 +837,8 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           trailing: Text('$_lockScreenLyricFontWeight'),
         ),
+        // 逐字歌词时间偏移（仅在线音乐生效）
+        const _LyricTimeOffsetTile(),
       ],
     );
   }
@@ -3052,6 +3054,150 @@ class _SettingsAmStylePreview extends StatelessWidget {
           color: color.withValues(alpha: opacity),
           borderRadius: BorderRadius.circular(4),
         ),
+      ),
+    );
+  }
+}
+
+/// 逐字歌词时间偏移设置（仅在线音乐生效）。
+///
+/// 滑块精调 ±1500ms，输入框支持 ±10000ms；正值 = 歌词延后显示。
+/// 修改即时写入 [SettingsRepository.lyricTimeOffsetMs] 内存缓存并持久化，
+/// 播放页每帧读取该缓存，无需重启即可生效。
+class _LyricTimeOffsetTile extends StatefulWidget {
+  const _LyricTimeOffsetTile();
+
+  @override
+  State<_LyricTimeOffsetTile> createState() => _LyricTimeOffsetTileState();
+}
+
+class _LyricTimeOffsetTileState extends State<_LyricTimeOffsetTile> {
+  static const int _sliderMin = -1500;
+  static const int _sliderMax = 1500;
+  static const int _limit = 10000;
+
+  final TextEditingController _controller = TextEditingController();
+  late int _offset;
+
+  @override
+  void initState() {
+    super.initState();
+    _offset = SettingsRepository.lyricTimeOffsetMs.value;
+    _controller.text = _offset.toString();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final v = await SettingsRepository().getLyricTimeOffset();
+    if (!mounted) return;
+    setState(() {
+      _offset = v;
+      _controller.text = v.toString();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// 应用新偏移：更新 UI + 写内存缓存 + 持久化。
+  void _apply(int v) {
+    final clamped = v.clamp(-_limit, _limit);
+    setState(() {
+      _offset = clamped;
+      _controller.text = clamped.toString();
+    });
+    // ignore: discarded_futures
+    SettingsRepository().setLyricTimeOffset(clamped);
+  }
+
+  /// 从输入框提交：非法输入回退为当前值。
+  void _submitFromField() {
+    final v = int.tryParse(_controller.text.trim());
+    if (v == null) {
+      _controller.text = _offset.toString();
+      return;
+    }
+    _apply(v);
+  }
+
+  String _fmt(int v) => v > 0 ? '+$v ms' : '$v ms';
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.av_timer, size: 20, color: colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                '逐字歌词时间偏移',
+                style: textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                _fmt(_offset),
+                style: textTheme.labelLarge?.copyWith(
+                  color: colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+          Slider(
+            value: _offset.clamp(_sliderMin, _sliderMax).toDouble(),
+            min: _sliderMin.toDouble(),
+            max: _sliderMax.toDouble(),
+            divisions: (_sliderMax - _sliderMin) ~/ 50,
+            label: _fmt(_offset),
+            onChanged: (v) => _apply(v.round()),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '滑块精调 ±1500ms',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 120,
+                child: TextField(
+                  controller: _controller,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    signed: true,
+                  ),
+                  textAlign: TextAlign.end,
+                  style: textTheme.bodyMedium,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    suffixText: 'ms',
+                    hintText: '0',
+                  ),
+                  onSubmitted: (_) => _submitFromField(),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '输入框支持 ±10000ms；正值 = 歌词延后显示，仅在线音乐生效',
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
     );
   }
