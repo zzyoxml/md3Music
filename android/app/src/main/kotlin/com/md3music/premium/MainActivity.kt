@@ -278,6 +278,31 @@ class MainActivity : FlutterActivity() {
                     startService(intent)
                     result.success(true)
                 }
+                // LyricInfo 歌词转发：写入 MediaSession 元数据 extras.lyricInfo
+                // （空字符串表示移除，切歌/功能关闭时使用）
+                "updateLyricInfo" -> {
+                    val intent = Intent(this, AudioPlaybackService::class.java).apply {
+                        action = AudioPlaybackService.ACTION_UPDATE_LYRIC_INFO
+                        putExtra(
+                            AudioPlaybackService.EXTRA_LYRIC_INFO,
+                            call.argument<String>("lyricInfo") ?: ""
+                        )
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+                // 锁屏歌词：开关 / 数据推送（headless 唤醒场景由 AudioPlaybackService 兜底）
+                "showLockScreenLyric" -> {
+                    result.success(true)
+                }
+                "hideLockScreenLyric" -> {
+                    LockScreenLyricActivity.dismiss()
+                    result.success(true)
+                }
+                "updateLockScreenLyric" -> {
+                    LockScreenLyricActivity.applyCall(call)
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -398,6 +423,8 @@ class MainActivity : FlutterActivity() {
         // 注册 Lyricon Provider MethodChannel，让 Dart 端能控制 Lyricon 播放器
         // （逻辑与 AudioPlaybackService.setupHeadlessChannels 共用，见该函数）
         AudioPlaybackService.registerLyriconChannel(flutterEngine)
+        // 注册 SuperLyric MethodChannel，让 Dart 端能推送当前歌词行到 SuperLyric
+        AudioPlaybackService.registerSuperLyricChannel(flutterEngine)
 
         // 注册文件夹选择器 MethodChannel
         val folderPickerChannel = MethodChannel(

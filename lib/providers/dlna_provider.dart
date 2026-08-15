@@ -47,6 +47,19 @@ class DlnaProvider extends ChangeNotifier {
   StreamSubscription? _durationSub;
   Timer? _statePollTimer;
 
+  /// 位置心跳看门狗：位置流每 2s 推送一次；超过该时长无更新判定设备掉线。
+  /// 约 6 个心跳周期，避免瞬时抖动误判。
+  static const int _positionTimeoutMs = 12000;
+  int _lastPositionMs = 0;
+
+  /// 设备支持的传输动作集（从 GetCurrentTransportActions 探测）。
+  /// 空集合 = 探测失败，UI 保守保留全部控制。
+  Set<String> _supportedActions = {};
+  bool get canPause =>
+      _supportedActions.isEmpty || _supportedActions.contains('Pause');
+  bool get canSeek =>
+      _supportedActions.isEmpty || _supportedActions.contains('Seek');
+
   DlnaCastState get state => _state;
   List<DlnaDeviceInfo> get devices => _devices;
   String? get castTitle => _castTitle;
@@ -65,6 +78,8 @@ class DlnaProvider extends ChangeNotifier {
       notifyListeners();
     });
     _positionSub = _service.positionStream.listen((pos) {
+      // 位置心跳更新：设备存活时每 2s 推送，用于看门狗判定掉线
+      _lastPositionMs = DateTime.now().millisecondsSinceEpoch;
       _position = pos;
       // 自动下一曲：position 接近 duration（差值≤3秒）时触发
       _checkAutoNext();
@@ -115,16 +130,24 @@ class DlnaProvider extends ChangeNotifier {
     notifyListeners();
     try {
       await _service.startSearch();
+      // ignore: avoid_print
+      print('[DLNA] startSearch ok');
     } catch (e) {
       _state = DlnaCastState.error;
       _errorMessage = '搜索失败：$e';
+      // ignore: avoid_print
+      print('[DLNA] startSearch error: $e');
       notifyListeners();
     }
   }
 
   /// 停止搜索。
   Future<void> stopSearch() async {
-    await _service.stopSearch();
+    try {
+      await _service.stopSearch();
+    } catch (_) {
+      // 防御性兜底：socket 关闭异常不冒泡
+    }
     if (_state == DlnaCastState.searching) {
       _state = DlnaCastState.idle;
       notifyListeners();
@@ -209,33 +232,35 @@ class DlnaProvider extends ChangeNotifier {
         overrideType = _audioPlayTypeForPath(filePath);
       }
 
-      final success = await _service.cast(
+      await _service.cast(
         url,
         title: song.displayName,
         mediaType: DlnaMediaType.audio,
         overrideType: overrideType,
       );
 
-      if (success) {
-        // 暂停本地播放（切歌场景不覆盖 _wasPlayingBefore）
-        if (!preserveWasPlaying) {
-          _wasPlayingBefore = playerProvider.isPlaying;
-        }
-        if (playerProvider.isPlaying) {
-          playerProvider.pause();
-        }
-        _state = DlnaCastState.casting;
-        _isPlaying = true;
-        _startStatePolling();
-        notifyListeners();
-      } else {
-        _state = DlnaCastState.error;
-        _errorMessage = '投屏失败，请重试';
-        notifyListeners();
+      // 暂停本地播放（切歌场景不覆盖 _wasPlayingBefore）
+      if (!preserveWasPlaying) {
+        _wasPlayingBefore = playerProvider.isPlaying;
       }
+      if (playerProvider.isPlaying) {
+        playerProvider.pause();
+      }
+      _state = DlnaCastState.casting;
+      _isPlaying = true;
+      // 初始化位置心跳，供看门狗判定设备掉线
+      _lastPositionMs = DateTime.now().millisecondsSinceEpoch;
+      _startStatePolling();
+      notifyListeners();
+      // 探测设备支持的传输动作（Pause/Seek），驱动 UI 隐藏/降级
+      _refreshSupportedActions();
+      // ignore: avoid_print
+      print('[DLNA] castSong ok song=${song.displayName}');
     } catch (e) {
       _state = DlnaCastState.error;
-      _errorMessage = '投屏出错：$e';
+      _errorMessage = e is DlnaServiceException ? e.message : '投屏出错：$e';
+      // ignore: avoid_print
+      print('[DLNA] castSong error: $e');
       notifyListeners();
     }
   }
@@ -263,25 +288,27 @@ class DlnaProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final success = await _service.cast(
+      await _service.cast(
         url,
         title: title,
         mediaType: DlnaMediaType.video,
       );
 
-      if (success) {
-        _state = DlnaCastState.casting;
-        _isPlaying = true;
-        _startStatePolling();
-        notifyListeners();
-      } else {
-        _state = DlnaCastState.error;
-        _errorMessage = '投屏失败，请重试';
-        notifyListeners();
-      }
+      _state = DlnaCastState.casting;
+      _isPlaying = true;
+      // 初始化位置心跳，供看门狗判定设备掉线
+      _lastPositionMs = DateTime.now().millisecondsSinceEpoch;
+      _startStatePolling();
+      notifyListeners();
+      // 探测设备支持的传输动作（Pause/Seek），驱动 UI 隐藏/降级
+      _refreshSupportedActions();
+      // ignore: avoid_print
+      print('[DLNA] castMv ok title=$title');
     } catch (e) {
       _state = DlnaCastState.error;
-      _errorMessage = '投屏出错：$e';
+      _errorMessage = e is DlnaServiceException ? e.message : '投屏出错：$e';
+      // ignore: avoid_print
+      print('[DLNA] castMv error: $e');
       notifyListeners();
     }
   }
@@ -292,38 +319,89 @@ class DlnaProvider extends ChangeNotifier {
   }
 
   Future<void> play() async {
-    await _service.play();
-    _isPlaying = true;
+    try {
+      await _service.play();
+      _isPlaying = true;
+      _errorMessage = null;
+    } on DlnaServiceException catch (e) {
+      // 单次操作失败仅提示，不退出投屏态；真实掉线由看门狗兜住
+      _errorMessage = e.message;
+      // ignore: avoid_print
+      print('[DLNA] play error: ${e.message}');
+    }
     notifyListeners();
   }
 
   Future<void> pause() async {
-    await _service.pause();
-    _isPlaying = false;
+    try {
+      await _service.pause();
+      _isPlaying = false;
+      _errorMessage = null;
+    } on DlnaServiceException catch (e) {
+      // Pause 不被支持/状态不允许 → 降级为 Stop（停止当前播放，保留投屏连接）
+      await _service.stopCurrent();
+      _isPlaying = false;
+      _errorMessage = null;
+      // ignore: avoid_print
+      print('[DLNA] pause 降级 stopCurrent: ${e.message}');
+    }
     notifyListeners();
   }
 
   /// 停止投屏并恢复本地播放。
+  /// best-effort：设备失联时服务层已清理连接，此处必须重置本地状态，
+  /// 保证 [restoreLocalPlayback] 一定被执行。
   Future<void> stop() async {
-    await _service.stop();
+    try {
+      await _service.stop();
+    } catch (_) {
+      // 设备失联时忽略异常，仅清理本地状态
+    }
     _stopStatePolling();
     _state = DlnaCastState.idle;
     _isPlaying = false;
     _position = Duration.zero;
     _duration = null;
     _castTitle = null;
+    _errorMessage = null;
+    _supportedActions = {};
+    // ignore: avoid_print
+    print('[DLNA] stop -> idle wasPlayingBefore=$_wasPlayingBefore');
     notifyListeners();
   }
 
   Future<void> seek(Duration position) async {
-    await _service.seek(position);
-    _position = position;
+    try {
+      await _service.seek(position);
+      _position = position;
+      _errorMessage = null;
+    } on DlnaServiceException catch (e) {
+      _errorMessage = e.message;
+    }
     notifyListeners();
   }
 
   Future<void> setVolume(int vol) async {
     _volume = vol;
-    await _service.setVolume(vol);
+    try {
+      await _service.setVolume(vol);
+    } on DlnaServiceException catch (e) {
+      _errorMessage = e.message;
+    }
+    notifyListeners();
+  }
+
+  /// 清除当前错误提示（UI 的关闭按钮调用）。
+  void clearError() {
+    _errorMessage = null;
+    notifyListeners();
+  }
+
+  /// 探测设备支持的传输动作（Pause/Seek 等），驱动 UI 隐藏/降级。
+  Future<void> _refreshSupportedActions() async {
+    _supportedActions = await _service.getSupportedActions();
+    // ignore: avoid_print
+    print('[DLNA] supportedActions=${_supportedActions.join(',')}');
     notifyListeners();
   }
 
@@ -344,6 +422,11 @@ class DlnaProvider extends ChangeNotifier {
       if (song != null) {
         await _castByMediaType(context, song);
       }
+    } catch (e) {
+      // 切歌解析/投屏失败不冒泡为未处理异常，改为 error 状态提示
+      _state = DlnaCastState.error;
+      _errorMessage = e is DlnaServiceException ? e.message : '切歌投屏出错：$e';
+      notifyListeners();
     } finally {
       _autoSkipping = false;
     }
@@ -358,6 +441,10 @@ class DlnaProvider extends ChangeNotifier {
       if (song != null) {
         await _castByMediaType(context, song);
       }
+    } catch (e) {
+      _state = DlnaCastState.error;
+      _errorMessage = e is DlnaServiceException ? e.message : '切歌投屏出错：$e';
+      notifyListeners();
     } finally {
       _autoSkipping = false;
     }
@@ -414,16 +501,31 @@ class DlnaProvider extends ChangeNotifier {
       _wasPlayingBefore = false;
       try {
         context.read<PlayerProvider>().resume();
-      } catch (_) {}
+        // ignore: avoid_print
+        print('[DLNA] restoreLocalPlayback resume ok');
+      } catch (_) {
+        // ignore: avoid_print
+        print('[DLNA] restoreLocalPlayback resume error');
+      }
+    } else {
+      // ignore: avoid_print
+      print('[DLNA] restoreLocalPlayback skip (wasPlayingBefore=false) currentSong=${context.read<PlayerProvider>().currentSong?.id}');
     }
   }
 
   /// 定期轮询设备传输状态，同步播放/暂停状态。
+  /// 同时作为设备断开看门狗：位置心跳超时则判定设备掉线。
   void _startStatePolling() {
     _statePollTimer?.cancel();
     _statePollTimer = Timer.periodic(const Duration(seconds: 3), (timer) async {
       if (!_service.isCasting) {
         timer.cancel();
+        return;
+      }
+      // 位置心跳超时 → 设备已掉线（如 WiFi 断开、设备关机）
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _lastPositionMs > _positionTimeoutMs) {
+        _handleDeviceLost();
         return;
       }
       final transportState = await _service.getTransportState();
@@ -435,6 +537,23 @@ class DlnaProvider extends ChangeNotifier {
         }
       }
     });
+  }
+
+  /// 设备断开处理：清理连接、退出投屏态并提示。
+  /// 不自动恢复本地播放（无可靠 context），由用户手动恢复。
+  void _handleDeviceLost() {
+    _service.disconnect();
+    _stopStatePolling();
+    _state = DlnaCastState.error;
+    _errorMessage = '投屏设备已断开连接';
+    _isPlaying = false;
+    _position = Duration.zero;
+    _duration = null;
+    _lastPositionMs = 0;
+    _supportedActions = {};
+    // ignore: avoid_print
+    print('[DLNA] device lost -> error');
+    notifyListeners();
   }
 
   void _stopStatePolling() {

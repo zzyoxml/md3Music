@@ -1,4 +1,9 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- SuperLyricApi 3.4 声明 minSdk 26，项目保持 minSdk 24（Android 7.0）。
+         overrideLibrary 强制放行以便构建；minSdk 由 build.gradle 提供（此处不重复声明）。
+         设置页已按 Android 版本（API 26+）禁用开关，低版本不会触发运行调用。 -->
+    <uses-sdk tools:overrideLibrary="com.hchen.superlyricapi" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -85,6 +90,15 @@
             android:name=".FloatingRecognitionService"
             android:foregroundServiceType="specialUse|mediaProjection"
             android:exported="false" />
+        <!-- 锁屏歌词：全屏覆盖在锁屏上方，显示逐字歌词 -->
+        <activity
+            android:name=".LockScreenLyricActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.MD3Music.LockScreen" />
         <!-- 桌面播放器小组件 -->
         <receiver
             android:name=".MusicWidgetProvider"

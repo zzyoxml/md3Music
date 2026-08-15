@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -82,6 +83,25 @@ class LyricPreferences extends ChangeNotifier {
   ///
   /// 与当前未设置字重时的渲染外观（Flutter 默认 FontWeight.normal=400）一致。
   static const int defaultFontWeight = 400;
+
+  // ============== 按设备类型的默认值（手机 / Pad） ==============
+
+  /// 按设备类型的字号默认：手机 29px，Pad 40px。
+  static double get _deviceDefaultFontSize => _isPadDevice() ? 40 : 29;
+
+  /// 按设备类型的字重默认：手机半粗(w600)，Pad 黑体(w900)。
+  static int get _deviceDefaultFontWeight => _isPadDevice() ? 900 : 600;
+
+  /// 按设备类型的行间距默认：手机 1.4x，Pad 0.9x。
+  static double get _deviceDefaultLineSpacing => _isPadDevice() ? 0.9 : 1.4;
+
+  /// 是否 Pad 设备（物理屏幕最短边 >= 600dp），与 DeviceProvider 判断一致。
+  /// 用于首次使用 / 重置时按设备类型提供差异化歌词默认值。
+  static bool _isPadDevice() {
+    final view = ui.PlatformDispatcher.instance.views.first;
+    final size = view.physicalSize / view.devicePixelRatio;
+    return size.shortestSide >= 600;
+  }
 
   // ============== SharedPreferences keys ==============
 
@@ -173,10 +193,13 @@ class LyricPreferences extends ChangeNotifier {
   Future<void> load() async {
     if (_loaded) return;
     final prefs = await SharedPreferences.getInstance();
-    _fontSize = prefs.getDouble(_keyFontSize) ?? defaultUserFontSize;
-    _lineSpacing = prefs.getDouble(_keyLineSpacing) ?? defaultLineSpacing;
+    // 首次使用（key 不存在）时按设备类型提供差异化默认：
+    // 手机 29px/半粗(600)/1.4x；Pad 40px/黑体(900)/0.9x。
+    // 用户后续手动调整后会持久化，届时尊重用户设置。
+    _fontSize = prefs.getDouble(_keyFontSize) ?? _deviceDefaultFontSize;
+    _lineSpacing = prefs.getDouble(_keyLineSpacing) ?? _deviceDefaultLineSpacing;
     _fontWeight =
-        (prefs.getInt(_keyFontWeight) ?? defaultFontWeight)
+        (prefs.getInt(_keyFontWeight) ?? _deviceDefaultFontWeight)
             .clamp(minFontWeight, maxFontWeight);
     _useGaussianBlur = prefs.getBool(_keyUseGaussianBlur) ?? true;
     _useGlowEffect = prefs.getBool(_keyUseGlowEffect) ?? true;
@@ -377,11 +400,11 @@ class LyricPreferences extends ChangeNotifier {
     return name == 'roma' ? LyricDisplayMode.roma : LyricDisplayMode.translation;
   }
 
-  /// 重置为默认值。
+  /// 重置为默认值（按设备类型：手机 / Pad 差异化默认）。
   Future<void> reset() async {
-    _fontSize = defaultUserFontSize;
-    _lineSpacing = defaultLineSpacing;
-    _fontWeight = defaultFontWeight;
+    _fontSize = _deviceDefaultFontSize;
+    _lineSpacing = _deviceDefaultLineSpacing;
+    _fontWeight = _deviceDefaultFontWeight;
     _useGaussianBlur = true;
     _useGlowEffect = true;
     _useFlowingBackground = true;
@@ -397,7 +420,7 @@ class LyricPreferences extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyFontSize, _fontSize);
     await prefs.setDouble(_keyLineSpacing, _lineSpacing);
-    await prefs.remove(_keyFontWeight);
+    await prefs.setInt(_keyFontWeight, _fontWeight);
     await prefs.setBool(_keyUseGaussianBlur, _useGaussianBlur);
     await prefs.setBool(_keyUseGlowEffect, _useGlowEffect);
     await prefs.setBool(_keyUseFlowingBackground, _useFlowingBackground);

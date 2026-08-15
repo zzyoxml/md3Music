@@ -54,9 +54,10 @@ Future<void> main() async {
     WakelockService.instance.init().catchError((_) {}),
     // 初始化均衡器服务（恢复偏好设置，监听播放状态自动绑定）
     EqualizerService.instance.init().catchError((_) {}),
-    // 恢复蓝牙歌词开关状态：让歌词服务定时器在需要时启动。
+    // 恢复蓝牙歌词开关 + 实时歌词推送协议（Lyricon/SuperLyric/LyricInfo 三选一）：
+    // 让歌词服务定时器在需要时启动、启用选中协议。
     // 原生端 AudioPlaybackService.onCreate 会自行从 SharedPreferences 恢复开关。
-    _restoreBluetoothLyricPref(),
+    _restoreLyricPushPref(),
   ]);
 
   // 注册通知栏/悬浮窗回调（悬浮窗内按钮 → DesktopLyricService；通知栏桌面歌词按钮 → toggle）
@@ -127,12 +128,56 @@ Future<void> main() async {
   });
 }
 
-/// 恢复蓝牙歌词开关：从 SettingsRepository 读取并同步到歌词服务。
-Future<void> _restoreBluetoothLyricPref() async {
+/// 恢复蓝牙歌词开关 + 实时歌词推送协议（Lyricon/SuperLyric/LyricInfo 三选一 + 关闭）。
+/// 从 SettingsRepository 读取协议与共用偏好，启用选中协议、禁用其他，并同步偏好。
+Future<void> _restoreLyricPushPref() async {
   try {
     final settings = SettingsRepository();
+    // 蓝牙歌词（独立开关）
     final btLyricEnabled = await settings.getBluetoothLyricEnabled();
     await DesktopLyricService.instance.setBluetoothLyricEnabled(btLyricEnabled);
+
+    // 锁屏歌词（独立开关）：开启后歌词服务定时器运行以推送逐字数据
+    final lockScreenLyricEnabled = await settings.getLockScreenLyricEnabled();
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setLockScreenLyricEnabled(lockScreenLyricEnabled);
+
+    // 锁屏歌词独立字体（字号/粗细，默认跟随 AM 歌词偏好）
+    final lockScreenLyricFontSize = await settings.getLockScreenLyricFontSize();
+    DesktopLyricService.instance.setLockScreenLyricFontSize(lockScreenLyricFontSize);
+    final lockScreenLyricFontWeight = await settings.getLockScreenLyricFontWeight();
+    DesktopLyricService.instance.setLockScreenLyricFontWeight(lockScreenLyricFontWeight);
+
+    // 实时歌词推送协议
+    final protocol = await settings.getLyricPushProtocol();
+    final translation = await settings.getLyricPushTranslation();
+    final roma = await settings.getLyricPushRoma();
+    final preferTranslation = await settings.getLyricPushPreferTranslation();
+    // 记录各协议 enabled key（兼容 Kotlin restoreLyricon 读 lyricon_enabled）
+    await settings.setLyriconEnabled(protocol == 'lyricon');
+    await settings.setSuperLyricEnabled(protocol == 'super_lyric');
+    await settings.setLyricInfoEnabled(protocol == 'lyric_info');
+    // 应用共用偏好
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setLyricPushPreferences(
+      translation: translation,
+      roma: roma,
+      preferTranslation: preferTranslation,
+    );
+    // 启用选中协议
+    if (protocol == 'lyricon') {
+      try {
+        await LyriconProviderService.instance.setDisplayTranslation(translation);
+        await LyriconProviderService.instance.setDisplayRoma(roma);
+        await LyriconProviderService.instance.setEnabled(true);
+      } catch (_) {}
+    } else if (protocol == 'super_lyric') {
+      // ignore: discarded_futures
+      DesktopLyricService.instance.setSuperLyricEnabled(true);
+    } else if (protocol == 'lyric_info') {
+      // ignore: discarded_futures
+      await DesktopLyricService.instance.setLyricInfoEnabled(true);
+    }
   } catch (_) {}
 }
 

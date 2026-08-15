@@ -92,6 +92,8 @@ dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("io.github.proify.lyricon:provider:0.1.70")
     implementation("io.github.proify.lyricon.lyric:model:0.1.70")
+    // SuperLyricApi：基于 Binder 的系统级实时歌词 API（jnitpack，settings.gradle.kts 已声明）
+    implementation("com.github.HChenX:SuperLyricApi:3.4")
     // JAudioTagger 社区分叉（支持 MP3/FLAC/Ogg/M4A 等格式的 ID3v2 / VorbisComment 标签读写，
     // 用于在下载完成后向音频文件嵌入标题/艺术家/专辑/封面/歌词）。
     // JitPack 上 AdrienPoupa 分叉仅有 2.2.3（无 2.2.5）。

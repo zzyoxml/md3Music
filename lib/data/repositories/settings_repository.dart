@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/kugou_api/kugou_api_client.dart';
+import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 
 class SettingsRepository {
   static const String _keyThemeMode = 'settings_theme_mode';
@@ -232,6 +233,53 @@ class SettingsRepository {
     await prefs.setBool('settings_dl_locked', v);
   }
 
+  // ===== 实时歌词推送协议 =====
+  // 三种协议（Lyricon / SuperLyric / LyricInfo）三选一 + 关闭，翻译/罗马音等偏好共用。
+
+  /// 当前选中的推送协议：'none' / 'lyricon' / 'super_lyric' / 'lyric_info'。
+  Future<String> getLyricPushProtocol() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('lyric_push_protocol') ?? 'none';
+  }
+
+  Future<void> setLyricPushProtocol(String v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lyric_push_protocol', v);
+  }
+
+  /// 共用：是否推送翻译（默认 true）。
+  Future<bool> getLyricPushTranslation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('lyric_push_translation') ?? true;
+  }
+
+  Future<void> setLyricPushTranslation(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lyric_push_translation', v);
+  }
+
+  /// 共用：是否推送罗马音（默认 false）。
+  Future<bool> getLyricPushRoma() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('lyric_push_roma') ?? false;
+  }
+
+  Future<void> setLyricPushRoma(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lyric_push_roma', v);
+  }
+
+  /// 共用：同时存在翻译和罗马音时是否优先推送翻译（默认 true）。
+  Future<bool> getLyricPushPreferTranslation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('lyric_push_prefer_translation') ?? true;
+  }
+
+  Future<void> setLyricPushPreferTranslation(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lyric_push_prefer_translation', v);
+  }
+
   // ===== Lyricon 配置 =====
 
   Future<bool> getLyriconEnabled() async {
@@ -278,6 +326,27 @@ class SettingsRepository {
     await prefs.setBool('lyricon_prefer_translation', v);
   }
 
+  Future<bool> getSuperLyricEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('super_lyric_enabled') ?? false;
+  }
+
+  Future<void> setSuperLyricEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('super_lyric_enabled', v);
+  }
+
+  /// SuperLyric：同时存在翻译和罗马音时是否优先推送翻译（默认 true）。
+  Future<bool> getSuperLyricPreferTranslation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('super_lyric_prefer_translation') ?? true;
+  }
+
+  Future<void> setSuperLyricPreferTranslation(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('super_lyric_prefer_translation', v);
+  }
+
   // ===== 蓝牙歌词配置 =====
   // 通过修改 MediaSession 元数据（title 显示歌词，artist 显示「作者 - 标题」），
   // 在蓝牙 AVRCP 协议下让汽车主机等设备显示当前歌词。
@@ -291,6 +360,62 @@ class SettingsRepository {
   Future<void> setBluetoothLyricEnabled(bool v) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyBluetoothLyricEnabled, v);
+  }
+
+  // ===== LyricInfo 歌词转发 =====
+  // 通过 MediaSession 元数据 extras.lyricInfo 发布整首歌词（LRC/ELRC），
+  // 供 ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取。
+  static const String _keyLyricInfoEnabled = 'settings_lyric_info_enabled';
+
+  Future<bool> getLyricInfoEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyLyricInfoEnabled) ?? false;
+  }
+
+  Future<void> setLyricInfoEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyLyricInfoEnabled, v);
+  }
+
+  // ===== 锁屏歌词 =====
+  // 锁屏时全屏显示逐字歌词（覆盖在系统锁屏上方），默认关闭。
+  static const String _keyLockScreenLyricEnabled = 'settings_lock_screen_lyric_enabled';
+
+  Future<bool> getLockScreenLyricEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyLockScreenLyricEnabled) ?? false;
+  }
+
+  Future<void> setLockScreenLyricEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyLockScreenLyricEnabled, v);
+  }
+
+  // ===== 锁屏歌词字体 =====
+  // 字号/粗细独立于 App 内歌词设置；默认跟随 AM 歌词偏好（未单独设置过时一致）。
+  static const String _keyLockScreenLyricFontSize = 'settings_lock_screen_lyric_font_size';
+  static const String _keyLockScreenLyricFontWeight = 'settings_lock_screen_lyric_font_weight';
+
+  Future<double> getLockScreenLyricFontSize() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_keyLockScreenLyricFontSize) ??
+        LyricPreferences.instance.fontSize;
+  }
+
+  Future<void> setLockScreenLyricFontSize(double v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyLockScreenLyricFontSize, v);
+  }
+
+  Future<int> getLockScreenLyricFontWeight() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keyLockScreenLyricFontWeight) ??
+        LyricPreferences.instance.fontWeightValue;
+  }
+
+  Future<void> setLockScreenLyricFontWeight(int v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyLockScreenLyricFontWeight, v);
   }
 
   // ===== UI 缩放 =====

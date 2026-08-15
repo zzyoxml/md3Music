@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dlna_dart/dlna.dart';
 import 'package:dlna_dart/xmlParser.dart';
@@ -6,12 +7,67 @@ import 'package:dlna_dart/xmlParser.dart';
 /// DLNA 媒体类型，映射到 dlna_dart 的 PlayType MIME 枚举。
 enum DlnaMediaType { audio, video }
 
+/// 投屏操作异常，message 为可直接展示给用户的友好描述。
+class DlnaServiceException implements Exception {
+  final String message;
+  const DlnaServiceException(this.message);
+  @override
+  String toString() => message;
+}
+
+/// 将底层异常映射为可展示的友好错误。
+/// 优先识别 UPnP SOAP Fault 中的 errorCode/errorDescription，
+/// 把设备返回的 701 等错误码翻译成用户能看懂的中文提示。
+String _friendlyError(Object error) {
+  if (error is DlnaServiceException) return error.message;
+  if (error is TimeoutException) return '投屏设备响应超时，请检查设备与网络';
+  if (error is SocketException) return '无法连接到投屏设备，请检查设备是否在线';
+  // 解析 UPnP SOAP Fault：<errorCode>xxx</errorCode> / <errorDescription>xxx</errorDescription>
+  final msg = error.toString();
+  final codeMatch =
+      RegExp(r'<errorCode>\s*(\d+)\s*</errorCode>').firstMatch(msg);
+  if (codeMatch != null) {
+    final code = codeMatch.group(1)!;
+    final hint = _upnpErrorHints[code];
+    if (hint != null) return '投屏失败：$hint（设备错误 $code）';
+    final descMatch = RegExp(
+      r'<errorDescription>\s*([^<]+)\s*</errorDescription>',
+    ).firstMatch(msg);
+    final desc = descMatch?.group(1)?.trim();
+    if (desc != null && desc.isNotEmpty) {
+      return '投屏失败：设备返回错误 $code（$desc）';
+    }
+    return '投屏失败：设备返回错误 $code';
+  }
+  return '投屏操作失败：$error';
+}
+
+/// UPnP AVTransport / RenderingControl 常见错误码 → 友好提示。
+const Map<String, String> _upnpErrorHints = {
+  '401': '设备不支持该操作',
+  '402': '请求参数无效',
+  '501': '设备不支持该操作',
+  '701': '设备当前状态不允许该操作（如未播放时暂停/跳转，或设备不支持）',
+  '702': '设备上不存在该资源',
+  '703': '请求参数无效',
+  '704': '操作执行失败',
+  '720': '无法提供该资源',
+  '721': '播放已停止，无法继续控制',
+  '722': '该资源无法通过本设备播放',
+};
+
 /// DLNA 服务层：封装 dlna_dart 包的设备发现与传输控制。
 /// 单例模式，与 [AudioService] 风格一致。
+///
+/// dlna_dart 底层 SOAP 请求固定 15s 超时（DLNAHttp），设备失联时会阻塞
+/// 15s 造成 UI 卡死无反馈。因此所有设备操作统一用 [_opTimeout] 包裹，
+/// 超时按失败处理，保证 UI 最多等 2s。
 class DlnaService {
   static final DlnaService _instance = DlnaService._internal();
   factory DlnaService() => _instance;
   DlnaService._internal();
+
+  static const Duration _opTimeout = Duration(seconds: 2);
 
   DLNAManager? _searcher;
   DeviceManager? _deviceManager;
@@ -39,7 +95,15 @@ class DlnaService {
   Future<void> startSearch() async {
     await stopSearch();
     _searcher = DLNAManager();
-    _deviceManager = await _searcher!.start();
+    try {
+      _deviceManager = await _searcher!.start().timeout(_opTimeout);
+    } catch (_) {
+      // start 失败（如 WiFi 关闭导致 socket bind 失败）时清理已建对象
+      _searcher?.stop();
+      _searcher = null;
+      _deviceManager = null;
+      throw const DlnaServiceException('无法启动设备搜索，请检查网络或 WiFi 连接');
+    }
     _deviceSub = _deviceManager!.devices.stream.listen((deviceMap) {
       final devices = deviceMap.values
           .map((d) => DlnaDeviceInfo(
@@ -65,14 +129,17 @@ class DlnaService {
   /// [mediaType] 决定 DLNA 的 MIME 类型（音频/视频）。
   /// [overrideType] 可选，本地文件按扩展名映射的具体 PlayType；
   ///   传 null 时按 [mediaType] 兜底用 mpeg/mp4（保持向后兼容）。
-  Future<bool> cast(
+  /// 失败（含未连接设备）时抛 [DlnaServiceException]，message 可直接展示。
+  Future<void> cast(
     String url, {
     String? title,
     required DlnaMediaType mediaType,
     PlayType? overrideType,
   }) async {
     final device = _connectedDevice;
-    if (device == null) return false;
+    if (device == null) {
+      throw const DlnaServiceException('未连接投屏设备');
+    }
 
     // 显式声明为 PlayType，避免 switch 推断为 Object
     final PlayType playType = overrideType ?? switch (mediaType) {
@@ -81,8 +148,15 @@ class DlnaService {
     };
 
     try {
-      await device.setUrl(url, title: title ?? '', type: playType);
-      await device.play();
+      // 部分设备状态机要求先 Stop 再换流；但设备已处于 STOPPED 状态时
+      // 再发 Stop 会返回 500/701（Transition not available）。
+      // 因此 Stop 必须独立 try/catch 真正吞掉错误，失败不影响后续换流。
+      try {
+        await device.stop().timeout(_opTimeout);
+      } catch (_) {}
+      await device.setUrl(url, title: title ?? '', type: playType)
+          .timeout(_opTimeout);
+      await device.play().timeout(_opTimeout);
       // 切歌时先取消旧的位置监听，避免 listener 累积和旧事件干扰
       await _positionSub?.cancel();
       // 重置 position/duration，避免旧值残留导致自动切歌误触发
@@ -97,9 +171,8 @@ class DlnaService {
           dur > 0 ? Duration(seconds: dur) : null,
         );
       });
-      return true;
     } catch (e) {
-      return false;
+      throw DlnaServiceException(_friendlyError(e));
     }
   }
 
@@ -109,19 +182,48 @@ class DlnaService {
   }
 
   Future<void> play() async {
-    await _connectedDevice?.play();
+    final device = _connectedDevice;
+    if (device == null) return;
+    try {
+      await device.play().timeout(_opTimeout);
+    } catch (e) {
+      throw DlnaServiceException(_friendlyError(e));
+    }
   }
 
   Future<void> pause() async {
-    await _connectedDevice?.pause();
+    final device = _connectedDevice;
+    if (device == null) return;
+    try {
+      await device.pause().timeout(_opTimeout);
+    } catch (e) {
+      throw DlnaServiceException(_friendlyError(e));
+    }
+  }
+
+  /// 向设备发送 Stop 指令但保留投屏连接。
+  /// 用于 Pause 不被支持/状态不允许时的降级（暂停 → 停止当前播放）。
+  Future<void> stopCurrent() async {
+    final device = _connectedDevice;
+    if (device == null) return;
+    try {
+      await device.stop().timeout(_opTimeout);
+    } catch (_) {
+      // 设备失联/超时忽略，投屏连接由调用方决定是否清理
+    }
   }
 
   /// 停止投屏并向设备发送 Stop 指令。
+  /// best-effort：设备失联时 Stop 可能超时/抛异常，但本地连接状态必须清理。
   Future<void> stop() async {
     _positionSub?.cancel();
     _positionSub = null;
     _connectedDevice?.positionPoller.stop();
-    await _connectedDevice?.stop();
+    try {
+      await _connectedDevice?.stop().timeout(_opTimeout);
+    } catch (_) {
+      // 设备失联/超时时忽略 Stop 失败，仅清理本地状态
+    }
     _connectedDevice = null;
   }
 
@@ -129,13 +231,23 @@ class DlnaService {
   Future<void> seek(Duration position) async {
     final device = _connectedDevice;
     if (device == null) return;
-    final target = PositionParser.toStr(position.inSeconds);
-    await device.seek(target);
+    try {
+      final target = PositionParser.toStr(position.inSeconds);
+      await device.seek(target).timeout(_opTimeout);
+    } catch (e) {
+      throw DlnaServiceException(_friendlyError(e));
+    }
   }
 
   /// 设置音量（0-100）。
   Future<void> setVolume(int volume) async {
-    await _connectedDevice?.volume(volume);
+    final device = _connectedDevice;
+    if (device == null) return;
+    try {
+      await device.volume(volume).timeout(_opTimeout);
+    } catch (e) {
+      throw DlnaServiceException(_friendlyError(e));
+    }
   }
 
   /// 获取当前音量（0-100）。
@@ -143,7 +255,7 @@ class DlnaService {
     final device = _connectedDevice;
     if (device == null) return null;
     try {
-      final text = await device.getVolume();
+      final text = await device.getVolume().timeout(_opTimeout);
       return VolumeParser(text).current;
     } catch (_) {
       return null;
@@ -155,10 +267,32 @@ class DlnaService {
     final device = _connectedDevice;
     if (device == null) return null;
     try {
-      final text = await device.getTransportInfo();
+      final text = await device.getTransportInfo().timeout(_opTimeout);
       return TransportInfoParser(text).CurrentTransportState;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// 探测设备当前支持的传输动作集合（Pause/Seek/Stop/Next...）。
+  /// 基于 GetCurrentTransportActions 返回的 `Actions` 字段（逗号分隔）。
+  /// 空集合 = 探测失败（设备不支持该查询），调用方应保守保留全部控制。
+  Future<Set<String>> getSupportedActions() async {
+    final device = _connectedDevice;
+    if (device == null) return {};
+    try {
+      final text =
+          await device.getCurrentTransportActions().timeout(_opTimeout);
+      final match = RegExp(r'<Actions>\s*([^<]*)\s*</Actions>').firstMatch(text);
+      if (match == null) return {};
+      return match
+          .group(1)!
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toSet();
+    } catch (_) {
+      return {};
     }
   }
 
