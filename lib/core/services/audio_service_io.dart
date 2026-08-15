@@ -70,6 +70,19 @@ class AudioService {
   Future<void> init() async {
     await _player.setLoopMode(LoopMode.off);
     await _configureAudioSession();
+    _setupResumeOnReady();
+  }
+
+  /// 兜底恢复：当 [tryResumeAfterFocusLoss] 因播放器未 ready 跳过时，
+  /// 监听播放器状态变为 ready 后自动尝试恢复。
+  void _setupResumeOnReady() {
+    _player.playerStateStream.listen((state) {
+      if (_pausedByInterruption &&
+          state.processingState == ProcessingState.ready) {
+        // ignore: discarded_futures
+        tryResumeAfterFocusLoss();
+      }
+    });
   }
 
   Future<void> _configureAudioSession() async {
@@ -103,6 +116,10 @@ class AudioService {
               tryResumeAfterFocusLoss();
               break;
             case AudioInterruptionType.unknown:
+              // 修复：unknown 型中断（部分游戏引擎 / 游戏内通话上报）结束时
+              // 也尝试恢复播放，否则音乐被动暂停后无法自动恢复。
+              // ignore: discarded_futures
+              tryResumeAfterFocusLoss();
               break;
           }
         }
