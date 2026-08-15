@@ -278,6 +278,27 @@ class SettingsRepository {
     await prefs.setBool('lyricon_prefer_translation', v);
   }
 
+  Future<bool> getSuperLyricEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('super_lyric_enabled') ?? false;
+  }
+
+  Future<void> setSuperLyricEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('super_lyric_enabled', v);
+  }
+
+  /// SuperLyric：同时存在翻译和罗马音时是否优先推送翻译（默认 true）。
+  Future<bool> getSuperLyricPreferTranslation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('super_lyric_prefer_translation') ?? true;
+  }
+
+  Future<void> setSuperLyricPreferTranslation(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('super_lyric_prefer_translation', v);
+  }
+
   // ===== 蓝牙歌词配置 =====
   // 通过修改 MediaSession 元数据（title 显示歌词，artist 显示「作者 - 标题」），
   // 在蓝牙 AVRCP 协议下让汽车主机等设备显示当前歌词。

@@ -31,6 +31,10 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
+import com.hchen.superlyricapi.SuperLyricData
+import com.hchen.superlyricapi.SuperLyricHelper
+import com.hchen.superlyricapi.SuperLyricLine
+import com.hchen.superlyricapi.SuperLyricWord
 import io.flutter.plugins.GeneratedPluginRegistrant
 import io.github.proify.lyricon.provider.ConnectionListener
 import java.util.concurrent.CountDownLatch
@@ -373,6 +377,68 @@ class AudioPlaybackService : Service() {
                 }
             }
         }
+
+        /**
+         * 注册 SuperLyric MethodChannel（Dart → 原生单向）。
+         * 由 MainActivity（正常启动）与 setupHeadlessChannels（进程被杀唤醒）共用。
+         * Dart 端在切歌 / 歌词行变化时推送当前行，本 handler 组装 SuperLyricData
+         * 经 SuperLyricHelper.sendLyric 发布到系统服务。播放/暂停由 SuperLyric
+         * 自动监听 App 的 MediaSession 处理（sendStop），此处不手动发送。
+         */
+        fun registerSuperLyricChannel(engine: FlutterEngine) {
+            val channel = MethodChannel(
+                engine.dartExecutor.binaryMessenger,
+                "com.md3music.premium/super_lyric"
+            )
+            channel.setMethodCallHandler { call, result ->
+                if (call.method != "sendLyric") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val arg = call.arguments as? Map<*, *> ?: run {
+                    result.success(false)
+                    return@setMethodCallHandler
+                }
+                @Suppress("UNCHECKED_CAST")
+                val wordsRaw = arg["words"] as? List<Map<*, *>> ?: emptyList()
+                val words = wordsRaw.mapNotNull { w ->
+                    val text = w["text"] as? String ?: return@mapNotNull null
+                    val start = (w["start"] as? Number)?.toLong() ?: 0L
+                    val end = (w["end"] as? Number)?.toLong() ?: 0L
+                    SuperLyricWord(text, start, end)
+                }
+                val startTime = (arg["startTime"] as? Number)?.toLong() ?: 0L
+                val endTime = (arg["endTime"] as? Number)?.toLong() ?: 0L
+                val text = arg["text"] as? String
+                val translation = arg["translation"] as? String
+                val roma = arg["roma"] as? String
+
+                val data = SuperLyricData()
+                (arg["title"] as? String)?.let { data.setTitle(it) }
+                (arg["artist"] as? String)?.let { data.setArtist(it) }
+                if (!text.isNullOrEmpty()) {
+                    data.setLyric(SuperLyricLine(text, words.toTypedArray(), startTime, endTime))
+                }
+                if (!translation.isNullOrEmpty()) {
+                    data.setTranslation(SuperLyricLine(translation, startTime, endTime))
+                }
+                if (!roma.isNullOrEmpty()) {
+                    data.setSecondary(SuperLyricLine(roma, startTime, endTime))
+                }
+
+                try {
+                    SuperLyricHelper.sendLyric(data)
+                    android.util.Log.d("SuperLyricDebug",
+                        "sendLyric: title='${arg["title"]}', artist='${arg["artist"]}', " +
+                        "text='$text', words=${words.size}, translation='$translation', roma='$roma'")
+                    result.success(true)
+                } catch (e: Exception) {
+                    android.util.Log.w("SuperLyricDebug",
+                        "sendLyric failed: ${e.javaClass.simpleName}: ${e.message}")
+                    result.success(false)
+                }
+            }
+        }
     }
 
     private var mediaSession: MediaSessionCompat? = null
@@ -488,6 +554,11 @@ class AudioPlaybackService : Service() {
         // 创建 provider 后立即读 SharedPreferences 恢复 enabled，并通知 Dart
         // 端通过 auto_restored 事件触发重推当前歌曲。
         restoreLyriconStateIfNeeded()
+        // 注册 SuperLyric 发布者（应用播放服务启动即首次播放时注册，进程终止后系统自动清理；
+        // 播放/暂停由 SuperLyric 自动监听 App 的 MediaSession 处理）
+        try {
+            SuperLyricHelper.registerPublisher()
+        } catch (_: Exception) {}
         // 恢复蓝牙歌词开关：避免冷启动后开关丢失（Flutter 端也会再推一次，幂等）
         restoreBluetoothLyricState()
     }
@@ -888,6 +959,8 @@ class AudioPlaybackService : Service() {
             // （无 MainActivity），注册后重新通知 Dart 端 Lyricon 已自动恢复，
             // 否则词幕不会随播放自动连接（Dart 端 _state 一直停留在 disabled）。
             registerLyriconChannel(engine)
+            // SuperLyric channel 原生 handler 同样只能在 headless 场景下在此注册
+            registerSuperLyricChannel(engine)
             restoreLyriconStateIfNeeded()
         } catch (_: Exception) {}
     }

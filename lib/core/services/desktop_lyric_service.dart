@@ -49,6 +49,17 @@ class DesktopLyricService {
   // 当前歌曲是否已推送过 lyricInfo（避免每 250ms tick 重复推送）
   bool _lyricInfoPushed = false;
 
+  // SuperLyric 歌词推送开关：基于 Binder 的系统级实时歌词 API。
+  // 复用本服务的定时器与歌词解析管线，在切歌 / 歌词行变化时推送当前行
+  // （text/words/翻译/副歌词 + title/artist）；播放/暂停由 SuperLyric 自动
+  // 监听 App 的 MediaSession 处理（sendStop），本服务不手动发送停止事件。
+  bool _superLyricEnabled = false;
+  bool get superLyricEnabled => _superLyricEnabled;
+  // 同时存在翻译和罗马音时是否优先推送翻译（默认 true，参照 Lyricon preferTranslation）。
+  // 开启：保留 translation、丢弃 roma；关闭：保留 roma、丢弃 translation。
+  // SuperLyric 接收端对同时携带两字段的数据会优先显示 secondary(roma)，故需在 Dart 侧过滤。
+  bool _superLyricPreferTranslation = true;
+
   String? _currentSongId;
   String? _currentLrcText;
   // 解析后的歌词行列表（统一模型，KRC 含 words，LRC/纯文本 words 为空）
@@ -290,8 +301,44 @@ class DesktopLyricService {
     _notify();
   }
 
-  /// 定时器是否需要运行：悬浮窗、蓝牙歌词或 LyricInfo 任一开启即需运行
-  bool _shouldTick() => _enabled || _bluetoothLyricEnabled || _lyricInfoEnabled;
+  /// SuperLyric 歌词推送开关：独立于悬浮窗/蓝牙歌词/LyricInfo。
+  /// 开启后定时器运行以在切歌/行变化时推送当前行；关闭时推一次空歌词清空。
+  Future<void> setSuperLyricEnabled(bool enabled) async {
+    if (_superLyricEnabled == enabled) return;
+    _superLyricEnabled = enabled;
+    _bindProvidersFromContext();
+    _updateTicker();
+    if (enabled) {
+      // 开启时若已有当前行立即推送一次（无需等下一个 tick）
+      if (_currentLineIndex >= 0 && _currentLineIndex < _lines.length) {
+        _pushSuperLyricLine(_lines[_currentLineIndex]);
+      } else {
+        _pushSuperLyricLine(null);
+      }
+    } else {
+      // 关闭时推一次「仅 title/artist」清空当前歌词
+      _pushSuperLyricLine(null);
+    }
+    _notify();
+  }
+
+  /// 设置 SuperLyric「优先翻译（同时存在时）」偏好，并立即重推当前行让过滤生效
+  /// （参照 Lyricon repushLastSong 的做法）。
+  Future<void> setSuperLyricPreferTranslation(bool preferTranslation) async {
+    if (_superLyricPreferTranslation == preferTranslation) return;
+    _superLyricPreferTranslation = preferTranslation;
+    if (_superLyricEnabled) {
+      if (_currentLineIndex >= 0 && _currentLineIndex < _lines.length) {
+        await _pushSuperLyricLine(_lines[_currentLineIndex]);
+      } else {
+        await _pushSuperLyricLine(null);
+      }
+    }
+  }
+
+  /// 定时器是否需要运行：悬浮窗、蓝牙歌词、LyricInfo 或 SuperLyric 任一开启即需运行
+  bool _shouldTick() =>
+      _enabled || _bluetoothLyricEnabled || _lyricInfoEnabled || _superLyricEnabled;
 
   /// 根据开关状态启停定时器（250ms tick：逐行歌词足够检测切行）
   void _updateTicker() {
@@ -341,6 +388,8 @@ class DesktopLyricService {
   }
 
   static const _channel = MethodChannel('com.md3music.premium/floating_lyric');
+  static const _superLyricChannel =
+      MethodChannel('com.md3music.premium/super_lyric');
 
   void _syncCurrentFromPlayer() {
     if (_player == null) return;
@@ -399,6 +448,10 @@ class DesktopLyricService {
       _lastPushedPosMs = null;
       _pushPlaying(_player!.isPlaying);
       _pushLyric('歌词加载中...', '', -1);
+      // SuperLyric：切歌时立即更新 title/artist（清空上一首歌词）
+      if (_superLyricEnabled) {
+        _pushSuperLyricLine(null);
+      }
       // LyricInfo：切歌时立即移除上一首的 lyricInfo，避免旧歌词短暂匹配到新歌
       if (_lyricInfoEnabled) {
         _lyricInfoPushed = false;
@@ -477,6 +530,10 @@ class DesktopLyricService {
           : '';
       // sungCharCount 固定 -1：不启用逐字二分色，原生侧走整行渐变色（避免 100ms invalidate 卡顿）
       _pushLyric(current, next, -1);
+      // SuperLyric：行变化时推送当前行（含逐字 words、翻译、副歌词）
+      if (_superLyricEnabled) {
+        _pushSuperLyricLine(newIndex >= 0 ? _lines[newIndex] : null);
+      }
     }
   }
 
@@ -545,6 +602,66 @@ class DesktopLyricService {
         await MediaNotificationService.updateBluetoothLyric(btText);
       } catch (_) {}
     }
+  }
+
+  /// 推送当前歌词行到 SuperLyric（基于 Binder 的系统级实时歌词 API）。
+  ///
+  /// [line] 为 null 时只发 title/artist（清空当前歌词，用于切歌/关闭开关）。
+  /// 核心字段映射：
+  /// - title/artist：取当前歌曲的 displayName（剥后缀）与 artist
+  /// - 主行：text + words（逐字）+ startTime/endTime
+  /// - translation：翻译（SuperLyricData.setTranslation）
+  /// - roma：副歌词（SuperLyricData.setSecondary）
+  /// 播放/暂停由 SuperLyric 自动监听 App 的 MediaSession 处理，这里不推停止事件。
+  Future<void> _pushSuperLyricLine(LyricLine? line) async {
+    if (_player == null) return;
+    final song = _player!.currentSong;
+    if (song == null) return;
+
+    final Map<String, dynamic> args = {
+      'title': song.displayName,
+      'artist': song.artist,
+    };
+    if (line != null) {
+      final text = line.text.trim();
+      if (text.isNotEmpty) {
+        final int startTime = line.startTime;
+        // endTime 兜底：LRC duration=0 时 endTime==startTime，补一个合法 end（参照 Lyricon）
+        final int endTime =
+            line.endTime > startTime ? line.endTime : startTime + 5000;
+        // 同时存在翻译和罗马音时按偏好二选一（参照 Lyricon preferTranslation），
+        // 避免 SuperLyric 接收端优先显示 secondary(roma) 导致"总是罗马音"。
+        final hasTranslation =
+            line.translation != null && line.translation!.isNotEmpty;
+        final hasRoma = line.roma != null && line.roma!.isNotEmpty;
+        final translationValue =
+            hasTranslation && hasRoma && !_superLyricPreferTranslation
+                ? null
+                : line.translation;
+        final romaValue =
+            hasTranslation && hasRoma && _superLyricPreferTranslation
+                ? null
+                : line.roma;
+        args.addAll({
+          'text': text,
+          'startTime': startTime,
+          'endTime': endTime,
+          'words': line.words
+              .map((w) => <String, dynamic>{
+                    'text': w.text,
+                    'start': w.startTime,
+                    'end': w.startTime + w.duration,
+                  })
+              .toList(),
+          if (translationValue != null && translationValue.isNotEmpty)
+            'translation': translationValue,
+          if (romaValue != null && romaValue.isNotEmpty) 'roma': romaValue,
+        });
+      }
+    }
+    try {
+      await _superLyricChannel.invokeMethod('sendLyric', args);
+    } catch (_) {}
   }
 
   /// LyricInfo：歌词就绪后推送一次整首歌词（_lyricInfoPushed 去重，每首歌 1 次）。

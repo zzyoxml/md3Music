@@ -411,6 +411,8 @@ class MainActivity : FlutterActivity() {
         // 注册 Lyricon Provider MethodChannel，让 Dart 端能控制 Lyricon 播放器
         // （逻辑与 AudioPlaybackService.setupHeadlessChannels 共用，见该函数）
         AudioPlaybackService.registerLyriconChannel(flutterEngine)
+        // 注册 SuperLyric MethodChannel，让 Dart 端能推送当前歌词行到 SuperLyric
+        AudioPlaybackService.registerSuperLyricChannel(flutterEngine)
 
         // 注册文件夹选择器 MethodChannel
         val folderPickerChannel = MethodChannel(

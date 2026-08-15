@@ -15,6 +15,7 @@ import '../../core/services/equalizer_service.dart';
 import '../../core/services/folder_picker_service.dart';
 import '../../core/services/lyricon_provider_service.dart';
 import '../../core/services/media_notification_service.dart';
+import '../../core/services/media_store_service.dart';
 import '../../core/services/spectrum_service.dart';
 import '../../core/services/wakelock_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -82,6 +83,15 @@ class _SettingsPageState extends State<SettingsPage>
   bool _lyriconDisplayRoma = false;
   // 同时存在翻译和罗马音时优先推送翻译（开启后 roma 在 Dart 侧被过滤）
   bool _lyriconPreferTranslation = true;
+  // SuperLyric 歌词推送开关（基于 Binder 的系统级实时歌词 API）
+  bool _superLyricEnabled = false;
+  // SuperLyric：同时存在翻译和罗马音时是否优先推送翻译
+  bool _superLyricPreferTranslation = true;
+  // 设备 Android SDK 版本（SuperLyricApi 3.4 要求 API 26+，低于此禁用开关）
+  int? _androidSdkVersion;
+  /// SuperLyric 是否受支持：API 26+（Android 8.0+）。未知时默认放行，避免误禁用。
+  bool get _superLyricSupported =>
+      _androidSdkVersion == null || _androidSdkVersion! >= 26;
   // 蓝牙歌词开关：通过 MediaSession 元数据替换在车机等设备显示歌词
   bool _bluetoothLyricEnabled = false;
   // LyricInfo 歌词转发开关：通过 MediaSession extras.lyricInfo 发布歌词
@@ -128,6 +138,7 @@ class _SettingsPageState extends State<SettingsPage>
     _loadSettings();
     _loadVersion();
     _loadLyriconSettings();
+    _loadAndroidSdkVersion();
     LyriconProviderService.instance.addListener(_onLyriconStateChanged);
     // 桌面歌词状态变化（设置页开关 / 播放器长按 / 通知栏按钮）→ 刷新 UI
     DesktopLyricService.instance.addListener(_onDesktopLyricChanged);
@@ -163,12 +174,17 @@ class _SettingsPageState extends State<SettingsPage>
     final displayRoma = await _settingsRepository.getLyriconDisplayRoma();
     final preferTranslation = await _settingsRepository
         .getLyriconPreferTranslation();
+    final superLyricEnabled = await _settingsRepository.getSuperLyricEnabled();
+    final superLyricPreferTranslation = await _settingsRepository
+        .getSuperLyricPreferTranslation();
     if (mounted) {
       setState(() {
         _lyriconEnabled = enabled;
         _lyriconDisplayTranslation = displayTranslation;
         _lyriconDisplayRoma = displayRoma;
         _lyriconPreferTranslation = preferTranslation;
+        _superLyricEnabled = superLyricEnabled;
+        _superLyricPreferTranslation = superLyricPreferTranslation;
       });
     }
     // 同步推送当前已保存的偏好到原生侧（冷启动后 Service 可能已自动恢复，
@@ -180,6 +196,16 @@ class _SettingsPageState extends State<SettingsPage>
         );
         await LyriconProviderService.instance.setDisplayRoma(displayRoma);
       } catch (_) {}
+    }
+  }
+
+  /// 加载设备 Android SDK 版本，用于判断 SuperLyric（要求 API 26+）是否可用。
+  Future<void> _loadAndroidSdkVersion() async {
+    final sdk = await MediaStoreService.getSdkVersion();
+    if (mounted && sdk != null) {
+      setState(() {
+        _androidSdkVersion = sdk;
+      });
     }
   }
 
@@ -532,6 +558,48 @@ class _SettingsPageState extends State<SettingsPage>
                   try {
                     await LyriconProviderService.instance.repushLastSong();
                   } catch (_) {}
+                }
+              : null,
+        ),
+        // SuperLyric 歌词推送主开关（基于 Binder 的系统级实时歌词 API）
+        SwitchListTile(
+          title: const Text('SuperLyric 歌词推送'),
+          subtitle: Text(
+            _superLyricSupported
+                ? '向 SuperLyric 系统服务实时推送当前歌词行（需 Android 8.0+）'
+                : 'SuperLyric 需 Android 8.0（API 26）及以上，当前系统版本不支持',
+          ),
+          value: _superLyricEnabled,
+          onChanged: _superLyricSupported
+              ? (value) {
+                  HapticFeedback.lightImpact();
+                  setState(() {
+                    _superLyricEnabled = value;
+                  });
+                  // ignore: discarded_futures
+                  DesktopLyricService.instance.setSuperLyricEnabled(value);
+                  // ignore: discarded_futures
+                  _settingsRepository.setSuperLyricEnabled(value);
+                }
+              : null,
+        ),
+        // SuperLyric 次级开关：同时存在翻译和罗马音时优先推送翻译
+        // 仅当主开关开启且系统支持时可用（参照 Lyricon「优先翻译」开关）
+        SwitchListTile(
+          title: const Text('优先翻译（同时存在时）'),
+          subtitle: const Text('一行同时有翻译和罗马音时，开启推送翻译、关闭推送罗马音'),
+          value: _superLyricPreferTranslation,
+          onChanged: (_superLyricSupported && _superLyricEnabled)
+              ? (value) {
+                  HapticFeedback.lightImpact();
+                  setState(() {
+                    _superLyricPreferTranslation = value;
+                  });
+                  // ignore: discarded_futures
+                  DesktopLyricService.instance
+                      .setSuperLyricPreferTranslation(value);
+                  // ignore: discarded_futures
+                  _settingsRepository.setSuperLyricPreferTranslation(value);
                 }
               : null,
         ),
