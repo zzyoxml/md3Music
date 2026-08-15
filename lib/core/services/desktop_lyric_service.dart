@@ -55,9 +55,14 @@ class DesktopLyricService {
   // 监听 App 的 MediaSession 处理（sendStop），本服务不手动发送停止事件。
   bool _superLyricEnabled = false;
   bool get superLyricEnabled => _superLyricEnabled;
-  // 同时存在翻译和罗马音时是否优先推送翻译（默认 true，参照 Lyricon preferTranslation）。
-  // 开启：保留 translation、丢弃 roma；关闭：保留 roma、丢弃 translation。
-  // SuperLyric 接收端对同时携带两字段的数据会优先显示 secondary(roma)，故需在 Dart 侧过滤。
+  // 共用偏好（设置页三种推送协议共用一份）：
+  // - 翻译歌词开关：是否推送翻译（影响 SuperLyric 与 LyricInfo）
+  bool _pushTranslation = true;
+  // - 罗马音歌词开关：是否推送罗马音（影响 SuperLyric）
+  bool _pushRoma = false;
+  // - 同时存在翻译和罗马音时是否优先推送翻译（参照 Lyricon preferTranslation）。
+  //   开启：保留 translation、丢弃 roma；关闭：保留 roma、丢弃 translation。
+  //   SuperLyric 接收端对同时携带两字段的数据会优先显示 secondary(roma)，故需在 Dart 侧过滤。
   bool _superLyricPreferTranslation = true;
 
   String? _currentSongId;
@@ -322,17 +327,32 @@ class DesktopLyricService {
     _notify();
   }
 
-  /// 设置 SuperLyric「优先翻译（同时存在时）」偏好，并立即重推当前行让过滤生效
+  /// 设置共用的推送偏好（翻译/罗马音/优先翻译），并让过滤立即生效：
+  /// - SuperLyric：重推当前行
+  /// - LyricInfo：重建并重推整首歌词 JSON
   /// （参照 Lyricon repushLastSong 的做法）。
-  Future<void> setSuperLyricPreferTranslation(bool preferTranslation) async {
-    if (_superLyricPreferTranslation == preferTranslation) return;
+  Future<void> setLyricPushPreferences({
+    required bool translation,
+    required bool roma,
+    required bool preferTranslation,
+  }) async {
+    final changed = _pushTranslation != translation ||
+        _pushRoma != roma ||
+        _superLyricPreferTranslation != preferTranslation;
+    _pushTranslation = translation;
+    _pushRoma = roma;
     _superLyricPreferTranslation = preferTranslation;
+    if (!changed) return;
     if (_superLyricEnabled) {
       if (_currentLineIndex >= 0 && _currentLineIndex < _lines.length) {
         await _pushSuperLyricLine(_lines[_currentLineIndex]);
       } else {
         await _pushSuperLyricLine(null);
       }
+    }
+    if (_lyricInfoEnabled) {
+      _lyricInfoPushed = false;
+      _maybePushLyricInfo();
     }
   }
 
@@ -631,15 +651,18 @@ class DesktopLyricService {
             line.endTime > startTime ? line.endTime : startTime + 5000;
         // 同时存在翻译和罗马音时按偏好二选一（参照 Lyricon preferTranslation），
         // 避免 SuperLyric 接收端优先显示 secondary(roma) 导致"总是罗马音"。
-        final hasTranslation =
-            line.translation != null && line.translation!.isNotEmpty;
-        final hasRoma = line.roma != null && line.roma!.isNotEmpty;
+        // 翻译/罗马音还受共用开关 _pushTranslation / _pushRoma 控制。
+        final hasTranslation = _pushTranslation &&
+            line.translation != null &&
+            line.translation!.isNotEmpty;
+        final hasRoma =
+            _pushRoma && line.roma != null && line.roma!.isNotEmpty;
         final translationValue =
             hasTranslation && hasRoma && !_superLyricPreferTranslation
                 ? null
                 : line.translation;
         final romaValue =
-            hasTranslation && hasRoma && _superLyricPreferTranslation
+            hasRoma && hasTranslation && _superLyricPreferTranslation
                 ? null
                 : line.roma;
         args.addAll({
@@ -704,7 +727,8 @@ class DesktopLyricService {
       }
       lyricBuf.write('\n');
       // 翻译行：与主行相同时间戳的 LRC 行（HyperLyric 据此识别翻译）
-      final t = line.translation;
+      // 受共用"翻译歌词"开关 _pushTranslation 控制
+      final t = _pushTranslation ? line.translation : null;
       if (t != null && t.isNotEmpty) {
         hasTranslation = true;
         lyricBuf

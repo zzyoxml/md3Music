@@ -232,6 +232,53 @@ class SettingsRepository {
     await prefs.setBool('settings_dl_locked', v);
   }
 
+  // ===== 实时歌词推送协议 =====
+  // 三种协议（Lyricon / SuperLyric / LyricInfo）三选一 + 关闭，翻译/罗马音等偏好共用。
+
+  /// 当前选中的推送协议：'none' / 'lyricon' / 'super_lyric' / 'lyric_info'。
+  Future<String> getLyricPushProtocol() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('lyric_push_protocol') ?? 'none';
+  }
+
+  Future<void> setLyricPushProtocol(String v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lyric_push_protocol', v);
+  }
+
+  /// 共用：是否推送翻译（默认 true）。
+  Future<bool> getLyricPushTranslation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('lyric_push_translation') ?? true;
+  }
+
+  Future<void> setLyricPushTranslation(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lyric_push_translation', v);
+  }
+
+  /// 共用：是否推送罗马音（默认 false）。
+  Future<bool> getLyricPushRoma() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('lyric_push_roma') ?? false;
+  }
+
+  Future<void> setLyricPushRoma(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lyric_push_roma', v);
+  }
+
+  /// 共用：同时存在翻译和罗马音时是否优先推送翻译（默认 true）。
+  Future<bool> getLyricPushPreferTranslation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('lyric_push_prefer_translation') ?? true;
+  }
+
+  Future<void> setLyricPushPreferTranslation(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lyric_push_prefer_translation', v);
+  }
+
   // ===== Lyricon 配置 =====
 
   Future<bool> getLyriconEnabled() async {

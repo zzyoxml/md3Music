@@ -77,25 +77,19 @@ class _SettingsPageState extends State<SettingsPage>
   // 歌词动态字体颜色开关（默认关闭，仅 AM 播放器生效）
   bool _lyricDynamicColor = false;
   String _appVersion = '';
-  // Lyricon 词幕推送相关状态
-  bool _lyriconEnabled = false;
-  bool _lyriconDisplayTranslation = true;
-  bool _lyriconDisplayRoma = false;
-  // 同时存在翻译和罗马音时优先推送翻译（开启后 roma 在 Dart 侧被过滤）
-  bool _lyriconPreferTranslation = true;
-  // SuperLyric 歌词推送开关（基于 Binder 的系统级实时歌词 API）
-  bool _superLyricEnabled = false;
-  // SuperLyric：同时存在翻译和罗马音时是否优先推送翻译
-  bool _superLyricPreferTranslation = true;
-  // 设备 Android SDK 版本（SuperLyricApi 3.4 要求 API 26+，低于此禁用开关）
+  // 实时歌词推送协议选择（三选一 + 关闭）
+  String _lyricPushProtocol = 'none';
+  // 共用偏好：翻译 / 罗马音 / 优先翻译（同时存在时）
+  bool _lyricPushTranslation = true;
+  bool _lyricPushRoma = false;
+  bool _lyricPushPreferTranslation = true;
+  // 设备 Android SDK 版本（SuperLyricApi 3.4 要求 API 26+，低于此禁用该协议选项）
   int? _androidSdkVersion;
   /// SuperLyric 是否受支持：API 26+（Android 8.0+）。未知时默认放行，避免误禁用。
   bool get _superLyricSupported =>
       _androidSdkVersion == null || _androidSdkVersion! >= 26;
   // 蓝牙歌词开关：通过 MediaSession 元数据替换在车机等设备显示歌词
   bool _bluetoothLyricEnabled = false;
-  // LyricInfo 歌词转发开关：通过 MediaSession extras.lyricInfo 发布歌词
-  bool _lyricInfoEnabled = false;
   // 自定义下载目录：null/空 表示使用默认目录
   String? _downloadDir;
   // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
@@ -137,7 +131,7 @@ class _SettingsPageState extends State<SettingsPage>
     );
     _loadSettings();
     _loadVersion();
-    _loadLyriconSettings();
+    _loadLyricPushSettings();
     _loadAndroidSdkVersion();
     LyriconProviderService.instance.addListener(_onLyriconStateChanged);
     // 桌面歌词状态变化（设置页开关 / 播放器长按 / 通知栏按钮）→ 刷新 UI
@@ -166,35 +160,32 @@ class _SettingsPageState extends State<SettingsPage>
     }
   }
 
-  /// 从 SettingsRepository 加载 Lyricon 相关偏好
-  Future<void> _loadLyriconSettings() async {
-    final enabled = await _settingsRepository.getLyriconEnabled();
-    final displayTranslation = await _settingsRepository
-        .getLyriconDisplayTranslation();
-    final displayRoma = await _settingsRepository.getLyriconDisplayRoma();
+  /// 从 SettingsRepository 加载实时歌词推送协议与共用偏好。
+  Future<void> _loadLyricPushSettings() async {
+    final protocol = await _settingsRepository.getLyricPushProtocol();
+    final translation = await _settingsRepository.getLyricPushTranslation();
+    final roma = await _settingsRepository.getLyricPushRoma();
     final preferTranslation = await _settingsRepository
-        .getLyriconPreferTranslation();
-    final superLyricEnabled = await _settingsRepository.getSuperLyricEnabled();
-    final superLyricPreferTranslation = await _settingsRepository
-        .getSuperLyricPreferTranslation();
+        .getLyricPushPreferTranslation();
     if (mounted) {
       setState(() {
-        _lyriconEnabled = enabled;
-        _lyriconDisplayTranslation = displayTranslation;
-        _lyriconDisplayRoma = displayRoma;
-        _lyriconPreferTranslation = preferTranslation;
-        _superLyricEnabled = superLyricEnabled;
-        _superLyricPreferTranslation = superLyricPreferTranslation;
+        _lyricPushProtocol = protocol;
+        _lyricPushTranslation = translation;
+        _lyricPushRoma = roma;
+        _lyricPushPreferTranslation = preferTranslation;
       });
     }
-    // 同步推送当前已保存的偏好到原生侧（冷启动后 Service 可能已自动恢复，
-    // 这里再推一次保证一致；未启用时 SDK 调用会被 try-catch 吞掉）
-    if (enabled) {
+    // 应用共用偏好到当前启用的推送服务（协议的实际启停由 main.dart 启动恢复处理）
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setLyricPushPreferences(
+      translation: translation,
+      roma: roma,
+      preferTranslation: preferTranslation,
+    );
+    if (protocol == 'lyricon') {
       try {
-        await LyriconProviderService.instance.setDisplayTranslation(
-          displayTranslation,
-        );
-        await LyriconProviderService.instance.setDisplayRoma(displayRoma);
+        await LyriconProviderService.instance.setDisplayTranslation(translation);
+        await LyriconProviderService.instance.setDisplayRoma(roma);
       } catch (_) {}
     }
   }
@@ -252,8 +243,6 @@ class _SettingsPageState extends State<SettingsPage>
     // 读取蓝牙歌词开关
     final bluetoothLyricEnabled = await _settingsRepository
         .getBluetoothLyricEnabled();
-    // 读取 LyricInfo 歌词转发开关
-    final lyricInfoEnabled = await _settingsRepository.getLyricInfoEnabled();
     final downloadWordLevelLyrics = await _settingsRepository
         .getDownloadWordLevelLyrics();
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
@@ -290,7 +279,6 @@ class _SettingsPageState extends State<SettingsPage>
       _downloadWordLevelLyrics = downloadWordLevelLyrics;
       _uiScale = uiScale;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
-      _lyricInfoEnabled = lyricInfoEnabled;
       _pauseFadeEnabled = pauseFadeEnabled;
       _keepScreenOn = keepScreenOn;
       _spectrumEnabled = spectrumEnabled;
@@ -478,130 +466,122 @@ class _SettingsPageState extends State<SettingsPage>
   /// （字号/行间距/字体）均已移入播放页右上角菜单的"歌词显示设置"入口，
   /// 设置页不再保留独立入口。
   Widget _buildLyricSection(ColorScheme colorScheme) {
+    final protocolActive = _lyricPushProtocol != 'none';
     return Column(
       children: [
-        // Lyricon 词幕推送主开关
-        SwitchListTile(
-          title: const Text('Lyricon 词幕推送'),
-          subtitle: const Text('向 Lyricon 提供方实时推送歌词'),
-          value: _lyriconEnabled,
-          onChanged: (value) {
-            HapticFeedback.lightImpact();
-            setState(() {
-              _lyriconEnabled = value;
-            });
-            LyriconProviderService.instance.setEnabled(value);
-            _settingsRepository.setLyriconEnabled(value);
-          },
-        ),
-        // 主开关下方显示当前连接状态
+        // 实时歌词推送：Lyricon / SuperLyric / LyricInfo 三选一 + 关闭
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
           child: Align(
             alignment: Alignment.centerLeft,
             child: Text(
-              _getLyriconStateText(),
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              '歌词推送',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),
             ),
           ),
         ),
-        // 次级开关：翻译歌词（主开关关闭时禁用）
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: DropdownButtonFormField<String>(
+            initialValue: _lyricPushProtocol,
+            // 按钮占满可用宽度，选中文本过长时省略号截断，避免 right overflowed
+            isExpanded: true,
+            decoration: const InputDecoration(
+              isDense: true,
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              border: OutlineInputBorder(),
+            ),
+            items: [
+              const DropdownMenuItem(
+                value: 'none',
+                child: Text('关闭'),
+              ),
+              const DropdownMenuItem(
+                value: 'lyricon',
+                child: Text('Lyricon 词幕'),
+              ),
+              DropdownMenuItem(
+                value: 'super_lyric',
+                enabled: _superLyricSupported,
+                child: Text(
+                  _superLyricSupported
+                      ? 'SuperLyric（系统级，需 Android 8.0+）'
+                      : 'SuperLyric（需 Android 8.0+）',
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const DropdownMenuItem(
+                value: 'lyric_info',
+                child: Text('LyricInfo'),
+              ),
+            ],
+            onChanged: (value) {
+              if (value != null) {
+                // ignore: discarded_futures
+                _setLyricPushProtocol(value);
+              }
+            },
+          ),
+        ),
+        // 选中 Lyricon 时显示连接状态
+        if (_lyricPushProtocol == 'lyricon')
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                _getLyriconStateText(),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        // 共用偏好：翻译 / 罗马音 / 优先翻译（关闭或无协议时禁用）
         SwitchListTile(
           title: const Text('翻译歌词'),
-          subtitle: const Text('在 Lyricon 设备上显示翻译文本'),
-          value: _lyriconDisplayTranslation,
-          onChanged: _lyriconEnabled
+          subtitle: const Text('向所选推送目标显示翻译文本'),
+          value: _lyricPushTranslation,
+          onChanged: protocolActive
               ? (value) {
-                  HapticFeedback.lightImpact();
-                  setState(() {
-                    _lyriconDisplayTranslation = value;
-                  });
-                  LyriconProviderService.instance.setDisplayTranslation(value);
-                  _settingsRepository.setLyriconDisplayTranslation(value);
+                  // ignore: discarded_futures
+                  _setLyricPushTranslation(value);
                 }
               : null,
         ),
-        // 次级开关：罗马音歌词（主开关关闭时禁用）
         SwitchListTile(
           title: const Text('罗马音歌词'),
-          subtitle: const Text('在 Lyricon 设备上显示罗马音/音译文本'),
-          value: _lyriconDisplayRoma,
-          onChanged: _lyriconEnabled
-              ? (value) {
-                  HapticFeedback.lightImpact();
-                  setState(() {
-                    _lyriconDisplayRoma = value;
-                  });
-                  LyriconProviderService.instance.setDisplayRoma(value);
-                  _settingsRepository.setLyriconDisplayRoma(value);
-                }
-              : null,
-        ),
-        // 次级开关：同时存在翻译和罗马音时二选一推送
-        // 仅当主开关开启时可用：
-        // - 开启：保留翻译，丢弃罗马音
-        // - 关闭：保留罗马音，丢弃翻译
-        SwitchListTile(
-          title: const Text('优先翻译（同时存在时）'),
-          subtitle: const Text('一行同时有翻译和罗马音时，开启推送翻译、关闭推送罗马音'),
-          value: _lyriconPreferTranslation,
-          onChanged: _lyriconEnabled
-              ? (value) async {
-                  HapticFeedback.lightImpact();
-                  setState(() {
-                    _lyriconPreferTranslation = value;
-                  });
-                  await _settingsRepository.setLyriconPreferTranslation(value);
-                  // 偏好变化后重新推送当前歌曲，让过滤逻辑立即生效
-                  try {
-                    await LyriconProviderService.instance.repushLastSong();
-                  } catch (_) {}
-                }
-              : null,
-        ),
-        // SuperLyric 歌词推送主开关（基于 Binder 的系统级实时歌词 API）
-        SwitchListTile(
-          title: const Text('SuperLyric 歌词推送'),
           subtitle: Text(
-            _superLyricSupported
-                ? '向 SuperLyric 系统服务实时推送当前歌词行（需 Android 8.0+）'
-                : 'SuperLyric 需 Android 8.0（API 26）及以上，当前系统版本不支持',
+            _lyricPushProtocol == 'lyric_info'
+                ? 'LyricInfo 仅支持翻译，不支持罗马音'
+                : '向所选推送目标显示罗马音/音译文本',
           ),
-          value: _superLyricEnabled,
-          onChanged: _superLyricSupported
-              ? (value) {
-                  HapticFeedback.lightImpact();
-                  setState(() {
-                    _superLyricEnabled = value;
-                  });
-                  // ignore: discarded_futures
-                  DesktopLyricService.instance.setSuperLyricEnabled(value);
-                  // ignore: discarded_futures
-                  _settingsRepository.setSuperLyricEnabled(value);
-                }
-              : null,
+          value: _lyricPushRoma,
+          onChanged:
+              protocolActive && _lyricPushProtocol != 'lyric_info'
+                  ? (value) {
+                      // ignore: discarded_futures
+                      _setLyricPushRoma(value);
+                    }
+                  : null,
         ),
-        // SuperLyric 次级开关：同时存在翻译和罗马音时优先推送翻译
-        // 仅当主开关开启且系统支持时可用（参照 Lyricon「优先翻译」开关）
         SwitchListTile(
           title: const Text('优先翻译（同时存在时）'),
-          subtitle: const Text('一行同时有翻译和罗马音时，开启推送翻译、关闭推送罗马音'),
-          value: _superLyricPreferTranslation,
-          onChanged: (_superLyricSupported && _superLyricEnabled)
-              ? (value) {
-                  HapticFeedback.lightImpact();
-                  setState(() {
-                    _superLyricPreferTranslation = value;
-                  });
-                  // ignore: discarded_futures
-                  DesktopLyricService.instance
-                      .setSuperLyricPreferTranslation(value);
-                  // ignore: discarded_futures
-                  _settingsRepository.setSuperLyricPreferTranslation(value);
-                }
-              : null,
+          subtitle: Text(
+            _lyricPushProtocol == 'lyric_info'
+                ? 'LyricInfo 仅支持翻译，无罗马音可选'
+                : '一行同时有翻译和罗马音时，开启推送翻译、关闭推送罗马音',
+          ),
+          value: _lyricPushPreferTranslation,
+          onChanged:
+              protocolActive && _lyricPushProtocol != 'lyric_info'
+                  ? (value) {
+                      // ignore: discarded_futures
+                      _setLyricPushPreferTranslation(value);
+                    }
+                  : null,
         ),
         // 解锁桌面歌词：悬浮窗锁定后点击穿透（无法点击自身解锁），
         // 且无法下拉通知栏时，可在此一键解锁悬浮窗。
@@ -618,7 +598,7 @@ class _SettingsPageState extends State<SettingsPage>
             await DesktopLyricService.instance.unlock();
           },
         ),
-        // 蓝牙歌词：通过 MediaSession 元数据替换在车机等设备显示歌词
+        // 蓝牙歌词（独立开关）：通过 MediaSession 元数据替换在车机等设备显示歌词
         SwitchListTile(
           title: const Text('蓝牙歌词'),
           subtitle: const Text('通过蓝牙在汽车主机等设备显示当前歌词（标题显示歌词，作者显示「作者 - 标题」）'),
@@ -632,21 +612,117 @@ class _SettingsPageState extends State<SettingsPage>
             MediaNotificationService.setBluetoothLyricEnabled(value);
           },
         ),
-        // LyricInfo 歌词转发：写入 MediaSession extras.lyricInfo，
-        // 供 ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取
-        SwitchListTile(
-          title: const Text('LyricInfo 歌词转发'),
-          subtitle: const Text('向 ColorOS 桌面歌词 / LyricInfo 模块等系统提供整首歌词（写入媒体会话元数据）'),
-          value: _lyricInfoEnabled,
-          onChanged: (value) async {
-            HapticFeedback.lightImpact();
-            setState(() => _lyricInfoEnabled = value);
-            await _settingsRepository.setLyricInfoEnabled(value);
-            // 同步到歌词服务（启用定时器拉取歌词构造 JSON，关闭时移除）
-            await DesktopLyricService.instance.setLyricInfoEnabled(value);
-          },
-        ),
       ],
+    );
+  }
+
+  /// 切换实时歌词推送协议（三选一 + 关闭）：先全部关闭，再启用选中协议。
+  Future<void> _setLyricPushProtocol(String protocol) async {
+    if (protocol == _lyricPushProtocol) return;
+    HapticFeedback.lightImpact();
+    setState(() => _lyricPushProtocol = protocol);
+    await _settingsRepository.setLyricPushProtocol(protocol);
+    await _applyLyricPushProtocol(protocol);
+  }
+
+  /// 应用协议选择：关闭所有协议，启用选中协议，并同步偏好到各协议。
+  Future<void> _applyLyricPushProtocol(String protocol) async {
+    // 先全部关闭（幂等）
+    try {
+      LyriconProviderService.instance.setEnabled(false);
+    } catch (_) {}
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setSuperLyricEnabled(false);
+    // ignore: discarded_futures
+    await DesktopLyricService.instance.setLyricInfoEnabled(false);
+    // 记录各协议 enabled 状态（兼容 Kotlin restoreLyricon 读 lyricon_enabled）
+    await _settingsRepository.setLyriconEnabled(protocol == 'lyricon');
+    await _settingsRepository.setSuperLyricEnabled(protocol == 'super_lyric');
+    await _settingsRepository.setLyricInfoEnabled(protocol == 'lyric_info');
+
+    if (protocol == 'none') return;
+
+    // 启用选中协议并应用共用偏好
+    if (protocol == 'lyricon') {
+      try {
+        await LyriconProviderService.instance.setDisplayTranslation(
+          _lyricPushTranslation,
+        );
+        await LyriconProviderService.instance.setDisplayRoma(_lyricPushRoma);
+        await LyriconProviderService.instance.setEnabled(true);
+      } catch (_) {}
+    } else if (protocol == 'super_lyric') {
+      if (_superLyricSupported) {
+        // ignore: discarded_futures
+        DesktopLyricService.instance.setSuperLyricEnabled(true);
+      }
+    } else if (protocol == 'lyric_info') {
+      // ignore: discarded_futures
+      await DesktopLyricService.instance.setLyricInfoEnabled(true);
+    }
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setLyricPushPreferences(
+      translation: _lyricPushTranslation,
+      roma: _lyricPushRoma,
+      preferTranslation: _lyricPushPreferTranslation,
+    );
+  }
+
+  Future<void> _setLyricPushTranslation(bool value) async {
+    HapticFeedback.lightImpact();
+    setState(() => _lyricPushTranslation = value);
+    await _settingsRepository.setLyricPushTranslation(value);
+    // 同步到 Lyricon 偏好（兼容 Kotlin 端 restore 读取）
+    await _settingsRepository.setLyriconDisplayTranslation(value);
+    if (_lyricPushProtocol == 'lyricon') {
+      try {
+        await LyriconProviderService.instance.setDisplayTranslation(value);
+      } catch (_) {}
+    }
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setLyricPushPreferences(
+      translation: value,
+      roma: _lyricPushRoma,
+      preferTranslation: _lyricPushPreferTranslation,
+    );
+  }
+
+  Future<void> _setLyricPushRoma(bool value) async {
+    HapticFeedback.lightImpact();
+    setState(() => _lyricPushRoma = value);
+    await _settingsRepository.setLyricPushRoma(value);
+    await _settingsRepository.setLyriconDisplayRoma(value);
+    if (_lyricPushProtocol == 'lyricon') {
+      try {
+        await LyriconProviderService.instance.setDisplayRoma(value);
+      } catch (_) {}
+    }
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setLyricPushPreferences(
+      translation: _lyricPushTranslation,
+      roma: value,
+      preferTranslation: _lyricPushPreferTranslation,
+    );
+  }
+
+  Future<void> _setLyricPushPreferTranslation(bool value) async {
+    HapticFeedback.lightImpact();
+    setState(() => _lyricPushPreferTranslation = value);
+    await _settingsRepository.setLyricPushPreferTranslation(value);
+    // 同步到各协议偏好 key
+    await _settingsRepository.setLyriconPreferTranslation(value);
+    await _settingsRepository.setSuperLyricPreferTranslation(value);
+    if (_lyricPushProtocol == 'lyricon') {
+      // 偏好变化后重新推送当前歌曲，让过滤逻辑立即生效
+      try {
+        await LyriconProviderService.instance.repushLastSong();
+      } catch (_) {}
+    }
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setLyricPushPreferences(
+      translation: _lyricPushTranslation,
+      roma: _lyricPushRoma,
+      preferTranslation: value,
     );
   }
 
