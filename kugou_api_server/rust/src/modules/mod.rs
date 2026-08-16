@@ -96,6 +96,8 @@ pub fn register(routes: &mut Vec<(&'static str, ModuleFn)>) {
     routes.push(("/user/video/love", user::handle_video_love));
     routes.push(("/user/vip/detail", user::handle_vip_detail));
     routes.push(("/user/playlist", user::handle_playlist));
+    routes.push(("/user/purchased/songs", user::handle_purchased_songs));
+    routes.push(("/user/purchased/albums", user::handle_purchased_albums));
     routes.push(("/user/listen", user::handle_listen));
     routes.push(("/user/history", user::handle_history));
     routes.push(("/user/follow/message", user::handle_follow_message));

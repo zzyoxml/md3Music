@@ -17,6 +17,7 @@ import 'cloud_music_page.dart';
 import 'downloads_page.dart';
 import 'listen_ranking_page.dart';
 import 'play_history_page.dart';
+import 'purchased_page.dart';
 import 'vip_status.dart';
 
 class UserCenterPage extends StatefulWidget {
@@ -751,6 +752,11 @@ class _UserCenterPageState extends State<UserCenterPage> {
             _actionItem(cs, Icons.download, '下载', () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const DownloadsPage()),
+              );
+            }),
+            _actionItem(cs, Icons.shopping_bag_outlined, '已购', () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const PurchasedPage()),
               );
             }),
           ],

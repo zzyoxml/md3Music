@@ -10,8 +10,8 @@ use crate::crypto::{
 };
 use crate::helper::{sign_cloud_key, sign_params_key};
 use crate::modules::{
-    c_str, cookie_or_param_str, forward, param_or_cookie_str, q_cookie, q_num, q_raw_or, q_str,
-    Ctx,
+    c_str, cookie_or_param_num, cookie_or_param_str, forward, param_or_cookie_str, q_cookie,
+    q_num, q_raw_or, q_str, Ctx,
 };
 use crate::request::{raw_request, BodyData, BodyValue, ModuleResponse, RequestOptions};
 use crate::util::json_stringify;
@@ -753,4 +753,44 @@ pub fn handle_grade_info(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleR
         json_stringify(&res.body.to_json()),
     );
     Ok(res)
+}
+
+/// user_purchased_songs.js → /user/purchased/songs（已购单曲列表）。
+pub fn handle_purchased_songs(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
+    let userid = cookie_or_param_num(q, "userid", 0);
+    let token = cookie_or_param_str(q, "token", "");
+    let dm = json!({
+        "appid": APP_ID,
+        "userid": userid,
+        "token": token,
+        "page": q_num(q, "page", 1),
+        "pagesize": q_num(q, "pagesize", 50),
+        "clientver": CLIENT_VER.to_string(),
+        "deleted": 0,
+        "need_audio_info": 1,
+        "area_code": "1",
+    });
+    forward(
+        q, ctx, "POST", "/openapi/copyright/v1/audio/get_goods", None,
+        None, Some(dm), "android", &[], false, false,
+    )
+}
+
+/// user_purchased_albums.js → /user/purchased/albums（已购专辑列表）。
+pub fn handle_purchased_albums(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
+    let userid = cookie_or_param_num(q, "userid", 0);
+    let token = cookie_or_param_str(q, "token", "");
+    let dm = json!({
+        "appid": APP_ID,
+        "userid": userid,
+        "token": token,
+        "page": q_num(q, "page", 1),
+        "pagesize": q_num(q, "pagesize", 15),
+        "clientver": CLIENT_VER.to_string(),
+        "deleted": 0,
+    });
+    forward(
+        q, ctx, "POST", "/openapi/v1/copyright/get_album_goods", None,
+        None, Some(dm), "android", &[], false, false,
+    )
 }

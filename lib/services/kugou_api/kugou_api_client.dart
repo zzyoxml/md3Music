@@ -2628,6 +2628,32 @@ class KugouApiClient {
     );
   }
 
+  /// 获取用户已购单曲列表（需登录）。返回原始 JSON，由调用方自适应解析。
+  Future<Map<String, dynamic>?> getUserPurchasedSongs({
+    int page = 1,
+    int pagesize = 50,
+    bool noCache = false,
+  }) async {
+    return await _get(
+      KugouEndpoints.userPurchasedSongs,
+      queryParameters: {'page': page, 'pagesize': pagesize},
+      noCache: noCache,
+    );
+  }
+
+  /// 获取用户已购专辑列表（需登录）。返回原始 JSON，由调用方自适应解析。
+  Future<Map<String, dynamic>?> getUserPurchasedAlbums({
+    int page = 1,
+    int pagesize = 15,
+    bool noCache = false,
+  }) async {
+    return await _get(
+      KugouEndpoints.userPurchasedAlbums,
+      queryParameters: {'page': page, 'pagesize': pagesize},
+      noCache: noCache,
+    );
+  }
+
   /// 上传本地音乐文件到酷狗云盘。
   ///
   /// [body] 为文件完整二进制（octet-stream）；本地服务器端负责：
