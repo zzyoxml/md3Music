@@ -42,6 +42,9 @@ class _BrushVerticalPageState extends State<BrushVerticalPage> {
     super.initState();
     _cards = List.of(widget.cards);
     _syncCurrent(_currentIndex);
+    // 重置自动进入标记：本页只允许通过菜单按钮手动进入画中画，
+    // 退出 app（按 Home）时不得自动进入画中画。
+    PipService.instance.setVideoActive(false);
     // 监听画中画：进入后只显示视频本身
     PipService.instance.isPipMode.addListener(_onPipModeChanged);
   }
@@ -63,6 +66,8 @@ class _BrushVerticalPageState extends State<BrushVerticalPage> {
   void dispose() {
     // 恢复系统 UI（避免影响其他页面）
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    // 关闭自动进入标记，避免残留影响其他页面
+    PipService.instance.setVideoActive(false);
     PipService.instance.isPipMode.removeListener(_onPipModeChanged);
     _pageController.dispose();
     super.dispose();
@@ -123,14 +128,14 @@ class _BrushVerticalPageState extends State<BrushVerticalPage> {
     );
   }
 
-  /// 进入画中画。
+  /// 进入画中画（仅手动按钮触发）。
   void _enterPip() {
     final isLandscape =
         MediaQuery.of(context).orientation == Orientation.landscape;
-    // pipAspectRatio 是原生端全局值，可能被 MV 页的横屏画中画污染；
-    // 这里总是显式覆盖为当前方向比例，保证画中画方向正确。
+    // active 恒为 false：只设置宽高比（覆盖可能被 MV 页横屏污染的值），
+    // 但退出 app（按 Home）不会自动进入画中画。
     PipService.instance
-        .setVideoActive(true, aspectRatio: isLandscape ? 16 / 9 : 9 / 16);
+        .setVideoActive(false, aspectRatio: isLandscape ? 16 / 9 : 9 / 16);
     PipService.instance.enterPip();
   }
 
