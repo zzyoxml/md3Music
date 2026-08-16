@@ -35,6 +35,9 @@ class ListeningGradeService {
   /// 已同步到服务器的累计听歌秒数（本地基准）
   int _syncedDsec = 0;
 
+  /// 最近一次服务器返回的累计听歌秒数（用于计算未上报时长）
+  int _serverDsec = 0;
+
   /// 尚未上报的增量秒数（diff_sec）
   int _pendingDiff = 0;
 
@@ -43,11 +46,17 @@ class ListeningGradeService {
   /// 当前服务针对的 userid（用于账号切换重载）
   String? _userid;
 
-  /// 启动 30s 心跳（仅 Android 本地服务器环境生效）。
+  /// 启动 30s 心跳（仅 Android 主 isolate 生效）。
+  ///
+  /// 关键：audio_service 的后台 headless isolate 也会执行 main() 并调用 init()。
+  /// 若不区分，会在后台再创建一个 Timer，两个实例并发累计/上报并互相覆盖
+  /// SharedPreferences 里的 synced 基准，导致上报 d_sec 与服务器不一致被拒。
+  /// 主 isolate 才有 UI view（`PlatformDispatcher.instance.views` 非空），据此区分。
   void init() {
     if (_started) return;
     _started = true;
     if (kIsWeb || !Platform.isAndroid) return;
+    if (PlatformDispatcher.instance.views.isEmpty) return; // 后台 headless isolate，跳过
     _timer ??= Timer.periodic(_interval, (_) => _onTick());
   }
 
@@ -56,8 +65,17 @@ class ListeningGradeService {
     _onlinePlaying = value;
   }
 
-  /// 查询到服务器 d_sec 后调用：本地基准只升不降，避免上报被拒。
+  /// 未上报（服务器未记账）的听歌时长（秒）：
+  /// 本地累计基准 - 服务器累计值。仅当已知服务器值且本地高于服务器时非 0。
+  int get unreportedSeconds {
+    if (_serverDsec <= 0) return 0;
+    final d = _syncedDsec - _serverDsec;
+    return d > 0 ? d : 0;
+  }
+
+  /// 查询到服务器 d_sec 后调用：记录服务器值，本地基准只升不降，避免上报被拒。
   Future<void> resyncFromServer(int serverDsec) async {
+    _serverDsec = serverDsec;
     if (serverDsec > _syncedDsec) {
       _syncedDsec = serverDsec;
       await _save();
@@ -123,9 +141,11 @@ class ListeningGradeService {
       _syncedDsec = dSec;
       _pendingDiff = 0;
       _failedReports = 0;
+      _serverDsec = _parseServerDsec(resp); // 记录服务器返回的 d_sec（未上报时长用）
       await _save();
+      // 打印服务器完整返回（含 data.d_sec），用于确认服务器是否真的记账
       // ignore: avoid_print
-      print('[GradeReport] 上报成功 d_sec=$dSec diff=$diff');
+      print('[GradeReport] 上报成功 d_sec=$dSec diff=$diff resp=$resp');
     } else {
       _failedReports++;
       // ignore: avoid_print
@@ -142,9 +162,10 @@ class ListeningGradeService {
   /// 查询服务器当前累计时长，把本地基准抬升到服务器值（只升不降）。
   Future<void> _syncBaselineFromServer() async {
     final resp = await KugouApiClient().getGradeInfo();
-    final serverDsec = (resp?['data'] as Map<String, dynamic>?)?['d_sec'];
-    if (serverDsec is num && serverDsec.toInt() > _syncedDsec) {
-      _syncedDsec = serverDsec.toInt();
+    final serverDsec = _parseServerDsec(resp);
+    if (serverDsec > 0) _serverDsec = serverDsec;
+    if (serverDsec > _syncedDsec) {
+      _syncedDsec = serverDsec;
       await _save();
       // ignore: avoid_print
       print('[GradeReport] 重同步基准 synced=$_syncedDsec');
@@ -155,17 +176,26 @@ class ListeningGradeService {
   Future<void> _resyncAndDrop() async {
     _failedReports = 0;
     final resp = await KugouApiClient().getGradeInfo();
-    final serverDsec = (resp?['data'] as Map<String, dynamic>?)?['d_sec'];
-    if (serverDsec is num && serverDsec.toInt() > _syncedDsec) {
-      _syncedDsec = serverDsec.toInt();
+    final serverDsec = _parseServerDsec(resp);
+    if (serverDsec > 0) _serverDsec = serverDsec;
+    if (serverDsec > _syncedDsec) {
+      _syncedDsec = serverDsec;
     }
     _pendingDiff = 0;
     await _save();
   }
 
+  /// 从 grade 响应中安全提取服务器 d_sec（不存在/类型不符返回 0）。
+  int _parseServerDsec(Map<String, dynamic>? resp) {
+    final data = resp?['data'];
+    final v = data is Map ? data['d_sec'] : null;
+    return v is num ? v.toInt() : 0;
+  }
+
   Future<void> _load(String userid) async {
     final prefs = await SharedPreferences.getInstance();
     _syncedDsec = prefs.getInt(_key('synced', userid)) ?? 0;
+    _serverDsec = prefs.getInt(_key('server', userid)) ?? 0;
     _pendingDiff = prefs.getInt(_key('pending', userid)) ?? 0;
   }
 
@@ -174,6 +204,7 @@ class ListeningGradeService {
     if (userid == null || userid.isEmpty) return;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_key('synced', userid), _syncedDsec);
+    await prefs.setInt(_key('server', userid), _serverDsec);
     await prefs.setInt(_key('pending', userid), _pendingDiff);
   }
 

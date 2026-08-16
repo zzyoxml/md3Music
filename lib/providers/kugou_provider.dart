@@ -312,6 +312,9 @@ class KugouProvider extends ChangeNotifier {
   Map<String, dynamic>? get topSongData => _topSongData;
   KugouUserVipDetail? get vipInfo => _vipInfo;
   KugouGradeInfo? get gradeInfo => _gradeInfo;
+
+  /// 未上报（服务器未记账）的听歌时长（秒），来自本地累计服务
+  int get unreportedSeconds => ListeningGradeService.instance.unreportedSeconds;
   Map<String, dynamic>? get vipMonthRecord => _vipMonthRecord;
   Set<String> get localSignedDays => _localSignedDays;
   Map<String, dynamic>? get userHistoryData => _userHistoryData;
@@ -2034,6 +2037,11 @@ class KugouProvider extends ChangeNotifier {
       final r = await _apiClient.getGradeInfo();
       if (r != null) {
         _gradeInfo = KugouGradeInfo.fromJson(r);
+        // 打印服务器实际返回的 d_sec，用于确认服务器是否记账（排查用）
+        // ignore: avoid_print
+        print(
+          '[GradeQuery] server d_sec=${_gradeInfo?.dSec} grade=${_gradeInfo?.pGrade} point=${_gradeInfo?.pCurrentPoint}/${_gradeInfo?.pNextGradePoint}',
+        );
         final serverDsec = _gradeInfo?.dSec;
         if (serverDsec != null) {
           ListeningGradeService.instance.resyncFromServer(serverDsec);

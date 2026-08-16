@@ -232,7 +232,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                   ),
                   if (kugou.gradeInfo != null) ...[
                     const SizedBox(width: 12),
-                    _buildGradePill(cs, tt, kugou.gradeInfo!),
+                    _buildGradePill(cs, tt, kugou.gradeInfo!, kugou.unreportedSeconds),
                   ],
                   Icon(Icons.chevron_right, color: cs.onPrimaryContainer),
                 ],
@@ -244,13 +244,19 @@ class _UserCenterPageState extends State<UserCenterPage> {
     );
   }
 
-  /// 听歌等级胶囊：LV + 累计时长 + 升级进度（显示在头像昵称右侧）。
-  Widget _buildGradePill(ColorScheme cs, TextTheme tt, KugouGradeInfo grade) {
+  /// 听歌等级胶囊：LV + 累计时长 + 未上报时长（≥5分钟显示）+ 升级进度
+  Widget _buildGradePill(
+    ColorScheme cs,
+    TextTheme tt,
+    KugouGradeInfo grade,
+    int unreportedSec,
+  ) {
     final sec = grade.dSec ?? grade.duration ?? 0;
     final gradeNum = grade.pGrade ?? 0;
     final cur = (grade.pCurrentPoint ?? 0).toDouble();
     final next = (grade.pNextGradePoint ?? 1).toDouble();
     final progress = next > 0 ? (cur / next).clamp(0.0, 1.0) : 0.0;
+    final showUnreported = unreportedSec >= 300; // 5 分钟
     return Container(
       width: 116,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -285,6 +291,18 @@ class _UserCenterPageState extends State<UserCenterPage> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
+          if (showUnreported) ...[
+            const SizedBox(height: 2),
+            Text(
+              '未上报 ${_formatGradeSeconds(unreportedSec)}',
+              style: tt.labelSmall?.copyWith(
+                fontSize: 10,
+                color: cs.error,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
           const SizedBox(height: 4),
           ClipRRect(
             borderRadius: BorderRadius.circular(2),
