@@ -468,11 +468,11 @@ class KugouApiClient {
       // 记录当前登录的用户ID
       await prefs.setString(currentUserKey, userid);
 
-      // 维护账号列表：已存在则更新登录时间，否则新增条目
+      // 维护账号列表：已存在则更新登录时间并清除过期标记，否则新增条目
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final idx = _accounts.indexWhere((a) => a.userid == userid);
       if (idx >= 0) {
-        _accounts[idx] = _accounts[idx].copyWith(loginTime: now);
+        _accounts[idx] = _accounts[idx].copyWith(loginTime: now, expired: false);
       } else {
         _accounts.add(KugouAccount(userid: userid, loginTime: now));
       }
@@ -505,6 +505,24 @@ class KugouApiClient {
     } catch (e) {
       print('❌ [Auth] 切换账号失败: $e');
       return false;
+    }
+  }
+
+  /// 标记账号登录态已过期（切换时校验 token 失败）。
+  /// 过期账号在账号管理列表显示「登录已过期」，重新登录成功后由
+  /// [setLoginCookies] 清除该标记。
+  Future<void> markAccountExpired(String userid) async {
+    if (userid.isEmpty) return;
+    await _ensureInitialized();
+    final idx = _accounts.indexWhere((a) => a.userid == userid);
+    if (idx < 0) return;
+    if (_accounts[idx].expired) return;
+    _accounts[idx] = _accounts[idx].copyWith(expired: true);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kAccountsKey, KugouAccount.encodeList(_accounts));
+    } catch (e) {
+      print('❌ [Auth] 保存过期标记失败: $e');
     }
   }
 
@@ -2525,6 +2543,9 @@ class KugouApiClient {
       noCache: true,
     );
     if (json == null) return null;
+    // 业务失败（如 token 失效/未登录，error_code=20010）时返回 null，
+    // 避免误判为「成功但无昵称」（此前会返回 nickname=null 的对象）。
+    if (!_isBizOk(json)) return null;
     try {
       final detail = KugouUserDetail.fromJson(json);
       // ignore: avoid_print
@@ -2537,6 +2558,29 @@ class KugouApiClient {
       print('[USER_DETAIL] parse error: $e json=$json');
       return null;
     }
+  }
+
+  /// 校验当前登录 token 是否仍有效（复用 /user/detail，精确判断业务状态）。
+  /// 返回 true=有效；false=已过期/无效/请求失败（保守视为无效）。
+  Future<bool> checkTokenValid() async {
+    final json = await _getAllowNonOk(
+      KugouEndpoints.userDetail,
+      noCache: true,
+    );
+    if (json == null) return false;
+    if (!_isBizOk(json)) return false;
+    final data = json['data'];
+    return data is Map && data.isNotEmpty;
+  }
+
+  /// 判断用户态接口响应的业务状态是否成功。
+  /// 成功判定：error_code 为 0 或缺失，且 status 为 1 或缺失。
+  static bool _isBizOk(Map<String, dynamic> json) {
+    final errorCode = json['error_code'];
+    if (errorCode is num && errorCode != 0) return false;
+    final status = json['status'];
+    if (status is num && status != 1) return false;
+    return true;
   }
 
   Future<KugouUserVipDetail?> getUserVipDetail() async {

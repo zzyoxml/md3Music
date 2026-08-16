@@ -468,16 +468,44 @@ class _UserCenterPageState extends State<UserCenterPage> {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     final isCurrent = account.userid == kugou.userid;
+    final displayName = (account.nickname != null && account.nickname!.isNotEmpty)
+        ? account.nickname!
+        : '用户 ${account.userid}';
     return ListTile(
       contentPadding: const EdgeInsets.symmetric(horizontal: 4),
       leading: _accountAvatar(account, cs),
-      title: Text(
-        (account.nickname != null && account.nickname!.isNotEmpty)
-            ? account.nickname!
-            : '用户 ${account.userid}',
-        style: tt.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(
+              displayName,
+              style: tt.bodyLarge?.copyWith(
+                fontWeight: FontWeight.w600,
+                // 过期账号的昵称置灰
+                color: account.expired ? cs.onSurfaceVariant : null,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (account.expired) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: cs.errorContainer,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                '登录已过期',
+                style: tt.labelSmall?.copyWith(
+                  color: cs.onErrorContainer,
+                  fontSize: 10,
+                ),
+              ),
+            ),
+          ],
+        ],
       ),
       subtitle: Text('ID: ${account.userid}', style: tt.bodySmall),
       trailing: Row(
@@ -495,7 +523,10 @@ class _UserCenterPageState extends State<UserCenterPage> {
           ),
         ],
       ),
-      onTap: isCurrent ? null : () => _switchToAccount(context, account, kugou),
+      // 过期账号点击直接引导重新登录/删除，不再走切换（凭证已失效）
+      onTap: account.expired
+          ? () => _handleExpiredAccount(context, account, kugou)
+          : (isCurrent ? null : () => _switchToAccount(context, account, kugou)),
     );
   }
 
@@ -533,7 +564,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
     );
   }
 
-  /// 切换账号（确认 → 切换 → 重载收藏 → 关闭面板）
+  /// 切换账号（确认 → 切换 + 过期检测 → 重载收藏 → 关闭面板）
   Future<void> _switchToAccount(
     BuildContext context,
     KugouAccount account,
@@ -559,18 +590,69 @@ class _UserCenterPageState extends State<UserCenterPage> {
     );
     if (confirmed != true || !context.mounted) return;
 
-    final ok = await kugou.switchAccount(account.userid);
+    final result = await kugou.switchAccount(account.userid);
     if (!context.mounted) return;
-    if (ok) {
-      navigator.pop(); // 关闭账号管理面板
-      context.read<FavoritesProvider>().loadFavorites();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('已切换到 ${account.nickname ?? account.userid}')),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('切换失败，该账号凭证已失效')),
-      );
+    switch (result) {
+      case SwitchAccountResult.success:
+        navigator.pop(); // 关闭账号管理面板
+        context.read<FavoritesProvider>().loadFavorites();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已切换到 ${account.nickname ?? account.userid}')),
+        );
+      case SwitchAccountResult.tokenExpired:
+        // 凭证已切换但登录态过期：引导重新登录或删除该账号
+        navigator.pop();
+        await _handleExpiredAccount(context, account, kugou);
+      case SwitchAccountResult.noCredentials:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('切换失败，该账号凭证已失效')),
+        );
+    }
+  }
+
+  /// 账号登录态已过期：提示并引导重新登录 / 删除该账号。
+  Future<void> _handleExpiredAccount(
+    BuildContext context,
+    KugouAccount account,
+    KugouProvider kugou,
+  ) async {
+    if (!context.mounted) return;
+    final navigator = Navigator.of(context);
+    final action = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('登录已过期'),
+        content: Text(
+          '「${account.nickname ?? account.userid}」的登录状态已过期，'
+          '需重新登录后才能使用该账号。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'remove'),
+            child: const Text('删除该账号'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'relogin'),
+            child: const Text('重新登录'),
+          ),
+        ],
+      ),
+    );
+    if (!context.mounted) return;
+
+    switch (action) {
+      case 'relogin':
+        // 重新登录：登录成功后 setLoginCookies 会清除该账号的过期标记
+        await navigator.push(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+        );
+      case 'remove':
+        await kugou.removeAccount(account.userid);
+        if (!context.mounted) return;
+        context.read<FavoritesProvider>().loadFavorites();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('已删除过期账号')),
+        );
     }
   }
 
