@@ -1762,7 +1762,7 @@ class KugouApiClient {
   Future<Map<String, dynamic>?> getPlaylistSimilar(String id) async {
     return await _get(
       KugouEndpoints.playlistSimilar,
-      queryParameters: {'id': id},
+      queryParameters: {'ids': id},
     );
   }
 

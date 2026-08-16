@@ -13,6 +13,7 @@ import '../../providers/player_provider.dart';
 import '../../providers/downloads_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
+import '../../services/kugou_api/kugou_models.dart';
 import '../../services/stream_cache_manager.dart';
 import '../../widgets/song_list_item.dart';
 import '../../widgets/playlist_comments_view.dart';
@@ -782,6 +783,40 @@ class _PlaylistPageState extends State<PlaylistPage> {
     );
   }
 
+  /// 「相似歌单」底部弹窗：调 /playlist/similar 获取相似歌单并展示。
+  /// 使用 original 歌单的 global_collection_id（listCreateGid 兜底 id）。
+  void _showSimilarPlaylists(BuildContext context) {
+    final gid = widget.playlist.listCreateGid ?? widget.playlist.id;
+    if (gid.isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return Container(
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
+            ),
+            child: _SimilarPlaylistsView(
+              gid: gid,
+              scrollController: scrollController,
+              colorScheme: colorScheme,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   // ==================== 收藏本地缓存（解决后端 user/playlist 列表 ~1-2 分钟缓存才同步的问题）====================
 
   /// 查询当前歌单是否已被收藏。
@@ -1225,6 +1260,13 @@ class _PlaylistPageState extends State<PlaylistPage> {
                               icon: const Icon(Icons.my_location),
                               onPressed: _scrollToPlayingSong,
                               tooltip: '定位正在播放',
+                            ),
+                          if (_songs.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.auto_awesome),
+                              onPressed: () =>
+                                  _showSimilarPlaylists(context),
+                              tooltip: '相似歌单',
                             ),
                           if (_songs.isNotEmpty)
                             PopupMenuButton<_SortBy>(
@@ -1852,6 +1894,257 @@ class _PlaylistPageState extends State<PlaylistPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 「相似歌单」底部弹窗内容：拉取 /playlist/similar 并展示相似歌单列表。
+class _SimilarPlaylistsView extends StatefulWidget {
+  final String gid;
+  final ScrollController scrollController;
+  final ColorScheme colorScheme;
+
+  const _SimilarPlaylistsView({
+    required this.gid,
+    required this.scrollController,
+    required this.colorScheme,
+  });
+
+  @override
+  State<_SimilarPlaylistsView> createState() => _SimilarPlaylistsViewState();
+}
+
+class _SimilarPlaylistsViewState extends State<_SimilarPlaylistsView> {
+  List<KugouPlaylistBrief> _playlists = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final result = await KugouApiClient().getPlaylistSimilar(widget.gid);
+      debugPrint('[SimilarPL] gid=${widget.gid} rawResult=${result}');
+      final parsed = _parseSimilarList(result);
+      debugPrint('[SimilarPL] parsed=${parsed.length}');
+      if (parsed.isNotEmpty) {
+        debugPrint('[SimilarPL] first name=${parsed.first.name} id=${parsed.first.id} gid=${parsed.first.globalCollectionId}');
+      }
+      if (!mounted) return;
+      setState(() {
+        _playlists = parsed;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('[SimilarPL] error=$e');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '加载失败，请稍后重试';
+      });
+    }
+  }
+
+  /// 从 /playlist/similar 响应中自适应提取相似歌单列表。
+  ///
+  /// 实测返回结构：`data: [{ collection_list: [ { collection_name, flexible_cover,
+  /// global_collection_id, heat, ... }, ... ] }]`，需先解 `collection_list`，
+  /// 再用针对性的字段映射（而非 KugouPlaylistBrief.fromJson 的标准字段）。
+  List<KugouPlaylistBrief> _parseSimilarList(Map<String, dynamic>? r) {
+    if (r == null) return const [];
+    final d = r['data'];
+    List<dynamic> raw = const [];
+    if (d is Map<String, dynamic>) {
+      final list = d['collection_list'] ?? d['list'] ?? d['info'] ?? d['songs'] ?? d['data'];
+      if (list is List) raw = list;
+    } else if (d is List) {
+      raw = d;
+    }
+    final out = <KugouPlaylistBrief>[];
+    for (final e in raw) {
+      if (e is! Map<String, dynamic>) continue;
+      // 兼容 { collection_list: [...] } 的包装层
+      final cl = e['collection_list'];
+      if (cl is List) {
+        for (final item in cl) {
+          if (item is Map<String, dynamic>) {
+            final b = _mapSimilarPlaylist(item);
+            if (b != null) out.add(b);
+          }
+        }
+      } else {
+        final b = _mapSimilarPlaylist(e);
+        if (b != null) out.add(b);
+      }
+    }
+    return out;
+  }
+
+  /// 针对 /playlist/similar 单项字段的映射：collection_name / flexible_cover /
+  /// global_collection_id / songs（数量）。
+  KugouPlaylistBrief? _mapSimilarPlaylist(Map<String, dynamic> item) {
+    final gid = (item['global_collection_id'] ?? item['gid'] ?? '').toString();
+    if (gid.isEmpty) return null;
+    final name = (item['collection_name'] ?? item['name'] ?? item['specialname'] ?? '')
+        .toString()
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .trim();
+    if (name.isEmpty) return null;
+    int songCount = 0;
+    final songs = item['songs'];
+    if (songs is List) songCount = songs.length;
+    return KugouPlaylistBrief(
+      id: gid,
+      name: name,
+      coverUrl: _resolveSimilarCover(item['flexible_cover'] ?? item['cover'] ?? item['imgurl'] ?? item['sizable_cover']),
+      songCount: songCount,
+      globalCollectionId: gid,
+    );
+  }
+
+  /// 封面 URL：处理 `//` 协议相对路径与 `{size}` 占位符。
+  String? _resolveSimilarCover(dynamic v) {
+    if (v == null) return null;
+    var s = v.toString();
+    if (s.isEmpty) return null;
+    if (s.startsWith('//')) s = 'https:$s';
+    s = s.replaceAll('{size}', '200');
+    return s;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final cs = widget.colorScheme;
+    return Column(
+      children: [
+        // 拖动手柄
+        Container(
+          margin: const EdgeInsets.only(top: 12),
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(
+            color: cs.onSurfaceVariant.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        // 标题栏
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.auto_awesome, size: 20, color: cs.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Text(
+                '相似歌单',
+                style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        ),
+        Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.3)),
+        Expanded(child: _buildBody(cs, tt)),
+      ],
+    );
+  }
+
+  Widget _buildBody(ColorScheme cs, TextTheme tt) {
+    if (_loading) return const Center(child: MD3ELoadingIndicator());
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 48,
+              color: cs.onSurfaceVariant.withValues(alpha: 0.4),
+            ),
+            const SizedBox(height: 8),
+            Text(_error!, style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+            const SizedBox(height: 8),
+            TextButton(onPressed: _load, child: const Text('重试')),
+          ],
+        ),
+      );
+    }
+    if (_playlists.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.queue_music,
+              size: 48,
+              color: cs.onSurfaceVariant.withValues(alpha: 0.4),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '暂无相似歌单',
+              style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ],
+        ),
+      );
+    }
+    return ListView.builder(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemCount: _playlists.length,
+      itemBuilder: (context, i) {
+        final pl = _playlists[i];
+        final cleanName = pl.name.replaceAll(RegExp(r'<[^>]*>'), '');
+        return ListTile(
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: pl.coverUrl != null
+                  ? CachedNetworkImage(
+                      imageUrl: pl.coverUrl!,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, _, _) => _coverPlaceholder(cs),
+                    )
+                  : _coverPlaceholder(cs),
+            ),
+          ),
+          title: Text(cleanName, maxLines: 2, overflow: TextOverflow.ellipsis),
+          subtitle: pl.songCount > 0 ? Text('${pl.songCount} 首歌曲') : null,
+          onTap: () {
+            // 先取 navigator 再 pop，避免 pop 后使用已销毁的 context
+            final navigator = Navigator.of(context);
+            navigator.pop();
+            navigator.push(
+              MaterialPageRoute(
+                builder: (_) => PlaylistPage(playlist: pl.toPlaylist()),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _coverPlaceholder(ColorScheme cs) {
+    return Container(
+      color: cs.surfaceContainerHighest,
+      child: const Center(
+        child: Icon(Icons.queue_music, color: Colors.grey),
       ),
     );
   }
