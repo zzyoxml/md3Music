@@ -23,6 +23,7 @@ import 'modules/charts/charts_page.dart';
 import 'modules/ip/ip_page.dart';
 import 'modules/user/user_center_page.dart';
 import 'modules/user/favorites_page.dart';
+import 'modules/brush/brush_page.dart';
 
 import 'modules/player/full_player.dart';
 import 'modules/player/full_player_route.dart';
@@ -504,6 +505,9 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       case 'channel':
         page = const ChannelPage();
         break;
+      case 'brush':
+        page = const BrushPage();
+        break;
       case 'settings':
         page = const SettingsPage();
         break;
@@ -639,6 +643,15 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           ),
           label: tab.label,
         );
+      case 'brush':
+        return NavigationDestination(
+          icon: _AnimatedTabIcon(
+            selected: isSelected,
+            outlinedIcon: Icons.swipe_outlined,
+            filledIcon: Icons.swipe,
+          ),
+          label: tab.label,
+        );
       case 'settings':
         return NavigationDestination(
           icon: _AnimatedTabIcon(
@@ -749,6 +762,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
           selectedIcon: const Icon(Icons.dynamic_feed),
           label: Text(tab.label),
         );
+      case 'brush':
+        return NavigationRailDestination(
+          icon: const Icon(Icons.swipe_outlined),
+          selectedIcon: const Icon(Icons.swipe),
+          label: Text(tab.label),
+        );
       case 'settings':
         return NavigationRailDestination(
           icon: const Icon(Icons.settings_outlined),
@@ -848,6 +867,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDrawerDestination(
           icon: const Icon(Icons.dynamic_feed_outlined),
           selectedIcon: const Icon(Icons.dynamic_feed),
+          label: Text(tab.label),
+        );
+      case 'brush':
+        return NavigationDrawerDestination(
+          icon: const Icon(Icons.swipe_outlined),
+          selectedIcon: const Icon(Icons.swipe),
           label: Text(tab.label),
         );
       case 'settings':
@@ -1015,6 +1040,9 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         break;
       case 'channel':
         page = const ChannelPage();
+        break;
+      case 'brush':
+        page = const BrushPage();
         break;
       case 'settings':
         page = const SettingsPage();

@@ -42,6 +42,24 @@ pub fn signature_android_params(params: &Value, data: &[u8], is_buffer: bool) ->
     }
 }
 
+/// 标准版(非概念版) Android signature：盐用 OIlwieks28dk2k092lksi2UIkp。
+/// 刷刷(brush) feed 接口 appid=1005 需要，否则上游报 20006 签名错误。
+pub fn signature_android_params_standard(params: &Value, data: &[u8], is_buffer: bool) -> String {
+    const STANDARD_ROUTE: &str = "OIlwieks28dk2k092lksi2UIkp";
+    let params_string = params_joined_sorted(params);
+    if is_buffer {
+        md5_hex_4(
+            STANDARD_ROUTE.as_bytes(),
+            params_string.as_bytes(),
+            data,
+            STANDARD_ROUTE.as_bytes(),
+        )
+    } else {
+        let data_str = std::str::from_utf8(data).unwrap_or("");
+        md5_hex(format!("{}{}{}{}", STANDARD_ROUTE, params_string, data_str, STANDARD_ROUTE).as_bytes())
+    }
+}
+
 pub fn signature_web_params(params: &Value) -> String {
     let mut parts: Vec<String> = match params.as_object() {
         Some(m) => m
@@ -90,6 +108,12 @@ pub fn sign_params_key(data: &str, appid: &str, clientver: &str) -> String {
     let appid = if appid.is_empty() { "3116" } else { appid };
     let clientver = if clientver.is_empty() { "11440" } else { clientver };
     md5_hex(format!("{}{}{}{}", appid, SIGN_PARAMS_KEY_STR, clientver, data).as_bytes())
+}
+
+/// 刷刷(brush) feed 接口只认标准版(非概念版)签名：
+/// key = md5(1005 + 标准盐 + 20489 + data)，与 JS 标准版 signParamsKey(dateTime) 对齐。
+pub fn sign_params_key_standard(data: &str) -> String {
+    md5_hex(format!("1005{}20489{}", "OIlwieks28dk2k092lksi2UIkp", data).as_bytes())
 }
 
 /// signParams used by user_cloud etc.

@@ -84,6 +84,11 @@ const List<DesktopShortcutItem> kDesktopShortcutCandidates = [
     label: '频道',
     iconResource: 'ic_shortcut_channel',
   ),
+  DesktopShortcutItem(
+    id: 'brush',
+    label: '刷刷',
+    iconResource: 'ic_shortcut_brush',
+  ),
 ];
 
 /// 默认启用的快捷方式 id（与旧版写死的 3 个一致）。

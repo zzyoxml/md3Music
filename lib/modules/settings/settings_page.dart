@@ -2720,6 +2720,9 @@ IconData _tabIconForId(String tabId) {
     case 'channel':
       // 与主页 tab 图标保持一致（见 app.dart 的 channel case）
       return Icons.dynamic_feed;
+    case 'brush':
+      // 与主页 tab 图标保持一致（见 app.dart 的 brush case）
+      return Icons.swipe;
     case 'settings':
       // 与主页 tab 图标保持一致（见 app.dart 的 settings case）
       return Icons.settings;

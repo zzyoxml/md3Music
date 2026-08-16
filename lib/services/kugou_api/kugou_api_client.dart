@@ -2967,8 +2967,8 @@ class KugouApiClient {
 
   // ==================== Other ====================
 
-  Future<Map<String, dynamic>?> getBrush() async {
-    return await _get(KugouEndpoints.brush);
+  Future<Map<String, dynamic>?> getBrush({int page = 1}) async {
+    return await _get(KugouEndpoints.brush, queryParameters: {'page': page});
   }
 
   /// 根据专辑音乐 id（album_audio_id/MixSongID，可多个逗号分隔）获取 AI 推荐歌曲。
