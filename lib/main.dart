@@ -83,7 +83,8 @@ Future<void> main() async {
   // 服务器初始化可能耗时数秒 → 用户看到长时间启动画面/白屏。
   // 现在首帧立即渲染；发现页等首屏请求通过 KugouApiClient 的
   // serverReady 信号等待服务器就绪后再放行，不会因服务器未启动而失败。
-  if (!kIsWeb && Platform.isAndroid) {
+  // 桌面与 Android 都启动本地服务器（桌面走 dart:ffi 加载 kugou_server.dll）。
+  if (!kIsWeb) {
     unawaited(KugouApiServer.start().catchError((_) {}));
     unawaited(LocalHttpServer.instance.start().catchError((_) {}));
   }
@@ -206,6 +207,8 @@ void handleShortcut(String shortcutType) {
 Future<void> _requestPermissions() async {
   // Web 平台不支持 permission_handler，跳过所有权限请求
   if (kIsWeb) return;
+  // 桌面端无 Android 专属权限，跳过（permission_handler 桌面语义不同）
+  if (!Platform.isAndroid) return;
 
   // Android 13+ 通知权限
   if (await Permission.notification.isDenied) {
