@@ -32,6 +32,11 @@ set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE}")
 # Use Unicode for all projects.
 add_definitions(-DUNICODE -D_UNICODE)
 
+# 新 MSVC 会把 <experimental/coroutine>/<await> 的弃用告警升级为编译错误（STL1011），
+# 导致 permission_handler_windows 等插件编译失败。此处统一抑制该告警。
+# 注意：仅作用于 Windows 构建，不影响 Android 打包。
+add_compile_definitions(_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS)
+
 # Compilation settings that should be applied to most targets.
 #
 # Be cautious about adding new options here, as plugins use this function by
