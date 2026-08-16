@@ -13,6 +13,7 @@ import 'modules/recognition/floating_recognition_service.dart';
 import 'core/services/equalizer_service.dart';
 import 'core/services/local_http_server.dart';
 import 'core/services/lyricon_provider_service.dart';
+import 'core/services/listening_grade_service.dart';
 import 'core/services/media_notification_service.dart';
 import 'core/services/usb_audio_service.dart';
 import 'core/services/wakelock_service.dart';
@@ -72,6 +73,9 @@ Future<void> main() async {
   if (!kIsWeb && Platform.isAndroid) {
     UsbAudioService.instance.init();
   }
+
+  // 启动听歌等级：本地听歌时长累计 + 自动上报（内部按平台/登录态自行处理）
+  ListeningGradeService.instance.init();
 
   // P0: 本地 API 服务器与 DLNA 本地 HTTP 服务器改为后台启动（不阻塞 runApp）。
   // 之前 await KugouApiServer.start() 在首帧前完成，其中
@@ -133,6 +137,9 @@ Future<void> main() async {
 Future<void> _restoreLyricPushPref() async {
   try {
     final settings = SettingsRepository();
+    // 逐字歌词时间偏移：加载到内存缓存（播放页每帧读取），默认 0
+    await settings.getLyricTimeOffset();
+
     // 蓝牙歌词（独立开关）
     final btLyricEnabled = await settings.getBluetoothLyricEnabled();
     await DesktopLyricService.instance.setBluetoothLyricEnabled(btLyricEnabled);

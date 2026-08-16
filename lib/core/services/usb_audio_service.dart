@@ -22,6 +22,7 @@ class UsbAudioService {
       MethodChannel('com.md3music.premium/usb_audio');
 
   static const String _tag = 'UsbAudioService';
+  static const String _keyAutoDisableForMv = 'usb_auto_disable_for_mv';
 
   final StreamController<Map<String, dynamic>> _statusController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -83,6 +84,24 @@ class UsbAudioService {
     } catch (e) {
       _debug('setUsbVolume failed: $e');
     }
+  }
+
+  /// 「播放 MV 时自动关闭独占」开关（默认开启）：
+  /// USB 独占绕过 AudioFlinger，MV 播放无系统音频，开启后进入 MV 页自动关闭独占。
+  Future<bool> getAutoDisableForMv() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_keyAutoDisableForMv) ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> setAutoDisableForMv(bool value) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_keyAutoDisableForMv, value);
+    } catch (_) {}
   }
 
   void dispose() {

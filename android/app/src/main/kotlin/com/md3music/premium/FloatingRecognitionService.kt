@@ -25,6 +25,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import android.view.Gravity
 import android.view.MotionEvent
@@ -144,9 +146,20 @@ class FloatingRecognitionService : Service() {
         super.onCreate()
         instance = this
         createNotificationChannel()
-        // Android 14+：MediaProjection 要求前台服务运行时类型包含 mediaProjection，
-        // startForeground 必须显式声明该类型，否则 getMediaProjection 抛 SecurityException
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        // 先以 specialUse 类型启动前台服务（仅悬浮窗，不要求 MediaProjection 授权）。
+        // Android 14+ 若在授权前就以 mediaProjection 类型 startForeground，系统会检查
+        // PROJECT_MEDIA 权限——该权限须经 createScreenCaptureIntent 授权后才授予，
+        // 未授权时 Android 15+ 直接抛 SecurityException（"Starting FGS with type
+        // mediaProjection ... requires permissions ... PROJECT_MEDIA"）。
+        // 授权成功后由 promoteToMediaProjectionType() 切换为 mediaProjection 类型。
+        // Android 10~13 无此检查，可直接以 mediaProjection 类型启动。
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             startForeground(
                 NOTIFICATION_ID,
                 createNotification(),
@@ -423,12 +436,27 @@ class FloatingRecognitionService : Service() {
         val gd = closeZoneView?.background as? GradientDrawable ?: return
         // 拖入：背景 error 红高亮；移出：恢复深色
         gd.setColor(if (on) 0xE6B3261E.toInt() else 0xE61D1B20.toInt())
+        if (on) {
+            // 拖入关闭区域：轻微震动提示即将删除
+            vibrate(40, 120)
+        }
     }
 
     private fun resetCloseZoneHighlight() {
         isOverCloseZone = false
         val gd = closeZoneView?.background as? GradientDrawable ?: return
         gd.setColor(0xE61D1B20.toInt())
+    }
+
+    /// 震动反馈（API 26+ 用振幅，低版本回退 vibrate）。
+    private fun vibrate(durationMs: Long, amplitude: Int) {
+        val vibrator = getSystemService(VIBRATOR_SERVICE) as? Vibrator ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            vibrator.vibrate(VibrationEffect.createOneShot(durationMs, amplitude))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(durationMs)
+        }
     }
 
     /// 悬浮窗拖动中：判断悬浮窗底部是否进入关闭区域 → 高亮
@@ -476,7 +504,8 @@ class FloatingRecognitionService : Service() {
                     val shouldClose = isOverCloseZone
                     hideCloseZone()
                     if (shouldClose) {
-                        // 拖入底部关闭区域：关闭悬浮窗服务
+                        // 拖入底部关闭区域：震动反馈后关闭悬浮窗服务
+                        vibrate(120, 220)
                         stopSelf()
                         return@setOnTouchListener true
                     }
@@ -529,8 +558,28 @@ class FloatingRecognitionService : Service() {
         }
         projectionResultCode = resultCode
         projectionData = data
+        // 授权成功后把前台服务类型切换到 mediaProjection：Android 14+ 要求
+        // getMediaProjection 前 FGS 运行时类型包含 mediaProjection，且此时
+        // PROJECT_MEDIA 已由 createScreenCaptureIntent 授权授予，startForeground
+        // 才能通过校验（Android 15+ 必须在授权后切换，否则 SecurityException）。
+        promoteToMediaProjectionType()
         sendToDart("onProjectionResult", true)
         beginCaptureIfReady()
+    }
+
+    /// 把前台服务运行时类型从 specialUse 切换为 mediaProjection（授权成功后调用）。
+    private fun promoteToMediaProjectionType() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.UPSIDE_DOWN_CAKE) return
+        try {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+            Log.i(TAG, "promoteToMediaProjectionType: OK")
+        } catch (e: Exception) {
+            Log.e(TAG, "promoteToMediaProjectionType failed", e)
+        }
     }
 
     /// 授权就绪后开始采集（首次）；已采集时跳过

@@ -4,8 +4,11 @@ import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../core/services/wakelock_service.dart';
+import '../../core/services/pip_service.dart';
+import '../../core/services/usb_audio_service.dart';
 import '../../data/models/mv_models.dart';
 import '../../data/models/song.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/dlna_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
@@ -51,6 +54,12 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
   /// 标记 dispose 已执行，避免异步回调操作已释放的控制器。
   bool _disposed = false;
 
+  /// 当前设备是否支持画中画（Android 8.0+），决定是否显示画中画按钮。
+  bool _pipSupported = false;
+
+  /// 设置开关：是否按 Home 自动进入画中画（默认关闭，手动按钮不受影响）。
+  bool _autoPipEnabled = false;
+
   @override
   void initState() {
     super.initState();
@@ -63,7 +72,40 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
     // 监听投屏状态：投屏 MV 时暂停本地视频，停止投屏时恢复
     final dlna = context.read<DlnaProvider>();
     dlna.addListener(_onDlnaStateChanged);
+    // 监听画中画模式切换：进入后切到纯视频布局
+    PipService.instance.isPipMode.addListener(_onPipModeChanged);
+    PipService.instance.isSupported().then((supported) {
+      if (!mounted) return;
+      setState(() => _pipSupported = supported);
+    });
+    // 读取「自动画中画」开关：决定按 Home 是否自动进入（默认关闭）
+    SettingsRepository().getAutoPipEnabled().then((enabled) {
+      if (!mounted) return;
+      setState(() => _autoPipEnabled = enabled);
+      _syncPipActive();
+    });
+    // USB 独占开启时 MV 无系统音频：若开启「播放 MV 时自动关闭独占」则进入即关闭
+    _maybeAutoDisableUsbExclusive();
     _loadMv();
+  }
+
+  /// 进入 MV 播放时自动关闭 USB 独占（绕过 AudioFlinger，MV 无声），并 SnackBar 提示。
+  Future<void> _maybeAutoDisableUsbExclusive() async {
+    try {
+      if (!await UsbAudioService.instance.getAutoDisableForMv()) return;
+      if (!await UsbAudioService.instance.isEnabled()) return;
+      await UsbAudioService.instance.disableExclusive();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('已自动关闭 USB 独占输出，恢复系统音频'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (_) {
+      // 关闭失败不阻塞 MV 播放
+    }
   }
 
   @override
@@ -73,6 +115,9 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
     try {
       context.read<DlnaProvider>().removeListener(_onDlnaStateChanged);
     } catch (_) {}
+    // 移除画中画模式监听并取消「按 Home 自动进入画中画」标记
+    PipService.instance.isPipMode.removeListener(_onPipModeChanged);
+    PipService.instance.setVideoActive(false);
     WakelockService.instance.setVideoPlaying(false);
     _chewieController?.dispose();
     _controller?.dispose();
@@ -105,9 +150,46 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
     }
   }
 
-  /// 视频控制器状态变化回调：同步播放状态到屏幕常亮服务。
+  /// 视频控制器状态变化回调：同步播放状态到屏幕常亮服务 + 画中画自动进入标记。
   void _onVideoStateChanged() {
-    WakelockService.instance.setVideoPlaying(_controller?.value.isPlaying ?? false);
+    WakelockService.instance.setVideoPlaying(
+      _controller?.value.isPlaying ?? false,
+    );
+    _syncPipActive();
+  }
+
+  /// 按「自动画中画」开关与播放状态同步原生标记。
+  /// 开关关闭时恒传 false，保证按 Home 不会自动进入画中画。
+  void _syncPipActive() {
+    final controller = _controller;
+    final playing = controller?.value.isPlaying ?? false;
+    final aspectRatio = controller?.value.aspectRatio;
+    PipService.instance.setVideoActive(
+      _autoPipEnabled && playing,
+      aspectRatio: (aspectRatio != null && aspectRatio > 0) ? aspectRatio : null,
+    );
+  }
+
+  /// 画中画模式切换回调：进入后切到纯视频布局，并关闭屏幕常亮（允许息屏）。
+  void _onPipModeChanged() {
+    if (!mounted || _disposed) return;
+    final inPip = PipService.instance.isPipMode.value;
+    setState(() {});
+    if (inPip) {
+      // 画中画时关闭屏幕常亮，避免一直亮屏；退出画中画时按播放状态恢复
+      WakelockService.instance.setVideoPlaying(false);
+    } else {
+      WakelockService.instance.setVideoPlaying(
+        _controller?.value.isPlaying ?? false,
+      );
+    }
+  }
+
+  /// 手动进入画中画（仅支持设备显示按钮）。
+  void _enterPip() {
+    PipService.instance.enterPip();
+    // 手动进入与开关无关，但标记须遵循开关：关闭时退出画中画后按 Home 不会再次自动进入
+    _syncPipActive();
   }
 
   Future<void> _loadMv() async {
@@ -333,6 +415,10 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 画中画模式：只渲染纯视频（隐藏 AppBar 与其余 UI），窗口比例即视频比例
+    if (PipService.instance.isPipMode.value) {
+      return _buildPipBody();
+    }
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     return Scaffold(
@@ -431,9 +517,21 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
 
     final videoPlayer = Container(
       color: Colors.black,
-      child: _chewieController != null
-          ? Chewie(controller: _chewieController!)
-          : const Center(child: CircularProgressIndicator(color: Colors.white)),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _chewieController != null
+              ? Chewie(controller: _chewieController!)
+              : const Center(child: CircularProgressIndicator(color: Colors.white)),
+          // 画中画按钮：仅支持的设备、视频就绪且非画中画状态时显示（右上角）
+          if (_pipSupported && _chewieController != null)
+            Positioned(
+              top: 12,
+              right: 12,
+              child: _buildPipButton(),
+            ),
+        ],
+      ),
     );
 
     // 横屏：左 70% 视频 + 右 30% 清晰度&信息
@@ -465,6 +563,41 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
         const Divider(height: 1),
         _buildInfoSection(colorScheme, textTheme),
       ],
+    );
+  }
+
+  /// 画中画模式布局：纯视频铺满（无控件），点击画中画窗口即返回完整页面。
+  Widget _buildPipBody() {
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) {
+      return const ColoredBox(color: Colors.black);
+    }
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: controller.value.aspectRatio,
+          child: VideoPlayer(controller),
+        ),
+      ),
+    );
+  }
+
+  /// 画中画按钮：半透明圆形图标，点击进入画中画。
+  Widget _buildPipButton() {
+    return Material(
+      color: Colors.black.withValues(alpha: 0.6),
+      shape: const CircleBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: IconButton(
+        icon: const Icon(
+          Icons.picture_in_picture_alt,
+          color: Colors.white,
+          size: 20,
+        ),
+        tooltip: '画中画',
+        onPressed: _enterPip,
+      ),
     );
   }
 

@@ -7,6 +7,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../data/models/kugou_account.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
+import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
@@ -16,6 +17,7 @@ import 'cloud_music_page.dart';
 import 'downloads_page.dart';
 import 'listen_ranking_page.dart';
 import 'play_history_page.dart';
+import 'purchased_page.dart';
 import 'vip_status.dart';
 
 class UserCenterPage extends StatefulWidget {
@@ -40,6 +42,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
       if (kugou.isLoggedIn) {
         kugou.getVipDetail();
         kugou.getVipMonthRecord();
+        kugou.getGradeInfo();
       }
     });
   }
@@ -93,6 +96,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
             onRefresh: () async {
               await kugou.getVipDetail();
               await kugou.getVipMonthRecord();
+              await kugou.getGradeInfo();
             },
             child: CustomScrollView(
               controller: _scrollController,
@@ -227,6 +231,10 @@ class _UserCenterPageState extends State<UserCenterPage> {
                       ],
                     ),
                   ),
+                  if (kugou.gradeInfo != null) ...[
+                    const SizedBox(width: 12),
+                    _buildGradePill(cs, tt, kugou.gradeInfo!, kugou.unreportedSeconds),
+                  ],
                   Icon(Icons.chevron_right, color: cs.onPrimaryContainer),
                 ],
               ),
@@ -235,6 +243,91 @@ class _UserCenterPageState extends State<UserCenterPage> {
         ),
       ),
     );
+  }
+
+  /// 听歌等级胶囊：LV + 累计时长 + 未上报时长（≥5分钟显示）+ 升级进度
+  Widget _buildGradePill(
+    ColorScheme cs,
+    TextTheme tt,
+    KugouGradeInfo grade,
+    int unreportedSec,
+  ) {
+    final sec = grade.dSec ?? grade.duration ?? 0;
+    final gradeNum = grade.pGrade ?? 0;
+    final cur = (grade.pCurrentPoint ?? 0).toDouble();
+    final next = (grade.pNextGradePoint ?? 1).toDouble();
+    final progress = next > 0 ? (cur / next).clamp(0.0, 1.0) : 0.0;
+    final showUnreported = unreportedSec >= 300; // 5 分钟
+    return Container(
+      width: 116,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: cs.surface.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.graphic_eq, size: 13, color: cs.onPrimaryContainer),
+              const SizedBox(width: 3),
+              Text(
+                'LV.$gradeNum',
+                style: tt.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: cs.onPrimaryContainer,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            _formatGradeSeconds(sec),
+            style: tt.labelSmall?.copyWith(
+              color: cs.onPrimaryContainer.withValues(alpha: 0.75),
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (showUnreported) ...[
+            const SizedBox(height: 2),
+            Text(
+              '未上报 ${_formatGradeSeconds(unreportedSec)}',
+              style: tt.labelSmall?.copyWith(
+                fontSize: 10,
+                color: cs.error,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 3,
+              backgroundColor: cs.onPrimaryContainer.withValues(alpha: 0.15),
+              valueColor: AlwaysStoppedAnimation<Color>(cs.primary),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 秒数 → 可读时长，精确到分钟：X天Y小时Z分 / X小时Y分 / X分钟。
+  String _formatGradeSeconds(int sec) {
+    if (sec <= 0) return '0分钟';
+    final d = sec ~/ 86400;
+    final h = (sec % 86400) ~/ 3600;
+    final m = (sec % 3600) ~/ 60;
+    if (d > 0) return '$d天$h小时$m分';
+    if (h > 0) return '$h小时$m分';
+    return '$m分钟';
   }
 
   // ==================== 多账号管理 ====================
@@ -659,6 +752,11 @@ class _UserCenterPageState extends State<UserCenterPage> {
             _actionItem(cs, Icons.download, '下载', () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const DownloadsPage()),
+              );
+            }),
+            _actionItem(cs, Icons.shopping_bag_outlined, '已购', () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const PurchasedPage()),
               );
             }),
           ],

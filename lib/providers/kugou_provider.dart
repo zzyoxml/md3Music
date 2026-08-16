@@ -9,6 +9,7 @@ import '../data/models/kugou_account.dart';
 import '../data/models/playlist.dart';
 import '../data/models/song.dart';
 import '../data/repositories/settings_repository.dart';
+import '../core/services/listening_grade_service.dart';
 import '../services/stream_cache_manager.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import '../services/kugou_api/kugou_models.dart';
@@ -138,6 +139,7 @@ class KugouProvider extends ChangeNotifier {
   Map<String, dynamic>? _topAlbumData;
   Map<String, dynamic>? _topSongData;
   KugouUserVipDetail? _vipInfo;
+  KugouGradeInfo? _gradeInfo;
   Map<String, dynamic>? _vipMonthRecord;
   // 本地打卡兜底：服务端 /youth/month/vip/record 有时不及时返回当天记录，
   // 用本地集合保证“今天签到后日历立即打勾”，并持久化跨重启。
@@ -309,6 +311,10 @@ class KugouProvider extends ChangeNotifier {
   Map<String, dynamic>? get topAlbumData => _topAlbumData;
   Map<String, dynamic>? get topSongData => _topSongData;
   KugouUserVipDetail? get vipInfo => _vipInfo;
+  KugouGradeInfo? get gradeInfo => _gradeInfo;
+
+  /// 未上报（服务器未记账）的听歌时长（秒），来自本地累计服务
+  int get unreportedSeconds => ListeningGradeService.instance.unreportedSeconds;
   Map<String, dynamic>? get vipMonthRecord => _vipMonthRecord;
   Set<String> get localSignedDays => _localSignedDays;
   Map<String, dynamic>? get userHistoryData => _userHistoryData;
@@ -1106,6 +1112,7 @@ class KugouProvider extends ChangeNotifier {
     // 否则 getUserDetail 失败时 _userInfo 残留旧账号，用户中心顶部显示旧昵称。
     _userInfo = null;
     _vipInfo = null;
+    _gradeInfo = null;
     _vipMonthRecord = null;
     _qrKey = null;
     _qrData = null;
@@ -1167,6 +1174,7 @@ class KugouProvider extends ChangeNotifier {
     _qrKey = null;
     _qrData = null;
     _vipInfo = null;
+    _gradeInfo = null;
     _vipMonthRecord = null;
     _userHistoryData = null;
     _everydayHistory = null;
@@ -1199,6 +1207,7 @@ class KugouProvider extends ChangeNotifier {
       _qrKey = null;
       _qrData = null;
       _vipInfo = null;
+      _gradeInfo = null;
       _vipMonthRecord = null;
       _userHistoryData = null;
       _everydayHistory = null;
@@ -2017,6 +2026,26 @@ class KugouProvider extends ChangeNotifier {
       final r = await _apiClient.getUserVipDetail();
       if (r != null) {
         _vipInfo = r;
+        notifyListeners();
+      }
+    } catch (_) {}
+  }
+
+  /// 拉取听歌等级信息，并同步服务器累计时长到本地基准（避免上报被拒）。
+  Future<void> getGradeInfo() async {
+    try {
+      final r = await _apiClient.getGradeInfo();
+      if (r != null) {
+        _gradeInfo = KugouGradeInfo.fromJson(r);
+        // 打印服务器实际返回的 d_sec，用于确认服务器是否记账（排查用）
+        // ignore: avoid_print
+        print(
+          '[GradeQuery] server d_sec=${_gradeInfo?.dSec} grade=${_gradeInfo?.pGrade} point=${_gradeInfo?.pCurrentPoint}/${_gradeInfo?.pNextGradePoint}',
+        );
+        final serverDsec = _gradeInfo?.dSec;
+        if (serverDsec != null) {
+          ListeningGradeService.instance.resyncFromServer(serverDsec);
+        }
         notifyListeners();
       }
     } catch (_) {}

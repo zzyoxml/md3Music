@@ -232,28 +232,40 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
 
       if (fileBytes.isEmpty) return false;
 
-      // 提取原始 PCM 数据（44100Hz）
-      final rawPcm = _extractPcmFromWav(fileBytes);
-      print('[SongRecognition] fileBytes=${fileBytes.length}, rawPcm=${rawPcm.length} (${_recordSampleRate}Hz)');
+      // 优先用本地 Rust 服务器做 PCM 前处理（WAV 解析 + 降采样 + 增益归一化），
+      // 全程网络 IO + Rust 计算，不占用 UI isolate；服务器不可用时降级回 Dart 实现。
+      final rustResult = await processPcmWithRust(
+        input: fileBytes,
+        fromHz: _recordSampleRate,
+        toHz: _targetSampleRate,
+      );
+      Uint8List pcmData;
+      int maxAmplitude;
+      if (rustResult != null) {
+        pcmData = rustResult.pcm;
+        maxAmplitude = rustResult.maxAmplitude;
+        print('[SongRecognition] rust pcm: len=${pcmData.length} (${_targetSampleRate}Hz) maxAmp=$maxAmplitude');
+      } else {
+        // 降级：Dart 实现（原逻辑）
+        final rawPcm = _extractPcmFromWav(fileBytes);
+        print('[SongRecognition] fileBytes=${fileBytes.length}, rawPcm=${rawPcm.length} (${_recordSampleRate}Hz)');
+        pcmData = downsamplePcm(rawPcm, _recordSampleRate, _targetSampleRate);
+        print('[SongRecognition] dart pcm fallback: ${pcmData.length} bytes (${_targetSampleRate}Hz)');
+        maxAmplitude = computeMaxAmplitude(pcmData);
+        if (maxAmplitude >= kSilenceAmplitudeThreshold) {
+          pcmData = normalizeGain(pcmData, maxAmplitude);
+        }
+      }
 
-      // 降采样到 8000Hz
-      final pcmData = downsamplePcm(rawPcm, _recordSampleRate, _targetSampleRate);
-      print('[SongRecognition] downsampled: ${pcmData.length} bytes (${_targetSampleRate}Hz)');
-
-      // 检查音量
-      final maxAmplitude = computeMaxAmplitude(pcmData);
+      // 检查音量（静音段跳过）
       print('[SongRecognition] maxAmplitude=$maxAmplitude');
-      if (maxAmplitude < 100) {
+      if (maxAmplitude < kSilenceAmplitudeThreshold) {
         print('[SongRecognition] 本段为静音，跳过');
         return false;
       }
 
-      // 增益归一化：提升音量到目标振幅，改善指纹识别率
-      final normalizedPcm = normalizeGain(pcmData, maxAmplitude);
-      print('[SongRecognition] gain normalized, sending ${normalizedPcm.length} bytes');
-
       final api = KugouApiClient();
-      final response = await api.audioMatch(normalizedPcm);
+      final response = await api.audioMatch(pcmData);
 
       if (!mounted || !_isLooping) return false;
 

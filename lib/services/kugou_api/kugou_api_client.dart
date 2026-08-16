@@ -1762,7 +1762,7 @@ class KugouApiClient {
   Future<Map<String, dynamic>?> getPlaylistSimilar(String id) async {
     return await _get(
       KugouEndpoints.playlistSimilar,
-      queryParameters: {'id': id},
+      queryParameters: {'ids': id},
     );
   }
 
@@ -2549,6 +2549,24 @@ class KugouApiClient {
     }
   }
 
+  /// 查询/上报听歌等级信息（v2/lite 协议）。
+  /// [dSec]/[diffSec] 同时传入时进入上报模式（同步本地累计时长）；都为空时为查询。
+  /// noCache 默认 true：避免 Rust apicache 命中旧值（等级/时长需要实时）。
+  Future<Map<String, dynamic>?> getGradeInfo({
+    int? dSec,
+    int? diffSec,
+    bool noCache = true,
+  }) async {
+    final params = <String, dynamic>{};
+    if (dSec != null) params['d_sec'] = dSec;
+    if (diffSec != null) params['diff_sec'] = diffSec;
+    return await _get(
+      KugouEndpoints.userGradeInfo,
+      queryParameters: params,
+      noCache: noCache,
+    );
+  }
+
   Future<Map<String, dynamic>?> getUserPlaylist({
     int page = 1,
     int pagesize = 30,
@@ -2605,6 +2623,32 @@ class KugouApiClient {
   }) async {
     return await _get(
       KugouEndpoints.userCloud,
+      queryParameters: {'page': page, 'pagesize': pagesize},
+      noCache: noCache,
+    );
+  }
+
+  /// 获取用户已购单曲列表（需登录）。返回原始 JSON，由调用方自适应解析。
+  Future<Map<String, dynamic>?> getUserPurchasedSongs({
+    int page = 1,
+    int pagesize = 50,
+    bool noCache = false,
+  }) async {
+    return await _get(
+      KugouEndpoints.userPurchasedSongs,
+      queryParameters: {'page': page, 'pagesize': pagesize},
+      noCache: noCache,
+    );
+  }
+
+  /// 获取用户已购专辑列表（需登录）。返回原始 JSON，由调用方自适应解析。
+  Future<Map<String, dynamic>?> getUserPurchasedAlbums({
+    int page = 1,
+    int pagesize = 15,
+    bool noCache = false,
+  }) async {
+    return await _get(
+      KugouEndpoints.userPurchasedAlbums,
       queryParameters: {'page': page, 'pagesize': pagesize},
       noCache: noCache,
     );
@@ -2923,8 +2967,8 @@ class KugouApiClient {
 
   // ==================== Other ====================
 
-  Future<Map<String, dynamic>?> getBrush() async {
-    return await _get(KugouEndpoints.brush);
+  Future<Map<String, dynamic>?> getBrush({int page = 1}) async {
+    return await _get(KugouEndpoints.brush, queryParameters: {'page': page});
   }
 
   /// 根据专辑音乐 id（album_audio_id/MixSongID，可多个逗号分隔）获取 AI 推荐歌曲。

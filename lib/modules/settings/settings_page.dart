@@ -122,6 +122,9 @@ class _SettingsPageState extends State<SettingsPage>
   double _spectrumCurveOpacity = 1.0;
   // 频谱动态取色独立开关（默认关闭）：AM 播放器频谱颜色取封面主色 50/50 混合
   bool _spectrumDynamicColor = false;
+  // 设置搜索：输入框控制器 + 当前查询词
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
@@ -146,6 +149,7 @@ class _SettingsPageState extends State<SettingsPage>
   @override
   void dispose() {
     _sectionTransition.dispose();
+    _searchController.dispose();
     LyriconProviderService.instance.removeListener(_onLyriconStateChanged);
     DesktopLyricService.instance.removeListener(_onDesktopLyricChanged);
     super.dispose();
@@ -369,7 +373,11 @@ class _SettingsPageState extends State<SettingsPage>
                   )
                 : ListView(
                     children: [
-                      ..._buildCategoryEntries(colorScheme),
+                      _buildSearchField(colorScheme),
+                      if (_searchQuery.trim().isNotEmpty)
+                        ..._buildSearchResults(colorScheme)
+                      else
+                        ..._buildCategoryEntries(colorScheme),
                       const SizedBox(height: 32),
                     ],
                   ),
@@ -460,6 +468,152 @@ class _SettingsPageState extends State<SettingsPage>
           title: Text(title),
           trailing: const Icon(Icons.chevron_right, size: 20),
           onTap: () => _openSection(title),
+        ),
+    ];
+  }
+
+  /// 设置搜索索引：label 为展示名，aliases 为补充匹配词。
+  /// 命中后在总览页展示对应设置项，点击进入所属分类。
+  static const List<({String label, String category, String aliases})> _searchIndex = [
+    // 歌词
+    (label: '翻译歌词', category: '歌词', aliases: '翻译'),
+    (label: '罗马音歌词', category: '歌词', aliases: '罗马音 拼音'),
+    (label: '优先翻译', category: '歌词', aliases: '优先'),
+    (label: '解锁桌面歌词', category: '歌词', aliases: '桌面歌词 桌面'),
+    (label: '蓝牙歌词', category: '歌词', aliases: '蓝牙'),
+    (label: '锁屏歌词', category: '歌词', aliases: '锁屏'),
+    (label: '锁屏歌词字号', category: '歌词', aliases: '字号 大小'),
+    (label: '锁屏歌词粗细', category: '歌词', aliases: '粗细 加粗'),
+    (label: '歌词字体', category: '歌词', aliases: '字体'),
+    // 外观
+    (label: 'app 全局字体', category: '外观', aliases: '字体'),
+    (label: '主题色', category: '外观', aliases: '主题 颜色 换肤'),
+    (label: '使用系统主题色', category: '外观', aliases: '系统主题 壁纸 莫奈'),
+    (label: '封面动态取色', category: '外观', aliases: '动态取色 封面'),
+    (label: 'OLED 纯黑深色', category: '外观', aliases: 'oled 纯黑 深色 黑色'),
+    // 播放页样式
+    (label: '歌词双击跳转', category: '播放页样式', aliases: '双击 跳转'),
+    (label: '歌手写真背景轮播', category: '播放页样式', aliases: '写真 背景 轮播'),
+    (label: '写真背景透明度', category: '播放页样式', aliases: '写真 透明度'),
+    (label: '歌词高斯模糊', category: '播放页样式', aliases: '高斯模糊 模糊'),
+    (label: '歌词辉光效果', category: '播放页样式', aliases: '辉光 发光'),
+    (label: '背景动态流光', category: '播放页样式', aliases: '流光 背景'),
+    (label: '男女对唱歌词优化', category: '播放页样式', aliases: '对唱 男女'),
+    (label: '歌词省电模式', category: '播放页样式', aliases: '省电 限帧'),
+    (label: '歌词动态颜色', category: '播放页样式', aliases: '动态颜色 混色'),
+    (label: '音乐频谱环绕', category: '播放页样式', aliases: '频谱 环绕 可视化'),
+    (label: '频谱柱数量', category: '播放页样式', aliases: '频谱'),
+    (label: '频谱动态取色', category: '播放页样式', aliases: '频谱'),
+    (label: '频谱透明度', category: '播放页样式', aliases: '频谱'),
+    // 播放
+    (label: '默认音质', category: '播放', aliases: '音质 清晰度'),
+    (label: '均衡器', category: '播放', aliases: 'eq 均衡'),
+    (label: '自动领取 VIP', category: '播放', aliases: 'vip 会员 自动领取'),
+    (label: '暂停淡入淡出', category: '播放', aliases: '淡入淡出 渐变 音量'),
+    (label: '播放时保持屏幕常亮', category: '播放', aliases: '屏幕常亮 常亮 息屏'),
+    (label: '播放 MV 时自动画中画', category: '播放', aliases: '画中画 pip 悬浮'),
+    (label: 'MiniPlayer 滑动切歌', category: '播放', aliases: 'miniplaer 迷你播放条 滑动切歌 切歌'),
+    // 主页管理
+    (label: '主页 Tab 管理', category: '主页管理', aliases: 'tab 标签页 主页'),
+    // 桌面快捷方式
+    (label: '桌面快捷方式', category: '桌面快捷方式', aliases: '快捷方式 快捷 长按'),
+    // USB 独占
+    (label: 'USB 独占输出', category: 'USB 独占', aliases: 'usb dac 独占 音频'),
+    // 边听边存
+    (label: '启用边听边存', category: '边听边存', aliases: '边听边存 缓存 流量'),
+    (label: '缓存上限', category: '边听边存', aliases: '缓存 上限 大小'),
+    (label: '清理缓存', category: '边听边存', aliases: '缓存 清理'),
+    // 下载
+    (label: '下载目录', category: '下载', aliases: '下载 目录 路径'),
+    (label: '下载内嵌逐字歌词', category: '下载', aliases: '逐字歌词 歌词 内嵌'),
+    // 在线音乐
+    (label: '本地数据接口', category: '在线音乐', aliases: '接口 本地服务器 api 在线音乐'),
+    // 缓存与数据
+    (label: '清除缓存', category: '缓存与数据', aliases: '缓存 清除'),
+    (label: '数据迁移', category: '缓存与数据', aliases: '迁移 数据 修复'),
+    // 关于
+    (label: '新手教程', category: '关于', aliases: '教程 引导'),
+    (label: '用户协议', category: '关于', aliases: '协议 条款'),
+    (label: '免责声明', category: '关于', aliases: '免责'),
+    (label: '应用版本', category: '关于', aliases: '版本 检查更新'),
+    (label: '更新最新版本', category: '关于', aliases: '更新'),
+    (label: '开源许可', category: '关于', aliases: '开源 license 许可'),
+  ];
+
+  /// 按查询词过滤搜索索引（label + aliases 包含匹配）。
+  List<({String label, String category, String aliases})> _searchResults(
+    String query,
+  ) {
+    final q = query.trim().toLowerCase();
+    if (q.isEmpty) return const [];
+    return _searchIndex
+        .where((e) => '${e.label} ${e.aliases}'.toLowerCase().contains(q))
+        .toList();
+  }
+
+  /// 总览页顶部搜索框。
+  Widget _buildSearchField(ColorScheme colorScheme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (v) => setState(() => _searchQuery = v),
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: '搜索设置项',
+          prefixIcon: const Icon(Icons.search),
+          suffixIcon: _searchQuery.isEmpty
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () {
+                    _searchController.clear();
+                    setState(() => _searchQuery = '');
+                  },
+                ),
+          isDense: true,
+          filled: true,
+          fillColor: colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(28),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 搜索结果的设置项列表；无结果显示空态提示。
+  List<Widget> _buildSearchResults(ColorScheme colorScheme) {
+    final results = _searchResults(_searchQuery);
+    if (results.isEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 48),
+          child: Center(
+            child: Text(
+              '未找到「${_searchQuery.trim()}」相关设置',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      ];
+    }
+    return [
+      for (final r in results)
+        ListTile(
+          leading: const Icon(Icons.search, size: 20),
+          title: Text(r.label),
+          subtitle: Text('${r.category} ›'),
+          trailing: const Icon(Icons.chevron_right, size: 20),
+          onTap: () {
+            // 清空搜索后进入对应分类
+            _searchController.clear();
+            setState(() => _searchQuery = '');
+            _openSection(r.category);
+          },
         ),
     ];
   }
@@ -683,6 +837,8 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           trailing: Text('$_lockScreenLyricFontWeight'),
         ),
+        // 逐字歌词时间偏移（仅在线音乐生效）
+        const _LyricTimeOffsetTile(),
       ],
     );
   }
@@ -1607,6 +1763,24 @@ class _SettingsPageState extends State<SettingsPage>
             });
             _settingsRepository.setKeepScreenOn(value);
             WakelockService.instance.setSettingEnabled(value);
+          },
+        ),
+        // MV 画中画：按 Home 自动进入（手动按钮始终可用）
+        FutureBuilder<bool>(
+          future: SettingsRepository().getAutoPipEnabled(),
+          builder: (context, snapshot) {
+            final enabled = snapshot.data ?? false;
+            return SwitchListTile(
+              secondary: Icon(Icons.picture_in_picture_alt, color: colorScheme.primary),
+              title: const Text('播放 MV 时自动画中画'),
+              subtitle: const Text('播放 MV 视频时按 Home 键自动进入画中画，默认关闭'),
+              value: enabled,
+              onChanged: (v) async {
+                HapticFeedback.lightImpact();
+                await SettingsRepository().setAutoPipEnabled(v);
+                setState(() {});
+              },
+            );
           },
         ),
         SwitchListTile(
@@ -2546,6 +2720,9 @@ IconData _tabIconForId(String tabId) {
     case 'channel':
       // 与主页 tab 图标保持一致（见 app.dart 的 channel case）
       return Icons.dynamic_feed;
+    case 'brush':
+      // 与主页 tab 图标保持一致（见 app.dart 的 brush case）
+      return Icons.swipe;
     case 'settings':
       // 与主页 tab 图标保持一致（见 app.dart 的 settings case）
       return Icons.settings;
@@ -2880,6 +3057,150 @@ class _SettingsAmStylePreview extends StatelessWidget {
           color: color.withValues(alpha: opacity),
           borderRadius: BorderRadius.circular(4),
         ),
+      ),
+    );
+  }
+}
+
+/// 逐字歌词时间偏移设置（仅在线音乐生效）。
+///
+/// 滑块精调 ±1500ms，输入框支持 ±10000ms；正值 = 歌词延后显示。
+/// 修改即时写入 [SettingsRepository.lyricTimeOffsetMs] 内存缓存并持久化，
+/// 播放页每帧读取该缓存，无需重启即可生效。
+class _LyricTimeOffsetTile extends StatefulWidget {
+  const _LyricTimeOffsetTile();
+
+  @override
+  State<_LyricTimeOffsetTile> createState() => _LyricTimeOffsetTileState();
+}
+
+class _LyricTimeOffsetTileState extends State<_LyricTimeOffsetTile> {
+  static const int _sliderMin = -1500;
+  static const int _sliderMax = 1500;
+  static const int _limit = 10000;
+
+  final TextEditingController _controller = TextEditingController();
+  late int _offset;
+
+  @override
+  void initState() {
+    super.initState();
+    _offset = SettingsRepository.lyricTimeOffsetMs.value;
+    _controller.text = _offset.toString();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final v = await SettingsRepository().getLyricTimeOffset();
+    if (!mounted) return;
+    setState(() {
+      _offset = v;
+      _controller.text = v.toString();
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// 应用新偏移：更新 UI + 写内存缓存 + 持久化。
+  void _apply(int v) {
+    final clamped = v.clamp(-_limit, _limit);
+    setState(() {
+      _offset = clamped;
+      _controller.text = clamped.toString();
+    });
+    // ignore: discarded_futures
+    SettingsRepository().setLyricTimeOffset(clamped);
+  }
+
+  /// 从输入框提交：非法输入回退为当前值。
+  void _submitFromField() {
+    final v = int.tryParse(_controller.text.trim());
+    if (v == null) {
+      _controller.text = _offset.toString();
+      return;
+    }
+    _apply(v);
+  }
+
+  String _fmt(int v) => v > 0 ? '+$v ms' : '$v ms';
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.av_timer, size: 20, color: colorScheme.primary),
+              const SizedBox(width: 8),
+              Text(
+                '逐字歌词时间偏移',
+                style: textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                _fmt(_offset),
+                style: textTheme.labelLarge?.copyWith(
+                  color: colorScheme.primary,
+                ),
+              ),
+            ],
+          ),
+          Slider(
+            value: _offset.clamp(_sliderMin, _sliderMax).toDouble(),
+            min: _sliderMin.toDouble(),
+            max: _sliderMax.toDouble(),
+            divisions: (_sliderMax - _sliderMin) ~/ 50,
+            label: _fmt(_offset),
+            onChanged: (v) => _apply(v.round()),
+          ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '滑块精调 ±1500ms',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 120,
+                child: TextField(
+                  controller: _controller,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    signed: true,
+                  ),
+                  textAlign: TextAlign.end,
+                  style: textTheme.bodyMedium,
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    suffixText: 'ms',
+                    hintText: '0',
+                  ),
+                  onSubmitted: (_) => _submitFromField(),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '输入框支持 ±10000ms；正值 = 歌词延后显示，仅在线音乐生效',
+            style: textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
     );
   }

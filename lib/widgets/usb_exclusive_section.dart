@@ -104,6 +104,24 @@ class _UsbExclusiveSectionState extends State<UsbExclusiveSection> {
           value: enabled,
           onChanged: _loading ? null : _toggle,
         ),
+        // 播放 MV 时自动关闭独占（默认开启）：独占绕过 AudioFlinger，MV 无系统音频
+        FutureBuilder<bool>(
+          future: UsbAudioService.instance.getAutoDisableForMv(),
+          builder: (context, snapshot) {
+            final autoClose = snapshot.data ?? true;
+            return SwitchListTile(
+              secondary: Icon(Icons.movie_outlined, color: colorScheme.primary),
+              title: const Text('播放 MV 时自动关闭独占'),
+              subtitle: const Text('进入 MV 视频播放时自动关闭 USB 独占，恢复系统音频输出'),
+              value: autoClose,
+              onChanged: (v) async {
+                HapticFeedback.lightImpact();
+                await UsbAudioService.instance.setAutoDisableForMv(v);
+                if (mounted) setState(() {});
+              },
+            );
+          },
+        ),
         // 状态卡
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),

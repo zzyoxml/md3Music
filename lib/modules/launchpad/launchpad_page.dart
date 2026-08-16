@@ -156,6 +156,8 @@ class _LaunchPadPageState extends State<LaunchPadPage> {
         return Icons.landscape;
       case 'channel':
         return Icons.dynamic_feed;
+      case 'brush':
+        return Icons.swipe;
       case 'settings':
         return Icons.settings;
       default:

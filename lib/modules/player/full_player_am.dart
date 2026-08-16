@@ -1373,25 +1373,32 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               playerProvider.positionNotifier,
                               playerProvider,
                             ]),
-                            builder: (context, _) => AppleLyricsView(
-                              lines: _parsedLyrics,
-                              currentTimeMs: playerProvider
+                            builder: (context, _) {
+                              // 逐字歌词时间偏移（仅在线音乐生效）：渲染位置 = 播放位置 - 偏移
+                              final offset = (currentSong != null && currentSong.isOnline)
+                                  ? SettingsRepository.lyricTimeOffsetMs.value
+                                  : 0;
+                              final rawMs = playerProvider
                                   .positionNotifier
                                   .value
-                                  .inMilliseconds,
-                              isPlaying: playerProvider.isPlaying,
-                              forceDarkBackground: true,
-                              // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                              enableInterludeDots:
-                                  !_isLocalLrcLyricWithoutWordTiming(
-                                    currentSong,
-                                  ),
-                              doubleTapToJump: lyricDoubleTap,
-                              accentColor: _lyricAccentColor,
-                              onSeek: (ms) => playerProvider.seek(
-                                Duration(milliseconds: ms),
-                              ),
-                            ),
+                                  .inMilliseconds;
+                              return AppleLyricsView(
+                                lines: _parsedLyrics,
+                                currentTimeMs: rawMs > offset ? rawMs - offset : 0,
+                                isPlaying: playerProvider.isPlaying,
+                                forceDarkBackground: true,
+                                // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+                                enableInterludeDots:
+                                    !_isLocalLrcLyricWithoutWordTiming(
+                                      currentSong,
+                                    ),
+                                doubleTapToJump: lyricDoubleTap,
+                                accentColor: _lyricAccentColor,
+                                onSeek: (ms) => playerProvider.seek(
+                                  Duration(milliseconds: ms),
+                                ),
+                              );
+                            },
                           ),
                   ),
                 ),

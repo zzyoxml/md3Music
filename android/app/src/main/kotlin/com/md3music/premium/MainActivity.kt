@@ -2,12 +2,15 @@ package com.md3music.premium
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PictureInPictureParams
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.support.v4.media.session.MediaSessionCompat
+import android.util.Rational
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -24,11 +27,14 @@ class MainActivity : FlutterActivity() {
     private val MEDIA_STORE_CHANNEL = "com.md3music.premium/media_store"
     private val HOME_WIDGET_CHANNEL = "com.md3music.premium/home_widget"
     private val RECOGNITION_CHANNEL = "com.md3music.premium/floating_recognition"
+    private val PIP_CHANNEL = "com.md3music.premium/pip"
     private var pendingDesktopLyricAction: String? = null
     private var folderPickerResult: MethodChannel.Result? = null
     private var fontPickerResult: MethodChannel.Result? = null
     // 悬浮窗识曲 channel：MediaProjection 授权结果等原生→Dart 回调
     private var recognitionChannel: MethodChannel? = null
+    // MV 画中画 channel：原生→Dart 回调 onPipModeChanged
+    private var pipChannel: MethodChannel? = null
 
     companion object {
         private const val FOLDER_PICKER_REQUEST_CODE = 9999
@@ -42,6 +48,11 @@ class MainActivity : FlutterActivity() {
         @Volatile private var kugouApiService: KugouApiService? = null
         // 频谱插件引用，Activity 销毁时释放 Visualizer
         @Volatile private var spectrumPlugin: SpectrumPlugin? = null
+
+        // MV 画中画：Dart 端标记视频是否播放中（按 Home 自动进入画中画用）
+        @Volatile private var pipVideoActive = false
+        // MV 视频宽高比（宽/高），用于画中画窗口比例
+        @Volatile private var pipAspectRatio: Rational = Rational(16, 9)
 
         // 记录自定义插件已注册到的引擎：provideFlutterEngine 复用后台（headless）
         // 引擎时 configureFlutterEngine 会再次执行，若对同一引擎重复注册
@@ -590,6 +601,73 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // 注册 MV 画中画 MethodChannel：Dart 端进入画中画 / 标记视频播放中
+        // （API 26+ 才支持，低版本由 Dart 端隐藏入口）
+        val pipChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            PIP_CHANNEL
+        )
+        this.pipChannel = pipChannel
+        pipChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isPipSupported" -> {
+                    result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                }
+                "enterPip" -> {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                        result.error("UNSUPPORTED", "仅支持 Android 8.0 及以上", null)
+                    } else {
+                        enterPipMode()
+                        result.success(true)
+                    }
+                }
+                "setVideoActive" -> {
+                    val active = call.argument<Boolean>("active") ?: false
+                    val width = call.argument<Number>("width")?.toInt()
+                    val height = call.argument<Number>("height")?.toInt()
+                    if (width != null && height != null && width > 0 && height > 0) {
+                        pipAspectRatio = Rational(width, height)
+                    }
+                    pipVideoActive = active
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /// 以当前保存的视频宽高比进入画中画（API 26+）。
+    private fun enterPipMode() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (isInPictureInPictureMode) return
+        val params = PictureInPictureParams.Builder()
+            .setAspectRatio(pipAspectRatio)
+            .build()
+        enterPictureInPictureMode(params)
+    }
+
+    /// 画中画模式切换回调：通知 Dart 端切换到纯视频布局 / 恢复完整页面。
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        try {
+            pipChannel?.invokeMethod("onPipModeChanged", isInPictureInPictureMode)
+        } catch (_: Exception) {
+            // Flutter 引擎可能尚未就绪，忽略
+        }
+    }
+
+    /// 用户按 Home 离开当前页面：视频播放中自动进入画中画（MV 播放场景）。
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            pipVideoActive && !isInPictureInPictureMode
+        ) {
+            enterPipMode()
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -660,6 +738,8 @@ class MainActivity : FlutterActivity() {
         cachedEngine = null
         cachedChannel = null
         recognitionChannel = null
+        pipChannel = null
+        pipVideoActive = false
         super.onDestroy()
     }
 }

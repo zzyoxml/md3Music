@@ -53,6 +53,7 @@ const List<TabItem> kOptionalTabs = [
   TabItem(id: 'audiobook', label: '听书'),
   TabItem(id: 'scene', label: '场景音乐'),
   TabItem(id: 'channel', label: '频道'),
+  TabItem(id: 'brush', label: '刷刷'),
   TabItem(id: 'settings', label: '设置'),
 ];
 

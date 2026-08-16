@@ -1132,7 +1132,7 @@ class _FullPlayerState extends State<FullPlayer>
                           valueListenable: playerProvider.positionNotifier,
                           builder: (context, position, _) => LyricsView(
                             lyrics: _lyrics,
-                            position: position,
+                            position: _adjustedLyricPosition(position, currentSong),
                             doubleTapToJump: lyricDoubleTap,
                             onSeek: (duration) {
                               playerProvider.seek(duration);
@@ -1368,7 +1368,7 @@ class _FullPlayerState extends State<FullPlayer>
                                     builder: (context, position, _) =>
                                         LyricsView(
                                           lyrics: _lyrics,
-                                          position: position,
+                                          position: _adjustedLyricPosition(position, currentSong),
                                           doubleTapToJump: lyricDoubleTap,
                                           onSeek: (duration) {
                                             playerProvider.seek(duration);
@@ -1609,7 +1609,7 @@ class _FullPlayerState extends State<FullPlayer>
                                     builder: (context, position, _) =>
                                         LyricsView(
                                           lyrics: _lyrics,
-                                          position: position,
+                                          position: _adjustedLyricPosition(position, currentSong),
                                           doubleTapToJump: lyricDoubleTap,
                                           onSeek: (duration) {
                                             playerProvider.seek(duration);
@@ -2633,6 +2633,16 @@ class _FullPlayerState extends State<FullPlayer>
     final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
+  }
+
+  /// 逐字歌词时间偏移（仅在线音乐生效）：渲染位置 = 播放位置 - 偏移。
+  /// 每帧读取 [SettingsRepository.lyricTimeOffsetMs] 内存缓存，设置页修改即时生效。
+  Duration _adjustedLyricPosition(Duration position, Song? song) {
+    final offset = (song != null && song.isOnline)
+        ? SettingsRepository.lyricTimeOffsetMs.value
+        : 0;
+    final rawMs = position.inMilliseconds;
+    return Duration(milliseconds: rawMs > offset ? rawMs - offset : 0);
   }
 
   // MD3E v2: 下方 ActionBar 第 3 个按钮（封面）长按触发。

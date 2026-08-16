@@ -22,6 +22,10 @@ class SettingsRepository {
   static const String _keyUiScale = 'settings_ui_scale';
   // Pad 端网格页面列数偏好
   static const String _keyGridColumns = 'grid_columns';
+  // MV 画中画：按 Home 自动进入画中画（默认关闭，手动按钮不受影响）
+  static const String _keyAutoPip = 'settings_auto_pip';
+  // 逐字歌词时间偏移（ms，默认 0；仅在线音乐生效，正值 = 歌词延后显示）
+  static const String _keyLyricTimeOffset = 'lyric_time_offset_ms';
 
   /// 签到日历键：登录时按账号隔离（`settings_signed_days_$userid`），
   /// 未登录（游客）用全局键。
@@ -127,6 +131,37 @@ class SettingsRepository {
   Future<void> setAutoReceiveVip(bool autoReceive) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyAutoReceiveVip, autoReceive);
+  }
+
+  /// MV 画中画：按 Home 自动进入画中画是否开启（默认关闭）。
+  Future<bool> getAutoPipEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyAutoPip) ?? false;
+  }
+
+  Future<void> setAutoPipEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAutoPip, value);
+  }
+
+  /// 逐字歌词时间偏移（ms，内存缓存）。播放页每帧高频读取，
+  /// 用 ValueNotifier 避免重复异步读 SharedPreferences；设置页修改后即时生效。
+  static final ValueNotifier<int> lyricTimeOffsetMs = ValueNotifier<int>(0);
+
+  /// 读取逐字歌词时间偏移（限制 ±10000ms，默认 0）。
+  Future<int> getLyricTimeOffset() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = (prefs.getInt(_keyLyricTimeOffset) ?? 0).clamp(-10000, 10000);
+    lyricTimeOffsetMs.value = v;
+    return v;
+  }
+
+  /// 保存逐字歌词时间偏移（限制 ±10000ms），并同步内存缓存。
+  Future<void> setLyricTimeOffset(int v) async {
+    final clamped = v.clamp(-10000, 10000);
+    lyricTimeOffsetMs.value = clamped;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyLyricTimeOffset, clamped);
   }
 
   /// 读取用户配置的自定义下载目录。
