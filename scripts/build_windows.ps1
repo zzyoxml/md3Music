@@ -48,7 +48,10 @@ Write-Step '检测 Visual Studio（Flutter Windows 构建必需）'
 $vsWhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
 $vsInstalled = $false
 if (Test-Path $vsWhere) {
-    $vsInstalled = (& $vsWhere -latest -property installationPath 2>$null) -ne $null
+    # 注意：必须带 `-products *`，否则 vswhere 默认只匹配 Visual Studio IDE 实例，
+    # 只装了 Build Tools（无 IDE）时会返回空 → 误判"未安装 VS"导致打包中止。
+    # 本机即只装了 VS 2022 Build Tools，无 -products * 一定失败。
+    $vsInstalled = (& $vsWhere -latest -products * -property installationPath 2>$null)
 }
 if (-not $vsInstalled) {
     Write-Host @"
