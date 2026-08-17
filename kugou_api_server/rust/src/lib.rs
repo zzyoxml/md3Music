@@ -68,6 +68,8 @@ pub extern "C" fn get_server_port() -> c_int {
 
 /// Java_com_md3music_premium_KugouApiService_nativeStartNode(JNIEnv*, jobject, jint port, jstring dataDir)
 /// port==0 表示随机选端口。返回实际监听端口（0=失败）。
+/// 仅 Android 构建导出（桌面用纯 C FFI，不编译 JNI 符号）。
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "system" fn Java_com_md3music_premium_KugouApiService_nativeStartNode(
     mut env: jni::JNIEnv,
@@ -86,6 +88,7 @@ pub extern "system" fn Java_com_md3music_premium_KugouApiService_nativeStartNode
 }
 
 /// Java_com_md3music_premium_KugouApiService_nativeIsNodeRunning(JNIEnv*, jobject)
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "system" fn Java_com_md3music_premium_KugouApiService_nativeIsNodeRunning(
     _env: jni::JNIEnv,
@@ -99,6 +102,7 @@ pub extern "system" fn Java_com_md3music_premium_KugouApiService_nativeIsNodeRun
 }
 
 /// Java_com_md3music_premium_KugouApiService_nativeStopNode(JNIEnv*, jobject)
+#[cfg(target_os = "android")]
 #[no_mangle]
 pub extern "system" fn Java_com_md3music_premium_KugouApiService_nativeStopNode(
     _env: jni::JNIEnv,

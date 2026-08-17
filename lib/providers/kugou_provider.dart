@@ -50,6 +50,18 @@ class PhoneLoginResult {
   const PhoneLoginResult(this.status);
 }
 
+/// 账号切换结果（含登录态过期检测）。
+enum SwitchAccountResult {
+  /// 切换成功
+  success,
+
+  /// 目标账号凭证缺失/不完整，切换失败
+  noCredentials,
+
+  /// 目标账号凭证已切换，但 token 已失效（登录过期）
+  tokenExpired,
+}
+
 class KugouProvider extends ChangeNotifier {
   final KugouApiClient _apiClient = KugouApiClient();
 
@@ -1161,11 +1173,11 @@ class KugouProvider extends ChangeNotifier {
   /// 已保存的账号列表（供「账号管理」UI 展示）。
   List<KugouAccount> get savedAccounts => _apiClient.savedAccounts;
 
-  /// 切换到指定账号：切换内存凭证 + 重载该账号的用户信息与签到日历。
-  /// 返回是否切换成功。
-  Future<bool> switchAccount(String userid) async {
+  /// 切换到指定账号：切换内存凭证 + 检查登录态是否过期 + 重载该账号的用户信息与签到日历。
+  /// 返回切换结果（[SwitchAccountResult.tokenExpired] 表示凭证已切换但登录已过期）。
+  Future<SwitchAccountResult> switchAccount(String userid) async {
     final ok = await _apiClient.switchToUser(userid);
-    if (!ok) return false;
+    if (!ok) return SwitchAccountResult.noCredentials;
 
     _isLoggedIn = _apiClient.isLoggedIn;
 
@@ -1187,12 +1199,21 @@ class KugouProvider extends ChangeNotifier {
     await _loadLocalSignedDays();
 
     if (_isLoggedIn) {
+      // 检查目标账号登录态是否过期（token 已切换到该账号，直接校验）。
+      // 过期时仍在账号列表标记「登录已过期」，由 UI 引导重新登录/删除。
+      final valid = await _apiClient.checkTokenValid();
+      if (!valid) {
+        await _apiClient.markAccountExpired(userid);
+        print('⚠️ [Account] 账号 $userid 登录已过期');
+        notifyListeners();
+        return SwitchAccountResult.tokenExpired;
+      }
       await _fetchUserInfo();
     }
 
     print('✅ [Account] 已切换到账号: $userid');
     notifyListeners();
-    return true;
+    return SwitchAccountResult.success;
   }
 
   /// 删除指定账号。若删除的是当前账号，自动切换到最近登录的其他账号；

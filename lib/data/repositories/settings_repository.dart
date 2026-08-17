@@ -670,6 +670,22 @@ class SettingsRepository {
     await prefs.setStringList(_keyHiddenDesktopShortcuts, hidden.toList());
   }
 
+  // ===== 收藏歌单排序 =====
+  static const String _keySortCollectedByLatestClick =
+      'settings_sort_collected_by_latest_click';
+
+  /// 收藏页歌单是否按「最近点击」排序（默认开启）。
+  /// 开启：最近点击的歌单排最前；关闭：按服务端返回顺序排列。
+  Future<bool> getSortCollectedByLatestClick() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keySortCollectedByLatestClick) ?? true;
+  }
+
+  Future<void> setSortCollectedByLatestClick(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keySortCollectedByLatestClick, value);
+  }
+
   // ===== Pad 端网格列数 =====
 
   /// 读取 Pad 端网格页面列数偏好，默认 4。

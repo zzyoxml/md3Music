@@ -517,7 +517,7 @@ class KugouSongDetail {
             json['Hash128'] ??
             json['trans_param']?['ogg_128_hash'],
       ),
-      lyrics: _strNull(json['lyrics'] ?? json['Lyrics']),
+      lyrics: _strNull(json['lyrics'] ?? json['Lyrics'] ?? json['Lyric']),
       albumAudioId: _strNull(
         json['album_audio_id'] ??
             json['AlbumAudioID'] ??

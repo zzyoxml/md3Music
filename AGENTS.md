@@ -86,38 +86,39 @@ md3Music/
 
 ## 3. 构建流程
 
-### 3.1 完整构建顺序（CI / 手动发布）
+### 3.1 完整构建顺序（Windows 本机 / CI）
+
+> **Windows 本机（推荐）**：本机未装 MSVC（缺 `link.exe`），用 GNU toolchain + MinGW 作为 host 编译器。一键脚本 `scripts/build_android.ps1` 已封装全部流程。
 
 ```
 步骤 1: 构建 Rust 服务器 cdylib（修改 rust/src 后必须执行）
-   └── cd kugou_api_server/rust
-       一键脚本（推荐，自动定位 NDK、交叉编译 4 ABI 并覆盖 jniLibs）：
-           ./build_android.sh
-           # 可选：--no-copy 只编译；--debug 调试构建；--out=<目录> 自定义复制目标；--host 额外编译主机 release
-       主机：cargo build --release
-            → target/release/libkugou_server.so
-       安卓（交叉编译，4 个 ABI）：
-           cargo build --target aarch64-linux-android --release
-           cargo build --target armv7-linux-androideabi --release
-           cargo build --target i686-linux-android --release
-           cargo build --target x86_64-linux-android --release
-       每个 ABI 需要 NDK 链接器（见 4.1），产物：
-           → target/{target}/release/libkugou_server.so
+   └── 一键脚本（推荐，Windows 本机用 PowerShell 脚本）：
+           .\scripts\build_android.ps1
+           # 参数：-ForceRust 强制重编；-SkipFlutter 只更新 .so 不打 APK；-NdkPath 手动指定 NDK
+       脚本会自动：
+           1. 检测 Rust 代码是否有改动（git status + .so 时间戳比对）
+           2. 有改动 → 交叉编译 3 个 ABI（arm64-v8a / armeabi-v7a / x86_64，不含 x86）
+           3. 覆盖 android/app/src/main/jniLibs/
+           4. 无改动 → 跳过 Rust 编译，直接打包
 
-步骤 2: 复制到 jniLibs
-   └── 4 个 ABI 的 .so 复制到 android/app/src/main/jniLibs/{abi}/libkugou_server.so
-
-步骤 3: Flutter 构建
-   └── flutter build apk --release --split-per-abi
+步骤 2: Flutter 构建（由脚本自动执行，或手动）
+   └── flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm,android-x64
        → build/app/outputs/flutter-apk/app-{abi}-release.apk
 ```
 
-### 3.2 开发时快速迭代
+> **CI（Ubuntu GitHub Actions）**：使用 `kugou_api_server/rust/build_android.sh`（Linux shell 版，4 ABI），环境见 3.4。
 
-```bash
+### 3.2 开发时快速迭代（Windows 本机）
+
+```powershell
 # 只修改了 rust/src/ 下的代码时：
-cd kugou_api_server/rust && cargo build --release   # 主机验证编译
-# 修改安卓侧行为（JNI 符号等）后需交叉编译并复制 .so，再：
+# 本机无 MSVC，需用 GNU toolchain 验证编译：
+$env:CC_x86_64_pc_windows_gnu = "C:\Program Files (x86)\Dev-Cpp\MinGW64\bin\gcc.exe"
+$env:AR_x86_64_pc_windows_gnu = "C:\Program Files (x86)\Dev-Cpp\MinGW64\bin\ar.exe"
+cd kugou_api_server/rust && cargo +stable-x86_64-pc-windows-gnu check --release
+# 或：cargo +stable-x86_64-pc-windows-gnu build --release（产出 host 版 .so）
+
+# 交叉编译并覆盖 jniLibs 后，再运行：
 flutter run
 
 # 只改 Dart/Android/Kotlin 代码时：
@@ -126,10 +127,12 @@ flutter run
 
 ### 3.3 测试
 
-```bash
+```powershell
 cd kugou_api_server/rust
-cargo test        # 本地冒烟：404/CORS/RSA 常量解析 + 路由 dispatch 断言
-cargo clippy      # 静态检查（勿引入新 error）
+$env:CC_x86_64_pc_windows_gnu = "C:\Program Files (x86)\Dev-Cpp\MinGW64\bin\gcc.exe"
+$env:AR_x86_64_pc_windows_gnu = "C:\Program Files (x86)\Dev-Cpp\MinGW64\bin\ar.exe"
+cargo +stable-x86_64-pc-windows-gnu test        # 本地冒烟：404/CORS/RSA 常量解析 + 路由 dispatch 断言
+cargo +stable-x86_64-pc-windows-gnu clippy      # 静态检查（勿引入新 error）
 ```
 
 ### 3.4 CI 流程（`.github/workflows/ci.yml`）
@@ -147,19 +150,25 @@ cargo clippy      # 静态检查（勿引入新 error）
 
 **问题**：`ureq` 的 TLS 依赖 `ring`，其 build script 按裸命令名找 C 编译器（`aarch64-linux-android-clang`），而 NDK 只提供带 API 级别的 `aarch64-linux-android21-clang`；且它是以 shell 包装脚本形式存在，**不能**被 symlink 到别的目录（脚本用 `dirname $0` 定位 `clang`）。
 
-**解决**：通过环境变量显式指定 CC/AR/链接器为 NDK 完整路径（配合 `cargo build --target`）：
+**解决（Windows 本机，以 `scripts/build_android.ps1` 为准）**：通过环境变量显式指定 CC/AR/链接器为 NDK 完整路径。注意：
 
-```bash
-NDK=~/Android/Sdk/ndk/28.2.13676358
-BIN=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
-env CC_aarch64_linux_android=$BIN/aarch64-linux-android21-clang \
-    AR_aarch64_linux_android=$BIN/llvm-ar \
-    CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER=$BIN/aarch64-linux-android21-clang \
-    cargo build --target aarch64-linux-android --release
+- **linker 统一用 `clang.exe`** + `RUSTFLAGS` 的 `--target` 带 API 级别，而非把 per-ABI clang 直接当 linker（旧版 AGENTS.md 此处有误）。
+- **CC_<target> 的是 `.cmd` 包装脚本**（如 `aarch64-linux-android21-clang.cmd`），不是 clang.exe 本身。
+- **交叉编译 3 个 ABI**（不含 `i686-linux-android`），mapping 如下：
+
+```powershell
+# 以 arm64-v8a 为例，完整逻辑见 scripts/build_android.ps1 L141-148：
+$NDK = "C:\Users\32732\AppData\Local\Android\Sdk\ndk\28.2.13676358"
+$BIN = "$NDK\toolchains\llvm\prebuilt\windows-x86_64\bin"
+$env:CC_aarch64_linux_android = "$BIN\aarch64-linux-android21-clang.cmd"  # .cmd 包装
+$env:AR_aarch64_linux_android = "$BIN\llvm-ar.exe"
+$env:CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER = "$BIN\clang.exe"         # 统一 clang.exe
+$env:RUSTFLAGS = "-C link-arg=--target=aarch64-linux-android21 -C link-arg=-fuse-ld=lld"
+cargo +stable-x86_64-pc-windows-gnu build --target aarch64-linux-android --release
 ```
 
 - CC/AR 用小写目标名（cc-rs 读取 `CC_<target>`，target 用下划线）；cargo 的 linker 变量**必须大写**（`CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER`），小写会被静默忽略。
-- 各 target 对应 linker：`aarch64-linux-android21-clang` / `armv7a-linux-androideabi21-clang` / `i686-linux-android21-clang` / `x86_64-linux-android21-clang`，AR 统一用 `llvm-ar`。
+- 各 target 对应的 clang 前缀：`aarch64-linux-android21-clang` / `armv7a-linux-androideabi21-clang` / `x86_64-linux-android21-clang`，AR 统一用 `llvm-ar.exe`。
 - 验证产物：`file target/{target}/release/libkugou_server.so` 应为 `for Android 21`。
 - 导出符号核对：`llvm-nm -D --defined-only libkugou_server.so` 应含 `start_server`/`stop_server`/`is_server_running`/`get_server_port` + 3 个 `Java_com_md3music_md3music_KugouApiService_*`。
 
@@ -259,23 +268,24 @@ env CC_aarch64_linux_android=$BIN/aarch64-linux-android21-clang \
 
 ## 6. 常用命令
 
-```bash
-# Rust 服务器构建 / 测试
+```powershell
+# Rust 服务器构建 / 测试（本机无 MSVC，需用 GNU toolchain）
 cd kugou_api_server/rust
-cargo build                     # 编译检查
-cargo test                      # 本地冒烟测试
-cargo clippy                    # 静态检查
-cargo build --release           # 主机 release cdylib
+$env:CC_x86_64_pc_windows_gnu = "C:\Program Files (x86)\Dev-Cpp\MinGW64\bin\gcc.exe"
+$env:AR_x86_64_pc_windows_gnu = "C:\Program Files (x86)\Dev-Cpp\MinGW64\bin\ar.exe"
+cargo +stable-x86_64-pc-windows-gnu check              # 编译检查
+cargo +stable-x86_64-pc-windows-gnu test                # 本地冒烟测试
+cargo +stable-x86_64-pc-windows-gnu clippy              # 静态检查
+cargo +stable-x86_64-pc-windows-gnu build --release     # 主机 release cdylib
 
-# 交叉编译（4 ABI，见 4.1 的完整 env 前缀）
-cargo build --target aarch64-linux-android --release   # 复制到 jniLibs/arm64-v8a
-cargo build --target armv7-linux-androideabi --release # jniLibs/armeabi-v7a
-cargo build --target i686-linux-android --release      # jniLibs/x86
-cargo build --target x86_64-linux-android --release    # jniLibs/x86_64
+# 交叉编译 + 打包（一键脚本，推荐）
+.\scripts\build_android.ps1                             # 智能检测 + 打包
+.\scripts\build_android.ps1 -ForceRust                  # 强制重编 Rust + 打包
+.\scripts\build_android.ps1 -SkipFlutter                # 只更新 .so
 
 # 日常开发
 flutter run                               # 调试运行
-flutter build apk --release --split-per-abi  # 发布构建
+flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm,android-x64  # 发布构建（排除 x86）
 
 # 测试 API（需先启动 App / 本地服务器）
 powershell -File scripts\test_api.ps1     # 测试本地 API 接口
@@ -322,7 +332,7 @@ flutter analyze                           # Dart 静态分析
 - 修复关注/取消关注歌手 userid 读取（`param_or_cookie_num`），Rust 与旧 Node 行为对齐
 - Kotlin：`NodeJsService` → `KugouApiService`；Dart：`nodejs_server` → `kugou_server`（MethodChannel `com.md3music.md3music/kugou_api` + dart:ffi 兜底）
 - jniLibs 提交 4 ABI（arm64-v8a、armeabi-v7a、x86、x86_64）的 `libkugou_server.so`；移除 `cpp/` CMake 原生构建
-- 新增一键交叉编译脚本 `kugou_api_server/rust/build_android.sh`
+- 新增一键交叉编译脚本 `scripts/build_android.ps1`（Windows 本机 PowerShell 版，自动检测改动、定位 NDK、交叉编译 3 ABI 并打包；`kugou_api_server/rust/build_android.sh` 为 Linux/CI 版）
 - 附带前端改动：`apple_lyrics_view.dart` / `word_renderer.dart` 重构、`full_player.dart` 精简、登录页/收藏页小改
 
 **相关命令**：见本文档 3、6 节；新增 API 模块统一在 `kugou_api_server/rust/src/modules/` 下实现（勿再改 `module/` 下旧 JS 模块）。

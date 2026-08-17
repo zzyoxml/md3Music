@@ -32,7 +32,7 @@ class KugouApiServer {
   static IsRunning? _isRunningFn;
 
   static Future<void> start() async {
-    if (_started || kIsWeb || !Platform.isAndroid) return;
+    if (_started || kIsWeb) return;
 
     // P0: 并发调用去重。main() 后台启动与 player_provider 播放前兜底
     // 可能同时触发 start()；此前 await getApplicationSupportDirectory()
@@ -54,7 +54,8 @@ class KugouApiServer {
         print('dart:ffi start failed, falling back to MethodChannel: $e');
       }
 
-      // FFI 失败再尝试 MethodChannel（JNI 方式）
+      // MethodChannel（JNI 方式）仅 Android 有该通道，桌面直接返回
+      if (!Platform.isAndroid) return;
       for (int attempt = 0; attempt < 2; attempt++) {
         try {
           final port = await _channel.invokeMethod<int>('startServer');
@@ -77,8 +78,16 @@ class KugouApiServer {
     _startFuture = null;
   }
 
+  /// 返回当前平台的原生库文件名（桌面与 Android 命名不同）。
+  static String _libraryName() {
+    if (Platform.isWindows) return 'kugou_server.dll';
+    if (Platform.isLinux) return 'libkugou_server.so';
+    if (Platform.isMacOS) return 'libkugou_server.dylib';
+    return 'libkugou_server.so'; // Android
+  }
+
   static DynamicLibrary _loadLib() {
-    _lib ??= DynamicLibrary.open('libkugou_server.so');
+    _lib ??= DynamicLibrary.open(_libraryName());
     return _lib!;
   }
 
@@ -164,7 +173,7 @@ class KugouApiServer {
   /// Android 直接划掉应用时进程会被系统 kill，线程随之终止；这里保证温和退出
   /// （确认退出 / Activity 销毁）场景能确定性关停。
   static Future<void> stop() async {
-    if (kIsWeb || !Platform.isAndroid) return;
+    if (kIsWeb) return;
 
     // 优先用 FFI 停止（不依赖 JNI 符号）
     try {
@@ -178,7 +187,8 @@ class KugouApiServer {
       print('KugouApiServer FFI stop error: $e');
     }
 
-    // FFI 失败再试 MethodChannel
+    // MethodChannel 兜底仅 Android 可用
+    if (!Platform.isAndroid) return;
     try {
       await _channel.invokeMethod('stopServer');
     } catch (e) {

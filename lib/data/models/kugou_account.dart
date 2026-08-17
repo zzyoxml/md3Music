@@ -14,11 +14,16 @@ class KugouAccount {
   /// 最近登录时间（epoch 秒）。
   final int loginTime;
 
+  /// 该账号的登录态是否已过期（切换时校验 token 发现失效）。
+  /// 过期账号在账号管理列表显示「登录已过期」，重新登录成功后被清除。
+  final bool expired;
+
   KugouAccount({
     required this.userid,
     this.nickname,
     this.avatar,
     required this.loginTime,
+    this.expired = false,
   });
 
   factory KugouAccount.fromJson(Map<String, dynamic> json) {
@@ -27,6 +32,7 @@ class KugouAccount {
       nickname: json['nickname']?.toString(),
       avatar: json['avatar']?.toString(),
       loginTime: json['loginTime'] is int ? json['loginTime'] as int : 0,
+      expired: json['expired'] == true,
     );
   }
 
@@ -35,14 +41,21 @@ class KugouAccount {
         'nickname': nickname,
         'avatar': avatar,
         'loginTime': loginTime,
+        'expired': expired,
       };
 
-  KugouAccount copyWith({String? nickname, String? avatar, int? loginTime}) {
+  KugouAccount copyWith({
+    String? nickname,
+    String? avatar,
+    int? loginTime,
+    bool? expired,
+  }) {
     return KugouAccount(
       userid: userid,
       nickname: nickname ?? this.nickname,
       avatar: avatar ?? this.avatar,
       loginTime: loginTime ?? this.loginTime,
+      expired: expired ?? this.expired,
     );
   }
 
