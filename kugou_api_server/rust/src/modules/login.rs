@@ -584,7 +584,7 @@ pub fn handle_token(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleRespon
     m.insert("clienttime_ms".into(), json!(date_now));
     m.insert("dev".into(), json!(c_str(q, "KUGOU_API_DEV")));
     let mut res = forward(
-        q, ctx, "POST", "/v5/login_by_token", Some("http://login.user.kugou.com"),
+        q, ctx, "POST", "/v5/login_by_token", Some("https://login.user.kugou.com"),
         None, Some(Value::Object(m)), "android", &[], false, false,
     )?;
     let mut body = res.body.to_json();

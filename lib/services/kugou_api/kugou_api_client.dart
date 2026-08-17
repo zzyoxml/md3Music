@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -367,6 +368,8 @@ class KugouApiClient {
     _initCompleter = Completer<void>();
     try {
       final prefs = await SharedPreferences.getInstance();
+      // 敏感凭证（token/vip_token）从加密存储（Android Keystore）读取
+      const secure = FlutterSecureStorage();
 
       // 读取已保存的账号列表（多账号）
       _accounts
@@ -377,14 +380,28 @@ class KugouApiClient {
       final currentUserid = prefs.getString('kugou_current_userid');
 
       if (currentUserid != null && currentUserid.isNotEmpty) {
-        // 从用户隔离的键名读取
-        final userTokenKey = 'kugou_token_$currentUserid';
         final userIdKey = 'kugou_userid_$currentUserid';
-        final userVipKey = 'kugou_vip_token_$currentUserid';
 
-        _token = prefs.getString(userTokenKey);
+        // token/vip_token 从加密存储读取；userid 仍用 prefs（非机密、用于定位账号）
+        _token = await secure.read(key: 'kugou_token_$currentUserid');
         _userid = prefs.getString(userIdKey);
-        _vipToken = prefs.getString(userVipKey);
+        _vipToken = await secure.read(key: 'kugou_vip_token_$currentUserid');
+
+        // 兼容旧版本明文存储：加密存储无值但存在明文 token → 迁移并删除明文
+        final legacyToken = prefs.getString('kugou_token_$currentUserid');
+        if (_token == null && legacyToken != null) {
+          _token = legacyToken;
+          await secure.write(
+              key: 'kugou_token_$currentUserid', value: legacyToken);
+          await prefs.remove('kugou_token_$currentUserid');
+        }
+        final legacyVip = prefs.getString('kugou_vip_token_$currentUserid');
+        if (_vipToken == null && legacyVip != null) {
+          _vipToken = legacyVip;
+          await secure.write(
+              key: 'kugou_vip_token_$currentUserid', value: legacyVip);
+          await prefs.remove('kugou_vip_token_$currentUserid');
+        }
 
         if (_token != null && _userid != null) {
           // 登录状态恢复成功
@@ -395,10 +412,25 @@ class KugouApiClient {
           _vipToken = null;
         }
       } else {
-        // 兼容旧版本：尝试读取全局键
+        // 兼容旧版本：读取全局明文键，并迁移到按 userid 隔离的加密存储
         _token = prefs.getString('kugou_token');
         _userid = prefs.getString('kugou_userid');
         _vipToken = prefs.getString('kugou_vip_token');
+
+        if (_token != null && _userid != null && _userid!.isNotEmpty) {
+          final uid = _userid!;
+          await secure.write(key: 'kugou_token_$uid', value: _token!);
+          if (_vipToken != null && _vipToken!.isNotEmpty) {
+            await secure.write(
+                key: 'kugou_vip_token_$uid', value: _vipToken!);
+          }
+          await prefs.setString('kugou_userid_$uid', uid);
+          await prefs.setString('kugou_current_userid', uid);
+          // 删除全局明文凭证（保留 kugou_dfid，非机密且下方还需读取）
+          await prefs.remove('kugou_token');
+          await prefs.remove('kugou_userid');
+          await prefs.remove('kugou_vip_token');
+        }
 
         // 旧版本迁移：全局凭证存在且账号列表为空时，播种一个账号条目，
         // 保证老用户升级后账号出现在「账号管理」列表（昵称/头像留空，
@@ -446,6 +478,9 @@ class KugouApiClient {
 
     try {
       final prefs = await SharedPreferences.getInstance();
+      // 敏感凭证（token/vip_token）写入加密存储（Keystore），
+      // userid/账号列表等非机密数据仍用 prefs（用于定位与展示）
+      const secure = FlutterSecureStorage();
 
       // 仅清除旧版本全局键（一次性迁移清理，不碰其他账号的按用户键）
       await prefs.remove('kugou_token');
@@ -454,16 +489,21 @@ class KugouApiClient {
       await prefs.remove('kugou_dfid');
 
       // 使用带用户ID的键名存储（防止多用户冲突）
-      final userTokenKey = 'kugou_token_$userid';
       final userIdKey = 'kugou_userid_$userid';
-      final userVipKey = 'kugou_vip_token_$userid';
       final currentUserKey = 'kugou_current_userid';
 
-      await prefs.setString(userTokenKey, token);
-      await prefs.setString(userIdKey, userid);
+      // token / vip_token → 加密存储；vipToken 为空时清除旧值
+      await secure.write(key: 'kugou_token_$userid', value: token);
       if (vipToken != null && vipToken.isNotEmpty) {
-        await prefs.setString(userVipKey, vipToken);
+        await secure.write(key: 'kugou_vip_token_$userid', value: vipToken);
+      } else {
+        await secure.delete(key: 'kugou_vip_token_$userid');
       }
+      // 清除该账号历史明文 token（旧版本迁移遗留）
+      await prefs.remove('kugou_token_$userid');
+      await prefs.remove('kugou_vip_token_$userid');
+
+      await prefs.setString(userIdKey, userid);
 
       // 记录当前登录的用户ID
       await prefs.setString(currentUserKey, userid);
@@ -488,17 +528,17 @@ class KugouApiClient {
     await _ensureInitialized();
     try {
       final prefs = await SharedPreferences.getInstance();
-      final userTokenKey = 'kugou_token_$userid';
+      // 凭证从加密存储读取
+      const secure = FlutterSecureStorage();
       final userIdKey = 'kugou_userid_$userid';
-      final userVipKey = 'kugou_vip_token_$userid';
 
-      final token = prefs.getString(userTokenKey);
+      final token = await secure.read(key: 'kugou_token_$userid');
       final uid = prefs.getString(userIdKey);
       if (token == null || uid == null || uid.isEmpty) return false;
 
       _token = token;
       _userid = uid;
-      _vipToken = prefs.getString(userVipKey);
+      _vipToken = await secure.read(key: 'kugou_vip_token_$userid');
 
       await prefs.setString('kugou_current_userid', uid);
       return true;
@@ -556,6 +596,10 @@ class KugouApiClient {
     await _ensureInitialized();
     try {
       final prefs = await SharedPreferences.getInstance();
+      const secure = FlutterSecureStorage();
+      // 清除加密存储中的凭证 + prefs 中的 userid 定位键与明文遗留
+      await secure.delete(key: 'kugou_token_$userid');
+      await secure.delete(key: 'kugou_vip_token_$userid');
       await prefs.remove('kugou_token_$userid');
       await prefs.remove('kugou_userid_$userid');
       await prefs.remove('kugou_vip_token_$userid');
@@ -584,15 +628,18 @@ class KugouApiClient {
 
     try {
       final prefs = await SharedPreferences.getInstance();
+      const secure = FlutterSecureStorage();
 
-      // 清除当前用户的键
+      // 清除当前用户的加密凭证 + prefs 定位键（加密存储无旧全局键，无需清除）
       if (oldUserid != null) {
+        await secure.delete(key: 'kugou_token_$oldUserid');
+        await secure.delete(key: 'kugou_vip_token_$oldUserid');
         await prefs.remove('kugou_token_$oldUserid');
         await prefs.remove('kugou_userid_$oldUserid');
         await prefs.remove('kugou_vip_token_$oldUserid');
       }
 
-      // 清除全局键（兼容旧版本）
+      // 清除全局键（兼容旧版本，新版本加密存储无这些键）
       await prefs.remove('kugou_token');
       await prefs.remove('kugou_userid');
       await prefs.remove('kugou_vip_token');
