@@ -86,9 +86,10 @@ class _ScrollAwareAppBarState extends State<ScrollAwareAppBar> {
     final textTheme = Theme.of(context).textTheme;
     final t = (_scrollOffset / widget.fadeRange).clamp(0.0, 1.0);
 
-    // 背景从透明渐变到 surface
-    final backgroundColor =
-        Color.lerp(Colors.transparent, colorScheme.surface, t)!;
+    // 背景从透明渐变到 surface：仅插值 alpha（透明度），保持 surface 色相。
+    // 不能用 Color.lerp(Colors.transparent, surface, t)：transparent 是
+    // alpha=0 的黑色，逐通道插值会让中间态变成半透明灰（顶栏先变暗再变正常）。
+    final backgroundColor = colorScheme.surface.withValues(alpha: t);
 
     return AppBar(
       backgroundColor: backgroundColor,
