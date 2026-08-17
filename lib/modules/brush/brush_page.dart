@@ -239,11 +239,16 @@ class _BrushPageState extends State<BrushPage> {
     }
 
     if (videoUrl == null && videoHash == null && song == null) return null;
+    // 酷狗视频地址为 http 明文；Android 明文策略仅放行本地回环，统一转 https
+    // 避免 VideoError ... Source error
+    final playUrl = videoUrl != null && videoUrl.startsWith('http://')
+        ? videoUrl.replaceFirst('http://', 'https://')
+        : videoUrl;
     return BrushCard(
       title: title,
       subtitle: subtitle,
       coverUrl: cover,
-      videoUrl: videoUrl,
+      videoUrl: playUrl,
       song: song,
     );
   }
