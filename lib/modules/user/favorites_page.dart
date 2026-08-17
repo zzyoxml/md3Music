@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/repositories/collected_playlist_store.dart';
 import '../../data/repositories/favorite_lists_cache.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
@@ -66,6 +67,10 @@ class _FavoritesPageState extends State<FavoritesPage>
   Map<String, int> _playlistAccessOrder = {};
   static const _accessOrderKey = 'playlist_access_order';
 
+  // 是否按「最近点击」排序（设置页可开关，默认开启）
+  final SettingsRepository _settingsRepository = SettingsRepository();
+  bool _sortByLatestClick = true;
+
   // 管理模式（批量选择）
   bool _isManaging = false;
   final Set<int> _selectedIndices = {};
@@ -89,7 +94,10 @@ class _FavoritesPageState extends State<FavoritesPage>
       // 导致 banner 在 cache 显示后才被清掉，闪烁）。
       await _loadCachedData();
       await _loadAccessOrder();
+      _sortByLatestClick = await _settingsRepository
+          .getSortCollectedByLatestClick();
       if (!mounted) return;
+      setState(() {});
       _loadAllData();
       context.read<PlaylistCollectionNotifier>().addListener(
         _onCollectionChanged,
@@ -212,13 +220,21 @@ class _FavoritesPageState extends State<FavoritesPage>
   int _getAccessTime(KugouPlaylistBrief p) =>
       _playlistAccessOrder[p.globalCollectionId ?? p.id] ?? 0;
 
-  List<KugouPlaylistBrief> get _createdPlaylists =>
-      _playlists.where(_isCreated).toList()
-        ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+  List<KugouPlaylistBrief> get _createdPlaylists {
+    final list = _playlists.where(_isCreated).toList();
+    if (_sortByLatestClick) {
+      list.sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+    }
+    return list;
+  }
 
-  List<KugouPlaylistBrief> get _collectedPlaylists =>
-      _playlists.where((p) => !_isCreated(p)).toList()
-        ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+  List<KugouPlaylistBrief> get _collectedPlaylists {
+    final list = _playlists.where((p) => !_isCreated(p)).toList();
+    if (_sortByLatestClick) {
+      list.sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+    }
+    return list;
+  }
 
   // ==================== 数据加载 ====================
 
@@ -227,6 +243,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     // 重置分页状态
     _playlistPage = 1;
     _hasMorePlaylists = true;
+    // 刷新时重新读取「最近点击排序」开关，使设置改动无需重启即可生效
+    _sortByLatestClick = await _settingsRepository
+        .getSortCollectedByLatestClick();
     setState(() => _isLoadingPlaylists = true);
 
     try {

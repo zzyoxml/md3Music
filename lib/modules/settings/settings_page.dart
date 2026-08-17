@@ -106,6 +106,8 @@ class _SettingsPageState extends State<SettingsPage>
   bool _keepScreenOn = false;
   // MiniPlayer 滑动切歌开关（默认开启）
   bool _miniPlayerSwipeSwitch = true;
+  // 收藏歌单按「最近点击」排序（默认开启）
+  bool _sortCollectedByLatestClick = true;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
   // 音乐频谱环绕显示开关（默认关闭，仅 Android 生效）
@@ -274,6 +276,8 @@ class _SettingsPageState extends State<SettingsPage>
     final spectrumDynamicColor = await _settingsRepository.getSpectrumDynamicColor();
     final miniPlayerSwipeSwitch = await _settingsRepository
         .getMiniPlayerSwipeSwitchEnabled();
+    final sortCollectedByLatestClick = await _settingsRepository
+        .getSortCollectedByLatestClick();
 
     setState(() {
       _themeMode = themeMode;
@@ -310,6 +314,7 @@ class _SettingsPageState extends State<SettingsPage>
       _spectrumCurveOpacity = spectrumCurveOpacity;
       _spectrumDynamicColor = spectrumDynamicColor;
       _miniPlayerSwipeSwitch = miniPlayerSwipeSwitch;
+      _sortCollectedByLatestClick = sortCollectedByLatestClick;
     });
     // 同步到全局开关，让已挂载的 MiniPlayer 实例实时响应
     miniPlayerSwipeSwitchEnabled.value = miniPlayerSwipeSwitch;
@@ -513,6 +518,7 @@ class _SettingsPageState extends State<SettingsPage>
     (label: '播放时保持屏幕常亮', category: '播放', aliases: '屏幕常亮 常亮 息屏'),
     (label: '播放 MV 时自动画中画', category: '播放', aliases: '画中画 pip 悬浮'),
     (label: 'MiniPlayer 滑动切歌', category: '播放', aliases: 'miniplaer 迷你播放条 滑动切歌 切歌'),
+    (label: '收藏歌单按最近点击排序', category: '播放', aliases: '收藏 歌单 排序 最近点击 顺序'),
     // 主页管理
     (label: '主页 Tab 管理', category: '主页管理', aliases: 'tab 标签页 主页'),
     // 桌面快捷方式
@@ -1795,6 +1801,18 @@ class _SettingsPageState extends State<SettingsPage>
             // 同步到全局开关，让已挂载的 MiniPlayer 实例实时生效
             miniPlayerSwipeSwitchEnabled.value = value;
             _settingsRepository.setMiniPlayerSwipeSwitchEnabled(value);
+          },
+        ),
+        SwitchListTile(
+          title: const Text('收藏歌单按最近点击排序'),
+          subtitle: const Text('最近点击的歌单排在前面；关闭后按收藏顺序排列'),
+          value: _sortCollectedByLatestClick,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            setState(() {
+              _sortCollectedByLatestClick = value;
+            });
+            _settingsRepository.setSortCollectedByLatestClick(value);
           },
         ),
       ],
