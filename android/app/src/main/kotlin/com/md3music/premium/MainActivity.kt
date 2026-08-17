@@ -82,6 +82,56 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // 高刷新率适配：主动向系统声明最高刷新率偏好，避免被 ROM 的高刷新率管理
+        // 归为「跟随应用内设置」而锁在 60Hz。Flutter 引擎从不调用
+        // Surface.setFrameRate()，系统无法得知 App 需要高刷，须在此显式声明。
+        applyOptimalRefreshRate()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 回到前台（如从画中画/锁屏/切后台返回）时重新应用，
+        // 防止被系统降频后未恢复（偶现锁 60Hz 的场景之一）。
+        applyOptimalRefreshRate()
+    }
+
+    /// 向系统请求当前分辨率下可用的最高刷新率。
+    ///
+    /// - API 30+：设置 `preferredRefreshRate`（只改刷新率、不改分辨率，
+    ///   LTPO 屏仍可动态降频省电），为 refresh_rate 插件推荐做法。
+    /// - API 23~29：设置 `preferredDisplayModeId`（无 preferredRefreshRate 时
+    ///   只能指定完整显示模式，故保持当前分辨率匹配，避免分辨率被切换）。
+    /// - API 34+：开启触摸提频（触摸/滚动时升到高刷，更跟手）。
+    private fun applyOptimalRefreshRate() {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+            val display = windowManager.defaultDisplay
+            val currentMode = display.mode
+            // 与当前分辨率一致、刷新率最高的显示模式
+            val best = display.supportedModes
+                .filter {
+                    it.physicalWidth == currentMode.physicalWidth &&
+                        it.physicalHeight == currentMode.physicalHeight
+                }
+                .maxByOrNull { it.refreshRate }
+                ?: return
+            val lp = window.attributes
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                lp.preferredRefreshRate = best.refreshRate
+            } else {
+                lp.preferredDisplayModeId = best.modeId
+            }
+            window.attributes = lp // 重新 setAttributes 使偏好生效
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                window.frameRateBoostOnTouchEnabled = true
+            }
+        } catch (_: Exception) {
+            // 个别 ROM 可能不支持，忽略即可（高刷非致命）
+        }
+    }
+
     /// 复用后台（headless）FlutterEngine：线控耳机「唤醒播放」被拉起时，
     /// AudioPlaybackService 已创建并运行完整 App（main() 已执行、PlayerProvider
     /// 正在恢复播放状态）。此处返回缓存引擎，避免创建第二个 FlutterEngine 导致

@@ -362,8 +362,13 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
         // 位置兜底：播放中 position >= duration 且 processingState 非 completed
         // 时主动触发切歌，防止 completed 事件丢失导致永不切歌（Media3 偶发）。
+        // 同样受 Windows 误报防护窗口约束：setUrl 加载新源后 3s 内不兜底切歌。
+        final insideLoadGuard =
+            DateTime.now().difference(_lastUrlLoadStarted) <
+                _urlLoadGuardWindow;
         final duration = _duration ?? Duration.zero;
         if (_isPlaying &&
+            !insideLoadGuard &&
             duration > Duration.zero &&
             position >= duration &&
             _audioService?.processingState !=
@@ -450,8 +455,26 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   bool _handlingCompletion = false;
 
+  // —— Windows 误报 completed 防护 ——
+  // just_audio_windows（WinRT MediaPlayer）在 setUrl() 加载新源时，旧源
+  // 会异步触发一次 completed 事件（或 processingState 短暂变 completed），
+  // 导致 _handlePlaybackCompleted / position 兜底被误触发 → 自动 next() 跳到
+  // 下一首。Android(Media3) 无此行为。播放列表点歌"总切到下一首"即由此引起。
+  // 方案：每次开始加载新源时记录时间戳；completed 兜底切歌若发生在
+  // [guard 窗口]内则判定为误报并忽略。真实播完一首歌必然远超该窗口。
+  static const Duration _urlLoadGuardWindow = Duration(milliseconds: 3000);
+  DateTime _lastUrlLoadStarted = DateTime.fromMillisecondsSinceEpoch(0);
+
   Future<void> _handlePlaybackCompleted() async {
     if (_handlingCompletion) return;
+    // Windows 误报 completed 防护：just_audio_windows 在 setUrl() 加载新源时，
+    // 旧源会异步补发一次 completed，若距上次加载源 < 窗口则判为误报并忽略，
+    // 避免"播放列表点歌总自动跳到下一首"。真实播完一首歌必然远超该窗口。
+    if (DateTime.now().difference(_lastUrlLoadStarted) < _urlLoadGuardWindow) {
+      print('[PlaybackCompleted] ignored: within ${_urlLoadGuardWindow} of url '
+          'load (likely spurious completed on Windows)');
+      return;
+    }
     _handlingCompletion = true;
     try {
       if (_loopMode == AppLoopMode.one) {
@@ -1116,6 +1139,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     bool playAfter = true,
   }) async {
     if (_audioService == null) return;
+    // 记录本次加载新源时间，防护 Windows 误报 completed 导致的自动切歌
+    _lastUrlLoadStarted = DateTime.now();
+    // 诊断日志：setUrl
+    // ignore: avoid_print
+    print('[D切歌] setUrl → ${url.substring(0, url.length < 60 ? url.length : 60)}');
     await _audioService.setUrl(url);
     final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (DateTime.now().isBefore(deadline)) {
@@ -1451,6 +1479,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _currentIndex = nextIndex;
       _currentSong = _playlist[nextIndex];
       _resolveError = null;
+      // 诊断日志：next 切歌
+      // ignore: avoid_print
+      print('[D切歌] next: _currentIndex=$_currentIndex → id=${_currentSong!.id}');
       _updatePosition(Duration.zero); // 切歌时重置位置，避免恢复时跳到上一首的进度
       _recordHistory(_currentSong!);
       _updateNotification();
@@ -1529,6 +1560,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _currentIndex = index;
     _currentSong = _playlist[index];
     _resolveError = null;
+    // 诊断日志：切歌目标
+    // ignore: avoid_print
+    print('[D切歌] playSongAt index=$index 实际_currentIndex=$_currentIndex → id=${_currentSong!.id}');
     _updatePosition(Duration.zero);
     _recordHistory(_currentSong!);
     _saveState();
