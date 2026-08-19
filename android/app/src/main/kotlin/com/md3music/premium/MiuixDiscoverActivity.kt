@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -553,19 +552,13 @@ private fun MiuixDiscoverScreen(port: Int, onBack: () -> Unit) {
                     }
                     if (s.data.songs.isNotEmpty()) {
                         item(key = "dailyTitle") { SectionHeader("每日推荐") }
-                        item(key = "daily") {
-                            LazyRow(
-                                contentPadding = PaddingValues(horizontal = 16.dp),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                items(s.data.songs.size) { i ->
-                                    SongStripItem(
-                                        index = i,
-                                        song = s.data.songs[i],
-                                        onClick = { notify("测试页：暂未接入播放器") },
-                                    )
-                                }
-                            }
+                        // miuix 克制列表：纯文本歌曲行，无需 Card 容器
+                        items(s.data.songs.size) { i ->
+                            SongRow(
+                                index = i,
+                                song = s.data.songs[i],
+                                onClick = { notify("测试页：暂未接入播放器") },
+                            )
                         }
                     }
                     if (s.data.themes.isNotEmpty()) {
@@ -626,10 +619,13 @@ private fun MiuixDiscoverScreen(port: Int, onBack: () -> Unit) {
 // 区块组件（HyperOS 音乐页风）
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** 分区标题：沿用 miuix SmallTitle 默认内边距（28dp 左 / 8dp 上）形成系统页节奏。 */
+/** 分区标题：与内容卡片 16dp 水平边距对齐，整体更整洁（替代默认 28dp 内缩）。 */
 @Composable
 private fun SectionHeader(text: String) {
-    SmallTitle(text = text)
+    SmallTitle(
+        text = text,
+        insideMargin = PaddingValues(start = 16.dp, top = 8.dp),
+    )
 }
 
 /**
@@ -831,25 +827,24 @@ private fun SceneTile(name: String) {
     }
 }
 
-/** 每日推荐横滑条目：序号 + 歌名 + 歌手，柔和 squircle 容器。 */
+/** 歌曲行：序号（primary 点缀）+ 歌名 + 歌手，纯文本无彩色容器，符合 miuix 克制美学。 */
 @Composable
-private fun SongStripItem(index: Int, song: SongItem, onClick: () -> Unit) {
+private fun SongRow(index: Int, song: SongItem, onClick: () -> Unit) {
     Row(
         modifier = Modifier
-            .clip(miuixShape(16.dp))
-            .background(MiuixTheme.colorScheme.secondaryContainer)
+            .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             "${index + 1}",
             style = MiuixTheme.textStyles.title4,
             color = MiuixTheme.colorScheme.primary,
-            modifier = Modifier.width(18.dp),
+            modifier = Modifier.width(24.dp),
         )
         Spacer(Modifier.width(8.dp))
-        Column(modifier = Modifier.widthIn(max = 150.dp)) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 song.name,
                 style = MiuixTheme.textStyles.body2,
@@ -864,6 +859,7 @@ private fun SongStripItem(index: Int, song: SongItem, onClick: () -> Unit) {
                     color = MiuixTheme.colorScheme.onSurfaceContainerVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
                 )
             }
         }
