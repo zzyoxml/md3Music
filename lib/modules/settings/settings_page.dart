@@ -117,6 +117,8 @@ class _SettingsPageState extends State<SettingsPage>
   String? _backgroundImagePath;
   double _backgroundBlur = 12.0;
   double _backgroundOpacity = 0.7;
+  // 按背景图莫奈取色（默认开启）
+  bool _useBackgroundMonet = true;
   // 音乐频谱环绕显示开关（默认关闭，仅 Android 生效）
   bool _spectrumEnabled = false;
   // 频谱柱数量（20~80，默认 40）
@@ -261,6 +263,7 @@ class _SettingsPageState extends State<SettingsPage>
         .backgroundImagePath;
     final backgroundBlur = context.read<ThemeProvider>().backgroundBlur;
     final backgroundOpacity = context.read<ThemeProvider>().backgroundOpacity;
+    final useBackgroundMonet = context.read<ThemeProvider>().useBackgroundMonet;
     // 读取自定义下载目录
     final downloadDir = await _settingsRepository.getDownloadDir();
     // 从 ThemeProvider 同步 UI 缩放
@@ -308,6 +311,7 @@ class _SettingsPageState extends State<SettingsPage>
       _backgroundImagePath = backgroundImagePath;
       _backgroundBlur = backgroundBlur;
       _backgroundOpacity = backgroundOpacity;
+      _useBackgroundMonet = useBackgroundMonet;
       _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
       _useGlowEffect = LyricPreferences.instance.useGlowEffect;
       _useFlowingBackground = LyricPreferences.instance.useFlowingBackground;
@@ -1155,20 +1159,22 @@ class _SettingsPageState extends State<SettingsPage>
           onTap: () => _showFontSourceSheet(themeProvider),
         ),
         // 主题色入口：点击弹出 8 色预设面板。
-        // 系统主题色 / 封面动态取色开启时用 IgnorePointer 禁用点击
+        // 系统主题色 / 封面动态取色 / 背景莫奈取色开启时用 IgnorePointer 禁用点击
         // （不灰显，色块仍显示当前 effectiveSeedColor）。
         IgnorePointer(
           ignoring:
               themeProvider.useDynamicColor ||
               themeProvider.useCoverSeedColor ||
-              themeProvider.useBackgroundImage,
+              (themeProvider.useBackgroundImage &&
+                  themeProvider.useBackgroundMonet),
           child: ListTile(
             leading: const Icon(Icons.palette),
             title: const Text('主题色'),
             subtitle: Text(
               themeProvider.useCoverSeedColor
                   ? '跟随歌曲封面取色'
-                  : (themeProvider.useBackgroundImage
+                  : ((themeProvider.useBackgroundImage &&
+                          themeProvider.useBackgroundMonet)
                       ? '跟随背景图片取色'
                       : (themeProvider.useDynamicColor
                           ? '跟随系统壁纸取色'
@@ -1306,13 +1312,22 @@ class _SettingsPageState extends State<SettingsPage>
       children: [
         SwitchListTile(
           title: const Text('启用自定义背景图片（实验性）'),
-          subtitle: const Text('全局界面背景，自动按背景图莫奈取色'),
           value: _useBackgroundImage,
           onChanged: (v) {
             HapticFeedback.lightImpact();
             setState(() => _useBackgroundImage = v);
             // ignore: discarded_futures
             themeProvider.setUseBackgroundImage(v);
+          },
+        ),
+        SwitchListTile(
+          title: const Text('按背景图莫奈取色'),
+          value: _useBackgroundMonet,
+          onChanged: (v) {
+            HapticFeedback.lightImpact();
+            setState(() => _useBackgroundMonet = v);
+            // ignore: discarded_futures
+            themeProvider.setUseBackgroundMonet(v);
           },
         ),
         ListTile(
