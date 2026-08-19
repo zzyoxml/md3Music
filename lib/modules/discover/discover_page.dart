@@ -458,15 +458,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '主题歌单',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    TextButton(onPressed: () {}, child: const Text('查看更多')),
-                  ],
+                child: Text(
+                  '主题歌单',
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
               SizedBox(

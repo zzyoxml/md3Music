@@ -977,14 +977,6 @@ class _UserCenterPageState extends State<UserCenterPage> {
         children: [
           Row(
             children: [
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: const Icon(Icons.chevron_left),
-                color: cs.onSurfaceVariant,
-                onPressed: () {},
-              ),
               Expanded(
                 child: Text(
                   monthLabel,
@@ -993,14 +985,6 @@ class _UserCenterPageState extends State<UserCenterPage> {
                   overflow: TextOverflow.ellipsis,
                   style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                 ),
-              ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: const Icon(Icons.chevron_right),
-                color: cs.onSurfaceVariant,
-                onPressed: () {},
               ),
               const SizedBox(width: 4),
               Flexible(
