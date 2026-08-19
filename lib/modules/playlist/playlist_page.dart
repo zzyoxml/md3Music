@@ -1297,7 +1297,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                 end: Alignment.bottomCenter,
                                 colors: [
                                   colorScheme.primaryContainer,
-                                  colorScheme.surface,
+                                  // 底部渐变到透明：启用全局背景图（页面背景透明）时，
+                                  // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
+                                  colorScheme.surface.withValues(alpha: 0),
                                 ],
                               ),
                             ),

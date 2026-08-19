@@ -1,4 +1,5 @@
-import 'dart:io' show exit;
+import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,7 @@ import 'core/services/lyricon_provider_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/motion_constants.dart';
 import 'core/utils/artwork_color_extractor.dart';
+import 'core/widgets/app_background.dart';
 import 'data/models/playlist.dart';
 import 'main.dart'
     show
@@ -177,6 +179,11 @@ class _AppViewState extends State<_AppView> {
   // 上一次已提取/正在提取的封面 url：同一首歌反复 notify 不重复提取，
   // 且异步提取期间切歌时丢弃过期结果（参考 AM 歌词动态取色 _lastAccentUrl 模式）。
   String? _lastCoverUrl;
+  // 背景图莫奈取色桥接：监听 ThemeProvider 背景图路径变化 → 提取主色注入 seed 链。
+  // 持有引用以便 dispose 时移除 listener。
+  ThemeProvider? _backgroundThemeProvider;
+  // 上一次已提取/正在提取的背景图路径：同一路径不重复提取。
+  String? _lastBackgroundPath;
   // 桌面快捷方式配置：监听变更 → 重新注册 Android 长按图标快捷入口。
   ShortcutConfigProvider? _shortcutConfig;
 
@@ -205,6 +212,7 @@ class _AppViewState extends State<_AppView> {
     // 此时 provider 实例已就绪，且不影响首帧渲染。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupCoverColorBridge();
+      _setupBackgroundColorBridge();
     });
   }
 
@@ -243,10 +251,43 @@ class _AppViewState extends State<_AppView> {
     context.read<ThemeProvider>().setCoverSeedColor(color);
   }
 
+  /// 建立背景图莫奈取色桥接：监听 ThemeProvider 背景图路径变化 → 提取主色注入 seed 链。
+  ///
+  /// 启动时按已持久化的背景图提取一次；用户更换/清除背景图时由
+  /// setBackgroundImagePath 触发 notify → 重新提取或清空。
+  void _setupBackgroundColorBridge() {
+    final themeProvider = context.read<ThemeProvider>();
+    _backgroundThemeProvider = themeProvider;
+    themeProvider.addListener(_onBackgroundChanged);
+    _onBackgroundChanged();
+  }
+
+  /// 背景图路径变化回调：异步提取主色并注入 ThemeProvider。
+  ///
+  /// 与封面取色同模式：路径变化时丢弃过期结果；提取失败（返回 null）
+  /// 时把 seed 置 null，让 effectiveSeedColor 回落到后续级别。
+  Future<void> _onBackgroundChanged() async {
+    final themeProvider = context.read<ThemeProvider>();
+    final path = themeProvider.backgroundImagePath;
+    if (path == null || path.isEmpty) {
+      // 清除背景图：重置上次路径与取色结果，允许下次再选同一文件时重新提取
+      _lastBackgroundPath = null;
+      themeProvider.setBackgroundSeedColor(null);
+      return;
+    }
+    if (path == _lastBackgroundPath) return;
+    _lastBackgroundPath = path;
+    final color = await ArtworkColorExtractor.extract('file://$path');
+    // 过期校验：提取期间背景图已更换/清除则丢弃结果
+    if (context.read<ThemeProvider>().backgroundImagePath != path) return;
+    context.read<ThemeProvider>().setBackgroundSeedColor(color);
+  }
+
   @override
   void dispose() {
     _shortcutConfig?.removeListener(_applyDesktopShortcuts);
     _playerProvider?.removeListener(_onPlayerChanged);
+    _backgroundThemeProvider?.removeListener(_onBackgroundChanged);
     super.dispose();
   }
 
@@ -264,14 +305,22 @@ class _AppViewState extends State<_AppView> {
       // 动态生成（支持「莫奈色」开关切换系统主色）。
       // darkTheme 额外接收 useOledBlack 开关，开启时 surface 系列覆盖为纯黑。
       // fontFamily 透传给 ThemeData，影响所有 Material Widget 的默认字体。
-      theme: AppTheme.lightThemeFromSeed(
-        themeProvider.effectiveSeedColor,
-        fontFamily: fontFamily,
+      // 启用自定义背景图时，通过 _applyBackgroundOverrides 把主要表面改为透明，
+      // 让底层 AppBackgroundLayer 的模糊背景图透出。
+      theme: _applyBackgroundOverrides(
+        AppTheme.lightThemeFromSeed(
+          themeProvider.effectiveSeedColor,
+          fontFamily: fontFamily,
+        ),
+        themeProvider,
       ),
-      darkTheme: AppTheme.darkThemeFromSeed(
-        themeProvider.effectiveSeedColor,
-        useOledBlack: themeProvider.useOledBlack,
-        fontFamily: fontFamily,
+      darkTheme: _applyBackgroundOverrides(
+        AppTheme.darkThemeFromSeed(
+          themeProvider.effectiveSeedColor,
+          useOledBlack: themeProvider.useOledBlack,
+          fontFamily: fontFamily,
+        ),
+        themeProvider,
       ),
       themeMode: themeProvider.themeMode,
       // 根据主题设置系统导航栏颜色
@@ -284,6 +333,9 @@ class _AppViewState extends State<_AppView> {
           child: _SystemUiUpdater(
             child: Stack(
               children: [
+                // 全局背景层（主页/底层背景）：复用 AppBackground 组件。
+                // 二级页面由路由过渡内嵌 AppBackground，随页面位移入场。
+                Positioned.fill(child: AppBackground()),
                 child!,
                 const DlnaCastingOverlay(),
                 // 上滑拖拽跟手覆盖层（在 Navigator 之上，拖拽期间显示预览）
@@ -352,6 +404,37 @@ class _AppViewState extends State<_AppView> {
         }
         return null;
       },
+    );
+  }
+
+  /// 背景图启用时，把主要页面表面（Scaffold/AppBar/导航栏等）改为透明或半透明，
+  /// 让底层 [AppBackgroundLayer] 的模糊背景图从间隙透出。关闭时原样返回。
+  ///
+  /// 卡片（CardTheme）等保持不透明，保证内容可读性；导航栏/抽屉/底部弹层
+  /// 保留高透明度背景以维持层级感。
+  ThemeData _applyBackgroundOverrides(
+    ThemeData base,
+    ThemeProvider themeProvider,
+  ) {
+    if (!themeProvider.useBackgroundImage) return base;
+    final cs = base.colorScheme;
+    return base.copyWith(
+      scaffoldBackgroundColor: Colors.transparent,
+      appBarTheme: base.appBarTheme.copyWith(
+        backgroundColor: Colors.transparent,
+      ),
+      navigationBarTheme: base.navigationBarTheme.copyWith(
+        backgroundColor: cs.surface.withValues(alpha: 0.82),
+      ),
+      navigationRailTheme: base.navigationRailTheme.copyWith(
+        backgroundColor: cs.surface.withValues(alpha: 0.82),
+      ),
+      drawerTheme: base.drawerTheme.copyWith(
+        backgroundColor: cs.surface.withValues(alpha: 0.96),
+      ),
+      bottomSheetTheme: base.bottomSheetTheme.copyWith(
+        backgroundColor: cs.surfaceContainerLow.withValues(alpha: 0.97),
+      ),
     );
   }
 }
@@ -1268,9 +1351,12 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
               1.0,
               curve: M3ExpressiveMotion.expressiveEasing,
             ),
+            // 退出曲线必须与进入曲线错开：旧页（outgoing）的 controller 是
+            // reverse（1→0），Interval(0.5,1.0) 对反向值映射后旧页恰好在前半段
+            // 淡出、新页在后半段淡入，避免新旧页同时过渡造成内容重叠/闪烁。
             switchOutCurve: const Interval(
-              0.0,
               0.5,
+              1.0,
               curve: M3ExpressiveMotion.expressiveEasing,
             ),
             transitionBuilder: (child, animation) {

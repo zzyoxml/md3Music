@@ -1,6 +1,44 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../widgets/app_background.dart';
+
+/// 路由过渡：M3 FadeForwards 动效 + 页面自带背景。
+///
+/// 启用全局背景图时页面背景透明，路由过渡中新旧页面内容会叠加重叠。
+/// 本 builder 给每个 MaterialPageRoute 的过渡 child **内嵌 [AppBackground]**，
+/// 使背景图作为页面的一部分一起滑动入场（随画面位移，无跳变），且背景图
+/// 不透明盖住下层旧页面（无重叠）。对所有 MaterialPageRoute 全局生效。
+class _BgSafeFadeForwardsBuilder extends PageTransitionsBuilder {
+  const _BgSafeFadeForwardsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    // 背景作为页面底层，随 FadeForwards 一起滑动/淡入
+    final withBg = Stack(
+      fit: StackFit.expand,
+      children: [
+        const AppBackground(),
+        child,
+      ],
+    );
+    // FadeForwards 基础动效：新页面右侧滑入 + 淡入（无白色屏障层）
+    return FadeForwardsPageTransitionsBuilder().buildTransitions(
+      route,
+      context,
+      animation,
+      secondaryAnimation,
+      withBg,
+    );
+  }
+}
+
 class AppTheme {
   AppTheme._();
 
@@ -120,6 +158,14 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       brightness: brightness,
+      // 全局路由过渡：Android 用 FadeForwards（滑动 + 淡入）+ 过渡期间
+      // 背景遮罩（避免透明页面过渡重叠，完成后再露出背景图）。
+      // 其余平台（iOS/macOS）保留系统默认 Cupertino 过渡。
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: _BgSafeFadeForwardsBuilder(),
+        },
+      ),
       // fontFamily 为 null 时，Flutter 会走系统字体链（Android 上是 Roboto +
       // Noto Sans CJK），符合"优先展示用户手机字体"需求。
       // fontFamilyFallback 兜底链保证 SimHei 在系统字体缺字符时仍能命中。

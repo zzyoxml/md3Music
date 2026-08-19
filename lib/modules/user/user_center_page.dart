@@ -701,6 +701,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
+          // 实心矩形包裹：填充主题容器色，而非仅单一描边
+          color: cs.surfaceContainer,
           border: Border.all(color: cs.outlineVariant),
         ),
         child: Column(
