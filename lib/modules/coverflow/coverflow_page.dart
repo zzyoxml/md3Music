@@ -1,11 +1,11 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:m3e_core/m3e_core.dart';
 
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../player/full_player_route.dart';
 
 /// 封面流页横屏沉浸开关（用户请求语义）：
@@ -62,7 +62,7 @@ class _CoverFlowPageState extends State<CoverFlowPage> {
         builder: (context, kugou, _) {
           final songs = kugou.recommendSongs;
           if (songs.isEmpty && kugou.isLoading) {
-            return const Center(child: MD3ELoadingIndicator());
+            return const Center(child: M3ELoadingIndicator());
           }
           if (songs.isEmpty) {
             return _buildEmpty();

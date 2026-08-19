@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models/song.dart';
@@ -8,7 +9,6 @@ import '../../providers/comment_display_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 
 /// 统一的评论面板入口。
 ///
@@ -455,7 +455,7 @@ class _CommentsViewState extends State<CommentsView> {
     }
 
     if (_isLoading) {
-      return Center(child: MD3ELoadingIndicator(color: primaryTextColor));
+      return Center(child: M3ELoadingIndicator(color: primaryTextColor));
     }
 
     if (_error != null) {
@@ -546,7 +546,9 @@ class _CommentsViewState extends State<CommentsView> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: _isLoadingMore
-                    ? MD3ELoadingIndicator(size: 24, color: primaryTextColor)
+                    ? M3ELoadingIndicator(
+                        constraints: BoxConstraints.tightFor(width: 24, height: 24),
+                        color: primaryTextColor)
                     : TextButton(
                         onPressed: _loadMore,
                         style: TextButton.styleFrom(
@@ -913,7 +915,9 @@ class _CommentsViewState extends State<CommentsView> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Center(
-                child: MD3ELoadingIndicator(size: 16, color: usernameColor),
+                child: M3ELoadingIndicator(
+                    constraints: BoxConstraints.tightFor(width: 16, height: 16),
+                    color: usernameColor),
               ),
             ),
           // 空状态

@@ -2,12 +2,12 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
+import 'package:m3e_core/m3e_core.dart';
 
 import '../providers/kugou_provider.dart';
 import '../providers/comment_display_provider.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import '../services/kugou_api/kugou_models.dart';
-import 'md3e_loading_indicator.dart';
 
 /// 楼层评论状态
 class _FloorState {
@@ -394,7 +394,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(32),
-          child: MD3ELoadingIndicator(),
+          child: M3ELoadingIndicator(),
         ),
       );
     }
@@ -477,7 +477,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: _isLoadingMore
-                  ? const MD3ELoadingIndicator(size: 24)
+                  ? const M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24))
                   : TextButton(onPressed: _loadMore, child: const Text('加载更多')),
             ),
           );
@@ -821,8 +821,8 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Center(
-                child: MD3ELoadingIndicator(
-                  size: 16,
+                child: M3ELoadingIndicator(
+                  constraints: BoxConstraints.tightFor(width: 16, height: 16),
                   color: colorScheme.primary,
                 ),
               ),

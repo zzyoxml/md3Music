@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models/album.dart';
@@ -7,7 +8,6 @@ import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../album/album_detail_page.dart';
 import '../player/mini_player.dart';
@@ -274,7 +274,7 @@ class _PurchasedPageState extends State<PurchasedPage> {
   }
 
   Widget _buildBody(ColorScheme cs) {
-    if (_isLoading) return const Center(child: MD3ELoadingIndicator());
+    if (_isLoading) return const Center(child: M3ELoadingIndicator());
     if (_error != null) return _buildMessage(cs, _error!, Icons.error_outline);
     if (_currentTab == _tabSongs) {
       if (_songs.isEmpty) return _buildMessage(cs, '暂无已购单曲', Icons.music_note);

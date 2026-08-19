@@ -1,10 +1,9 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
-import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../login/login_page.dart';
@@ -141,10 +140,10 @@ class _ChannelPageState extends State<ChannelPage> {
         scrollController: _scrollController,
       ),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : _channels.isEmpty
               ? _buildEmpty(cs)
-              : MD3ERefreshIndicator(
+              : M3EPullToRefreshIndicator(
                   onRefresh: _load,
                   child: PinchableGridView(
                     controller: _scrollController,

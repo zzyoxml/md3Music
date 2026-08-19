@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:m3e_core/m3e_core.dart';
 
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
@@ -10,7 +11,6 @@ import '../../providers/player_provider.dart';
 import '../../services/kugou_api/cloud_song_mapper.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/song_list_item.dart';
 import '../album/album_detail_page.dart';
@@ -372,7 +372,7 @@ class _SearchPageState extends State<SearchPage>
 
     if (kugouProvider.isLoading &&
         (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null &&
@@ -424,7 +424,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: MD3ELoadingIndicator(size: 24),
+              child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24)),
             ),
         ],
       ),
@@ -437,7 +437,7 @@ class _SearchPageState extends State<SearchPage>
 
     if (kugouProvider.isLoading &&
         (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null &&
@@ -486,7 +486,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: MD3ELoadingIndicator(size: 24),
+              child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24)),
             ),
         ],
       ),
@@ -504,7 +504,7 @@ class _SearchPageState extends State<SearchPage>
 
     if (kugouProvider.isLoading &&
         (kugouProvider.searchResults?.albums.isEmpty ?? true)) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null &&
@@ -565,7 +565,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: MD3ELoadingIndicator(size: 24),
+              child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24)),
             ),
         ],
       ),
@@ -577,7 +577,7 @@ class _SearchPageState extends State<SearchPage>
 
     if (kugouProvider.isLoading &&
         (kugouProvider.searchResults?.artists.isEmpty ?? true)) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null &&
@@ -653,7 +653,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: MD3ELoadingIndicator(size: 24),
+              child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24)),
             ),
         ],
       ),
@@ -665,7 +665,7 @@ class _SearchPageState extends State<SearchPage>
 
     if (kugouProvider.isLoading &&
         (kugouProvider.searchResults?.playlists.isEmpty ?? true)) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null &&
@@ -728,7 +728,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: MD3ELoadingIndicator(size: 24),
+              child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24)),
             ),
         ],
       ),
@@ -819,7 +819,7 @@ class _SearchPageState extends State<SearchPage>
 
   Widget _buildCloudResults() {
     if (_cloudLoading) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
     if (_cloudError != null) {
       return _buildErrorState(_cloudError!, _loadCloudSongsForSearch);
@@ -831,7 +831,7 @@ class _SearchPageState extends State<SearchPage>
           _loadCloudSongsForSearch();
         }
       });
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
     final results = _filteredCloudSongs;
     if (results.isEmpty) {

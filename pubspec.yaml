@@ -47,6 +47,7 @@ dependencies:
   flutter_secure_storage: ^10.3.1
   # 原生 Toast 提示（替代 SnackBar 通知）；10.0.0 起 compileSdk 满足项目 36 要求
   fluttertoast: ^10.0.0
+  m3e_core: ^0.1.6
 
 dev_dependencies:
   flutter_test:

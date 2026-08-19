@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/kugou_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
-import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/smart_artwork_image.dart';
 import 'audiobook_album_detail_page.dart';
@@ -83,8 +82,8 @@ class _AudiobookPageState extends State<AudiobookPage> {
         scrollController: _scrollController,
       ),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
-          : MD3ERefreshIndicator(
+          ? const Center(child: M3ELoadingIndicator())
+          : M3EPullToRefreshIndicator(
               onRefresh: _loadAll,
               child: hasAnyData
                   ? ListView(
