@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/song.dart';
 import '../../data/repositories/collected_playlist_store.dart';
@@ -315,12 +316,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
   void _showBatchDownloadDialog() {
     final api = KugouApiClient();
     if (!api.isLoggedIn) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先登录'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('请先登录', long: true);
       return;
     }
 
@@ -549,31 +545,16 @@ class _PlaylistPageState extends State<PlaylistPage> {
         // 通知「我的收藏」刷新歌曲数
         context.read<PlaylistCollectionNotifier>().notifyChanged();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('已删除 $count 首歌曲'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          showToast('已删除 $count 首歌曲', long: true);
         }
       } else if (mounted) {
         setState(() => _isDeleting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('删除失败，请重试'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('删除失败，请重试', long: true);
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isDeleting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('删除失败: $e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('删除失败: $e', long: true);
       }
     }
   }
@@ -602,12 +583,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final index = displayList.indexWhere((s) => s.id == currentSong.id);
     // 随机播放 / 跨歌单场景：当前歌曲可能不在本歌单显示列表中，提示而非静默失败
     if (index == -1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('当前播放歌曲不在本歌单中'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('当前播放歌曲不在本歌单中', long: true);
       return;
     }
 
@@ -908,12 +884,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final api = KugouApiClient();
     if (!api.isLoggedIn) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('请先登录'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('请先登录', long: true);
       }
       return;
     }
@@ -937,12 +908,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
       );
       if (result == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('收藏失败，请重试'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          showToast('收藏失败，请重试', long: true);
         }
         return;
       }
@@ -957,21 +923,11 @@ class _PlaylistPageState extends State<PlaylistPage> {
         });
         // 通知「我的收藏」tab 立即刷新（绕过本地代理 2 分钟缓存）
         context.read<PlaylistCollectionNotifier>().notifyChanged();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('收藏成功'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('收藏成功', long: true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('收藏失败'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('收藏失败', long: true);
       }
     }
   }
@@ -986,12 +942,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
     listId ??= await _findCollectedListId(api);
     if (listId == null || listId.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('找不到收藏记录，无法取消'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('找不到收藏记录，无法取消', long: true);
       }
       return;
     }
@@ -1007,28 +958,13 @@ class _PlaylistPageState extends State<PlaylistPage> {
         });
         // 通知「我的收藏」tab 立即刷新（绕过本地代理 2 分钟缓存）
         context.read<PlaylistCollectionNotifier>().notifyChanged();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('已取消收藏'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('已取消收藏', long: true);
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('取消收藏失败，请重试'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('取消收藏失败，请重试', long: true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('取消收藏失败'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('取消收藏失败', long: true);
       }
     }
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/services/custom_font_loader.dart';
+import '../core/utils/app_toast.dart';
 import 'md3_lyric_preferences.dart';
 
 /// MD3 风格播放页的歌词显示调节面板。
@@ -224,23 +225,13 @@ class Md3LyricPreferencesPanel extends StatelessWidget {
     final path = await CustomFontLoader.pickFontFile();
     if (path == null) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('未选择字体文件'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('未选择字体文件', long: true);
       return;
     }
     await prefs.setCustomFontPath(path);
     await prefs.setFontSource(Md3LyricFontSource.custom);
     if (!context.mounted) return;
     final loaded = prefs.effectiveFontFamily != null;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(loaded ? '已应用自定义字体到 MD3 歌词' : '字体加载失败，已降级为系统字体'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    showToast(loaded ? '已应用自定义字体到 MD3 歌词' : '字体加载失败，已降级为系统字体', long: true);
   }
 }

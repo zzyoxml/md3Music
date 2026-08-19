@@ -17,6 +17,7 @@ import '../../core/services/media_notification_service.dart';
 import '../../core/services/spectrum_service.dart';
 import '../../core/services/usb_audio_service.dart';
 import '../../core/utils/audio_scanner.dart';
+import '../../core/utils/app_toast.dart';
 import '../../core/utils/artwork_color_extractor.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
@@ -312,13 +313,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       if (Platform.isAndroid) {
         final status = await Permission.microphone.request();
         if (!status.isGranted && mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('未授予录音权限，将使用模拟频谱模式'),
-              behavior: SnackBarBehavior.floating,
-              duration: Duration(seconds: 3),
-            ),
-          );
+          showToast('未授予录音权限，将使用模拟频谱模式', long: true);
         }
       }
       final isPlaying = context.read<PlayerProvider>().isPlaying;
@@ -337,13 +332,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   void _onSpectrumSimulated() {
     if (!mounted) return;
     if (SpectrumService.instance.simulatedNotifier.value) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('设备不支持实时频谱，已切换到模拟模式'),
-          behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 3),
-        ),
-      );
+      showToast('设备不支持实时频谱，已切换到模拟模式', long: true);
       setState(() {});
     }
   }
@@ -982,12 +971,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   void _navigateToAlbum(Song song) {
     final albumId = song.albumId;
     if (albumId == null || albumId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('暂无专辑信息'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('暂无专辑信息', long: true);
       return;
     }
     final album = Album(
@@ -1035,12 +1019,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   void _navigateToArtist(Song song) {
     final artists = _splitArtistNames(song.artist);
     if (artists.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('暂无歌手信息'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('暂无歌手信息', long: true);
       return;
     }
     // 单歌手：直接跳转
@@ -1113,9 +1092,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       if (!mounted) return;
       Navigator.of(context).pop(); // 关闭 loading
       if (result == null || result.isEmpty) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('未找到歌手「$name」')));
+        showToast('未找到歌手「$name」', long: true);
         return;
       }
       final artist = result.first;
@@ -1123,21 +1100,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     } catch (e) {
       if (!mounted) return;
       Navigator.of(context).pop(); // 关闭 loading
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('搜索歌手失败：$e')));
+      showToast('搜索歌手失败：$e', long: true);
     }
   }
 
   /// 实际 push 歌手详情页。先 dismiss FullPlayer，再 push。
   void _pushArtistPage(String? artistId, String artistName) {
     if (artistId == null || artistId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('暂无歌手信息'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('暂无歌手信息', long: true);
       return;
     }
     // 注意：必须在 dismiss 之前捕获 navigatorState 引用，因为 dismiss 后
@@ -2721,13 +2691,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         ? LyricDisplayMode.roma
                         : LyricDisplayMode.translation;
                     LyricPreferences.instance.setDisplayMode(next);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          next == LyricDisplayMode.roma ? '已切换到罗马音' : '已切换到翻译',
-                        ),
-                        duration: const Duration(milliseconds: 800),
-                      ),
+                    showToast(
+                      next == LyricDisplayMode.roma ? '已切换到罗马音' : '已切换到翻译',
                     );
                   },
                   child: Center(
@@ -2992,40 +2957,24 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     final isDownloading = downloadsProvider.isDownloading(song.id);
 
     if (isDownloaded) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('已下载: ${song.displayName}'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      showToast('已下载: ${song.displayName}');
       return;
     }
 
     if (isDownloading) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('正在下载: ${song.displayName}'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
+      showToast('正在下载: ${song.displayName}');
       return;
     }
 
     // 查询歌曲实际可用音质
     final api = KugouApiClient();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('正在查询可用音质...'),
-        duration: Duration(seconds: 3),
-      ),
-    );
+    showToast('正在查询可用音质...', long: true);
     final available = await api.getAvailableQualities(
       song.id,
       albumId: song.albumId,
       albumAudioId: song.albumAudioId,
     );
     if (!mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
     // 弹出音质选择对话框
     showDialog(
@@ -3118,35 +3067,21 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           ? () async {
               Navigator.pop(context);
               final displayName = song.displayName ?? song.title;
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('开始下载: $displayName'),
-                  duration: const Duration(seconds: 2),
-                ),
-              );
+              showToast('开始下载: $displayName');
               final actual = await provider.downloadSong(
                 song,
                 quality: quality,
               );
               if (actual == 'trial_blocked') {
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('你的账号已被kugou风控,请等待kugou解除风控后再试'),
-                      duration: Duration(seconds: 4),
-                    ),
-                  );
+                  showToast('你的账号已被kugou风控,请等待kugou解除风控后再试', long: true);
                 }
               } else if (actual != null &&
                   actual != quality &&
                   context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      '${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}',
-                    ),
-                    duration: const Duration(seconds: 3),
-                  ),
+                showToast(
+                  '${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}',
+                  long: true,
                 );
               }
             }
@@ -3674,12 +3609,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   onTap: () {
                     player.setSleepTimer(d);
                     Navigator.pop(sheetCtx);
-                    ScaffoldMessenger.of(rootContext).showSnackBar(
-                      SnackBar(
-                        content: Text('将在 ${d.inMinutes} 分钟后自动暂停'),
-                        behavior: SnackBarBehavior.floating,
-                      ),
-                    );
+                    showToast('将在 ${d.inMinutes} 分钟后自动暂停', long: true);
                   },
                 );
               }),
@@ -3753,23 +3683,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         final n = int.tryParse(controller.text);
                         controller.dispose();
                         if (n == null || n < 1 || n > 240) {
-                          ScaffoldMessenger.of(rootContext).showSnackBar(
-                            const SnackBar(
-                              content: Text('请输入 1-240 之间的整数'),
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
+                          showToast('请输入 1-240 之间的整数', long: true);
                           return;
                         }
                         final d = Duration(minutes: n);
                         player.setSleepTimer(d);
                         Navigator.pop(dialogCtx);
-                        ScaffoldMessenger.of(rootContext).showSnackBar(
-                          SnackBar(
-                            content: Text('将在 $n 分钟后自动暂停'),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
+                        showToast('将在 $n 分钟后自动暂停', long: true);
                       },
                       child: const Text('确定'),
                     ),
@@ -3816,12 +3736,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   void _showAddToPlaylistDialog(BuildContext context, dynamic song) async {
     final api = KugouApiClient();
     if (!api.isLoggedIn) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先登录'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('请先登录', long: true);
       return;
     }
 
@@ -3956,24 +3871,13 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
     if (listid.isEmpty) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('歌单ID无效'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('歌单ID无效', long: true);
       return;
     }
 
     // 乐观更新：立即显示成功，后台同步到酷狗服务器
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('已添加到「${playlist['name']}」'),
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    showToast('已添加到「${playlist['name']}」');
 
     // 构造歌曲数据 — 酷狗API要求的格式：歌名|hash|albumId|albumAudioId
     final songData =
@@ -3986,13 +3890,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           // 同步失败时提示用户（静默失败，不影响已显示的乐观更新）
           if (result == null) {
             if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: const Text('同步到服务器失败，将在下次启动时重试'),
-                  behavior: SnackBarBehavior.floating,
-                  duration: const Duration(seconds: 3),
-                ),
-              );
+              showToast('同步到服务器失败，将在下次启动时重试', long: true);
             }
           }
         })

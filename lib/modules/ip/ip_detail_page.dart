@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../data/models/song.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
@@ -489,9 +490,7 @@ class _IpDetailPageState extends State<IpDetailPage>
   void _playVideo(Map<String, dynamic> b, String title, String? cover) {
     final albumAudioId = b['album_audio_id']?.toString();
     if (albumAudioId == null || albumAudioId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('该视频无法播放')),
-      );
+      showToast('该视频无法播放', long: true);
       return;
     }
     final song = Song(

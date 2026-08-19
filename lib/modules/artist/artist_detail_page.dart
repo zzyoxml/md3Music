@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
@@ -351,12 +352,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     final api = KugouApiClient();
     if (!api.isLoggedIn) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先登录'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('请先登录', long: true);
       return;
     }
 
@@ -384,33 +380,18 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       if (isFailed) {
         // 失败，回滚
         setState(() => _isFollowing = wasFollowing);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result?['msg'] ??
-                result?['message'] ??
-                '操作失败，请重试'),
-            behavior: SnackBarBehavior.floating,
-          ),
+        showToast(
+          result?['msg'] ?? result?['message'] ?? '操作失败，请重试',
+          long: true,
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(wasFollowing ? '已取消关注' : '已关注'),
-            behavior: SnackBarBehavior.floating,
-            duration: const Duration(seconds: 1),
-          ),
-        );
+        showToast(wasFollowing ? '已取消关注' : '已关注');
       }
     } catch (e) {
       if (!mounted) return;
       // 异常，回滚
       setState(() => _isFollowing = wasFollowing);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('网络错误: $e'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('网络错误: $e', long: true);
     } finally {
       if (mounted) setState(() => _isFollowLoading = false);
     }

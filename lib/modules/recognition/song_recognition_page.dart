@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:record/record.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../player/mini_player.dart';
 import 'floating_recognition_service.dart';
@@ -387,9 +388,7 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
     if (svc.isActive) {
       await svc.stop();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已关闭悬浮窗识曲')),
-        );
+        showToast('已关闭悬浮窗识曲', long: true);
         setState(() {});
       }
       return;
@@ -402,24 +401,16 @@ class _SongRecognitionPageState extends State<SongRecognitionPage>
         // 开启后立即同步当前主题色到悬浮窗
         await svc.pushThemeColors(Theme.of(context).colorScheme);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('悬浮窗识曲已开启，可返回任意界面点击悬浮按钮识别')),
-        );
+        showToast('悬浮窗识曲已开启，可返回任意界面点击悬浮按钮识别', long: true);
         Navigator.of(context).pop();
       case FloatingStartResult.alreadyActive:
         break;
       case FloatingStartResult.unsupported:
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('仅支持 Android 10 及以上')),
-        );
+        showToast('仅支持 Android 10 及以上', long: true);
       case FloatingStartResult.permissionDenied:
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('需要麦克风/悬浮窗权限，请在系统设置中开启后重试')),
-        );
+        showToast('需要麦克风/悬浮窗权限，请在系统设置中开启后重试', long: true);
       case FloatingStartResult.failed:
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('启动失败，请重试')),
-        );
+        showToast('启动失败，请重试', long: true);
     }
   }
 

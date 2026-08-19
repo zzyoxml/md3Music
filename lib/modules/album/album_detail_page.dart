@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../../data/repositories/collected_playlist_store.dart';
@@ -266,9 +267,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     final api = KugouApiClient();
     if (!api.isLoggedIn) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请先登录'), behavior: SnackBarBehavior.floating),
-        );
+        showToast('请先登录', long: true);
       }
       return;
     }
@@ -292,9 +291,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
         // 回滚
         if (mounted) {
           setState(() { _isCollected = false; });
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('收藏失败，请重试'), behavior: SnackBarBehavior.floating),
-          );
+          showToast('收藏失败，请重试', long: true);
         }
         return;
       }
@@ -308,9 +305,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       // 回滚
       if (mounted) {
         setState(() { _isCollected = false; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('收藏失败'), behavior: SnackBarBehavior.floating),
-        );
+        showToast('收藏失败', long: true);
       }
     }
   }
@@ -330,9 +325,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
     if (listId == null || listId.isEmpty) {
       if (mounted) {
         setState(() { _isCollected = true; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('找不到收藏记录，无法取消'), behavior: SnackBarBehavior.floating),
-        );
+        showToast('找不到收藏记录，无法取消', long: true);
       }
       return;
     }
@@ -346,17 +339,13 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
       } else if (mounted) {
         // 回滚
         setState(() { _isCollected = true; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('取消收藏失败，请重试'), behavior: SnackBarBehavior.floating),
-        );
+        showToast('取消收藏失败，请重试', long: true);
       }
     } catch (e) {
       if (mounted) {
         // 回滚
         setState(() { _isCollected = true; });
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('取消收藏失败'), behavior: SnackBarBehavior.floating),
-        );
+        showToast('取消收藏失败', long: true);
       }
     }
   }

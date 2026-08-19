@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
 import '../../core/services/wakelock_service.dart';
+import '../../core/utils/app_toast.dart';
 import '../../core/services/pip_service.dart';
 import '../../core/services/usb_audio_service.dart';
 import '../../data/models/mv_models.dart';
@@ -89,20 +90,14 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
     _loadMv();
   }
 
-  /// 进入 MV 播放时自动关闭 USB 独占（绕过 AudioFlinger，MV 无声），并 SnackBar 提示。
+  /// 进入 MV 播放时自动关闭 USB 独占（绕过 AudioFlinger，MV 无声），并 Toast 提示。
   Future<void> _maybeAutoDisableUsbExclusive() async {
     try {
       if (!await UsbAudioService.instance.getAutoDisableForMv()) return;
       if (!await UsbAudioService.instance.isEnabled()) return;
       await UsbAudioService.instance.disableExclusive();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('已自动关闭 USB 独占输出，恢复系统音频'),
-          duration: Duration(seconds: 2),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('已自动关闭 USB 独占输出，恢复系统音频');
     } catch (_) {
       // 关闭失败不阻塞 MV 播放
     }
@@ -306,12 +301,7 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
     if (_disposed) return;
     if (url == null || url.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('切换清晰度失败'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('切换清晰度失败', long: true);
       }
       setState(() => _isSwitching = false);
       return;
@@ -358,12 +348,7 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
       if (_disposed) return;
       setState(() => _isSwitching = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('切换清晰度失败：$e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('切换清晰度失败：$e', long: true);
       }
     }
   }

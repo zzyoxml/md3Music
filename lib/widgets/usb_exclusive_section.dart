@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/services/usb_audio_service.dart';
+import '../core/utils/app_toast.dart';
 
 /// USB 独占输出设置板块（设置页 / 歌曲信息页共用，保证信息与开关一致）。
 ///
@@ -44,12 +45,7 @@ class _UsbExclusiveSectionState extends State<UsbExclusiveSection> {
     if (enabled && _wasDeviceConnected && !nowConnected) {
       widget.onAutoPause?.call();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('USB DAC 已断开，独占输出已自动关闭'),
-            duration: Duration(seconds: 2),
-          ),
-        );
+        showToast('USB DAC 已断开，独占输出已自动关闭');
       }
     }
     _wasDeviceConnected = nowConnected;
@@ -68,15 +64,11 @@ class _UsbExclusiveSectionState extends State<UsbExclusiveSection> {
       if (mounted) setState(() => _status = s);
     } on UsbAudioException catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('USB 独占开启失败：${e.message}')),
-        );
+        showToast('USB 独占开启失败：${e.message}', long: true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('USB 独占操作失败：$e')),
-        );
+        showToast('USB 独占操作失败：$e', long: true);
       }
     } finally {
       if (mounted) setState(() => _loading = false);

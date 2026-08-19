@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/utils/app_toast.dart';
 import '../data/models/song.dart';
 import '../modules/player/comments_view.dart';
 import '../modules/player/mv_player_page.dart';
@@ -79,12 +80,7 @@ class SongListItem extends StatelessWidget {
                 Navigator.pop(ctx);
                 final player = context.read<PlayerProvider>();
                 player.insertAfterCurrent([song]);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('已加入下一首'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                showToast('已加入下一首', long: true);
               },
             ),
             ListTile(
@@ -106,29 +102,18 @@ class SongListItem extends StatelessWidget {
     final api = KugouApiClient();
 
     if (!api.isLoggedIn) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先登录'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('请先登录', long: true);
       return;
     }
 
     // 查询歌曲实际可用音质
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('正在查询可用音质...'),
-        duration: Duration(seconds: 3),
-      ),
-    );
+    showToast('正在查询可用音质...', long: true);
     final available = await api.getAvailableQualities(
       song.id,
       albumId: song.albumId,
       albumAudioId: song.albumAudioId,
     );
     if (!context.mounted) return;
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
     showDialog(
       context: context,
@@ -185,29 +170,14 @@ class SongListItem extends StatelessWidget {
             )),
       onTap: enabled ? () async {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('开始下载: ${song.displayName}'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
+        showToast('开始下载: ${song.displayName}');
         final actual = await provider.downloadSong(song, quality: quality);
         if (actual == 'trial_blocked') {
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('你的账号已被kugou风控,请等待kugou解除风控后再试'),
-                duration: Duration(seconds: 4),
-              ),
-            );
+            showToast('你的账号已被kugou风控,请等待kugou解除风控后再试', long: true);
           }
         } else if (actual != null && actual != quality && context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}'),
-              duration: const Duration(seconds: 3),
-            ),
-          );
+          showToast('${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}', long: true);
         }
       } : null,
     );

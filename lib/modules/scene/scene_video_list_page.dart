@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../data/models/song.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
@@ -114,9 +115,7 @@ class _SceneVideoListPageState extends State<SceneVideoListPage> {
     final url = await api.getVideoUrl(hash);
     if (!mounted) return;
     if (url == null || url.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('该视频暂无法播放')));
+      showToast('该视频暂无法播放', long: true);
       return;
     }
     // 复用 MvPlayerPage：直接播放地址模式 + 展示标题/作者，支持投屏

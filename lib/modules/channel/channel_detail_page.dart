@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
@@ -395,20 +396,13 @@ class _ChannelDetailPageState extends State<ChannelDetailPage> {
       final status = r?['status'];
       final success = status == 1 || status == 200 || r?['error_code'] == 0;
       setState(() => _subscribed = success ? target : _subscribed);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(success ? (target ? '已订阅' : '已取消订阅') : '操作失败'),
-          behavior: SnackBarBehavior.floating,
-        ),
+      showToast(
+        success ? (target ? '已订阅' : '已取消订阅') : '操作失败',
+        long: true,
       );
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('操作失败'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('操作失败', long: true);
       }
     }
   }
