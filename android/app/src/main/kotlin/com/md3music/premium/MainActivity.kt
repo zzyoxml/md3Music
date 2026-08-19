@@ -28,6 +28,7 @@ class MainActivity : FlutterActivity() {
     private val HOME_WIDGET_CHANNEL = "com.md3music.premium/home_widget"
     private val RECOGNITION_CHANNEL = "com.md3music.premium/floating_recognition"
     private val PIP_CHANNEL = "com.md3music.premium/pip"
+    private val MIUIX_DISCOVER_CHANNEL = "com.md3music.premium/miuix_discover"
     private var pendingDesktopLyricAction: String? = null
     private var folderPickerResult: MethodChannel.Result? = null
     private var fontPickerResult: MethodChannel.Result? = null
@@ -172,6 +173,29 @@ class MainActivity : FlutterActivity() {
 
             // 注册 USB 独占输出插件：MethodChannel + 动态拔插广播 + AudioSink 拦截桥接
             UsbAudioPlugin(this).register(flutterEngine)
+
+            // 注册 Miuix 发现页测试通道：Dart 设置页点击后打开原生 Compose + miuix 页面，
+            // 并携带本地 Rust API 服务器当前端口（原生页据此直连取数）。
+            MethodChannel(
+                flutterEngine.dartExecutor.binaryMessenger,
+                MIUIX_DISCOVER_CHANNEL,
+            ).setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "open" -> {
+                        val port = call.argument<Number>("port")?.toInt() ?: 0
+                        try {
+                            startActivity(
+                                Intent(this, MiuixDiscoverActivity::class.java)
+                                    .putExtra(MiuixDiscoverActivity.EXTRA_PORT, port),
+                            )
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("OPEN_FAILED", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         }
 
         // 初始化本地 API 服务器（KugouApiService 含 JNI external 方法，

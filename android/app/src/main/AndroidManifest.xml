@@ -106,6 +106,14 @@
             android:noHistory="true"
             android:showWhenLocked="true"
             android:theme="@style/Theme.MD3Music.LockScreen" />
+        <!-- Miuix 风格发现页测试（原生 Compose + miuix 组件），由设置页经 MethodChannel 打开 -->
+        <activity
+            android:name=".MiuixDiscoverActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:windowSoftInputMode="adjustResize" />
         <!-- 桌面播放器小组件 -->
         <receiver
             android:name=".MusicWidgetProvider"

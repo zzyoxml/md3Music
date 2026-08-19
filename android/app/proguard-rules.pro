@@ -23,3 +23,6 @@
 -keep class com.md3music.premium.UsbAudioAdapter { *; }
 -keep class com.ryanheise.just_audio.UsbAudioSinkController { *; }
 -keep class com.ryanheise.just_audio.UsbAudioSink { *; }
+
+# ── Miuix 组件（Compose Multiplatform，无自带 consumer rules，R8 需保留类结构） ──
+-keep class top.yukonga.miuix.** { *; }
