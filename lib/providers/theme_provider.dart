@@ -64,7 +64,7 @@ class ThemeProvider extends ChangeNotifier {
   /// 1. 启用封面动态取色且提取成功 → 歌曲封面主色（可叠加系统主题色，封面优先）
   /// 2. 启用系统主题色且成功取到 → 系统主色
   /// 3. 用户手动选择非 null → 手动色
-  /// 4. 默认紫色种子（[AppTheme.defaultSeedColor]）
+  /// 4. 默认蓝色种子（[AppTheme.defaultSeedColor]）
   ///
   /// 封面取色开启但提取失败（[_coverSeedColor] 为 null，如无封面/本地图损坏）
   /// 时自然回落到后续级别，完成兜底。

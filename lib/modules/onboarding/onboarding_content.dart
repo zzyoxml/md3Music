@@ -2,8 +2,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
-import '../../core/theme/app_theme.dart';
-
 /// SharedPreferences 持久化 key：标记用户是否已完成引导。
 const String kOnboardingCompletedKey = 'onboarding_completed';
 
@@ -20,6 +18,9 @@ class OnboardingPageData {
   /// 是否为播放页隐藏操作页（交互式特殊页面）。
   final bool isHiddenOpsPage;
 
+  /// 是否为主题色选择页（交互式特殊页面）。
+  final bool isColorPicker;
+
   const OnboardingPageData({
     required this.icon,
     required this.title,
@@ -27,6 +28,7 @@ class OnboardingPageData {
     this.highlights = const [],
     this.isPlayerStylePicker = false,
     this.isHiddenOpsPage = false,
+    this.isColorPicker = false,
   });
 }
 
@@ -67,6 +69,7 @@ const List<OnboardingPageData> onboardingPages = [
     title: '个性化你的体验',
     description: '8 种主题色、动态取色、OLED 纯黑模式，打造属于你的视觉风格。',
     highlights: ['Material 3 主题', '动态色', 'OLED 纯黑'],
+    isColorPicker: true,
   ),
   OnboardingPageData(
     icon: Icons.style,
@@ -132,11 +135,7 @@ class OnboardingIllustration extends StatelessWidget {
                   colorScheme: colorScheme,
                   progress: animation.value,
                 );
-              case 5:
-                return _PersonalizationIllustration(
-                  colorScheme: colorScheme,
-                  progress: animation.value,
-                );
+              // case 5 是主题色选择页，不使用插画（交互式取色网格）
               // case 6 是播放器风格选择页，不使用插画（交互式卡片）
               case 7:
                 return _GetStartedIllustration(
@@ -681,104 +680,6 @@ class _LongPressDeleteIllustration extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ── Page 5: 个性化设置 ───────────────────────────────────────────────
-
-class _PersonalizationIllustration extends StatelessWidget {
-  final ColorScheme colorScheme;
-  final double progress;
-
-  const _PersonalizationIllustration({
-    required this.colorScheme,
-    required this.progress,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        // 8 个种子色圆点网格（4x2）
-        Opacity(
-          opacity: progress,
-          child: Wrap(
-            spacing: 14,
-            runSpacing: 14,
-            alignment: WrapAlignment.center,
-            children: List.generate(8, (i) {
-              final color = AppTheme.presetSeedColors[i];
-              final isSelected = i == 0;
-              return Transform.scale(
-                scale: 0.5 + progress * 0.5,
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: color,
-                    border: isSelected
-                        ? Border.all(
-                            color: colorScheme.primary,
-                            width: 3,
-                          )
-                        : null,
-                  ),
-                  child: isSelected
-                      ? Icon(
-                          Icons.check,
-                          size: 18,
-                          color: Colors.white,
-                        )
-                      : null,
-                ),
-              );
-            }),
-          ),
-        ),
-        const SizedBox(height: 24),
-        // 音质 chip mockup
-        Opacity(
-          opacity: progress,
-          child: Wrap(
-            spacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              _buildQualityChip('标准', false),
-              _buildQualityChip('高品', false),
-              _buildQualityChip('无损', true),
-              _buildQualityChip('Hi-Res', false),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildQualityChip(String label, bool isSelected) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      decoration: BoxDecoration(
-        color: isSelected
-            ? colorScheme.primaryContainer
-            : colorScheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(20),
-        border: isSelected
-            ? Border.all(color: colorScheme.primary, width: 1.5)
-            : null,
-      ),
-      child: Text(
-        label,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-          color: isSelected
-              ? colorScheme.onPrimaryContainer
-              : colorScheme.onSurfaceVariant,
-        ),
       ),
     );
   }

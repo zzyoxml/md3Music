@@ -32,7 +32,6 @@ import '../../services/kugou_server.dart';
 import '../../services/stream_cache_manager.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
-import '../../widgets/apple_lyrics/preview/lyrics_preview_page.dart';
 import '../../widgets/seed_color_picker.dart';
 import '../../widgets/usb_exclusive_section.dart';
 import '../player/mini_player.dart';
@@ -2348,17 +2347,6 @@ class _SettingsPageState extends State<SettingsPage>
               applicationVersion: _appVersion.isEmpty
                   ? kBuildAppVersion
                   : _appVersion,
-            );
-          },
-        ),
-        // 开发者入口：跳转 Apple Music 风格歌词渲染预览页（Task 22.5）
-        ListTile(
-          title: const Text('歌词预览（开发）'),
-          subtitle: const Text('Apple Music 风格歌词渲染调试'),
-          leading: const Icon(Icons.lyrics_outlined),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const LyricsPreviewPage()),
             );
           },
         ),

@@ -5,11 +5,11 @@ class AppTheme {
   AppTheme._();
 
   /// 8 个预设种子色，取自 Material 3 官方 Theme Builder 的 key tone 40。
-  /// 顺序：色环顺序（紫→蓝→青→绿→黄→橙→红→粉）。
+  /// 顺序：色环顺序（蓝→紫→青→绿→黄→橙→红→粉）。
   /// 索引 0 是默认色，与 [defaultSeedColor] 保持一致。
   static const List<Color> presetSeedColors = [
+    Color(0xFF0061A4), // 蓝（默认）
     Color(0xFF6750A4), // 紫（M3 默认）
-    Color(0xFF0061A4), // 蓝
     Color(0xFF006A6A), // 青绿
     Color(0xFF386A20), // 绿
     Color(0xFF7E5700), // 黄
@@ -18,9 +18,9 @@ class AppTheme {
     Color(0xFF984061), // 粉
   ];
 
-  /// 默认种子色（紫色），用于未启用系统主题色且未手动选择时的兜底。
+  /// 默认种子色（蓝色），用于未启用系统主题色且未手动选择时的兜底。
   /// 必须独立定义为 const，不能引用 [presetSeedColors] 的索引（非常量表达式）。
-  static const Color defaultSeedColor = Color(0xFF6750A4);
+  static const Color defaultSeedColor = Color(0xFF0061A4);
 
   // CJK 字体回退链 - 按平台优先级排序:
   // 1) Web 浏览器(Windows + Edge) 优先用系统自带的 "Microsoft YaHei" (无需下载)

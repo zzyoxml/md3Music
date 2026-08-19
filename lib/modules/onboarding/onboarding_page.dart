@@ -1,9 +1,11 @@
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../core/theme/motion_constants.dart';
 import '../../providers/theme_provider.dart';
 import 'onboarding_content.dart';
@@ -196,6 +198,11 @@ class _OnboardingPageState extends State<OnboardingPage>
           return _buildHiddenOpsPage(page, animation, isLandscape: isLandscape);
         }
 
+        // 主题色选择页：交互式取色网格渲染
+        if (page.isColorPicker) {
+          return _buildColorPickerPage(page, animation, isLandscape: isLandscape);
+        }
+
         if (isLandscape) {
           return _buildLandscapePage(page, index, animation);
         }
@@ -309,6 +316,14 @@ class _OnboardingPageState extends State<OnboardingPage>
         action: '进入 Zen 沉浸模式',
         color: colorScheme.secondary,
         onColor: colorScheme.onSecondary,
+      ),
+      _HiddenOp(
+        icon: Icons.favorite,
+        gesture: '长按',
+        target: '收藏红心',
+        action: '查看 AI 推荐歌曲',
+        color: colorScheme.tertiary,
+        onColor: colorScheme.onTertiary,
       ),
     ];
 
@@ -454,6 +469,124 @@ class _OnboardingPageState extends State<OnboardingPage>
             size: 18,
             color: colorScheme.onSurfaceVariant.withValues(alpha: 0.4),
           ),
+        ],
+      ),
+    );
+  }
+
+  // ── 主题色选择页（交互式取色） ────────────────────────────────────────
+
+  Widget _buildColorPickerPage(
+    OnboardingPageData page,
+    Animation<double> animation, {
+    required bool isLandscape,
+  }) {
+    final colorScheme = Theme.of(context).colorScheme;
+    // 监听 ThemeProvider：取色结果与设置页共用同一 Provider，自动同步持久化
+    final themeProvider = context.watch<ThemeProvider>();
+    final current = themeProvider.manualSeedColor ?? AppTheme.defaultSeedColor;
+
+    Widget colorGrid = FadeTransition(
+      opacity: animation,
+      child: Wrap(
+        spacing: 18,
+        runSpacing: 18,
+        alignment: WrapAlignment.center,
+        children: [
+          for (final color in AppTheme.presetSeedColors)
+            GestureDetector(
+              onTap: () {
+                HapticFeedback.lightImpact();
+                // 写入 ThemeProvider（内部持久化 + notifyListeners），设置页「主题色」随之同步
+                themeProvider.setManualSeedColor(color);
+              },
+              child: AnimatedContainer(
+                duration: M3ExpressiveMotion.defaultDuration,
+                curve: M3ExpressiveMotion.expressiveEasing,
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: color,
+                  border: Border.all(
+                    color: color.toARGB32() == current.toARGB32()
+                        ? colorScheme.onSurface
+                        : colorScheme.outlineVariant,
+                    width: color.toARGB32() == current.toARGB32() ? 3 : 1,
+                  ),
+                ),
+                child: color.toARGB32() == current.toARGB32()
+                    ? const Icon(Icons.check, color: Colors.white, size: 22)
+                    : null,
+              ),
+            ),
+        ],
+      ),
+    );
+
+    Widget hint = Opacity(
+      opacity: animation.value,
+      child: Text(
+        '点击色块立即更换主题色，与「设置 → 外观 → 主题色」同步',
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+      ),
+    );
+
+    if (isLandscape) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 48),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildTitle(page.title, animation, isCenter: false),
+                  const SizedBox(height: 12),
+                  _buildDescription(page.description, animation, isCenter: false),
+                  if (page.highlights.isNotEmpty) ...[
+                    const SizedBox(height: 16),
+                    _buildHighlights(page.highlights, isCenter: false),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(width: 32),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                colorGrid,
+                const SizedBox(height: 12),
+                SizedBox(width: 200, child: hint),
+              ],
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 32),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _buildTitle(page.title, animation, isCenter: true),
+          const SizedBox(height: 12),
+          _buildDescription(page.description, animation, isCenter: true),
+          const SizedBox(height: 28),
+          colorGrid,
+          const SizedBox(height: 12),
+          hint,
+          if (page.highlights.isNotEmpty) ...[
+            const SizedBox(height: 20),
+            _buildHighlights(page.highlights),
+          ],
         ],
       ),
     );
