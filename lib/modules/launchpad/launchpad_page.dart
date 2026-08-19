@@ -91,9 +91,16 @@ class _LaunchPadPageState extends State<LaunchPadPage> {
     final tabConfig = context.watch<TabConfigProvider>();
     final tabs = tabConfig.allTabs
         .where((t) => t.id != 'user' && t.id != 'launchpad')
-        .toList();
-    // 宽屏（平板/横屏）4 列，手机 2 列
-    final columns = MediaQuery.sizeOf(context).width >= 600 ? 4 : 2;
+        .toList()
+      // 已启用（在底部导航可见）的 Tab 动态置底，未启用的排前面更醒目
+      ..sort((a, b) {
+        final aHidden = tabConfig.hiddenTabs.contains(a.id);
+        final bHidden = tabConfig.hiddenTabs.contains(b.id);
+        return (aHidden ? 0 : 1) - (bHidden ? 0 : 1);
+      });
+    // 手机竖屏 3 列，横屏（及宽屏）4 列
+    final columns =
+        MediaQuery.orientationOf(context) == Orientation.landscape ? 4 : 3;
 
     return Scaffold(
       appBar: AppBar(title: const Text('LaunchPad')),

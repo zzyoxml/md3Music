@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../data/models/playlist.dart';
 import '../../providers/kugou_provider.dart';
 import '../../widgets/md3e_loading_indicator.dart';
@@ -282,9 +283,7 @@ class _IpPageState extends State<IpPage> {
   }
 
   void _showUnavailable(String title) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('「$title」暂无可浏览内容')));
+    showToast('「$title」暂无可浏览内容', long: true);
   }
 
   // ---------- 防御性字段解析 ----------

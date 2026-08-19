@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../core/utils/app_toast.dart';
 import '../data/models/song.dart';
 import '../providers/player_provider.dart';
 import '../services/kugou_api/kugou_api_client.dart';
@@ -16,12 +17,7 @@ import 'song_list_item.dart';
 void showAiRecommendSheet(BuildContext context, Song song) {
   final albumAudioId = song.albumAudioId;
   if (albumAudioId == null || albumAudioId.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('该歌曲缺少专辑 ID，无法获取 AI 推荐'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    showToast('该歌曲缺少专辑 ID，无法获取 AI 推荐', long: true);
     return;
   }
   showModalBottomSheet(

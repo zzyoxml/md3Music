@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../core/services/equalizer_service.dart';
+import '../../core/utils/app_toast.dart';
 
 /// 均衡器设置页：Material Design 3 风格，包含频率响应曲线、预设芯片、垂直频段滑块。
 ///
@@ -56,14 +57,7 @@ class _EqualizerSettingsPageState extends State<EqualizerSettingsPage> {
                     ? () {
                         HapticFeedback.lightImpact();
                         _eq.reset();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: const Text('已重置所有频段'),
-                            behavior: SnackBarBehavior.floating,
-                            duration: const Duration(seconds: 1),
-                            backgroundColor: colorScheme.primaryContainer,
-                          ),
-                        );
+                        showToast('已重置所有频段');
                       }
                     : null,
               );

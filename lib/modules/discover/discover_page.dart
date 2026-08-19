@@ -458,15 +458,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '主题歌单',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    TextButton(onPressed: () {}, child: const Text('查看更多')),
-                  ],
+                child: Text(
+                  '主题歌单',
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
               SizedBox(
@@ -948,7 +942,7 @@ class _CollapsibleSection extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         AnimatedRotation(
-                          turns: isExpanded ? 0 : 0.5,
+                          turns: isExpanded ? 0.5 : 0,
                           duration: const Duration(milliseconds: 200),
                           child: Icon(
                             Icons.expand_more,

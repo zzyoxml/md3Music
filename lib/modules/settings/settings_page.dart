@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -9,7 +10,9 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/services/background_image_loader.dart';
 import '../../core/services/custom_font_loader.dart';
+import '../../core/utils/app_toast.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/equalizer_service.dart';
 import '../../core/services/folder_picker_service.dart';
@@ -32,7 +35,6 @@ import '../../services/kugou_server.dart';
 import '../../services/stream_cache_manager.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
-import '../../widgets/apple_lyrics/preview/lyrics_preview_page.dart';
 import '../../widgets/seed_color_picker.dart';
 import '../../widgets/usb_exclusive_section.dart';
 import '../player/mini_player.dart';
@@ -110,6 +112,11 @@ class _SettingsPageState extends State<SettingsPage>
   bool _sortCollectedByLatestClick = true;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
+  // 自定义背景图片（全局界面背景）
+  bool _useBackgroundImage = false;
+  String? _backgroundImagePath;
+  double _backgroundBlur = 12.0;
+  double _backgroundOpacity = 0.7;
   // 音乐频谱环绕显示开关（默认关闭，仅 Android 生效）
   bool _spectrumEnabled = false;
   // 频谱柱数量（20~80，默认 40）
@@ -247,6 +254,13 @@ class _SettingsPageState extends State<SettingsPage>
         .read<ThemeProvider>()
         .artistPhotoInterval;
     final artistPhotoOpacity = context.read<ThemeProvider>().artistPhotoOpacity;
+    // 从 ThemeProvider 同步自定义背景图片配置
+    final useBackgroundImage = context.read<ThemeProvider>().useBackgroundImage;
+    final backgroundImagePath = context
+        .read<ThemeProvider>()
+        .backgroundImagePath;
+    final backgroundBlur = context.read<ThemeProvider>().backgroundBlur;
+    final backgroundOpacity = context.read<ThemeProvider>().backgroundOpacity;
     // 读取自定义下载目录
     final downloadDir = await _settingsRepository.getDownloadDir();
     // 从 ThemeProvider 同步 UI 缩放
@@ -290,6 +304,10 @@ class _SettingsPageState extends State<SettingsPage>
       _useArtistPhotoBackground = useArtistPhotoBackground;
       _artistPhotoInterval = artistPhotoInterval;
       _artistPhotoOpacity = artistPhotoOpacity;
+      _useBackgroundImage = useBackgroundImage;
+      _backgroundImagePath = backgroundImagePath;
+      _backgroundBlur = backgroundBlur;
+      _backgroundOpacity = backgroundOpacity;
       _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
       _useGlowEffect = LyricPreferences.instance.useGlowEffect;
       _useFlowingBackground = LyricPreferences.instance.useFlowingBackground;
@@ -496,6 +514,12 @@ class _SettingsPageState extends State<SettingsPage>
     (label: '使用系统主题色', category: '外观', aliases: '系统主题 壁纸 莫奈'),
     (label: '封面动态取色', category: '外观', aliases: '动态取色 封面'),
     (label: 'OLED 纯黑深色', category: '外观', aliases: 'oled 纯黑 深色 黑色'),
+    (label: '启用自定义背景图片', category: '外观', aliases: '背景 图片 壁纸'),
+    (label: '选择背景图片', category: '外观', aliases: '背景 图片 选择 更换'),
+    (label: '清除背景图片', category: '外观', aliases: '背景 图片 清除 移除'),
+    (label: '背景图片模糊', category: '外观', aliases: '模糊 高斯模糊 背景'),
+    (label: '背景图片透明度', category: '外观', aliases: '透明度 背景'),
+    (label: '背景图片莫奈取色', category: '外观', aliases: '莫奈 取色 动态取色 背景'),
     // 播放页样式
     (label: '歌词双击跳转', category: '播放页样式', aliases: '双击 跳转'),
     (label: '歌手写真背景轮播', category: '播放页样式', aliases: '写真 背景 轮播'),
@@ -1058,12 +1082,7 @@ class _SettingsPageState extends State<SettingsPage>
     if (path == null) {
       // 用户取消
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('未选择字体文件'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('未选择字体文件', long: true);
       return;
     }
     // 先保存路径并加载字体（_tryLoadCustomFont 内部会注册 FontLoader）
@@ -1072,12 +1091,7 @@ class _SettingsPageState extends State<SettingsPage>
     await prefs.setFontSource(LyricFontSource.custom);
     if (!mounted) return;
     final loaded = prefs.effectiveFontFamily != null;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(loaded ? '已应用自定义字体到歌词' : '字体加载失败，已降级为系统字体'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    showToast(loaded ? '已应用自定义字体到歌词' : '字体加载失败，已降级为系统字体', long: true);
   }
 
   Widget _buildAppearanceSection(ColorScheme colorScheme) {
@@ -1145,16 +1159,20 @@ class _SettingsPageState extends State<SettingsPage>
         // （不灰显，色块仍显示当前 effectiveSeedColor）。
         IgnorePointer(
           ignoring:
-              themeProvider.useDynamicColor || themeProvider.useCoverSeedColor,
+              themeProvider.useDynamicColor ||
+              themeProvider.useCoverSeedColor ||
+              themeProvider.useBackgroundImage,
           child: ListTile(
             leading: const Icon(Icons.palette),
             title: const Text('主题色'),
             subtitle: Text(
               themeProvider.useCoverSeedColor
                   ? '跟随歌曲封面取色'
-                  : (themeProvider.useDynamicColor
-                      ? '跟随系统壁纸取色'
-                      : '手动选择种子色'),
+                  : (themeProvider.useBackgroundImage
+                      ? '跟随背景图片取色'
+                      : (themeProvider.useDynamicColor
+                          ? '跟随系统壁纸取色'
+                          : '手动选择种子色')),
             ),
             trailing: Container(
               width: 24,
@@ -1256,8 +1274,189 @@ class _SettingsPageState extends State<SettingsPage>
             ),
           ),
         ),
+        const Divider(height: 32),
+        // 界面背景：独立子区块（保留与外观其他条目分隔的独立包裹）
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '界面背景',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+        ),
+        _buildBackgroundSection(colorScheme),
       ],
     );
+  }
+
+  /// 界面背景子区块（嵌套于外观 section）：全局自定义背景图片
+  /// （开关 / 选图 / 清除 / 预览 / 模糊 / 透明度）。
+  ///
+  /// 启用后全局页面表面的 Scaffold/AppBar 等变为透明，底层模糊背景图透出；
+  /// 同时自动按背景图提取主色作为莫奈取色种子（封面动态取色开启时仍优先）。
+  Widget _buildBackgroundSection(ColorScheme colorScheme) {
+    final themeProvider = context.read<ThemeProvider>();
+    final hasImage =
+        _backgroundImagePath != null &&
+        _backgroundImagePath!.isNotEmpty &&
+        File(_backgroundImagePath!).existsSync();
+    return Column(
+      children: [
+        SwitchListTile(
+          title: const Text('启用自定义背景图片（实验性）'),
+          subtitle: const Text('全局界面背景，自动按背景图莫奈取色'),
+          value: _useBackgroundImage,
+          onChanged: (v) {
+            HapticFeedback.lightImpact();
+            setState(() => _useBackgroundImage = v);
+            // ignore: discarded_futures
+            themeProvider.setUseBackgroundImage(v);
+          },
+        ),
+        ListTile(
+          leading: const Icon(Icons.image_outlined),
+          title: Text(hasImage ? '更换背景图片' : '选择背景图片'),
+          subtitle: Text(hasImage ? '已选择图片，点击更换' : '从系统文件选择器选择一张图片'),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: _pickBackgroundImage,
+        ),
+        if (hasImage) ...[
+          // 实时预览：按当前模糊 / 透明度渲染
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                height: 120,
+                width: double.infinity,
+                child: Opacity(
+                  opacity: _backgroundOpacity,
+                  child: ImageFiltered(
+                    imageFilter: ImageFilter.blur(
+                      sigmaX: _backgroundBlur,
+                      sigmaY: _backgroundBlur,
+                    ),
+                    child: Image.file(
+                      File(_backgroundImagePath!),
+                      fit: BoxFit.cover,
+                      // 限制解码宽度，避免选高分辨率照片时全尺寸解码导致内存峰值闪退
+                      cacheWidth: 800,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          ListTile(
+            leading: Icon(
+              Icons.cleaning_services_outlined,
+              color: colorScheme.error,
+            ),
+            title: const Text('清除背景图片'),
+            onTap: _clearBackgroundImage,
+          ),
+        ],
+        // 模糊程度滑块
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Row(
+            children: [
+              Icon(Icons.blur_on, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Slider(
+                  value: _backgroundBlur,
+                  min: 0,
+                  max: 30,
+                  divisions: 30,
+                  label: '${_backgroundBlur.round()}',
+                  onChanged: (v) => setState(() => _backgroundBlur = v),
+                  onChangeEnd: (v) => themeProvider.setBackgroundBlur(v),
+                ),
+              ),
+              SizedBox(
+                width: 34,
+                child: Text(
+                  '${_backgroundBlur.round()}',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 透明度滑块
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Row(
+            children: [
+              Icon(Icons.opacity, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Slider(
+                  value: _backgroundOpacity,
+                  min: 0.2,
+                  max: 1.0,
+                  divisions: 40,
+                  label: '${(_backgroundOpacity * 100).round()}%',
+                  onChanged: (v) {
+                    setState(() => _backgroundOpacity = v);
+                    // 实时同步到全局背景（ThemeProvider notify → AppBackgroundLayer 重建）
+                    // ignore: discarded_futures
+                    themeProvider.setBackgroundOpacity(v);
+                  },
+                ),
+              ),
+              SizedBox(
+                width: 34,
+                child: Text(
+                  '${(_backgroundOpacity * 100).round()}%',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 打开系统图片选择器选择背景图；选中后应用路径（app.dart 桥接自动莫奈取色）。
+  Future<void> _pickBackgroundImage() async {
+    final path = await BackgroundImageLoader.pickBackgroundImage();
+    if (path == null || path.isEmpty || !mounted) return;
+    setState(() => _backgroundImagePath = path);
+    await context.read<ThemeProvider>().setBackgroundImagePath(path);
+    showToast('背景图片已设置，已自动莫奈取色', long: true);
+  }
+
+  /// 清除背景图片：删除本地文件并清空配置（同时关闭开关）。
+  Future<void> _clearBackgroundImage() async {
+    final path = _backgroundImagePath;
+    if (path != null) {
+      try {
+        final f = File(path);
+        if (f.existsSync()) f.deleteSync();
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _backgroundImagePath = null;
+      _useBackgroundImage = false;
+    });
+    final themeProvider = context.read<ThemeProvider>();
+    await themeProvider.setBackgroundImagePath(null);
+    await themeProvider.setUseBackgroundImage(false);
+    showToast('已清除背景图片', long: true);
   }
 
   /// 播放页样式 section：播放器风格卡片选择 + 视觉特效开关。
@@ -1680,12 +1879,7 @@ class _SettingsPageState extends State<SettingsPage>
     if (path == null) {
       // 用户取消
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('未选择字体文件'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('未选择字体文件', long: true);
       return;
     }
     // 先保存路径并加载字体（_tryLoadCustomFont 内部会注册 FontLoader）
@@ -1694,12 +1888,7 @@ class _SettingsPageState extends State<SettingsPage>
     await themeProvider.setFontSource(FontSource.custom);
     if (!mounted) return;
     final loaded = themeProvider.effectiveFontFamily != null;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(loaded ? '已应用自定义字体' : '字体加载失败，已降级为系统字体'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    showToast(loaded ? '已应用自定义字体' : '字体加载失败，已降级为系统字体', long: true);
   }
 
   Widget _buildPlaybackSection(ColorScheme colorScheme) {
@@ -2108,12 +2297,7 @@ class _SettingsPageState extends State<SettingsPage>
     });
     await _settingsRepository.setDownloadDir(_downloadDir);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('下载目录已设置为：$path'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    showToast('下载目录已设置为：$path', long: true);
   }
 
   Widget _buildOnlineMusicSection(ColorScheme colorScheme) {
@@ -2187,23 +2371,14 @@ class _SettingsPageState extends State<SettingsPage>
       final ok = await KugouApiServer.restart();
       if (!mounted) return;
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ok
-              ? '已重启，新端口：${KugouApiServer.currentPort}'
-              : '重启失败，服务器未就绪'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast(ok
+          ? '已重启，新端口：${KugouApiServer.currentPort}'
+          : '重启失败，服务器未就绪',
+          long: true);
     } catch (e) {
       if (!mounted) return;
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('重启失败：$e'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('重启失败：$e', long: true);
     } finally {
       if (mounted) setState(() => _isRestarting = false);
     }
@@ -2263,13 +2438,7 @@ class _SettingsPageState extends State<SettingsPage>
 
         if (!mounted) return;
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ 数据迁移完成，请重新登录'),
-            behavior: SnackBarBehavior.floating,
-            duration: Duration(seconds: 3),
-          ),
-        );
+        showToast('✅ 数据迁移完成，请重新登录', long: true);
 
         // 退出登录
         context.read<KugouProvider>().logout();
@@ -2278,12 +2447,7 @@ class _SettingsPageState extends State<SettingsPage>
         Navigator.of(context).pop();
       } catch (e) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ 数据迁移失败: $e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('❌ 数据迁移失败: $e', long: true);
       }
     }
   }
@@ -2351,17 +2515,6 @@ class _SettingsPageState extends State<SettingsPage>
             );
           },
         ),
-        // 开发者入口：跳转 Apple Music 风格歌词渲染预览页（Task 22.5）
-        ListTile(
-          title: const Text('歌词预览（开发）'),
-          subtitle: const Text('Apple Music 风格歌词渲染调试'),
-          leading: const Icon(Icons.lyrics_outlined),
-          onTap: () {
-            Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const LyricsPreviewPage()),
-            );
-          },
-        ),
         // 开发者入口：Miuix（MIUI 风格组件库）发现页移植测试页（原生 Kotlin + Compose）
         ListTile(
           title: const Text('Miuix 发现页测试（开发）'),
@@ -2381,12 +2534,7 @@ class _SettingsPageState extends State<SettingsPage>
       await channel.invokeMethod('open', {'port': KugouApiServer.currentPort});
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('无法打开原生测试页：$e'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('无法打开原生测试页：$e', long: true);
     }
   }
 
@@ -2479,7 +2627,6 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _doClearCache() async {
-    final messenger = ScaffoldMessenger.of(context);
     try {
       // 1. 清图片缓存
       await DefaultCacheManager().emptyCache();
@@ -2510,12 +2657,7 @@ class _SettingsPageState extends State<SettingsPage>
       debugPrint('Clear cache error: $e');
     }
     if (mounted) {
-      messenger.showSnackBar(
-        const SnackBar(
-          content: Text('已清除缓存'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('已清除缓存', long: true);
     }
   }
 

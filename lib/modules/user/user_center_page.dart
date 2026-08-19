@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../data/models/kugou_account.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
@@ -596,17 +597,13 @@ class _UserCenterPageState extends State<UserCenterPage> {
       case SwitchAccountResult.success:
         navigator.pop(); // 关闭账号管理面板
         context.read<FavoritesProvider>().loadFavorites();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已切换到 ${account.nickname ?? account.userid}')),
-        );
+        showToast('已切换到 ${account.nickname ?? account.userid}', long: true);
       case SwitchAccountResult.tokenExpired:
         // 凭证已切换但登录态过期：引导重新登录或删除该账号
         navigator.pop();
         await _handleExpiredAccount(context, account, kugou);
       case SwitchAccountResult.noCredentials:
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('切换失败，该账号凭证已失效')),
-        );
+        showToast('切换失败，该账号凭证已失效', long: true);
     }
   }
 
@@ -650,9 +647,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
         await kugou.removeAccount(account.userid);
         if (!context.mounted) return;
         context.read<FavoritesProvider>().loadFavorites();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('已删除过期账号')),
-        );
+        showToast('已删除过期账号', long: true);
     }
   }
 
@@ -692,9 +687,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
       context.read<FavoritesProvider>().loadFavorites();
     }
     Navigator.of(context).pop(); // 关闭账号管理面板
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('已删除账号 ${account.nickname ?? account.userid}')),
-    );
+    showToast('已删除账号 ${account.nickname ?? account.userid}', long: true);
   }
 
   Widget _buildVipCard(ColorScheme cs, TextTheme tt, KugouProvider kugou) {
@@ -708,6 +701,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
+          // 实心矩形包裹：填充主题容器色，而非仅单一描边
+          color: cs.surfaceContainer,
           border: Border.all(color: cs.outlineVariant),
         ),
         child: Column(
@@ -977,14 +972,6 @@ class _UserCenterPageState extends State<UserCenterPage> {
         children: [
           Row(
             children: [
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: const Icon(Icons.chevron_left),
-                color: cs.onSurfaceVariant,
-                onPressed: () {},
-              ),
               Expanded(
                 child: Text(
                   monthLabel,
@@ -994,43 +981,33 @@ class _UserCenterPageState extends State<UserCenterPage> {
                   style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
-              IconButton(
-                visualDensity: VisualDensity.compact,
-                padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: const Icon(Icons.chevron_right),
-                color: cs.onSurfaceVariant,
-                onPressed: () {},
-              ),
-              const SizedBox(width: 4),
-              Flexible(
-                child: FilledButton.tonalIcon(
-                  style: FilledButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    minimumSize: const Size(0, 32),
-                    textStyle: tt.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  onPressed: kugou.manualSignInRunning
-                      ? null
-                      : () => _handleManualSignIn(context, kugou),
-                  icon: kugou.manualSignInRunning
-                      ? MD3ELoadingIndicator(
-                          size: 16,
-                          color: cs.onSecondaryContainer,
-                        )
-                      : const Icon(Icons.check_circle_outline, size: 16),
-                  label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  minimumSize: const Size(0, 32),
+                  textStyle: tt.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onPressed: kugou.manualSignInRunning
+                    ? null
+                    : () => _handleManualSignIn(context, kugou),
+                icon: kugou.manualSignInRunning
+                    ? MD3ELoadingIndicator(
+                        size: 16,
+                        color: cs.onSecondaryContainer,
+                      )
+                    : const Icon(Icons.check_circle_outline, size: 16),
+                label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
+              ),
+              const SizedBox(width: 8),
               FilledButton.tonalIcon(
                 style: FilledButton.styleFrom(
                   visualDensity: VisualDensity.compact,
@@ -1089,51 +1066,24 @@ class _UserCenterPageState extends State<UserCenterPage> {
     BuildContext context,
     KugouProvider kugou,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final (ok, msg) = await kugou.manualSignIn();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: ok
-            ? Theme.of(context).colorScheme.primary
-            : Theme.of(context).colorScheme.errorContainer,
-      ),
-    );
+    final (_, msg) = await kugou.manualSignIn();
+    showToast(msg, long: true);
   }
 
   Future<void> _handleListenClaim(
     BuildContext context,
     KugouProvider kugou,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final (ok, msg) = await kugou.listenSongClaim();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: ok
-            ? Theme.of(context).colorScheme.primary
-            : Theme.of(context).colorScheme.errorContainer,
-      ),
-    );
+    final (_, msg) = await kugou.listenSongClaim();
+    showToast(msg, long: true);
   }
 
   Future<void> _handleAdClaim(
     BuildContext context,
     KugouProvider kugou,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
-    final (ok, msg) = await kugou.claimAdVip();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: ok
-            ? Theme.of(context).colorScheme.primary
-            : Theme.of(context).colorScheme.errorContainer,
-      ),
-    );
+    final (_, msg) = await kugou.claimAdVip();
+    showToast(msg, long: true);
   }
 
   /// 20028 二次安全验证弹窗：WebView 加载本地滑块验证码页面（腾讯 TCaptcha），

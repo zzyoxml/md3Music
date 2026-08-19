@@ -24,6 +24,7 @@ class MainActivity : FlutterActivity() {
     private val FLOATING_CHANNEL = "com.md3music.premium/floating_lyric"
     private val FOLDER_PICKER_CHANNEL = "com.md3music.premium/folder_picker"
     private val FONT_PICKER_CHANNEL = "com.md3music.premium/font_picker"
+    private val BACKGROUND_PICKER_CHANNEL = "com.md3music.premium/background_picker"
     private val MEDIA_STORE_CHANNEL = "com.md3music.premium/media_store"
     private val HOME_WIDGET_CHANNEL = "com.md3music.premium/home_widget"
     private val RECOGNITION_CHANNEL = "com.md3music.premium/floating_recognition"
@@ -32,6 +33,7 @@ class MainActivity : FlutterActivity() {
     private var pendingDesktopLyricAction: String? = null
     private var folderPickerResult: MethodChannel.Result? = null
     private var fontPickerResult: MethodChannel.Result? = null
+    private var backgroundPickerResult: MethodChannel.Result? = null
     // 悬浮窗识曲 channel：MediaProjection 授权结果等原生→Dart 回调
     private var recognitionChannel: MethodChannel? = null
     // MV 画中画 channel：原生→Dart 回调 onPipModeChanged
@@ -41,6 +43,7 @@ class MainActivity : FlutterActivity() {
         private const val FOLDER_PICKER_REQUEST_CODE = 9999
         private const val FONT_PICKER_REQUEST_CODE = 10000
         private const val RECOGNITION_PROJECTION_REQUEST = 10001
+        private const val BACKGROUND_PICKER_REQUEST_CODE = 10002
 
         // 静态引用：让 Service 也能调用 MethodChannel（无 FlutterEngine 缓存时走这里）
         private var cachedEngine: FlutterEngine? = null
@@ -583,6 +586,29 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        // 注册背景图片选择器 MethodChannel
+        // 用 ACTION_OPEN_DOCUMENT 打开系统图片选择器，过滤常见图片 MIME
+        // 选中后原生端把 content URI 流拷贝到 filesDir/background/bg.<ext>
+        // 返回真实路径给 Dart 端用 Image.file 渲染 + PaletteGenerator 莫奈取色
+        val backgroundPickerChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            BACKGROUND_PICKER_CHANNEL
+        )
+        backgroundPickerChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "pickBackgroundImage" -> {
+                    backgroundPickerResult = result
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "image/*"
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivityForResult(intent, BACKGROUND_PICKER_REQUEST_CODE)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         // 注册 MediaStore 扫描器 MethodChannel
         // Android 11+ 沙箱模式下，通过 MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
         // 可以读取系统已索引的所有音频（含网易云/QQ 音乐/酷狗等通过 MediaStore 公开的部分）。
@@ -794,11 +820,71 @@ class MainActivity : FlutterActivity() {
                 fontPickerResult?.success(null)
                 fontPickerResult = null
             }
+        } else if (requestCode == BACKGROUND_PICKER_REQUEST_CODE) {
+            if (resultCode == RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                // 后台线程：把 content URI 流拷贝到 filesDir/background/bg_<ts>.<ext>
+                Thread {
+                    try {
+                        val targetDir = File(filesDir, "background").apply { mkdirs() }
+                        // 时间戳命名：每次更换图片路径必然不同，Dart 端据此触发刷新
+                        // + 新的 FileImage 缓存键（固定文件名会导致更换后仍显示旧图）
+                        val targetFile = File(
+                            targetDir,
+                            "bg_${System.currentTimeMillis()}.${guessImageExtension(uri)}"
+                        )
+                        contentResolver.openInputStream(uri).use { input ->
+                            targetFile.outputStream().use { output ->
+                                input?.copyTo(output)
+                            }
+                        }
+                        // 拷贝成功后清理旧背景文件，避免累积
+                        targetDir.listFiles()?.forEach { old ->
+                            if (old.isFile && old.absolutePath != targetFile.absolutePath) old.delete()
+                        }
+                        // 与字体选择器同理：success 与清空 result 必须同一主线程任务原子完成
+                        runOnUiThread {
+                            backgroundPickerResult?.success(targetFile.absolutePath)
+                            backgroundPickerResult = null
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            backgroundPickerResult?.error("COPY_FAILED", e.message, null)
+                            backgroundPickerResult = null
+                        }
+                    }
+                }.start()
+            } else {
+                backgroundPickerResult?.success(null)
+                backgroundPickerResult = null
+            }
         } else if (requestCode == RECOGNITION_PROJECTION_REQUEST) {
             // 悬浮窗识曲：MediaProjection 授权结果 → 注入服务 + 通知 Dart
             val granted = resultCode == RESULT_OK && data != null
             recognitionChannel?.invokeMethod("onProjectionResult", granted)
             FloatingRecognitionService.onProjectionResult(resultCode, data)
+        }
+    }
+
+    /// 根据 content URI 推断图片扩展名（MIME → ext；取不到时用 URI 文件名后缀，再兜底 jpg）。
+    private fun guessImageExtension(uri: Uri): String {
+        return try {
+            val mime = contentResolver.getType(uri)
+            when (mime) {
+                "image/png" -> "png"
+                "image/webp" -> "webp"
+                "image/gif" -> "gif"
+                "image/bmp" -> "bmp"
+                "image/heic", "image/heif" -> "heic"
+                "image/svg+xml" -> "svg"
+                else -> {
+                    uri.lastPathSegment?.substringAfterLast('.', "")
+                        ?.takeIf { it.isNotBlank() && it.length <= 5 }
+                        ?: "jpg"
+                }
+            }
+        } catch (_: Exception) {
+            "jpg"
         }
     }
 
