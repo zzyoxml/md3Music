@@ -1214,7 +1214,7 @@ class _GroupSectionState extends State<_GroupSection>
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 200),
       vsync: this,
       value: widget.expanded ? 1.0 : 0.0,
     );
@@ -1256,11 +1256,11 @@ class _GroupSectionState extends State<_GroupSection>
             child: Row(
               children: [
                 AnimatedRotation(
-                  turns: widget.expanded ? 0.25 : 0.0,
-                  duration: const Duration(milliseconds: 300),
+                  turns: widget.expanded ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 200),
                   curve: Curves.easeInOut,
                   child: Icon(
-                    Icons.chevron_right,
+                    Icons.expand_more,
                     color: colorScheme.onSurfaceVariant,
                     size: 20,
                   ),

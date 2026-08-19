@@ -942,7 +942,7 @@ class _CollapsibleSection extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         AnimatedRotation(
-                          turns: isExpanded ? 0 : 0.5,
+                          turns: isExpanded ? 0.5 : 0,
                           duration: const Duration(milliseconds: 200),
                           child: Icon(
                             Icons.expand_more,

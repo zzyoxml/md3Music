@@ -986,35 +986,33 @@ class _UserCenterPageState extends State<UserCenterPage> {
                   style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                 ),
               ),
-              const SizedBox(width: 4),
-              Flexible(
-                child: FilledButton.tonalIcon(
-                  style: FilledButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                    minimumSize: const Size(0, 32),
-                    textStyle: tt.labelMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  onPressed: kugou.manualSignInRunning
-                      ? null
-                      : () => _handleManualSignIn(context, kugou),
-                  icon: kugou.manualSignInRunning
-                      ? MD3ELoadingIndicator(
-                          size: 16,
-                          color: cs.onSecondaryContainer,
-                        )
-                      : const Icon(Icons.check_circle_outline, size: 16),
-                  label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
-                ),
-              ),
             ],
           ),
           const SizedBox(height: 8),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              FilledButton.tonalIcon(
+                style: FilledButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  minimumSize: const Size(0, 32),
+                  textStyle: tt.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onPressed: kugou.manualSignInRunning
+                    ? null
+                    : () => _handleManualSignIn(context, kugou),
+                icon: kugou.manualSignInRunning
+                    ? MD3ELoadingIndicator(
+                        size: 16,
+                        color: cs.onSecondaryContainer,
+                      )
+                    : const Icon(Icons.check_circle_outline, size: 16),
+                label: Text(kugou.manualSignInRunning ? '签到中' : '签到'),
+              ),
+              const SizedBox(width: 8),
               FilledButton.tonalIcon(
                 style: FilledButton.styleFrom(
                   visualDensity: VisualDensity.compact,
