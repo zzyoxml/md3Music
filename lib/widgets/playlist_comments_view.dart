@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/kugou_provider.dart';
@@ -66,6 +67,16 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
 
   /// 楼层评论状态（按评论 ID 索引）
   final Map<String, _FloorState> _floorStates = {};
+
+  /// 评论项 GlobalKey（按评论 ID 索引），用于收起楼中楼后定位滚动
+  final Map<String, GlobalKey> _commentItemKeys = {};
+
+  GlobalKey _keyForComment(String id) =>
+      _commentItemKeys.putIfAbsent(id, () => GlobalKey());
+
+  /// 收起滚动操作序号：每次收起自增，异步滚动前校验，只允许最新一次生效，
+  /// 避免多个收起操作并发时滚动互相干扰。
+  int _collapseScrollSeq = 0;
 
   ScrollController get _scrollController =>
       widget.scrollController ?? _internalScrollController!;
@@ -266,6 +277,18 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
 
   void _toggleFloor(KugouComment comment) {
     final state = _getFloorState(comment.id);
+    final wasExpanded = state.expanded;
+    // 收起前记录评论项顶部相对视口的位置与滚动偏移，供收起后精确定位。
+    // 此时楼中楼仍在展开、评论项通常未被懒加载回收，位置可可靠读取。
+    // 用局部变量随本次收起一起传递，避免多个评论项收起时相互覆盖。
+    final double? recorded = wasExpanded
+        ? _commentTopInViewport(comment.id)
+        : null;
+    final double? beforeOffset =
+        wasExpanded && _scrollController.hasClients
+        ? _scrollController.offset
+        : null;
+    final int seq = wasExpanded ? ++_collapseScrollSeq : _collapseScrollSeq;
     setState(() {
       if (!state.expanded) {
         state.expanded = true;
@@ -276,6 +299,59 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
         state.expanded = false;
       }
     });
+    // 收起楼中楼后，若楼主评论已超出视口则自然滚动回其位置
+    if (wasExpanded && !state.expanded) {
+      _scrollToCommentAfterCollapse(comment.id, seq, recorded, beforeOffset);
+    }
+  }
+
+  /// 计算评论项顶部相对视口顶部的偏移（负数表示在视口上方）。
+  double? _commentTopInViewport(String commentId) {
+    final rb = _keyForComment(commentId).currentContext?.findRenderObject();
+    if (rb is! RenderBox || !rb.attached) return null;
+    final viewport = RenderAbstractViewport.of(rb) as RenderBox;
+    final viewportTop = viewport.localToGlobal(Offset.zero).dy;
+    return rb.localToGlobal(Offset.zero).dy - viewportTop;
+  }
+
+  /// 收起楼中楼后把视口自然滚动回楼主评论位置。
+  ///
+  /// 用收起前记录的评论项顶部位置计算目标滚动偏移（不依赖评论项是否仍
+  /// 在 widget 树中），等待 [AnimatedSize] 收缩动画结束、布局稳定后滚动，
+  /// 滚动后再校准，确保评论项顶部对齐视口顶部。
+  /// [seq] 为本次收起操作的序号，异步期间若又有新的收起操作则放弃本次，
+  /// 避免多个收起并发滚动互相干扰。
+  Future<void> _scrollToCommentAfterCollapse(
+    String commentId,
+    int seq,
+    double? recorded,
+    double? beforeOffset,
+  ) async {
+    // 等待 AnimatedSize 收缩动画结束、布局稳定
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    if (!mounted || seq != _collapseScrollSeq) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || seq != _collapseScrollSeq) return;
+    final controller = _scrollController;
+    if (!controller.hasClients) return;
+    if (recorded == null || beforeOffset == null) return;
+    // 评论项顶部已在视口内则不滚动
+    if (recorded >= 0) return;
+    // 评论项顶部在滚动内容中的位置（收起前后不变）
+    final target = (beforeOffset + recorded)
+        .clamp(0.0, controller.position.maxScrollExtent);
+    // 滚动 + 校准：一次滚动可能因列表高度收缩没完全到位，滚动后再测量校准
+    for (int attempt = 0; attempt < 3; attempt++) {
+      if (seq != _collapseScrollSeq) return;
+      if ((target - controller.offset).abs() < 1.0) break;
+      await controller.animateTo(
+        target,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
   }
 
   // ---- 工具方法 ----
@@ -442,6 +518,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
   ) {
     final floorState = _floorStates[comment.id];
     return Padding(
+      key: _keyForComment(comment.id),
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -551,11 +628,28 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                   curve: Curves.easeInOut,
                   alignment: Alignment.topLeft,
                   child: floorState?.expanded == true
-                      ? _buildFloorReplies(
-                          comment,
-                          floorState!,
-                          colorScheme,
-                          replyFontSize,
+                      // 左侧竖条收纳按钮 + 楼中楼内容
+                      ? IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _buildFloorCollapseHandle(
+                                onTap: () => _toggleFloor(comment),
+                                lineColor: colorScheme.onSurfaceVariant
+                                    .withValues(alpha: 0.28),
+                                iconColor: colorScheme.primary,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _buildFloorReplies(
+                                  comment,
+                                  floorState!,
+                                  colorScheme,
+                                  replyFontSize,
+                                ),
+                              ),
+                            ],
+                          ),
                         )
                       : const SizedBox.shrink(),
                 ),
@@ -644,6 +738,60 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
           color: colorScheme.primary,
           fontSize: 10,
           fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  /// 楼中楼左侧的竖条收纳按钮。
+  ///
+  /// 一条与楼中楼等高的竖线 + 底部向上箭头，整条可点击收起楼中楼，
+  /// 方便在楼中楼较长时无需滚回顶部即可收纳。仅在展开楼中楼时渲染。
+  Widget _buildFloorCollapseHandle({
+    required VoidCallback onTap,
+    required Color lineColor,
+    required Color iconColor,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        width: 20,
+        child: Column(
+          children: [
+            // 顶部圆点：与右侧楼中楼矩形顶部（margin top 10）对齐
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: lineColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            // 竖线：从圆点下方延伸到楼中楼底部
+            Expanded(
+              child: Container(
+                width: 2,
+                margin: const EdgeInsets.only(top: 3),
+                decoration: BoxDecoration(
+                  color: lineColor,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ),
+            // 底部收纳图标
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Icon(
+                Icons.keyboard_arrow_up,
+                size: 16,
+                color: iconColor,
+              ),
+            ),
+          ],
         ),
       ),
     );
