@@ -667,7 +667,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
         children: [
           // 回复列表
           for (final reply in state.replies)
-            _buildFloorReplyItem(reply, colorScheme, replyFontSize),
+            _buildFloorReplyItem(reply, colorScheme, replyFontSize, comment.username),
           // 加载中
           if (state.loading)
             Padding(
@@ -727,10 +727,27 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
     );
   }
 
+  /// 清理楼中楼回复的引用后缀。
+  ///
+  /// 酷狗楼中楼回复内容形如「回复正文//@被回复用户名:被回复内容」。
+  /// 仅当被回复用户是楼主（[ownerName]）时去掉引用后缀、只显示回复正文；
+  /// 楼中楼用户互相回复时保留引用，便于看出回复对象。
+  String _cleanFloorReplyContent(String content, String ownerName) {
+    final idx = content.lastIndexOf('//@');
+    if (idx <= 0) return content;
+    final ref = content.substring(idx + 3);
+    final colon = ref.indexOf(':');
+    if (colon <= 0) return content;
+    if (ref.substring(0, colon).trim() != ownerName) return content;
+    final text = content.substring(0, idx).trim();
+    return text.isEmpty ? content : text;
+  }
+
   Widget _buildFloorReplyItem(
     KugouComment reply,
     ColorScheme colorScheme,
     double fontSize,
+    String ownerName,
   ) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -769,7 +786,7 @@ class _PlaylistCommentsViewState extends State<PlaylistCommentsView> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  reply.content,
+                  _cleanFloorReplyContent(reply.content, ownerName),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: colorScheme.onSurface,
                     height: 1.3,
