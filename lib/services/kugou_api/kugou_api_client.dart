@@ -2394,6 +2394,9 @@ class KugouApiClient {
     if (json == null) return null;
     try {
       // 真实响应：{ data: { "<hash_lower>": { downurl, backupdownurl, filesize } } }
+      // 注意：MV 视频 CDN（如 fsmvpc.tx.kugou.com）仅支持 HTTP，不支持 HTTPS，
+      // 不能做 http→https 转换（会 Source error）。明文由 network_security_config
+      // 按域名精确放行，故这里保持返回原始 downurl。
       final data = json['data'];
       if (data is Map<String, dynamic>) {
         // 优先用 hash 小写匹配 key
