@@ -854,14 +854,19 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final bool tickerGapResume = dt > _tickerGapResumeThreshold;
 
     // ============== 歌词省电模式：锁定 60fps ==============
-    // 仅"用户手指正按住拖动歌词"（isUserScrolling）才解锁为最高刷新率保证跟手；
-    // 其余一切自动运动（播放行切换 / 松手惯性 / 自动回弹 / 初始收敛）都保持 60fps。
-    // 注意：不能用"位移距目标 > 阈值"判定——否则每次自动行切换弹簧都在位移，
-    // 会频繁切回 120Hz，表现正是"开了开关仍锁不住 60fps"。
+    // 解锁（120Hz 满帧）仅限"用户驱动"的滚动：
+    //   1. 手指正按住拖动（isUserScrolling）
+    //   2. 松手后惯性仍在滑行（isWaitingForAutoReturn 且弹簧未静止）——惯性速度高，
+    //      60fps 会明显发卡，必须保持满帧顺滑
+    // 其余一律保持 60fps：
+    //   - 惯性已停、仅等待自动回弹倒计时（画面静止）→ 锁 60fps（这正是"拖动后要锁回"的原始 bug）
+    //   - 自动回弹动画 / 播放行切换的自动滚动 → 60fps 足够顺滑
     // **真正限帧由 [_syncEcoDriver] 切换 Ticker/Timer 实现**：锁定 → 停 Ticker、
     // 用 60fps Timer 驱动 _onTick（限制实际帧生产）；解锁/关闭 eco → Ticker 满帧。
     if (LyricPreferences.instance.ecoMode) {
-      _ecoUnlocked = _scrollController.isUserScrolling;
+      _ecoUnlocked = _scrollController.isUserScrolling ||
+          (_scrollController.isWaitingForAutoReturn &&
+              !_scrollController.isPosYSpringSettled);
       _syncEcoDriver();
     }
 
@@ -1379,8 +1384,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 用户滚动后 5s 自动回弹到当前行）。这里补上 onVerticalDragUpdate/End。
   void _onVerticalDragUpdate(DragUpdateDetails details) {
     _startTickerIfNeeded(); // v3 优化：用户滚动时重启 Ticker
-    // 省电模式：用户开始滑动歌词立即解锁帧率限制（保持 120Hz 顺滑滚动）
+    // 省电模式：用户开始滑动歌词立即解锁帧率限制（保持 120Hz 顺滑滚动）。
+    // 必须立刻同步驱动源：取消 60fps Timer、确认 Ticker 在跑，
+    // 否则要等下一帧 _onTick 里的 _syncEcoDriver 才切，拖动首帧会多走一次 60fps。
     _ecoUnlocked = true;
+    _syncEcoDriver();
     _scrollController.onUserScroll(details.primaryDelta ?? 0);
   }
 

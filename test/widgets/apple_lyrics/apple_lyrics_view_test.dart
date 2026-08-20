@@ -472,5 +472,76 @@ void main() {
       expect(ecoUnlocked(), isFalse,
           reason: '自动回弹结束后应保持锁定');
     });
+
+    testWidgets('快速甩动松手后惯性滑行期间保持解锁，惯性停住后锁回 60fps',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      await LyricPreferences.instance.setEcoMode(true);
+      addTearDown(() => LyricPreferences.instance.reset());
+
+      final lines = <LyricLine>[
+        LyricLine(
+          startTime: 0,
+          duration: 60000,
+          text: '逐字歌词行',
+          words: const [
+            LyricWord(startTime: 0, duration: 60000, text: '逐字歌词行'),
+          ],
+        ),
+        LyricLine(
+          startTime: 60000,
+          duration: 60000,
+          text: '第二行',
+          words: const [
+            LyricWord(startTime: 60000, duration: 60000, text: '第二行'),
+          ],
+        ),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 400,
+              height: 600,
+              child: AppleLyricsView(
+                lines: lines,
+                currentTimeMs: 0,
+                isPlaying: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      const step = Duration(milliseconds: 16);
+      for (int i = 0; i < 300; i++) {
+        await tester.pump(step);
+      }
+
+      bool ecoUnlocked() =>
+          (tester.state(find.byType(AppleLyricsView)) as dynamic)
+              .ecoUnlockedForTest as bool;
+
+      // 快速甩动（velocity 1000px/s）→ 松手后产生惯性滑行
+      await tester.fling(
+        find.byType(AppleLyricsView),
+        const Offset(0, -200),
+        1000,
+      );
+      // 惯性初期弹簧未静止 → 必须保持解锁（60fps 滑行会明显发卡）
+      int unlockedDuringInertia = 0;
+      for (int i = 0; i < 40; i++) {
+        await tester.pump(step);
+        if (ecoUnlocked()) unlockedDuringInertia++;
+      }
+      expect(unlockedDuringInertia, greaterThan(0),
+          reason: '松手后惯性滑行期间应保持解锁（否则滑动发卡）');
+
+      // 推进足够久让惯性收敛（弹簧静止），应锁回 60fps
+      for (int i = 0; i < 200; i++) {
+        await tester.pump(step);
+      }
+      expect(ecoUnlocked(), isFalse,
+          reason: '惯性停住后应锁回 60fps');
+    });
   });
 }
