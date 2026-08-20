@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/dlna_provider.dart';
@@ -124,7 +125,7 @@ class _DlnaRemotePageState extends State<DlnaRemotePage> {
                         },
                       )
                     else
-                      LinearProgressIndicator(
+                      M3ELinearProgressIndicator(
                         value: positionSeconds / totalSeconds,
                       ),
                     Padding(

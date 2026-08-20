@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:m3e_core/m3e_core.dart';
 
 import '../../core/utils/app_toast.dart';
 import '../../data/models/playlist.dart';
@@ -18,7 +19,6 @@ import '../../services/kugou_api/kugou_models.dart';
 import '../../services/stream_cache_manager.dart';
 import '../../widgets/song_list_item.dart';
 import '../../widgets/playlist_comments_view.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../player/mini_player.dart';
 
 class PlaylistPage extends StatefulWidget {
@@ -391,7 +391,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              LinearProgressIndicator(
+              M3ELinearProgressIndicator(
                 value: total > 0 ? progress.value / total : 0,
               ),
               const SizedBox(height: 16),
@@ -1137,7 +1137,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
       body: Column(
         children: [
           if (_isLoading)
-            const Expanded(child: Center(child: MD3ELoadingIndicator()))
+            const Expanded(child: Center(child: M3ELoadingIndicator()))
           else ...[
             // 加载失败时显示顶部 banner（不再完全覆盖 UI，
             // 歌单的元数据/封面/描述仍可见）
@@ -1801,7 +1801,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
               if (_isDeleting)
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 12),
-                  child: MD3ELoadingIndicator(size: 20),
+                  child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 20, height: 20)),
                 )
               else ...[
                 IconButton(
@@ -2001,7 +2001,7 @@ class _SimilarPlaylistsViewState extends State<_SimilarPlaylistsView> {
   }
 
   Widget _buildBody(ColorScheme cs, TextTheme tt) {
-    if (_loading) return const Center(child: MD3ELoadingIndicator());
+    if (_loading) return const Center(child: M3ELoadingIndicator());
     if (_error != null) {
       return Center(
         child: Column(

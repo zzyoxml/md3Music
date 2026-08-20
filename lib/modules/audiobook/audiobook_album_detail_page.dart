@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models/song.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/smart_artwork_image.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
@@ -265,7 +265,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
 
     return Scaffold(
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : Column(
               children: [
                 // 加载失败顶部 banner：专辑元数据仍可看
@@ -533,7 +533,11 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [cs.primaryContainer, cs.surface],
+              colors: [
+                cs.primaryContainer,
+                // 底部渐变到透明：与歌单详情页一致，启用全局背景图时不形成接缝穿帮
+                cs.surface.withValues(alpha: 0),
+              ],
             ),
           ),
           child: SafeArea(

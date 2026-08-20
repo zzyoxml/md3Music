@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -12,8 +13,6 @@ import '../../providers/favorites_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
-import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
@@ -685,7 +684,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildPlaylistsTab() {
     if (_isLoadingPlaylists) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (_playlists.isEmpty) {
@@ -719,7 +718,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return MD3ERefreshIndicator(
+    return M3EPullToRefreshIndicator(
       onRefresh: () => _loadPlaylists(forceNoCache: true),
       child: NotificationListener<ScrollNotification>(
         onNotification: (notification) {
@@ -758,7 +757,7 @@ class _FavoritesPageState extends State<FavoritesPage>
             if (_isLoadingMorePlaylists)
               const Padding(
                 padding: EdgeInsets.all(16),
-                child: Center(child: MD3ELoadingIndicator()),
+                child: Center(child: M3ELoadingIndicator()),
               )
             else if (!_hasMorePlaylists &&
                 _playlists.length > _playlistPageSize)
@@ -910,7 +909,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildAlbumsTab() {
     if (_isLoadingAlbums) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (_albums.isEmpty) {
@@ -937,7 +936,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return MD3ERefreshIndicator(
+    return M3EPullToRefreshIndicator(
       onRefresh: () => _loadAlbums(),
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1055,7 +1054,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildArtistsTab() {
     if (_isLoadingArtists) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (_artists.isEmpty) {
@@ -1082,7 +1081,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return MD3ERefreshIndicator(
+    return M3EPullToRefreshIndicator(
       onRefresh: () => _loadArtists(),
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),

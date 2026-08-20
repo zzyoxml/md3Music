@@ -9,6 +9,12 @@
 # packages, and plugins designed to encourage good coding practices.
 include: package:flutter_lints/flutter.yaml
 
+# 排除第三方 fork 代码：其测试/示例依赖（如 mockito）不会被根项目安装，
+# 且不属于本项目分析范围，避免全量 analyze 产生大量噪音与误报。
+analyzer:
+  exclude:
+    - third_party/**
+
 linter:
   # The lint rules applied to this project can be customized in the
   # section below to disable rules from the `package:flutter_lints/flutter.yaml`

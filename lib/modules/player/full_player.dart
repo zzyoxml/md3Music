@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
@@ -41,7 +42,6 @@ import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
 import '../../widgets/md3_lyric_preferences_panel.dart';
 import '../../widgets/ai_recommend_sheet.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/md3e_transport_row.dart';
 import '../../widgets/menu_action_cell.dart';
 import '../../widgets/player_artwork_image.dart';
@@ -404,7 +404,7 @@ class _FullPlayerState extends State<FullPlayer>
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(child: MD3ELoadingIndicator()),
+      builder: (_) => const Center(child: M3ELoadingIndicator()),
     );
     try {
       final api = KugouApiClient();
@@ -1095,7 +1095,7 @@ class _FullPlayerState extends State<FullPlayer>
                   onTap: () => _tabController.animateTo(1),
                   behavior: HitTestBehavior.translucent,
                   child: _isLoadingLyrics
-                      ? const Center(child: MD3ELoadingIndicator())
+                      ? const Center(child: M3ELoadingIndicator())
                       // P0: 歌词时间只订阅 positionNotifier（高频 200ms），
                       // 不再因 positionStream 触发整页重建
                       : ValueListenableBuilder<Duration>(
@@ -1330,7 +1330,7 @@ class _FullPlayerState extends State<FullPlayer>
                                 ),
                               ),
                             _isLoadingLyrics
-                                ? const Center(child: MD3ELoadingIndicator())
+                                ? const Center(child: M3ELoadingIndicator())
                                 // P0: 歌词时间只订阅 positionNotifier（高频 200ms）
                                 : ValueListenableBuilder<Duration>(
                                     valueListenable:
@@ -1571,7 +1571,7 @@ class _FullPlayerState extends State<FullPlayer>
                                 ),
                               ),
                             _isLoadingLyrics
-                                ? const Center(child: MD3ELoadingIndicator())
+                                ? const Center(child: M3ELoadingIndicator())
                                 // P0: 歌词时间只订阅 positionNotifier（高频 200ms）
                                 : ValueListenableBuilder<Duration>(
                                     valueListenable:
@@ -2080,7 +2080,7 @@ class _FullPlayerState extends State<FullPlayer>
         return Stack(
           clipBehavior: Clip.none,
           children: [
-            // Slider 本体
+            // Seekbar 本体
             Slider(
               value: totalMs > 0
                   ? (position.inMilliseconds / totalMs).clamp(0.0, 1.0)
@@ -2554,6 +2554,20 @@ class _FullPlayerState extends State<FullPlayer>
     );
   }
 
+  /// 音质简短文本：去掉码率/格式后缀，与设置页默认音质按钮一致。
+  String _qualityShortLabel(AudioQuality quality) {
+    switch (quality) {
+      case AudioQuality.standard:
+        return '标准';
+      case AudioQuality.high:
+        return '高品质';
+      case AudioQuality.flac:
+        return '无损';
+      case AudioQuality.hires:
+        return 'Hi-Res 无损';
+    }
+  }
+
   void _showQualityDialog(PlayerProvider playerProvider) {
     showDialog(
       context: context,
@@ -2567,7 +2581,7 @@ class _FullPlayerState extends State<FullPlayer>
                 Navigator.pop(context);
               },
               child: Text(
-                quality.label,
+                _qualityShortLabel(quality),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: playerProvider.audioQuality == quality
@@ -3418,7 +3432,8 @@ class _FullPlayerState extends State<FullPlayer>
                 content: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    MD3ELoadingIndicator(size: 32),
+                    M3ELoadingIndicator(
+                        constraints: BoxConstraints.tightFor(width: 32, height: 32)),
                     SizedBox(height: 16),
                     Text('加载歌单中...'),
                   ],

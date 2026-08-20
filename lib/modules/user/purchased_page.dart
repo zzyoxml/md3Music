@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models/album.dart';
@@ -7,7 +8,6 @@ import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../album/album_detail_page.dart';
 import '../player/mini_player.dart';
@@ -258,13 +258,15 @@ class _PurchasedPageState extends State<PurchasedPage> {
           preferredSize: const Size.fromHeight(48),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 0, label: Text('单曲')),
-                ButtonSegment(value: 1, label: Text('专辑')),
+            child: M3EToggleButtonGroup(
+              actions: const [
+                M3EToggleButtonGroupAction(label: Text('单曲')),
+                M3EToggleButtonGroupAction(label: Text('专辑')),
               ],
-              selected: {_currentTab},
-              onSelectionChanged: (v) => _switchTab(v.first),
+              selectedIndex: _currentTab,
+              onSelectedIndexChanged: (index) {
+                if (index != null) _switchTab(index);
+              },
             ),
           ),
         ),
@@ -274,7 +276,7 @@ class _PurchasedPageState extends State<PurchasedPage> {
   }
 
   Widget _buildBody(ColorScheme cs) {
-    if (_isLoading) return const Center(child: MD3ELoadingIndicator());
+    if (_isLoading) return const Center(child: M3ELoadingIndicator());
     if (_error != null) return _buildMessage(cs, _error!, Icons.error_outline);
     if (_currentTab == _tabSongs) {
       if (_songs.isEmpty) return _buildMessage(cs, '暂无已购单曲', Icons.music_note);

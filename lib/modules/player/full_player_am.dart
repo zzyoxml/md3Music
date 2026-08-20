@@ -6,6 +6,7 @@ import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
@@ -44,7 +45,6 @@ import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/flowing_background.dart';
 import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/menu_action_cell.dart';
 import '../../widgets/player_artwork_image.dart';
@@ -1084,7 +1084,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       context: context,
       barrierDismissible: false,
       builder: (_) =>
-          const Center(child: MD3ELoadingIndicator(color: Colors.white)),
+          const Center(child: M3ELoadingIndicator(color: Colors.white)),
     );
     try {
       final api = KugouApiClient();
@@ -1331,7 +1331,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     child: _isLoadingLyrics
                         // AM 风格：歌词 loading 改为白色，与深色背景协调
                         ? const Center(
-                            child: MD3ELoadingIndicator(color: Colors.white),
+                            child: M3ELoadingIndicator(color: Colors.white),
                           )
                         // P0: 用 ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
                         // 与 playerProvider（播放/暂停切换等低频通知）。
@@ -1582,7 +1582,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                             _isLoadingLyrics
                                 // AM 风格：歌词 loading 改为白色，与深色背景协调
                                 ? const Center(
-                                    child: MD3ELoadingIndicator(
+                                    child: M3ELoadingIndicator(
                                       color: Colors.white,
                                     ),
                                   )
@@ -1840,7 +1840,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                             _isLoadingLyrics
                                 // AM 风格：歌词 loading 改为白色，与深色背景协调
                                 ? const Center(
-                                    child: MD3ELoadingIndicator(
+                                    child: M3ELoadingIndicator(
                                       color: Colors.white,
                                     ),
                                   )
@@ -2900,6 +2900,20 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
+  /// 音质简短文本：去掉码率/格式后缀，与设置页默认音质按钮一致。
+  String _qualityShortLabel(AudioQuality quality) {
+    switch (quality) {
+      case AudioQuality.standard:
+        return '标准';
+      case AudioQuality.high:
+        return '高品质';
+      case AudioQuality.flac:
+        return '无损';
+      case AudioQuality.hires:
+        return 'Hi-Res 无损';
+    }
+  }
+
   void _showQualityDialog(PlayerProvider playerProvider) {
     showDialog(
       context: context,
@@ -2913,7 +2927,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 Navigator.pop(context);
               },
               child: Text(
-                quality.label,
+                _qualityShortLabel(quality),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: playerProvider.audioQuality == quality
@@ -3752,7 +3766,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     // AM 风格：白色 loading，与深色对话框背景协调
-                    MD3ELoadingIndicator(size: 32, color: Colors.white),
+                    M3ELoadingIndicator(
+                        constraints: BoxConstraints.tightFor(width: 32, height: 32),
+                        color: Colors.white),
                     SizedBox(height: 16),
                     Text('加载歌单中...'),
                   ],

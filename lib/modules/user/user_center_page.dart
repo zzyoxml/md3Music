@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -9,8 +10,6 @@ import '../../data/models/kugou_account.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
-import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../login/login_page.dart';
 import '../settings/settings_page.dart';
@@ -93,7 +92,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
             });
           }
           if (!kugou.isLoggedIn) return _buildNotLoggedIn(cs, tt);
-          return MD3ERefreshIndicator(
+          return M3EPullToRefreshIndicator(
             onRefresh: () async {
               await kugou.getVipDetail();
               await kugou.getVipMonthRecord();
@@ -308,7 +307,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
           const SizedBox(height: 4),
           ClipRRect(
             borderRadius: BorderRadius.circular(2),
-            child: LinearProgressIndicator(
+            child: M3ELinearProgressIndicator(
               value: progress,
               minHeight: 3,
               backgroundColor: cs.onPrimaryContainer.withValues(alpha: 0.15),
@@ -1000,8 +999,11 @@ class _UserCenterPageState extends State<UserCenterPage> {
                     ? null
                     : () => _handleManualSignIn(context, kugou),
                 icon: kugou.manualSignInRunning
-                    ? MD3ELoadingIndicator(
-                        size: 16,
+                    ? M3ELoadingIndicator(
+                        constraints: BoxConstraints.tightFor(
+                          width: 16,
+                          height: 16,
+                        ),
                         color: cs.onSecondaryContainer,
                       )
                     : const Icon(Icons.check_circle_outline, size: 16),
@@ -1021,8 +1023,11 @@ class _UserCenterPageState extends State<UserCenterPage> {
                     ? null
                     : () => _handleListenClaim(context, kugou),
                 icon: kugou.listenClaimRunning
-                    ? MD3ELoadingIndicator(
-                        size: 16,
+                    ? M3ELoadingIndicator(
+                        constraints: BoxConstraints.tightFor(
+                          width: 16,
+                          height: 16,
+                        ),
                         color: cs.onSecondaryContainer,
                       )
                     : const Icon(Icons.headphones, size: 16),
@@ -1042,8 +1047,11 @@ class _UserCenterPageState extends State<UserCenterPage> {
                     ? null
                     : () => _handleAdClaim(context, kugou),
                 icon: kugou.adClaimRunning
-                    ? MD3ELoadingIndicator(
-                        size: 16,
+                    ? M3ELoadingIndicator(
+                        constraints: BoxConstraints.tightFor(
+                          width: 16,
+                          height: 16,
+                        ),
                         color: cs.onSecondaryContainer,
                       )
                     : const Icon(Icons.monetization_on_outlined, size: 16),
@@ -1228,7 +1236,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
                 SizedBox(
                   width: 56,
                   height: 56,
-                  child: CircularProgressIndicator(
+                  child: M3ECircularProgressIndicator(
+                    size: 56,
                     value: progress,
                     strokeWidth: 4,
                     backgroundColor: cs.surfaceContainerLow,

@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/repositories/history_repository.dart';
 import '../../providers/player_provider.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
 
@@ -60,19 +60,21 @@ class _ListenRankingPageState extends State<ListenRankingPage> {
           preferredSize: const Size.fromHeight(48),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 0, label: Text('最近一周')),
-                ButtonSegment(value: 1, label: Text('全部累计')),
+            child: M3EToggleButtonGroup(
+              actions: const [
+                M3EToggleButtonGroupAction(label: Text('最近一周')),
+                M3EToggleButtonGroupAction(label: Text('全部累计')),
               ],
-              selected: {_currentType},
-              onSelectionChanged: (v) => _switchType(v.first),
+              selectedIndex: _currentType,
+              onSelectedIndexChanged: (index) {
+                if (index != null) _switchType(index);
+              },
             ),
           ),
         ),
       ),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : _rankedSongs.isEmpty
               ? _buildEmpty(cs)
               : Column(

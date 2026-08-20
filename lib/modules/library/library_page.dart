@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/utils/app_toast.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/local_favorites_provider.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../player/full_player_route.dart';
 import 'albums_page.dart';
 import 'artists_page.dart';
@@ -343,7 +343,7 @@ class _LibraryPageState extends State<LibraryPage>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const MD3ELoadingIndicator(),
+          const M3ELoadingIndicator(),
           const SizedBox(height: 16),
           Text(
             '正在扫描本地音乐...',

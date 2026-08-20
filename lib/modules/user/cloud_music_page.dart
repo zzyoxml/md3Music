@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/services/media_store_service.dart';
@@ -12,8 +13,6 @@ import '../../providers/library_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/cloud_song_mapper.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
-import '../../widgets/md3e_loading_indicator.dart';
-import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
 
@@ -558,17 +557,17 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
               ],
       ),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : _error != null
               ? _buildError()
               : _songs.isEmpty
-                  ? MD3ERefreshIndicator(
+                  ? M3EPullToRefreshIndicator(
                       onRefresh: _loadCloudSongs,
                       child: ListView(
                         children: [_buildEmpty()],
                       ),
                     )
-                  : MD3ERefreshIndicator(
+                  : M3EPullToRefreshIndicator(
                       onRefresh: _loadCloudSongs,
                       child: Column(
                         children: [

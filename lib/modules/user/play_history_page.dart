@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models/song.dart';
@@ -6,7 +7,6 @@ import '../../data/repositories/history_repository.dart';
 import '../../data/repositories/stream_cache_repository.dart';
 import '../../providers/player_provider.dart';
 import '../../services/stream_cache_manager.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
 
@@ -132,7 +132,7 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : _songs.isEmpty
           ? _buildEmpty()
           : _showOnlyPlayable && displaySongs.isEmpty && !_checkingPlayable
@@ -235,7 +235,8 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
             SizedBox(
               width: 16,
               height: 16,
-              child: CircularProgressIndicator(
+              child: M3ECircularProgressIndicator(
+                size: 16,
                 strokeWidth: 2,
                 color: cs.onSurfaceVariant,
               ),

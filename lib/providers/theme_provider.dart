@@ -25,6 +25,8 @@ class ThemeProvider extends ChangeNotifier {
   static const String _bgImagePathKey = 'background_image_path';
   static const String _bgBlurKey = 'background_blur';
   static const String _bgOpacityKey = 'background_opacity';
+  // 按背景图莫奈取色开关（默认开启）
+  static const String _bgMonetKey = 'use_background_monet';
 
   ThemeMode _themeMode = ThemeMode.system;
   bool _useDynamicColor = false;
@@ -53,6 +55,8 @@ class ThemeProvider extends ChangeNotifier {
   String? _backgroundImagePath;
   double _backgroundBlur = 12.0;
   double _backgroundOpacity = 0.7;
+  // 按背景图莫奈取色（默认开启；关闭后背景图仍显示但不参与主题色）
+  bool _useBackgroundMonet = true;
   // 从背景图片提取的主色（运行时，作为莫奈取色种子）
   Color? _backgroundSeedColor;
 
@@ -75,11 +79,12 @@ class ThemeProvider extends ChangeNotifier {
   String? get backgroundImagePath => _backgroundImagePath;
   double get backgroundBlur => _backgroundBlur;
   double get backgroundOpacity => _backgroundOpacity;
+  bool get useBackgroundMonet => _useBackgroundMonet;
   Color? get backgroundSeedColor => _backgroundSeedColor;
 
   /// 当前生效的种子色优先级：
   /// 1. 启用封面动态取色且提取成功 → 歌曲封面主色（可叠加系统主题色，封面优先）
-  /// 2. 启用自定义背景图片且取色成功 → 背景图片主色（自动莫奈取色）
+  /// 2. 启用自定义背景图片且开启莫奈取色并取色成功 → 背景图片主色
   /// 3. 启用系统主题色且成功取到 → 系统主色
   /// 4. 用户手动选择非 null → 手动色
   /// 5. 默认蓝色种子（[AppTheme.defaultSeedColor]）
@@ -90,7 +95,7 @@ class ThemeProvider extends ChangeNotifier {
     if (_useCoverSeedColor && _coverSeedColor != null) {
       return _coverSeedColor!;
     }
-    if (_useBackgroundImage && _backgroundSeedColor != null) {
+    if (_useBackgroundImage && _useBackgroundMonet && _backgroundSeedColor != null) {
       return _backgroundSeedColor!;
     }
     if (_useDynamicColor && _systemSeedColor != null) {
@@ -458,13 +463,15 @@ class ThemeProvider extends ChangeNotifier {
 
   // ============== 自定义背景图片 ==============
 
-  /// 加载背景图片相关持久化值（开关 / 路径 / 模糊 / 透明度），默认关闭。
+  /// 加载背景图片相关持久化值（开关 / 路径 / 模糊 / 透明度 / 莫奈取色），
+  /// 默认关闭 / 莫奈取色默认开启。
   Future<void> _loadBackgroundImage() async {
     final prefs = await SharedPreferences.getInstance();
     _useBackgroundImage = prefs.getBool(_bgImageEnabledKey) ?? false;
     _backgroundImagePath = prefs.getString(_bgImagePathKey);
     _backgroundBlur = prefs.getDouble(_bgBlurKey) ?? 12.0;
     _backgroundOpacity = prefs.getDouble(_bgOpacityKey) ?? 0.7;
+    _useBackgroundMonet = prefs.getBool(_bgMonetKey) ?? true;
     notifyListeners();
   }
 
@@ -475,6 +482,16 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_bgImageEnabledKey, enabled);
+  }
+
+  /// 切换「按背景图莫奈取色」开关（默认开启）。
+  /// 关闭后背景图仍正常显示，但不参与主题种子色（回落到系统/手动/默认色）。
+  Future<void> setUseBackgroundMonet(bool enabled) async {
+    if (_useBackgroundMonet == enabled) return;
+    _useBackgroundMonet = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_bgMonetKey, enabled);
   }
 
   /// 设置背景图片路径（原生端拷贝到 filesDir 后的真实路径）。

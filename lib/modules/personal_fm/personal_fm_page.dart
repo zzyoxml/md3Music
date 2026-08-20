@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 
 class PersonalFmPage extends StatefulWidget {
@@ -843,7 +843,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               color: cs.primary,
             ),
             child: _isLoading
-                ? MD3ELoadingIndicator(color: cs.onPrimary)
+                ? M3ELoadingIndicator(color: cs.onPrimary)
                 : Icon(
                     isPlaying ? Icons.pause : Icons.play_arrow,
                     color: cs.onPrimary,

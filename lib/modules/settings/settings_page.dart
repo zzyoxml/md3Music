@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:path_provider/path_provider.dart';
@@ -57,7 +58,6 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage>
     with SingleTickerProviderStateMixin {
   final SettingsRepository _settingsRepository = SettingsRepository();
-  ThemeMode _themeMode = ThemeMode.system;
   String _defaultQuality = '128';
   bool _autoReceiveVip = true;
   // 本地 API 服务器重启中（在线音乐区块显示加载态）
@@ -117,6 +117,8 @@ class _SettingsPageState extends State<SettingsPage>
   String? _backgroundImagePath;
   double _backgroundBlur = 12.0;
   double _backgroundOpacity = 0.7;
+  // 按背景图莫奈取色（默认开启）
+  bool _useBackgroundMonet = true;
   // 音乐频谱环绕显示开关（默认关闭，仅 Android 生效）
   bool _spectrumEnabled = false;
   // 频谱柱数量（20~80，默认 40）
@@ -235,7 +237,6 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _loadSettings() async {
-    final themeMode = await _settingsRepository.getThemeMode();
     final quality = await _settingsRepository.getDefaultQuality();
     final autoReceiveVip = await _settingsRepository.getAutoReceiveVip();
     // 从 ThemeProvider 同步「使用系统主题色」开关状态
@@ -261,6 +262,7 @@ class _SettingsPageState extends State<SettingsPage>
         .backgroundImagePath;
     final backgroundBlur = context.read<ThemeProvider>().backgroundBlur;
     final backgroundOpacity = context.read<ThemeProvider>().backgroundOpacity;
+    final useBackgroundMonet = context.read<ThemeProvider>().useBackgroundMonet;
     // 读取自定义下载目录
     final downloadDir = await _settingsRepository.getDownloadDir();
     // 从 ThemeProvider 同步 UI 缩放
@@ -294,7 +296,6 @@ class _SettingsPageState extends State<SettingsPage>
         .getSortCollectedByLatestClick();
 
     setState(() {
-      _themeMode = themeMode;
       _defaultQuality = quality;
       _autoReceiveVip = autoReceiveVip;
       _useDynamicColor = useDynamicColor;
@@ -308,6 +309,7 @@ class _SettingsPageState extends State<SettingsPage>
       _backgroundImagePath = backgroundImagePath;
       _backgroundBlur = backgroundBlur;
       _backgroundOpacity = backgroundOpacity;
+      _useBackgroundMonet = useBackgroundMonet;
       _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
       _useGlowEffect = LyricPreferences.instance.useGlowEffect;
       _useFlowingBackground = LyricPreferences.instance.useFlowingBackground;
@@ -828,11 +830,11 @@ class _SettingsPageState extends State<SettingsPage>
         // 锁屏歌词字号（独立于 App 内歌词）
         ListTile(
           title: const Text('锁屏歌词字号'),
-          subtitle: Slider(
+          subtitle: M3ESlider(
             value: _lockScreenLyricFontSize,
             min: 14,
             max: 50,
-            divisions: 36,
+            // 节点数过多(>30)不显示节点，连续调节
             label: '${_lockScreenLyricFontSize.round()}',
             onChanged: (v) {
               setState(() => _lockScreenLyricFontSize = v);
@@ -849,7 +851,8 @@ class _SettingsPageState extends State<SettingsPage>
         // 锁屏歌词粗细（独立于 App 内歌词）
         ListTile(
           title: const Text('锁屏歌词粗细'),
-          subtitle: Slider(
+          subtitle: M3ESlider(
+            decoration: const M3ESliderDecoration(haptic: M3EHapticFeedback.medium),
             value: _lockScreenLyricFontWeight.toDouble(),
             min: 300,
             max: 900,
@@ -1098,7 +1101,9 @@ class _SettingsPageState extends State<SettingsPage>
     final themeProvider = context.read<ThemeProvider>();
     // 仅 ThemeMode.light 时禁用 OLED 开关；dark 与 system 均可勾选。
     // system 模式下勾选后，等系统切到深色时 darkTheme 自动应用纯黑（MaterialApp 机制）。
-    final canToggleOled = _themeMode != ThemeMode.light;
+    // 以 ThemeProvider 为准（单一数据源），避免与本地 _themeMode 双份不同步
+    final canToggleOled =
+        context.watch<ThemeProvider>().themeMode != ThemeMode.light;
     return Column(
       children: [
         Padding(
@@ -1116,32 +1121,33 @@ class _SettingsPageState extends State<SettingsPage>
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: SegmentedButton<ThemeMode>(
-            segments: const [
-              ButtonSegment(
-                value: ThemeMode.light,
+          // 注意：按钮顺序(浅色/深色/跟随系统)与 ThemeMode.index(system=0,light=1,dark=2)
+          // 不一致，必须用显式映射，不能直接 ThemeMode.values[index]，否则切换错位。
+          child: M3EToggleButtonGroup(
+            actions: const [
+              M3EToggleButtonGroupAction(
                 label: Text('浅色'),
                 icon: Icon(Icons.light_mode),
               ),
-              ButtonSegment(
-                value: ThemeMode.dark,
+              M3EToggleButtonGroupAction(
                 label: Text('深色'),
                 icon: Icon(Icons.dark_mode),
               ),
-              ButtonSegment(
-                value: ThemeMode.system,
+              M3EToggleButtonGroupAction(
                 label: Text('跟随系统'),
                 icon: Icon(Icons.brightness_auto),
               ),
             ],
-            selected: {_themeMode},
-            onSelectionChanged: (modes) {
-              final mode = modes.first;
-              setState(() {
-                _themeMode = mode;
-              });
-              context.read<ThemeProvider>().setThemeMode(mode);
-              _settingsRepository.setThemeMode(mode);
+            selectedIndex: const [
+              ThemeMode.light,
+              ThemeMode.dark,
+              ThemeMode.system,
+            ].indexOf(context.watch<ThemeProvider>().themeMode),
+            onSelectedIndexChanged: (index) {
+              if (index == null) return;
+              const modes = [ThemeMode.light, ThemeMode.dark, ThemeMode.system];
+              // 单源：以 ThemeProvider 为准（即时生效 + 自行持久化）
+              context.read<ThemeProvider>().setThemeMode(modes[index]);
             },
           ),
         ),
@@ -1155,20 +1161,22 @@ class _SettingsPageState extends State<SettingsPage>
           onTap: () => _showFontSourceSheet(themeProvider),
         ),
         // 主题色入口：点击弹出 8 色预设面板。
-        // 系统主题色 / 封面动态取色开启时用 IgnorePointer 禁用点击
+        // 系统主题色 / 封面动态取色 / 背景莫奈取色开启时用 IgnorePointer 禁用点击
         // （不灰显，色块仍显示当前 effectiveSeedColor）。
         IgnorePointer(
           ignoring:
               themeProvider.useDynamicColor ||
               themeProvider.useCoverSeedColor ||
-              themeProvider.useBackgroundImage,
+              (themeProvider.useBackgroundImage &&
+                  themeProvider.useBackgroundMonet),
           child: ListTile(
             leading: const Icon(Icons.palette),
             title: const Text('主题色'),
             subtitle: Text(
               themeProvider.useCoverSeedColor
                   ? '跟随歌曲封面取色'
-                  : (themeProvider.useBackgroundImage
+                  : ((themeProvider.useBackgroundImage &&
+                          themeProvider.useBackgroundMonet)
                       ? '跟随背景图片取色'
                       : (themeProvider.useDynamicColor
                           ? '跟随系统壁纸取色'
@@ -1228,27 +1236,19 @@ class _SettingsPageState extends State<SettingsPage>
               Icon(Icons.format_size, color: colorScheme.onSurfaceVariant),
               const SizedBox(width: 12),
               Expanded(
-                child: SliderTheme(
-                  data: SliderTheme.of(context).copyWith(
-                    trackHeight: 4,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 8,
-                    ),
-                  ),
-                  child: Slider(
-                    value: _uiScale,
-                    min: 0.5,
-                    max: 2.0,
-                    divisions: 15,
-                    label: '${_uiScale.toStringAsFixed(1)}x',
-                    onChanged: (v) {
-                      setState(() => _uiScale = v);
-                      HapticFeedback.lightImpact();
-                    },
-                    onChangeEnd: (v) {
-                      context.read<ThemeProvider>().setUiScale(v);
-                    },
-                  ),
+                child: M3ESlider(
+                  decoration: const M3ESliderDecoration(haptic: M3EHapticFeedback.medium),
+                  value: _uiScale,
+                  min: 0.5,
+                  max: 2.0,
+                  divisions: 15,
+                  label: '${_uiScale.toStringAsFixed(1)}x',
+                  onChanged: (v) {
+                    setState(() => _uiScale = v);
+                  },
+                  onChangeEnd: (v) {
+                    context.read<ThemeProvider>().setUiScale(v);
+                  },
                 ),
               ),
               SizedBox(
@@ -1306,13 +1306,22 @@ class _SettingsPageState extends State<SettingsPage>
       children: [
         SwitchListTile(
           title: const Text('启用自定义背景图片（实验性）'),
-          subtitle: const Text('全局界面背景，自动按背景图莫奈取色'),
           value: _useBackgroundImage,
           onChanged: (v) {
             HapticFeedback.lightImpact();
             setState(() => _useBackgroundImage = v);
             // ignore: discarded_futures
             themeProvider.setUseBackgroundImage(v);
+          },
+        ),
+        SwitchListTile(
+          title: const Text('按背景图莫奈取色'),
+          value: _useBackgroundMonet,
+          onChanged: (v) {
+            HapticFeedback.lightImpact();
+            setState(() => _useBackgroundMonet = v);
+            // ignore: discarded_futures
+            themeProvider.setUseBackgroundMonet(v);
           },
         ),
         ListTile(
@@ -1366,11 +1375,11 @@ class _SettingsPageState extends State<SettingsPage>
               Icon(Icons.blur_on, color: colorScheme.onSurfaceVariant),
               const SizedBox(width: 12),
               Expanded(
-                child: Slider(
+                child: M3ESlider(
                   value: _backgroundBlur,
                   min: 0,
                   max: 30,
-                  divisions: 30,
+                  // 界面背景控件不显示节点
                   label: '${_backgroundBlur.round()}',
                   onChanged: (v) => setState(() => _backgroundBlur = v),
                   onChangeEnd: (v) => themeProvider.setBackgroundBlur(v),
@@ -1398,11 +1407,11 @@ class _SettingsPageState extends State<SettingsPage>
               Icon(Icons.opacity, color: colorScheme.onSurfaceVariant),
               const SizedBox(width: 12),
               Expanded(
-                child: Slider(
+                child: M3ESlider(
                   value: _backgroundOpacity,
                   min: 0.2,
                   max: 1.0,
-                  divisions: 40,
+                  // 界面背景控件不显示节点
                   label: '${(_backgroundOpacity * 100).round()}%',
                   onChanged: (v) {
                     setState(() => _backgroundOpacity = v);
@@ -1508,7 +1517,8 @@ class _SettingsPageState extends State<SettingsPage>
         if (_useArtistPhotoBackground && !_useAmStylePlayer)
           ListTile(
             title: const Text('写真背景透明度'),
-            subtitle: Slider(
+            subtitle: M3ESlider(
+              decoration: const M3ESliderDecoration(haptic: M3EHapticFeedback.medium),
               value: _artistPhotoOpacity,
               min: 0.0,
               max: 0.95,
@@ -1616,11 +1626,11 @@ class _SettingsPageState extends State<SettingsPage>
         if (_spectrumEnabled && Platform.isAndroid)
           ListTile(
             title: const Text('频谱柱数量'),
-            subtitle: Slider(
+            subtitle: M3ESlider(
               value: _spectrumBandCount.toDouble(),
               min: 20,
               max: 80,
-              divisions: 60,
+              // 频谱柱数量不显示节点
               label: '$_spectrumBandCount 根',
               onChanged: (v) {
                 setState(() => _spectrumBandCount = v.round());
@@ -1642,18 +1652,18 @@ class _SettingsPageState extends State<SettingsPage>
                 const Text('频谱样式'),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: SegmentedButton<int>(
-                    segments: const [
-                      ButtonSegment(value: 0, label: Text('柱状图')),
-                      ButtonSegment(value: 1, label: Text('曲线')),
-                      ButtonSegment(value: 2, label: Text('背景层')),
+                  child: M3EToggleButtonGroup(
+                    actions: const [
+                      M3EToggleButtonGroupAction(label: Text('柱状图')),
+                      M3EToggleButtonGroupAction(label: Text('曲线')),
+                      M3EToggleButtonGroupAction(label: Text('背景层')),
                     ],
-                    selected: {_spectrumStyle},
-                    onSelectionChanged: (selection) {
+                    selectedIndex: _spectrumStyle,
+                    onSelectedIndexChanged: (index) {
+                      if (index == null) return;
                       HapticFeedback.lightImpact();
-                      final style = selection.first;
-                      setState(() => _spectrumStyle = style);
-                      _settingsRepository.setSpectrumStyle(style);
+                      setState(() => _spectrumStyle = index);
+                      _settingsRepository.setSpectrumStyle(index);
                     },
                   ),
                 ),
@@ -1667,6 +1677,7 @@ class _SettingsPageState extends State<SettingsPage>
             subtitle: const Text('AM 播放器频谱颜色取自封面主色（白色与取色各半混合，深色自动提亮）'),
             value: _spectrumDynamicColor,
             onChanged: (v) {
+              HapticFeedback.selectionClick();
               setState(() => _spectrumDynamicColor = v);
               _settingsRepository.setSpectrumDynamicColor(v);
             },
@@ -1677,7 +1688,8 @@ class _SettingsPageState extends State<SettingsPage>
           if (_spectrumStyle == 0)
             ListTile(
               title: const Text('频谱柱状图透明度'),
-              subtitle: Slider(
+              subtitle: M3ESlider(
+                decoration: const M3ESliderDecoration(haptic: M3EHapticFeedback.medium),
                 value: _spectrumBarOpacity,
                 min: 0.1,
                 max: 1.0,
@@ -1695,7 +1707,8 @@ class _SettingsPageState extends State<SettingsPage>
           else if (_spectrumStyle == 1)
             ListTile(
               title: const Text('频谱曲线透明度'),
-              subtitle: Slider(
+              subtitle: M3ESlider(
+                decoration: const M3ESliderDecoration(haptic: M3EHapticFeedback.medium),
                 value: _spectrumCurveOpacity,
                 min: 0.1,
                 max: 1.0,
@@ -1714,7 +1727,8 @@ class _SettingsPageState extends State<SettingsPage>
         if (_spectrumEnabled && _spectrumStyle == 2 && Platform.isAndroid) ...[
           ListTile(
             title: const Text('频谱背景透明度'),
-            subtitle: Slider(
+            subtitle: M3ESlider(
+              decoration: const M3ESliderDecoration(haptic: M3EHapticFeedback.medium),
               value: _spectrumBgOpacity,
               min: 0.1,
               max: 0.8,
@@ -1731,7 +1745,8 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           ListTile(
             title: const Text('频谱背景高度'),
-            subtitle: Slider(
+            subtitle: M3ESlider(
+              decoration: const M3ESliderDecoration(haptic: M3EHapticFeedback.medium),
               value: _spectrumBgHeight,
               min: 0.2,
               max: 0.8,
@@ -1894,11 +1909,36 @@ class _SettingsPageState extends State<SettingsPage>
   Widget _buildPlaybackSection(ColorScheme colorScheme) {
     return Column(
       children: [
-        ListTile(
-          title: const Text('默认音质'),
-          subtitle: Text(_getQualityLabel(_defaultQuality)),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _showQualityDialog(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '默认音质',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              // M3E 按钮组：去掉码率/格式后缀（高亮为小圆角）
+              M3EToggleButtonGroup(
+                actions: const [
+                  M3EToggleButtonGroupAction(label: Text('标准')),
+                  M3EToggleButtonGroupAction(label: Text('高品质')),
+                  M3EToggleButtonGroupAction(label: Text('无损')),
+                  M3EToggleButtonGroupAction(label: Text('Hi-Res 无损')),
+                ],
+                selectedIndex: const ['128', 'hq', 'flac', 'high'].indexOf(_defaultQuality),
+                onSelectedIndexChanged: (index) {
+                  if (index == null) return;
+                  const q = ['128', 'hq', 'flac', 'high'];
+                  setState(() {
+                    _defaultQuality = q[index];
+                  });
+                  _settingsRepository.setDefaultQuality(q[index]);
+                },
+              ),
+            ],
+          ),
         ),
         ListenableBuilder(
           listenable: EqualizerService.instance,
@@ -2188,7 +2228,7 @@ class _SettingsPageState extends State<SettingsPage>
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: 8),
-                  LinearProgressIndicator(
+                  M3ELinearProgressIndicator(
                     value: progress,
                     backgroundColor: colorScheme.surfaceContainerHighest,
                   ),
@@ -2311,7 +2351,8 @@ class _SettingsPageState extends State<SettingsPage>
               ? SizedBox(
                   width: 20,
                   height: 20,
-                  child: CircularProgressIndicator(
+                  child: M3ECircularProgressIndicator(
+                    size: 20,
                     strokeWidth: 2,
                     color: colorScheme.primary,
                   ),
@@ -2544,61 +2585,6 @@ class _SettingsPageState extends State<SettingsPage>
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     }
-  }
-
-  String _getQualityLabel(String quality) {
-    switch (quality) {
-      case 'standard':
-      case '128':
-        return '标准 128k';
-      case 'hq':
-        return '高品质 320k';
-      case 'sq':
-      case 'flac':
-        return '无损 FLAC';
-      case 'hires':
-      case 'high':
-        return 'Hi-Res 无损';
-      default:
-        return '高品质 320k';
-    }
-  }
-
-  void _showQualityDialog() {
-    final qualities = [
-      ('128', '标准 128k'),
-      ('hq', '高品质 320k'),
-      ('flac', '无损 FLAC'),
-      ('high', 'Hi-Res 无损'),
-    ];
-
-    showDialog(
-      context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('默认音质'),
-          children: qualities.map((q) {
-            return SimpleDialogOption(
-              onPressed: () {
-                setState(() {
-                  _defaultQuality = q.$1;
-                });
-                _settingsRepository.setDefaultQuality(q.$1);
-                Navigator.pop(context);
-              },
-              child: Text(
-                q.$2,
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                  color: _defaultQuality == q.$1
-                      ? Theme.of(context).colorScheme.primary
-                      : null,
-                ),
-              ),
-            );
-          }).toList(),
-        );
-      },
-    );
   }
 
   void _showClearCacheDialog() {
@@ -3340,11 +3326,11 @@ class _LyricTimeOffsetTileState extends State<_LyricTimeOffsetTile> {
               ),
             ],
           ),
-          Slider(
+          M3ESlider(
             value: _offset.clamp(_sliderMin, _sliderMax).toDouble(),
             min: _sliderMin.toDouble(),
             max: _sliderMax.toDouble(),
-            divisions: (_sliderMax - _sliderMin) ~/ 50,
+            // 节点数过多(>30)不显示节点，连续调节
             label: _fmt(_offset),
             onChanged: (v) => _apply(v.round()),
           ),

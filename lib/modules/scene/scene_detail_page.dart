@@ -1,12 +1,11 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
-import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../player/mini_player.dart';
 import '../playlist/playlist_page.dart';
@@ -134,8 +133,8 @@ class _SceneDetailPageState extends State<SceneDetailPage> {
       ),
       bottomNavigationBar: const MiniPlayer(),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
-          : MD3ERefreshIndicator(
+          ? const Center(child: M3ELoadingIndicator())
+          : M3EPullToRefreshIndicator(
               onRefresh: _load,
               child: ListView(
                 controller: _scrollController,

@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:m3e_core/m3e_core.dart';
 
 import '../../core/utils/app_toast.dart';
 import '../../data/models/album.dart';
@@ -10,7 +11,6 @@ import '../../providers/player_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/playlist_comments_view.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
@@ -432,7 +432,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
     return Scaffold(
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : _error != null
               ? _buildError(context, colorScheme)
               : Column(

@@ -2,11 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -257,21 +257,21 @@ class _LoginPageState extends State<LoginPage> {
                   horizontal: 24,
                   vertical: 8,
                 ),
-                child: SegmentedButton<int>(
-                  segments: const [
-                    ButtonSegment(
-                      value: 0,
+                child: M3EToggleButtonGroup(
+                  actions: const [
+                    M3EToggleButtonGroupAction(
                       icon: Icon(Icons.qr_code),
                       label: Text('扫码'),
                     ),
-                    ButtonSegment(
-                      value: 1,
+                    M3EToggleButtonGroupAction(
                       icon: Icon(Icons.phone_android),
                       label: Text('手机'),
                     ),
                   ],
-                  selected: {_tabIndex},
-                  onSelectionChanged: (s) => _switchTab(s.first),
+                  selectedIndex: _tabIndex,
+                  onSelectedIndexChanged: (index) {
+                    if (index != null) _switchTab(index);
+                  },
                 ),
               ),
               const SizedBox(height: 16),
@@ -332,7 +332,7 @@ class _LoginPageState extends State<LoginPage> {
                           },
                         ),
                       )
-                    : const Center(child: MD3ELoadingIndicator()),
+                    : const Center(child: M3ELoadingIndicator()),
               ),
               const SizedBox(height: 24),
               FilledButton.icon(
@@ -391,7 +391,12 @@ class _LoginPageState extends State<LoginPage> {
           FilledButton.icon(
             onPressed: _loggingIn ? null : _onLoginPhone,
             icon: _loggingIn
-                ? const MD3ELoadingIndicator(size: 16)
+                ? const M3ELoadingIndicator(
+                    constraints: BoxConstraints.tightFor(
+                      width: 16,
+                      height: 16,
+                    ),
+                  )
                 : const Icon(Icons.login),
             label: const Text('登录'),
           ),
@@ -423,7 +428,7 @@ class _LoginPageState extends State<LoginPage> {
                     borderRadius: BorderRadius.circular(12),
                     child: Image.memory(bytes, fit: BoxFit.cover),
                   )
-                : const Center(child: MD3ELoadingIndicator()),
+                : const Center(child: M3ELoadingIndicator()),
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
