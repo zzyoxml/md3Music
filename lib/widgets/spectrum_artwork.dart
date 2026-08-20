@@ -14,8 +14,12 @@ import 'player_artwork_image.dart';
 /// 2. 圆形封面层：[ClipOval] 裁圆 + 1.5px 主题色细环，[Transform.rotate] 旋转
 ///
 /// 旋转逻辑：
-/// - `isPlaying=true` → `AnimationController.repeat()` **顺时针**（约 8s/圈）
-/// - `isPlaying=false` → `stop()` **保持当前角度静止**（不 reset，恢复播放时续转）
+/// - `isPlaying=true` → 60fps Timer 步进控制器值，**顺时针**（约 8s/圈）
+/// - `isPlaying=false` → 停止，**保持当前角度静止**（不 reset，恢复播放时续转）
+///
+/// 帧率说明：不使用 `AnimationController.repeat()`——repeat 会让控制器 Ticker
+/// 每帧 scheduleFrame，120Hz 屏上即便画面未变也保持 120fps 帧管线（与歌词省电
+/// 模式相同的坑）。改用 16ms Timer 直接步进控制器值，帧生产被限制到 60fps。
 ///
 /// 性能：环形频谱柱用 [ValueNotifier] + `super(repaint:)` 驱动重绘，
 /// 旋转用 [AnimatedBuilder] 局部重建，避免每帧 setState。
@@ -72,6 +76,9 @@ class _SpectrumArtworkState extends State<SpectrumArtwork>
   late final AnimationController _rotationController;
   late final Animation<double> _rotationAnimation;
 
+  /// 60fps 旋转步进定时器（替代 `repeat()`，避免 120Hz 屏保持 120fps 帧管线）。
+  Timer? _rotationTimer;
+
   /// 频谱幅值数组（0..1）。驱动 CustomPainter 重绘，不触发 setState。
   late final ValueNotifier<List<double>> _bandsNotifier;
 
@@ -114,15 +121,28 @@ class _SpectrumArtworkState extends State<SpectrumArtwork>
     }
   }
 
-  /// 根据 isPlaying 启停旋转：播放时顺时针 repeat，暂停时 stop 保持角度
+  /// 根据 isPlaying 启停旋转：播放时用 60fps Timer 步进，暂停时停止保持角度。
+  ///
+  /// 用 Timer 直接步进控制器值而非 `repeat()`：控制器 Ticker 不会被启动，
+  /// 帧生产由 16ms 定时器限制到 60fps（repeat 会让 120Hz 屏保持 120fps）。
   void _applyPlayingState() {
     if (widget.isPlaying) {
-      if (!_rotationController.isAnimating) {
-        _rotationController.repeat();
-      }
+      _rotationTimer ??= Timer.periodic(
+        const Duration(milliseconds: 16),
+        _onRotationTick,
+      );
     } else {
-      _rotationController.stop();
+      _rotationTimer?.cancel();
+      _rotationTimer = null;
     }
+  }
+
+  /// 以 16ms 步进推进旋转角度（控制器值 0→1 循环，映射到 0→2π）。
+  void _onRotationTick(Timer timer) {
+    if (!mounted) return;
+    // 每 16ms 推进的圈数比例：16ms / 转一圈时长
+    final step = 16.0 / widget.rotationDuration.inMilliseconds;
+    _rotationController.value = (_rotationController.value + step) % 1.0;
   }
 
   /// 订阅 SpectrumService 数据流，做帧间插值（上升快、回落慢）。
@@ -147,6 +167,7 @@ class _SpectrumArtworkState extends State<SpectrumArtwork>
 
   @override
   void dispose() {
+    _rotationTimer?.cancel();
     _subscription?.cancel();
     _rotationController.dispose();
     _bandsNotifier.dispose();
