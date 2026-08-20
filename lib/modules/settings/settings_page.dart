@@ -58,7 +58,6 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage>
     with SingleTickerProviderStateMixin {
   final SettingsRepository _settingsRepository = SettingsRepository();
-  ThemeMode _themeMode = ThemeMode.system;
   String _defaultQuality = '128';
   bool _autoReceiveVip = true;
   // 本地 API 服务器重启中（在线音乐区块显示加载态）
@@ -238,7 +237,6 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _loadSettings() async {
-    final themeMode = await _settingsRepository.getThemeMode();
     final quality = await _settingsRepository.getDefaultQuality();
     final autoReceiveVip = await _settingsRepository.getAutoReceiveVip();
     // 从 ThemeProvider 同步「使用系统主题色」开关状态
@@ -298,7 +296,6 @@ class _SettingsPageState extends State<SettingsPage>
         .getSortCollectedByLatestClick();
 
     setState(() {
-      _themeMode = themeMode;
       _defaultQuality = quality;
       _autoReceiveVip = autoReceiveVip;
       _useDynamicColor = useDynamicColor;
@@ -1104,7 +1101,9 @@ class _SettingsPageState extends State<SettingsPage>
     final themeProvider = context.read<ThemeProvider>();
     // 仅 ThemeMode.light 时禁用 OLED 开关；dark 与 system 均可勾选。
     // system 模式下勾选后，等系统切到深色时 darkTheme 自动应用纯黑（MaterialApp 机制）。
-    final canToggleOled = _themeMode != ThemeMode.light;
+    // 以 ThemeProvider 为准（单一数据源），避免与本地 _themeMode 双份不同步
+    final canToggleOled =
+        context.watch<ThemeProvider>().themeMode != ThemeMode.light;
     return Column(
       children: [
         Padding(
@@ -1122,6 +1121,8 @@ class _SettingsPageState extends State<SettingsPage>
         ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
+          // 注意：按钮顺序(浅色/深色/跟随系统)与 ThemeMode.index(system=0,light=1,dark=2)
+          // 不一致，必须用显式映射，不能直接 ThemeMode.values[index]，否则切换错位。
           child: M3EToggleButtonGroup(
             actions: const [
               M3EToggleButtonGroupAction(
@@ -1137,15 +1138,16 @@ class _SettingsPageState extends State<SettingsPage>
                 icon: Icon(Icons.brightness_auto),
               ),
             ],
-            selectedIndex: _themeMode.index,
+            selectedIndex: const [
+              ThemeMode.light,
+              ThemeMode.dark,
+              ThemeMode.system,
+            ].indexOf(context.watch<ThemeProvider>().themeMode),
             onSelectedIndexChanged: (index) {
               if (index == null) return;
-              final mode = ThemeMode.values[index];
-              setState(() {
-                _themeMode = mode;
-              });
-              context.read<ThemeProvider>().setThemeMode(mode);
-              _settingsRepository.setThemeMode(mode);
+              const modes = [ThemeMode.light, ThemeMode.dark, ThemeMode.system];
+              // 单源：以 ThemeProvider 为准（即时生效 + 自行持久化）
+              context.read<ThemeProvider>().setThemeMode(modes[index]);
             },
           ),
         ),
