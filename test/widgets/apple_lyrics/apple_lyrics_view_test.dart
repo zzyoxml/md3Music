@@ -360,6 +360,12 @@ void main() {
     });
 
     testWidgets('逐字歌词（KRC/字级 LRC，含本地/云盘 LRC 逐字）播放中保持 Ticker', (tester) async {
+      // 本用例验证"eco 关闭时"的 P0-A 行为：逐字动画需 Ticker 满帧推进。
+      // 省电模式现已默认开启（eco 开启时逐字动画改由 60fps Timer 推进、Ticker 停止），
+      // 因此这里显式关闭，保持断言 Ticker 仍在运行的原始意图。
+      SharedPreferences.setMockInitialValues({});
+      await LyricPreferences.instance.setEcoMode(false);
+      addTearDown(() => LyricPreferences.instance.reset());
       final lines = <LyricLine>[
         LyricLine(
           startTime: 0,

@@ -126,16 +126,16 @@ class LyricPreferences extends ChangeNotifier {
   int _fontWeight = defaultFontWeight;
   bool _useGaussianBlur = true;
   bool _useGlowEffect = true;
-  bool _useFlowingBackground = true;
-  bool _useDuetLayout = false;
+  bool _useFlowingBackground = false;
+  bool _useDuetLayout = true;
   bool _showTranslation = true;
   LyricDisplayMode _displayMode = LyricDisplayMode.translation;
   LyricFontSource _fontSource = LyricFontSource.system;
   String? _customFontPath;
-  // 歌词省电模式（默认关闭）：开启后歌词界面锁定 60fps，用户上下滑动歌词时临时解锁
-  bool _ecoMode = false;
-  // 动态字体颜色（默认关闭，仅 AM 播放器可用）：当前行歌词颜色按「70% 白 + 30% 封面提取色」混色
-  bool _useDynamicLyricColor = false;
+  // 歌词省电模式（默认开启）：开启后歌词界面锁定 60fps，用户上下滑动歌词时临时解锁
+  bool _ecoMode = true;
+  // 动态字体颜色（默认开启，仅 AM 播放器可用）：当前行歌词颜色按「70% 白 + 30% 封面提取色」混色
+  bool _useDynamicLyricColor = true;
   // 运行时加载成功后填充的 family（仅 custom 模式且加载成功时非 null）
   String? _loadedCustomFontFamily;
   bool _loaded = false;
@@ -157,10 +157,10 @@ class LyricPreferences extends ChangeNotifier {
   LyricFontSource get fontSource => _fontSource;
   String? get customFontPath => _customFontPath;
 
-  /// 歌词省电模式是否开启（默认关闭）。
+  /// 歌词省电模式是否开启（默认开启）。
   bool get ecoMode => _ecoMode;
 
-  /// 歌词动态字体颜色是否开启（默认关闭，仅 AM 播放器生效）。
+  /// 歌词动态字体颜色是否开启（默认开启，仅 AM 播放器生效）。
   bool get useDynamicLyricColor => _useDynamicLyricColor;
 
   /// 当前生效的 fontFamily（传给 TextPainter 的 TextStyle）：
@@ -203,14 +203,14 @@ class LyricPreferences extends ChangeNotifier {
             .clamp(minFontWeight, maxFontWeight);
     _useGaussianBlur = prefs.getBool(_keyUseGaussianBlur) ?? true;
     _useGlowEffect = prefs.getBool(_keyUseGlowEffect) ?? true;
-    _useFlowingBackground = prefs.getBool(_keyUseFlowingBackground) ?? true;
-    _useDuetLayout = prefs.getBool(_keyUseDuetLayout) ?? false;
+    _useFlowingBackground = prefs.getBool(_keyUseFlowingBackground) ?? false;
+    _useDuetLayout = prefs.getBool(_keyUseDuetLayout) ?? true;
     _showTranslation = prefs.getBool(_keyShowTranslation) ?? true;
     _displayMode = _displayModeFromName(prefs.getString(_keyDisplayMode));
     _fontSource = _fontSourceFromName(prefs.getString(_keyFontSource));
     _customFontPath = prefs.getString(_keyCustomFontPath);
-    _ecoMode = prefs.getBool(_keyEcoMode) ?? false;
-    _useDynamicLyricColor = prefs.getBool(_keyUseDynamicLyricColor) ?? false;
+    _ecoMode = prefs.getBool(_keyEcoMode) ?? true;
+    _useDynamicLyricColor = prefs.getBool(_keyUseDynamicLyricColor) ?? true;
     _loaded = true;
     notifyListeners();
     // 若已配置自定义字体，立即尝试加载（Fire-and-forget，加载完成后会 notifyListeners）
@@ -407,15 +407,15 @@ class LyricPreferences extends ChangeNotifier {
     _fontWeight = _deviceDefaultFontWeight;
     _useGaussianBlur = true;
     _useGlowEffect = true;
-    _useFlowingBackground = true;
-    _useDuetLayout = false;
+    _useFlowingBackground = false;
+    _useDuetLayout = true;
     _showTranslation = true;
     _displayMode = LyricDisplayMode.translation;
     _fontSource = LyricFontSource.system;
     _customFontPath = null;
     _loadedCustomFontFamily = null;
-    _ecoMode = false;
-    _useDynamicLyricColor = false;
+    _ecoMode = true;
+    _useDynamicLyricColor = true;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyFontSize, _fontSize);

@@ -72,12 +72,12 @@ class _SettingsPageState extends State<SettingsPage>
   int _artistPhotoInterval = 15;
   double _artistPhotoOpacity = 0.55;
   bool _useGlowEffect = true;
-  bool _useFlowingBackground = true;
-  bool _useDuetLayout = false;
-  // 歌词省电模式开关（默认关闭，开启后歌词界面锁定 60fps，滑动时解锁）
-  bool _lyricEcoMode = false;
-  // 歌词动态字体颜色开关（默认关闭，仅 AM 播放器生效）
-  bool _lyricDynamicColor = false;
+  bool _useFlowingBackground = false;
+  bool _useDuetLayout = true;
+  // 歌词省电模式开关（默认开启，开启后歌词界面锁定 60fps，滑动时解锁）
+  bool _lyricEcoMode = true;
+  // 歌词动态字体颜色开关（默认开启，仅 AM 播放器生效）
+  bool _lyricDynamicColor = true;
   String _appVersion = '';
   // 实时歌词推送协议选择（三选一 + 关闭）
   String _lyricPushProtocol = 'none';
@@ -131,8 +131,8 @@ class _SettingsPageState extends State<SettingsPage>
   // 环绕频谱透明度（style 0/1 分开记忆，默认不透明）
   double _spectrumBarOpacity = 1.0;
   double _spectrumCurveOpacity = 1.0;
-  // 频谱动态取色独立开关（默认关闭）：AM 播放器频谱颜色取封面主色 50/50 混合
-  bool _spectrumDynamicColor = false;
+  // 频谱动态取色独立开关（默认开启）：AM 播放器频谱颜色取封面主色 50/50 混合
+  bool _spectrumDynamicColor = true;
   // 设置搜索：输入框控制器 + 当前查询词
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';

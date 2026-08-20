@@ -587,10 +587,10 @@ class SettingsRepository {
     await prefs.setDouble(_keySpectrumCurveOpacity, value);
   }
 
-  /// 频谱动态取色开关（默认关闭）。
+  /// 频谱动态取色开关（默认开启）。
   Future<bool> getSpectrumDynamicColor() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keySpectrumDynamicColor) ?? false;
+    return prefs.getBool(_keySpectrumDynamicColor) ?? true;
   }
 
   Future<void> setSpectrumDynamicColor(bool value) async {
