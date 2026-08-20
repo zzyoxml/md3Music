@@ -59,6 +59,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Song? _currentSong;
   bool _isPlaying = false;
   Duration _position = Duration.zero;
+
   /// 播放进度（仅驱动进度条，不触发全量 rebuild；见 positionStream tick）
   final ValueNotifier<Duration> positionNotifier = ValueNotifier(Duration.zero);
   Duration? _duration;
@@ -190,7 +191,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     // 否则词幕不会自动连接显示（PlayerProvider 自己监听自己无法感知 Lyricon 启用）。
     LyriconProviderService.instance.addListener(_handleLyriconEnabledChanged);
     // 监听 USB 独占状态：独占关闭/拔线时自动还原普通音量（默认 100%）
-    _usbStatusSubscription = UsbAudioService.instance.statusStream.listen(_onUsbStatusChanged);
+    _usbStatusSubscription = UsbAudioService.instance.statusStream.listen(
+      _onUsbStatusChanged,
+    );
   }
 
   /// USB 独占状态轮询订阅（dispose 时取消）。
@@ -297,7 +300,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       await setVolume(volume);
 
       // 构建播放源并 seek 到保存的位置（不自动播放，等用户手动触发）
-      final ok = await _resolveAndPlayCurrentSong(seekTo: state.position, play: false);
+      final ok = await _resolveAndPlayCurrentSong(
+        seekTo: state.position,
+        play: false,
+      );
       if (ok) {
         _position = state.position;
         positionNotifier.value = state.position;
@@ -435,7 +441,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       final dPos = _position;
       final dDur = _currentSong?.duration ?? Duration.zero;
-      final dAbnormal = dPos.inMilliseconds > 500 &&
+      final dAbnormal =
+          dPos.inMilliseconds > 500 &&
           dDur.inSeconds > 0 &&
           dPos.inSeconds < dDur.inSeconds * 0.8;
       debugPrint(
@@ -452,13 +459,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         // 避免无限重播损坏的链接
         final lastPosition = _position;
         final songDuration = _currentSong?.duration ?? Duration.zero;
-        final bool isAbnormal = lastPosition.inMilliseconds > 500 &&
+        final bool isAbnormal =
+            lastPosition.inMilliseconds > 500 &&
             songDuration.inSeconds > 0 &&
             lastPosition.inSeconds < songDuration.inSeconds * 0.8;
 
-        if (isAbnormal &&
-            _currentSong != null &&
-            _currentSong!.isOnline) {
+        if (isAbnormal && _currentSong != null && _currentSong!.isOnline) {
           final songId = _currentSong!.id;
           if (_retryingSongId != songId) {
             _retryingSongId = songId;
@@ -503,14 +509,13 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           // （URL 过期 / 试听片段提前 completed 时，position 明显小于歌曲时长）
           final lastPosition = _position;
           final songDuration = _currentSong?.duration ?? Duration.zero;
-          final bool isAbnormalEnd = lastPosition.inMilliseconds > 500 &&
+          final bool isAbnormalEnd =
+              lastPosition.inMilliseconds > 500 &&
               songDuration.inSeconds > 0 &&
               lastPosition.inSeconds < songDuration.inSeconds * 0.8;
 
           // 异常结束时更新重试计数
-          if (isAbnormalEnd &&
-              _currentSong != null &&
-              _currentSong!.isOnline) {
+          if (isAbnormalEnd && _currentSong != null && _currentSong!.isOnline) {
             final songId = _currentSong!.id;
             if (_retryingSongId != songId) {
               _retryingSongId = songId;
@@ -526,7 +531,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
             if (_playlist.length > 1) {
               // 多首歌时删除当前故障歌曲，播放上一首（保持索引有效）
               _playlist.removeAt(_currentIndex);
-              _currentIndex = (_currentIndex - 1).clamp(0, _playlist.length - 1);
+              _currentIndex = (_currentIndex - 1).clamp(
+                0,
+                _playlist.length - 1,
+              );
               _currentSong = _playlist[_currentIndex];
               final ok = await _resolveAndPlayCurrentSong();
               if (!ok) _resolveError = '无法获取播放链接';
@@ -659,7 +667,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     try {
       _cachedArtworkPath = null;
 
-      // 确保 Node.js 本地代理服务器已启动
+      // 确保本地 Rust API 代理服务器已启动
       await _ensureApiServerReady();
 
       final apiClient = KugouApiClient();
@@ -685,7 +693,6 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           await _audioService.setPlaylist([source], startIndex: 0);
           await _audioService.play();
         } else {}
-
       } else {
         _isResolvingUrl = false;
         _resolveError = '无法获取播放链接';
@@ -829,16 +836,16 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           await _setUrlAndPlay(result.url);
         }
       } else {
-          _isResolvingUrl = false;
-          _resolveError = '无法获取播放链接';
-          final failedSong = _currentSong!;
-          notifyListeners();
-          // 先弹窗提示，随即切到下一首（不阻塞）
-          _showUnplayableSongDialog(failedSong);
-          if (_playlist.length > 1) {
-            await next(autoPlay: true);
-          }
+        _isResolvingUrl = false;
+        _resolveError = '无法获取播放链接';
+        final failedSong = _currentSong!;
+        notifyListeners();
+        // 先弹窗提示，随即切到下一首（不阻塞）
+        _showUnplayableSongDialog(failedSong);
+        if (_playlist.length > 1) {
+          await next(autoPlay: true);
         }
+      }
     } catch (e) {
       _isResolvingUrl = false;
       _resolveError = e.toString();
@@ -921,10 +928,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// 云盘歌曲 URL 解析：先 /user/cloud/url，后 /song/url 兜底
-  Future<String?> _resolveCloudUrl(
-    KugouApiClient apiClient,
-    Song song,
-  ) async {
+  Future<String?> _resolveCloudUrl(KugouApiClient apiClient, Song song) async {
     try {
       final cloudResult = await apiClient.getUserCloudUrl(
         song.id,
@@ -966,9 +970,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   void _prefetchCloudSongs(int startIndex) {
     final prefetchCount = 3;
     final apiClient = KugouApiClient();
-    for (int i = startIndex + 1;
-        i < _playlist.length && i <= startIndex + prefetchCount;
-        i++) {
+    for (
+      int i = startIndex + 1;
+      i < _playlist.length && i <= startIndex + prefetchCount;
+      i++
+    ) {
       final song = _playlist[i];
       if (song.isOnline && song.url == null) {
         _resolveCloudUrl(apiClient, song).then((url) {
@@ -1091,7 +1097,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
   }
 
-  Future<bool> _resolveAndPlayCurrentSong({Duration? seekTo, bool play = true}) async {
+  Future<bool> _resolveAndPlayCurrentSong({
+    Duration? seekTo,
+    bool play = true,
+  }) async {
     if (_currentSong == null) return false;
 
     // 切歌时先清除上一首的缓存封面路径，避免新歌曲通知栏/MediaSession 残留旧封面。
@@ -1174,7 +1183,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 而失败（MissingPluginException），导致后续所有 API 请求因连接被拒绝而失败。
   /// 此方法在播放流程中做二次兜底：探测端口，若不通则重新尝试启动。
   Future<void> _ensureApiServerReady() async {
-    if (kIsWeb || !Platform.isAndroid) return;
+    if (!KugouApiServer.isSupported) return;
     final port = KugouApiServer.currentPort;
     if (port <= 0) {
       await KugouApiServer.start();
@@ -1182,8 +1191,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
     // 快速探测端口是否可用
     try {
-      final socket = await Socket.connect('127.0.0.1', port,
-          timeout: const Duration(milliseconds: 500));
+      final socket = await Socket.connect(
+        '127.0.0.1',
+        port,
+        timeout: const Duration(milliseconds: 500),
+      );
       await socket.close();
       return; // 服务器已就绪
     } catch (_) {
@@ -1529,7 +1541,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _updateNotification();
     } else if (wasCurrent) {
       // 删除的是当前播放歌曲：先解析新当前歌曲的 URL，再重建队列播放
-      if (_currentSong != null && _currentSong!.isOnline && _currentSong!.url == null) {
+      if (_currentSong != null &&
+          _currentSong!.isOnline &&
+          _currentSong!.url == null) {
         try {
           final result = await KugouApiClient().getSongUrlWithFallback(
             _currentSong!.id,
@@ -1547,7 +1561,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
       // 重建前先批量解析本地 content://，避免 just_audio 加载失败
       final resolvedPlaylist = await _resolveLocalPathsForBatch(_playlist);
-      for (int i = 0; i < resolvedPlaylist.length && i < _playlist.length; i++) {
+      for (
+        int i = 0;
+        i < resolvedPlaylist.length && i < _playlist.length;
+        i++
+      ) {
         _playlist[i] = resolvedPlaylist[i];
       }
       if (_currentIndex >= 0 && _currentIndex < _playlist.length) {
@@ -1839,7 +1857,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           TextButton(
             onPressed: () {
               Navigator.pop(dialogCtx);
-              Navigator.push(ctx,
+              Navigator.push(
+                ctx,
                 MaterialPageRoute(builder: (_) => MvPlayerPage(song: song)),
               );
             },
@@ -1953,7 +1972,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       // just_audio 的 setUrl / AudioSource.uri 需要完整的 URI，
       // 裸路径 /storage/emulated/0/... 会导致 "No host specified in URI" 错误。
       // 这里把绝对路径转换为 file:// URI。
-      if (raw.startsWith('/')) {
+      if (File(raw).isAbsolute) {
         return Uri.file(raw).toString();
       }
       return raw;
@@ -2000,7 +2019,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
       // 非 content:// 的裸路径也需要转换为 file:// URI
       if (!raw.startsWith('content://')) {
-        if (raw.startsWith('/') && !raw.startsWith('file://')) {
+        if (File(raw).isAbsolute && !raw.startsWith('file://')) {
           result.add(song.copyWith(localPath: Uri.file(raw).toString()));
         } else {
           result.add(song);
@@ -2137,7 +2156,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _saveDebounce?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     removeListener(_handleLyriconSongChange);
-    LyriconProviderService.instance.removeListener(_handleLyriconEnabledChanged);
+    LyriconProviderService.instance.removeListener(
+      _handleLyriconEnabledChanged,
+    );
     _positionSubscription?.cancel();
     _durationSubscription?.cancel();
     _playingSubscription?.cancel();

@@ -51,11 +51,6 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Set up Node.js 18
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
       # 缓存 Gradle
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -66,52 +61,6 @@ jobs:
           key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
-
-      # 下载 native-libs（libnode.so + Node headers）
-      - name: Download native-libs.zip
-        run: |
-          set -e
-          echo "Downloading native-libs.zip..."
-          if ! curl -fL --retry 3 -o native-libs.zip \
-              "https://github.com/zzyoxml/md3Music/releases/download/native-libs/native-libs.zip"; then
-            echo "native-libs.zip 下载失败，尝试从本仓库下载..."
-            if ! curl -fL --retry 3 -o native-libs.zip \
-                "https://github.com/${GITHUB_REPOSITORY}/releases/download/native-libs/native-libs.zip"; then
-              echo "native-libs.zip 下载失败，构建可能失败"
-              exit 1
-            fi
-          fi
-          ls -lh native-libs.zip
-
-      - name: Extract native libs
-        run: |
-          set -e
-          unzip -q -o native-libs.zip -d .
-          rm native-libs.zip
-          echo "jniLibs/:"
-          ls -la android/app/src/main/jniLibs/ 2>/dev/null || echo "  (missing)"
-
-      # 构建嵌入式 Node.js 服务器 bundle
-      - name: Install server dependencies
-        working-directory: kugou_api_server
-        run: npm install --omit=dev
-
-      - name: Generate bundled entry
-        run: node scripts/gen_node_bundle_entry.js
-
-      - name: Build server bundle with esbuild
-        working-directory: kugou_api_server
-        run: |
-          npx --yes esbuild bundled_entry.js \
-            --bundle --minify \
-            --outfile=server_bundle.js \
-            --platform=node \
-            --target=node18
-
-      - name: Copy server bundle to Flutter assets
-        run: |
-          mkdir -p assets/nodejs-project
-          cp kugou_api_server/server_bundle.js assets/nodejs-project/server_bundle.js
 
       # Flutter 构建
       - name: Flutter pub get
@@ -226,3 +175,53 @@ jobs:
             build/app/outputs/flutter-apk/app-x86_64-release.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    name: Build Windows Desktop
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Flutter analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build Windows release
+        run: flutter build windows --release
+
+      - name: Package Windows single executable
+        shell: pwsh
+        run: .\scripts\package_windows_single_exe.ps1
+
+      - name: Upload Windows single executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: md3music-windows-single-exe
+          path: build/windows/md3music-windows.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Windows bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: md3music-windows-release
+          path: build/windows/x64/runner/Release/
+          if-no-files-found: error
+          retention-days: 7

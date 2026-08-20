@@ -101,7 +101,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
       kugou.resetDiscoverLoadedFlag();
     }
 
-    // 自动重试：首次启动时 Node.js 服务器可能尚未完全就绪
+    // 自动重试：首次启动时本地 API 服务器可能尚未完全就绪
     int retryCount = 0;
     while (retryCount < 3) {
       await _loadAllData();

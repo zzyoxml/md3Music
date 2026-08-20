@@ -130,7 +130,7 @@ impl DeviceConfig {
 
     /// Load cached device_info.json (replicating server.js loadCachedDeviceInfo).
     pub fn load_cached(&self, data_dir: &str) -> bool {
-        let path = format!("{}/device_info.json", data_dir);
+        let path = std::path::Path::new(data_dir).join("device_info.json");
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(_) => return false,
@@ -167,7 +167,10 @@ impl DeviceConfig {
             "serverDev": self.get_server_dev(),
             "mac": self.get_mac(),
         });
-        let path = format!("{}/device_info.json", data_dir);
+        let path = std::path::Path::new(data_dir).join("device_info.json");
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         if let Ok(text) = serde_json::to_string_pretty(&info) {
             let _ = std::fs::write(path, text);
         }

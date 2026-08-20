@@ -41,6 +41,11 @@ dependencies:
   chewie: ^1.8.5
   dlna_dart: ^0.1.0
   webview_flutter: ^4.10.0
+  # Windows：just_audio 0.10 官方推荐的 media_kit 后端（Android 不调用 ensureInitialized）
+  just_audio_media_kit: ^2.1.0
+  media_kit_libs_windows_audio: ^1.0.9
+  # Windows 本地音乐目录选择（Android 仍走 SAF MethodChannel）
+  file_selector: ^1.0.3
 
 dev_dependencies:
   flutter_test:

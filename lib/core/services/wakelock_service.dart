@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../../data/repositories/settings_repository.dart';
@@ -49,6 +52,7 @@ class WakelockService {
     final on = _settingEnabled && (_songPlaying || _videoPlaying);
     if (on == _lastApplied) return;
     _lastApplied = on;
+    if (kIsWeb || !Platform.isAndroid) return;
     _channel.invokeMethod('setKeepScreenOn', {'on': on});
   }
 }

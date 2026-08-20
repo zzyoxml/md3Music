@@ -334,11 +334,16 @@ class LocalMusicRepository {
     for (final song in songs) {
       final path = song.localPath;
       if (path == null) continue;
-      final dir = path.substring(0, path.lastIndexOf('/'));
+      final separator = _lastPathSeparator(path);
+      if (separator < 0) continue;
+      final dir = path.substring(0, separator);
       folderMap.putIfAbsent(dir, () => []).add(song);
     }
     return folderMap.entries.map((entry) {
-      final parts = entry.key.split('/').where((p) => p.isNotEmpty);
+      final parts = entry.key
+          .replaceAll('\\', '/')
+          .split('/')
+          .where((p) => p.isNotEmpty);
       return MusicFolder(
         path: entry.key,
         name: parts.isNotEmpty ? parts.last : entry.key,
@@ -346,4 +351,9 @@ class LocalMusicRepository {
       );
     }).toList()..sort((a, b) => a.name.compareTo(b.name));
   }
+
+  int _lastPathSeparator(String path) =>
+      [path.lastIndexOf('/'), path.lastIndexOf('\\')].reduce(
+        (a, b) => a > b ? a : b,
+      );
 }

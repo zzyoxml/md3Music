@@ -203,8 +203,13 @@ class LibraryProvider extends ChangeNotifier {
   List<Song> getSongsInFolder(String folderPath) {
     return _songs.where((s) {
       if (s.localPath == null) return false;
-      final songDir = s.localPath!.substring(0, s.localPath!.lastIndexOf('/'));
-      return songDir == folderPath;
+      final path = s.localPath!;
+      final separator = [path.lastIndexOf('/'), path.lastIndexOf('\\')].reduce(
+        (a, b) => a > b ? a : b,
+      );
+      if (separator < 0) return false;
+      final songDir = path.substring(0, separator);
+      return songDir.replaceAll('\\', '/') == folderPath.replaceAll('\\', '/');
     }).toList();
   }
 

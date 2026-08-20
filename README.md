@@ -13,7 +13,7 @@
 
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.12+-02569B?logo=flutter)](https://flutter.dev)
-[![Platform](https://img.shields.io/badge/Platform-Android-green)]()
+[![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20Windows-green)]()
 [![License](https://img.shields.io/badge/License-AGPL--3.0-blue)](LICENSE)
 
 </div>
@@ -126,7 +126,7 @@
 
 ### 核心特点
 
-- **嵌入式 Rust 服务器**：App 启动时通过 `libkugou_server.so`（JNI/MethodChannel）启动本地 tiny_http 服务器（127.0.0.1），所有酷狗 API 请求都在本地处理
+- **嵌入式 Rust 服务器**：App 启动时在 Android 通过 `libkugou_server.so`（JNI/MethodChannel）、在 Windows 通过 `kugou_server.dll`（dart:ffi）启动本地 tiny_http 服务器（127.0.0.1），所有酷狗 API 请求都在本地处理
 - **高性能低资源**：Rust 实现取代旧 Node.js 方案，内存占用更低，启动更快
 - **无需外部服务器**：用户无需自行搭建 API 服务器
 - **多架构支持**：支持 armeabi-v7a（32位）、arm64-v8a（64位）、x86、x86_64（模拟器）
@@ -211,9 +211,11 @@
 ### 前置要求
 
 - **Flutter SDK** 3.12.0 或更高版本
-- **Rust** 1.70+（用于构建嵌入式 API 服务器）
+- **Rust** 1.88.0（由 `kugou_api_server/rust/rust-toolchain.toml` 固定，用于构建嵌入式 API 服务器）
 - **Android Studio** / VS Code
 - **Android NDK** 28（用于 Rust 交叉编译）
+
+Windows 桌面构建还需要安装 Visual Studio 的“使用 C++ 的桌面开发”工作负载；Rust 用于在构建时生成随应用分发的本地 API 服务器 DLL。
 
 ### 1. 克隆项目
 
@@ -230,7 +232,7 @@ flutter pub get
 
 ### 3. 构建 Rust 服务器（可选）
 
-`libkugou_server.so` 已提交进 Git 仓库，通常无需重新编译。如果你修改了 `kugou_api_server/rust/src/` 下的代码，需要重新构建：
+Android 的 `libkugou_server.so` 已提交进 Git 仓库，通常无需重新编译。如果你修改了 `kugou_api_server/rust/src/` 下的代码，需要重新构建：
 
 ```bash
 # 主机编译验证
@@ -241,7 +243,7 @@ cargo build --release
 ./build_android.sh
 ```
 
-> **注意**：`libkugou_server.so`（arm64-v8a、armeabi-v7a、x86、x86_64）已包含在仓库中，修改服务器代码才需要重新编译。
+> **注意**：`libkugou_server.so`（arm64-v8a、armeabi-v7a、x86、x86_64）已包含在仓库中，修改服务器代码才需要重新编译。Windows 的 `kugou_server.dll` 会由 CMake 在 `flutter run -d windows` 或 `flutter build windows` 时自动构建并复制到应用目录。
 
 ### 4. 运行应用（调试模式）
 
@@ -261,6 +263,20 @@ flutter build apk --release --split-per-abi
 # build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   (64位)
 # build/app/outputs/flutter-apk/app-x86_64-release.apk      (模拟器)
 ```
+
+### Windows 桌面版
+
+```bash
+# 调试运行
+flutter run -d windows
+
+# 构建发布包
+flutter build windows --release
+
+# 输出目录：build/windows/x64/runner/Release/
+```
+
+Windows 版支持在线音乐、本地文件夹扫描和播放。Android 专属的桌面小组件、USB 独占输出、均衡器、悬浮歌词及安全验证页会自动禁用或提示使用 Android。
 
 ---
 
@@ -362,6 +378,24 @@ md3Music/
 ### 嵌入式服务器
 
 应用启动时会自动启动本地 Rust 服务器（`libkugou_server.so`），监听 `127.0.0.1` 的**随机端口**（10000~60000，被占用自动更换），实际端口由服务器启动后回传给应用。无需任何配置。
+
+### Windows Desktop
+
+Windows Release 默认输出完整运行目录：
+
+```powershell
+flutter build windows --release
+```
+
+如需单文件发布包，可在 Windows 上运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\package_windows_single_exe.ps1
+```
+
+输出为 `build\windows\md3music-windows.exe`。该文件启动时会自动解压 Flutter bundle 到临时目录并运行，用户无需手动管理 DLL 或 `data` 目录。应用数据仍保存在 `%APPDATA%\com.md3music`。
+
+Windows 应用启动后不会打开命令行窗口。点击主窗口关闭按钮时，应用会隐藏到系统托盘，继续保持播放和本地 API 服务；点击托盘图标可恢复窗口，右键托盘图标可选择显示或退出应用。
 
 ### 音质设置
 

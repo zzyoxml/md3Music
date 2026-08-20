@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:io' show Platform;
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:quick_actions/quick_actions.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -38,6 +39,10 @@ final ValueNotifier<int?> shortcutTabRequest = ValueNotifier<int?>(null);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // just_audio 0.10 在 Windows 上需注册 media_kit 后端；Android 仍走 fork 的 ExoPlayer。
+  if (!kIsWeb && Platform.isWindows) {
+    JustAudioMediaKit.ensureInitialized(windows: true);
+  }
   await initializeDateFormatting('zh_CN');
   // 加载歌词字号/行间距偏好（从 SharedPreferences）
   await LyricPreferences.instance.load();
@@ -70,18 +75,20 @@ Future<void> main() async {
 
   // 先启动本地 API 服务器，确保就绪后再运行 App
   // 否则发现页 post-frame callback 发出的请求会因服务器未启动而全部失败
-  if (!kIsWeb && Platform.isAndroid) {
+  if (KugouApiServer.isSupported) {
     try {
       await KugouApiServer.start();
     } catch (e) {
       print('API server start error: $e');
     }
-    // 启动本地 HTTP 服务器，供 DLNA 投屏本地音乐
-    // 失败不阻塞启动流程，投屏时若未启动会提示用户重启 App
-    try {
-      await LocalHttpServer.instance.start();
-    } catch (e) {
-      print('Local HTTP server start error: $e');
+    // Android 启动本地 HTTP 服务器，供 DLNA 投屏本地音乐。
+    // Windows 不启用该 Android 设计的局域网文件暴露服务。
+    if (!kIsWeb && Platform.isAndroid) {
+      try {
+        await LocalHttpServer.instance.start();
+      } catch (e) {
+        print('Local HTTP server start error: $e');
+      }
     }
   }
 
@@ -147,7 +154,7 @@ void handleShortcut(String shortcutType) {
 
 Future<void> _requestPermissions() async {
   // Web 平台不支持 permission_handler，跳过所有权限请求
-  if (kIsWeb) return;
+  if (kIsWeb || !Platform.isAndroid) return;
 
   // Android 13+ 通知权限
   if (await Permission.notification.isDenied) {

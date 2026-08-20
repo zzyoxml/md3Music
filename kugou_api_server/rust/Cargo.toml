@@ -22,9 +22,12 @@ rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 libc = "0.2"
-jni = "0.21"
 qrcode = { version = "0.14.0", features = ["image"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+# JNI 仅 Android 需要；Windows/主机 cdylib 只导出 C FFI（start_server 等）。
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
 
 [profile.release]
 opt-level = "s"

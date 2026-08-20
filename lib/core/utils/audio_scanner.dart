@@ -3,21 +3,38 @@ import 'dart:io';
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:flutter/foundation.dart';
 
-/// 默认扫描目录：覆盖常见音乐 App 下载路径。
-const List<String> defaultScanDirs = [
-  '/storage/emulated/0/Music',
-  '/storage/emulated/0/Download',
-  '/storage/emulated/0/Netease/CloudMusic/Music',
-  '/storage/emulated/0/qqmusic/song',
-  '/storage/emulated/0/kugou/down_data',
-  '/storage/emulated/0/kugou/down_kg',
-];
+/// 默认扫描目录：仅 Android 使用常见音乐 App 下载路径。
+/// Windows 无等价系统路径，只扫描用户通过文件夹选择器添加的目录。
+List<String> get defaultScanDirs {
+  if (kIsWeb) return const [];
+  if (Platform.isAndroid) {
+    return const [
+      '/storage/emulated/0/Music',
+      '/storage/emulated/0/Download',
+      '/storage/emulated/0/Netease/CloudMusic/Music',
+      '/storage/emulated/0/qqmusic/song',
+      '/storage/emulated/0/kugou/down_data',
+      '/storage/emulated/0/kugou/down_kg',
+    ];
+  }
+  return const [];
+}
 
 /// 支持的音频文件扩展名（用于过滤目录扫描结果）。
 /// 仅保留纯音频格式，不含 .mp4/.mov 等视频容器。
 const Set<String> audioExtensions = {
-  '.mp3', '.flac', '.m4a', '.ogg', '.opus', '.wav', '.aac', '.ape', '.wma',
-  '.aif', '.aiff', '.aifc',
+  '.mp3',
+  '.flac',
+  '.m4a',
+  '.ogg',
+  '.opus',
+  '.wav',
+  '.aac',
+  '.ape',
+  '.wma',
+  '.aif',
+  '.aiff',
+  '.aifc',
 };
 
 /// Isolate 入口函数：批量扫描音频文件并读取 metadata。
@@ -49,7 +66,8 @@ List<Map<String, dynamic>> scanAudioFilesInIsolate(List<String> filePaths) {
     }
   }
   debugPrint(
-      '[AudioScanner] 扫描完成: 共 ${filePaths.length} 个文件, 成功 ${results.length}, 失败 $skipped');
+    '[AudioScanner] 扫描完成: 共 ${filePaths.length} 个文件, 成功 ${results.length}, 失败 $skipped',
+  );
   return results;
 }
 
@@ -68,10 +86,7 @@ Map<String, dynamic>? readArtworkInIsolate(String filePath) {
         (p) => p.pictureType == PictureType.coverFront,
         orElse: () => metadata.pictures.first,
       );
-      return {
-        'filePath': filePath,
-        'bytes': frontCover.bytes,
-      };
+      return {'filePath': filePath, 'bytes': frontCover.bytes};
     }
   } catch (_) {}
   return null;
@@ -82,7 +97,10 @@ Map<String, dynamic>? readArtworkInIsolate(String filePath) {
 /// 在主 Isolate 中同步调用（文件列表收集阶段）。
 /// 使用 [audioExtensions] 过滤，去重后返回路径列表。
 /// [excludedDirs] 中的目录及其子目录会被跳过。
-List<String> collectAudioFiles(List<String> rootDirs, {List<String>? excludedDirs}) {
+List<String> collectAudioFiles(
+  List<String> rootDirs, {
+  List<String>? excludedDirs,
+}) {
   final filePaths = <String>[];
   final seen = <String>{};
   final excluded = excludedDirs ?? [];
@@ -115,8 +133,7 @@ List<String> collectAudioFiles(List<String> rootDirs, {List<String>? excludedDir
           }
         }
       }
-      debugPrint(
-          '[AudioScanner] 目录 $rootPath: 累计找到 ${filePaths.length} 个音频文件');
+      debugPrint('[AudioScanner] 目录 $rootPath: 累计找到 ${filePaths.length} 个音频文件');
     } catch (e) {
       // 跳过无权限访问的目录（Android 11+ 沙箱限制常见）
       debugPrint('[AudioScanner] 目录扫描失败: $rootPath, 错误: $e');

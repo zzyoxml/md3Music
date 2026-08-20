@@ -1,4 +1,7 @@
+import 'dart:io' show Platform;
+
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -282,9 +285,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
                     isVip
                         ? (kugou.isTodayYouthVip ? '概念版VIP会员' : 'VIP会员')
                         : '开通VIP会员',
-                    style: tt.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w600),
                   ),
                   Text(
                     isVip
@@ -319,9 +320,9 @@ class _UserCenterPageState extends State<UserCenterPage> {
               );
             }),
             _actionItem(cs, Icons.cloud, '云盘', () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const CloudMusicPage()),
-              );
+              Navigator.of(
+                context,
+              ).push(MaterialPageRoute(builder: (_) => const CloudMusicPage()));
             }),
           ],
         ),
@@ -494,7 +495,10 @@ class _UserCenterPageState extends State<UserCenterPage> {
                 child: FilledButton.tonalIcon(
                   style: FilledButton.styleFrom(
                     visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 6,
+                    ),
                     minimumSize: const Size(0, 32),
                     textStyle: tt.labelMedium?.copyWith(
                       fontWeight: FontWeight.w600,
@@ -521,7 +525,10 @@ class _UserCenterPageState extends State<UserCenterPage> {
               FilledButton.tonalIcon(
                 style: FilledButton.styleFrom(
                   visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
                   minimumSize: const Size(0, 32),
                   textStyle: tt.labelMedium?.copyWith(
                     fontWeight: FontWeight.w600,
@@ -542,7 +549,10 @@ class _UserCenterPageState extends State<UserCenterPage> {
               FilledButton.tonalIcon(
                 style: FilledButton.styleFrom(
                   visualDensity: VisualDensity.compact,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 6,
+                  ),
                   minimumSize: const Size(0, 32),
                   textStyle: tt.labelMedium?.copyWith(
                     fontWeight: FontWeight.w600,
@@ -637,10 +647,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
     );
   }
 
-  Future<void> _handleAdClaim(
-    BuildContext context,
-    KugouProvider kugou,
-  ) async {
+  Future<void> _handleAdClaim(BuildContext context, KugouProvider kugou) async {
     final messenger = ScaffoldMessenger.of(context);
     final (ok, msg) = await kugou.claimAdVip();
     messenger.showSnackBar(
@@ -661,6 +668,16 @@ class _UserCenterPageState extends State<UserCenterPage> {
     KugouProvider kugou,
     VerifyCaptchaRequest pending,
   ) async {
+    // webview_flutter 当前无 Windows 实现；伪造 WebView 会白屏，明确降级。
+    if (kIsWeb || !Platform.isAndroid) {
+      kugou.cancelVerifyCaptcha();
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('当前平台暂不支持安全验证页，请在 Android 完成验证')),
+        );
+      }
+      return;
+    }
     final controller = WebViewController();
     controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)

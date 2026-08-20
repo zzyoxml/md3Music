@@ -1,17 +1,20 @@
+import 'dart:io';
+
+import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Android 原生文件夹选择器：通过 SAF (Storage Access Framework) 打开系统目录选择界面。
-///
-/// 用户选择的目录 URI 会自动获得持久化权限，后续可直接读写。
+/// 跨平台文件夹选择：Android 走 SAF MethodChannel；Windows 走 file_selector。
 class FolderPickerService {
   static const _channel = MethodChannel('com.md3music.md3music/folder_picker');
 
   /// 打开系统文件夹选择器，返回用户选择的目录路径。
   ///
   /// 返回 `null` 表示用户取消选择。
-  /// 返回的是实际文件系统路径（如 `/storage/emulated/0/Music/md3Music`），
-  /// 可直接用于文件操作。
   static Future<String?> pickFolder() async {
+    if (!kIsWeb && Platform.isWindows) {
+      return getDirectoryPath(confirmButtonText: '选择文件夹');
+    }
     try {
       final uri = await _channel.invokeMethod<String>('pickFolder');
       if (uri == null) return null;
@@ -44,7 +47,9 @@ class FolderPickerService {
   /// 对已保存的 URI 请求持久化读写权限。
   ///
   /// 在 App 冷启动时调用，确保之前选择的目录仍然可访问。
+  /// Windows 无 SAF 持久化权限，直接视为成功。
   static Future<bool> persistUriPermission(String uri) async {
+    if (!kIsWeb && Platform.isWindows) return true;
     try {
       final result = await _channel.invokeMethod<bool>(
         'getPersistedUriPermission',
