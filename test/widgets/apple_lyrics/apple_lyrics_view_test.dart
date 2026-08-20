@@ -12,7 +12,9 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:md3music/widgets/apple_lyrics/apple_lyrics_view.dart';
+import 'package:md3music/widgets/apple_lyrics/layout/lyric_preferences.dart';
 import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   group('AppleLyricsView.findCurrentLineIndex', () {
@@ -358,6 +360,12 @@ void main() {
     });
 
     testWidgets('逐字歌词（KRC/字级 LRC，含本地/云盘 LRC 逐字）播放中保持 Ticker', (tester) async {
+      // 本用例验证"eco 关闭时"的 P0-A 行为：逐字动画需 Ticker 满帧推进。
+      // 省电模式现已默认开启（eco 开启时逐字动画改由 60fps Timer 推进、Ticker 停止），
+      // 因此这里显式关闭，保持断言 Ticker 仍在运行的原始意图。
+      SharedPreferences.setMockInitialValues({});
+      await LyricPreferences.instance.setEcoMode(false);
+      addTearDown(() => LyricPreferences.instance.reset());
       final lines = <LyricLine>[
         LyricLine(
           startTime: 0,
@@ -390,6 +398,156 @@ void main() {
       }
       expect(tester.binding.transientCallbackCount, greaterThan(0),
           reason: '逐字歌词（含本地/云盘 LRC 逐字）播放中必须保持 Ticker');
+    });
+  });
+
+  group('AppleLyricsView 省电模式：拖动歌词后立即锁回 60fps', () {
+    testWidgets('松手后的等待回弹期歌词静止，应立即锁回（不得等满 3s 回弹倒计时）',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      await LyricPreferences.instance.setEcoMode(true);
+      addTearDown(() => LyricPreferences.instance.reset());
+
+      // 逐字歌词（hasWordTiming=true）播放中：Ticker 保持运行，
+      // 便于直接读取 ecoUnlockedForTest 观测限帧状态。
+      final lines = <LyricLine>[
+        LyricLine(
+          startTime: 0,
+          duration: 60000,
+          text: '逐字歌词行',
+          words: const [
+            LyricWord(startTime: 0, duration: 60000, text: '逐字歌词行'),
+          ],
+        ),
+        LyricLine(
+          startTime: 60000,
+          duration: 60000,
+          text: '第二行',
+          words: const [
+            LyricWord(startTime: 60000, duration: 60000, text: '第二行'),
+          ],
+        ),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 400,
+              height: 600,
+              child: AppleLyricsView(
+                lines: lines,
+                currentTimeMs: 0,
+                isPlaying: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      // 推进到初始收敛（弹簧回到当前行目标，视觉静止）
+      const step = Duration(milliseconds: 16);
+      for (int i = 0; i < 300; i++) {
+        await tester.pump(step);
+      }
+
+      bool ecoUnlocked() =>
+          (tester.state(find.byType(AppleLyricsView)) as dynamic)
+              .ecoUnlockedForTest as bool;
+
+      // 初始稳态应锁定
+      expect(ecoUnlocked(), isFalse, reason: '初始收敛后省电模式应锁定');
+
+      // 垂直拖动歌词（分步移动累计超过 18px slop 后 onVerticalDragUpdate 才回调）
+      final gesture =
+          await tester.startGesture(tester.getCenter(find.byType(AppleLyricsView)));
+      for (int i = 0; i < 10; i++) {
+        await gesture.moveBy(const Offset(0, 10));
+      }
+      await tester.pump(step);
+      expect(ecoUnlocked(), isTrue, reason: '拖动中应解锁以保持顺滑');
+
+      // 松手：进入等待回弹期，但歌词已静止（弹簧停在拖拽位置）→ 应立即锁回
+      await gesture.up();
+      await tester.pump(step);
+      expect(ecoUnlocked(), isFalse,
+          reason: '松手后等待回弹期歌词静止，应立即锁回 60fps（不得等满 3s 倒计时）');
+
+      // 推进过整个等待 + 自动回弹 + 回弹收敛，始终保持锁定
+      for (int i = 0; i < 600; i++) {
+        await tester.pump(step);
+      }
+      expect(ecoUnlocked(), isFalse,
+          reason: '自动回弹结束后应保持锁定');
+    });
+
+    testWidgets('快速甩动松手后惯性滑行期间保持解锁，惯性停住后锁回 60fps',
+        (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      await LyricPreferences.instance.setEcoMode(true);
+      addTearDown(() => LyricPreferences.instance.reset());
+
+      final lines = <LyricLine>[
+        LyricLine(
+          startTime: 0,
+          duration: 60000,
+          text: '逐字歌词行',
+          words: const [
+            LyricWord(startTime: 0, duration: 60000, text: '逐字歌词行'),
+          ],
+        ),
+        LyricLine(
+          startTime: 60000,
+          duration: 60000,
+          text: '第二行',
+          words: const [
+            LyricWord(startTime: 60000, duration: 60000, text: '第二行'),
+          ],
+        ),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 400,
+              height: 600,
+              child: AppleLyricsView(
+                lines: lines,
+                currentTimeMs: 0,
+                isPlaying: true,
+              ),
+            ),
+          ),
+        ),
+      );
+      const step = Duration(milliseconds: 16);
+      for (int i = 0; i < 300; i++) {
+        await tester.pump(step);
+      }
+
+      bool ecoUnlocked() =>
+          (tester.state(find.byType(AppleLyricsView)) as dynamic)
+              .ecoUnlockedForTest as bool;
+
+      // 快速甩动（velocity 1000px/s）→ 松手后产生惯性滑行
+      await tester.fling(
+        find.byType(AppleLyricsView),
+        const Offset(0, -200),
+        1000,
+      );
+      // 惯性初期弹簧未静止 → 必须保持解锁（60fps 滑行会明显发卡）
+      int unlockedDuringInertia = 0;
+      for (int i = 0; i < 40; i++) {
+        await tester.pump(step);
+        if (ecoUnlocked()) unlockedDuringInertia++;
+      }
+      expect(unlockedDuringInertia, greaterThan(0),
+          reason: '松手后惯性滑行期间应保持解锁（否则滑动发卡）');
+
+      // 推进足够久让惯性收敛（弹簧静止），应锁回 60fps
+      for (int i = 0; i < 200; i++) {
+        await tester.pump(step);
+      }
+      expect(ecoUnlocked(), isFalse,
+          reason: '惯性停住后应锁回 60fps');
     });
   });
 }

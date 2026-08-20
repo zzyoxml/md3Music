@@ -178,8 +178,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   // 环绕频谱透明度（style 0/1 分开记忆，默认不透明）
   double _spectrumBarOpacity = 1.0;
   double _spectrumCurveOpacity = 1.0;
-  // 频谱动态取色独立开关（默认关闭）：AM 播放器频谱颜色取封面主色 50/50 混合
-  bool _spectrumDynamicColor = false;
+  // 频谱动态取色独立开关（默认开启）：AM 播放器频谱颜色取封面主色 50/50 混合
+  bool _spectrumDynamicColor = true;
 
   /// 频谱颜色：独立开关「频谱动态取色」开启且已提取到封面主色时，
   /// 用 50% 白 + 50% 取色混合（与歌词动态取色相同的兜底：抬升明度避免深色）；
