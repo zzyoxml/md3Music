@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/services/dlna_service.dart';
@@ -89,7 +90,7 @@ class _DlnaCastSheetState extends State<DlnaCastSheet> {
                   const SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: M3ECircularProgressIndicator(size: 20, strokeWidth: 2),
                   ),
               ],
             ),
@@ -253,7 +254,7 @@ class _DlnaCastSheetState extends State<DlnaCastSheet> {
             if (dlna.state == DlnaCastState.connecting)
               const Padding(
                 padding: EdgeInsets.all(16),
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: M3ECircularProgressIndicator()),
               )
             else ...[
               // 进度条（设备不支持 Seek 时降级为只读进度）
@@ -267,7 +268,7 @@ class _DlnaCastSheetState extends State<DlnaCastSheet> {
                     },
                   )
                 else
-                  LinearProgressIndicator(
+                  M3ELinearProgressIndicator(
                     value: positionSeconds / totalSeconds,
                   ),
                 Padding(

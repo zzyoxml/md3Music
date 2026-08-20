@@ -350,7 +350,7 @@ class _CoverFlowViewState extends State<_CoverFlowView>
                               width: 20,
                               height: 20,
                               child:
-                                  CircularProgressIndicator(strokeWidth: 2),
+                                  M3ECircularProgressIndicator(size: 20, strokeWidth: 2),
                             ),
                           ),
                         ),

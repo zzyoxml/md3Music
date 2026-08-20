@@ -258,13 +258,15 @@ class _PurchasedPageState extends State<PurchasedPage> {
           preferredSize: const Size.fromHeight(48),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 0, label: Text('单曲')),
-                ButtonSegment(value: 1, label: Text('专辑')),
+            child: M3EToggleButtonGroup(
+              actions: const [
+                M3EToggleButtonGroupAction(label: Text('单曲')),
+                M3EToggleButtonGroupAction(label: Text('专辑')),
               ],
-              selected: {_currentTab},
-              onSelectionChanged: (v) => _switchTab(v.first),
+              selectedIndex: _currentTab,
+              onSelectedIndexChanged: (index) {
+                if (index != null) _switchTab(index);
+              },
             ),
           ),
         ),

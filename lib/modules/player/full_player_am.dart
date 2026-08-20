@@ -2900,6 +2900,20 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
+  /// 音质简短文本：去掉码率/格式后缀，与设置页默认音质按钮一致。
+  String _qualityShortLabel(AudioQuality quality) {
+    switch (quality) {
+      case AudioQuality.standard:
+        return '标准';
+      case AudioQuality.high:
+        return '高品质';
+      case AudioQuality.flac:
+        return '无损';
+      case AudioQuality.hires:
+        return 'Hi-Res 无损';
+    }
+  }
+
   void _showQualityDialog(PlayerProvider playerProvider) {
     showDialog(
       context: context,
@@ -2913,7 +2927,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 Navigator.pop(context);
               },
               child: Text(
-                quality.label,
+                _qualityShortLabel(quality),
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                   color: playerProvider.audioQuality == quality

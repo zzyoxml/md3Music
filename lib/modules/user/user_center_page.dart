@@ -307,7 +307,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
           const SizedBox(height: 4),
           ClipRRect(
             borderRadius: BorderRadius.circular(2),
-            child: LinearProgressIndicator(
+            child: M3ELinearProgressIndicator(
               value: progress,
               minHeight: 3,
               backgroundColor: cs.onPrimaryContainer.withValues(alpha: 0.15),
@@ -1236,7 +1236,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
                 SizedBox(
                   width: 56,
                   height: 56,
-                  child: CircularProgressIndicator(
+                  child: M3ECircularProgressIndicator(
+                    size: 56,
                     value: progress,
                     strokeWidth: 4,
                     backgroundColor: cs.surfaceContainerLow,

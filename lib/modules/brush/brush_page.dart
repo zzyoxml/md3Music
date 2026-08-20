@@ -370,7 +370,7 @@ class _BrushPageState extends State<BrushPage> {
                                       child: SizedBox(
                                         width: 22,
                                         height: 22,
-                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                        child: M3ECircularProgressIndicator(size: 22, strokeWidth: 2),
                                       ),
                                     ),
                                   )

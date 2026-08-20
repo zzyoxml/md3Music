@@ -489,7 +489,7 @@ class _ChannelDetailPageState extends State<ChannelDetailPage> {
                         child: SizedBox(
                           width: 24,
                           height: 24,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                          child: M3ECircularProgressIndicator(size: 24, strokeWidth: 2),
                         ),
                       ),
                     ),

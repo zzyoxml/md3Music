@@ -1,5 +1,6 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/services/desktop_lyric_service.dart';
@@ -354,7 +355,7 @@ class _MiniPlayerState extends State<MiniPlayer>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            LinearProgressIndicator(
+            M3ELinearProgressIndicator(
               value: progress.clamp(0.0, 1.0),
               minHeight: 2,
               backgroundColor: colorScheme.surfaceContainerHighest,

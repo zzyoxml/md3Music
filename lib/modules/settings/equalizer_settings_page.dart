@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:m3e_core/m3e_core.dart';
 
 import '../../core/services/equalizer_service.dart';
 import '../../core/utils/app_toast.dart';
@@ -92,7 +93,8 @@ class _EqualizerSettingsPageState extends State<EqualizerSettingsPage> {
           SizedBox(
             width: 32,
             height: 32,
-            child: CircularProgressIndicator(
+            child: M3ECircularProgressIndicator(
+              size: 32,
               strokeWidth: 3,
               color: colorScheme.primary,
             ),
@@ -471,30 +473,21 @@ class _BandSlider extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 4),
-            // 垂直滑块
+            // 垂直滑块：M3ESlider 原生支持垂直方向，min 在底部 max 在顶部
             Expanded(
-              child: RotatedBox(
-                quarterTurns: 3, // 270° 顺时针 = 90° 逆时针，min 在底部 max 在顶部
-                child: Slider(
-                  value: level.toDouble().clamp(
-                        eq.minLevel.toDouble(),
-                        eq.maxLevel.toDouble(),
-                      ),
-                  min: eq.minLevel.toDouble(),
-                  max: eq.maxLevel.toDouble(),
-                  divisions: (eq.maxLevel - eq.minLevel) ~/ 100,
-                  activeColor: disabled
-                      ? colorScheme.onSurfaceVariant.withOpacity(0.3)
-                      : colorScheme.primary,
-                  inactiveColor: disabled
-                      ? colorScheme.surfaceContainerHighest
-                      : colorScheme.surfaceContainerHighest,
-                  onChanged: disabled
-                      ? null
-                      : (value) {
-                          eq.setBandLevel(bandIndex, value.round());
-                        },
-                ),
+              child: M3ESlider(
+                orientation: Axis.vertical,
+                enabled: !disabled,
+                value: level.toDouble().clamp(
+                      eq.minLevel.toDouble(),
+                      eq.maxLevel.toDouble(),
+                    ),
+                min: eq.minLevel.toDouble(),
+                max: eq.maxLevel.toDouble(),
+                // 不设 divisions：无密集刻度节点，观感更清爽
+                onChanged: (value) {
+                  eq.setBandLevel(bandIndex, value.round());
+                },
               ),
             ),
             const SizedBox(height: 4),

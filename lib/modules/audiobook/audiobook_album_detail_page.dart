@@ -533,7 +533,11 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [cs.primaryContainer, cs.surface],
+              colors: [
+                cs.primaryContainer,
+                // 底部渐变到透明：与歌单详情页一致，启用全局背景图时不形成接缝穿帮
+                cs.surface.withValues(alpha: 0),
+              ],
             ),
           ),
           child: SafeArea(

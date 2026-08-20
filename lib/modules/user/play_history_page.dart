@@ -235,7 +235,8 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
             SizedBox(
               width: 16,
               height: 16,
-              child: CircularProgressIndicator(
+              child: M3ECircularProgressIndicator(
+                size: 16,
                 strokeWidth: 2,
                 color: cs.onSurfaceVariant,
               ),

@@ -1,5 +1,6 @@
 import 'package:chewie/chewie.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 import 'package:video_player/video_player.dart';
 
@@ -428,7 +429,7 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          CircularProgressIndicator(color: colorScheme.primary),
+          const M3ELoadingIndicator(),
           const SizedBox(height: 16),
           Text('正在加载 MV...', style: TextStyle(color: colorScheme.onSurfaceVariant)),
         ],
@@ -507,7 +508,7 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
         children: [
           _chewieController != null
               ? Chewie(controller: _chewieController!)
-              : const Center(child: CircularProgressIndicator(color: Colors.white)),
+              : const Center(child: M3ECircularProgressIndicator(color: Colors.white)),
           // 画中画按钮：仅支持的设备、视频就绪且非画中画状态时显示（右上角）
           if (_pipSupported && _chewieController != null)
             Positioned(
@@ -632,7 +633,8 @@ class _MvPlayerPageState extends State<MvPlayerPage> {
             SizedBox(
               width: 16,
               height: 16,
-              child: CircularProgressIndicator(
+              child: M3ECircularProgressIndicator(
+                size: 16,
                 strokeWidth: 2,
                 color: colorScheme.primary,
               ),

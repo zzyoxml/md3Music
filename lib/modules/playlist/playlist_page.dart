@@ -391,7 +391,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              LinearProgressIndicator(
+              M3ELinearProgressIndicator(
                 value: total > 0 ? progress.value / total : 0,
               ),
               const SizedBox(height: 16),

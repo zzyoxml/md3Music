@@ -60,13 +60,15 @@ class _ListenRankingPageState extends State<ListenRankingPage> {
           preferredSize: const Size.fromHeight(48),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: SegmentedButton<int>(
-              segments: const [
-                ButtonSegment(value: 0, label: Text('最近一周')),
-                ButtonSegment(value: 1, label: Text('全部累计')),
+            child: M3EToggleButtonGroup(
+              actions: const [
+                M3EToggleButtonGroupAction(label: Text('最近一周')),
+                M3EToggleButtonGroupAction(label: Text('全部累计')),
               ],
-              selected: {_currentType},
-              onSelectionChanged: (v) => _switchType(v.first),
+              selectedIndex: _currentType,
+              onSelectedIndexChanged: (index) {
+                if (index != null) _switchType(index);
+              },
             ),
           ),
         ),

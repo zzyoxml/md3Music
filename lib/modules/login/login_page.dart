@@ -257,21 +257,21 @@ class _LoginPageState extends State<LoginPage> {
                   horizontal: 24,
                   vertical: 8,
                 ),
-                child: SegmentedButton<int>(
-                  segments: const [
-                    ButtonSegment(
-                      value: 0,
+                child: M3EToggleButtonGroup(
+                  actions: const [
+                    M3EToggleButtonGroupAction(
                       icon: Icon(Icons.qr_code),
                       label: Text('扫码'),
                     ),
-                    ButtonSegment(
-                      value: 1,
+                    M3EToggleButtonGroupAction(
                       icon: Icon(Icons.phone_android),
                       label: Text('手机'),
                     ),
                   ],
-                  selected: {_tabIndex},
-                  onSelectionChanged: (s) => _switchTab(s.first),
+                  selectedIndex: _tabIndex,
+                  onSelectedIndexChanged: (index) {
+                    if (index != null) _switchTab(index);
+                  },
                 ),
               ),
               const SizedBox(height: 16),
