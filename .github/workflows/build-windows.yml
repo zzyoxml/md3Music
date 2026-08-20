@@ -1,0 +1,101 @@
+name: Build Windows (portable zip)
+
+# 触发：push 到 rust-local-two（Windows 开发分支）或手动触发
+on:
+  push:
+    branches: [rust-local-two]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: win-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    name: Build Windows portable
+    runs-on: windows-latest       # 自带 VS2022 + MSVC + CMake + Windows SDK
+    timeout-minutes: 60
+
+    steps:
+      # 1. 拉取代码（含已入库的 windows/ 平台目录 与 third_party/just_audio）
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # 2. Rust 工具链（windows-latest 上用 MSVC，无需 NDK / GNU toolchain）
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # 3. Flutter（与现有 CI 一致）
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # 4. 构建 Rust 桌面版 kugou_server.dll
+      #    jni 已按 target_os=android 隔离，Windows 构建不引入 JNI 符号
+      - name: Build Rust desktop dll
+        working-directory: kugou_api_server/rust
+        run: cargo build --release
+
+      # 5. Flutter 依赖
+      - name: Flutter pub get
+        run: flutter pub get
+
+      # 6. Flutter Windows 构建（产出 exe）
+      - name: Flutter build windows
+        run: flutter build windows --release --dart-define=APP_VERSION=ci-${{ github.sha }}
+
+      # 7. 复制 kugou_server.dll 到 exe 同目录（运行时 dart:ffi 加载）
+      - name: Copy kugou_server.dll to Release
+        shell: pwsh
+        run: |
+          Copy-Item kugou_api_server/rust/target/release/kugou_server.dll build/windows/x64/runner/Release/ -Force
+          Get-ChildItem build/windows/x64/runner/Release/
+
+      # 8. 压缩为便携 zip
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $ver = ((Select-String -Path pubspec.yaml -Pattern '^version:').Line -replace '^version:\s*','' -split '\+')[0]
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "md3music-windows-$ver.zip" -CompressionLevel Optimal
+          Get-Item "md3music-windows-$ver.zip" | Select-Object Name,Length
+
+      # 9. 上传 artifact（可在 Actions 页下载）
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: md3music-windows
+          path: md3music-windows-*.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      # 10. 创建 CI Release（仅 push 触发时）
+      - name: Create CI Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: win-${{ github.sha }}
+          name: Windows Build ${{ github.sha }}
+          body: |
+            ## Windows 便携版（CI 自动构建）
+
+            **分支:** ${{ github.ref_name }}
+            **提交:** ${{ github.sha }}
+            **时间:** ${{ github.event.head_commit.timestamp }}
+
+            ### 下载
+            - **md3music-windows-\*.zip** — 便携版，解压后运行 `md3music.exe` 即可。
+
+            > 此为 CI 自动构建，非正式发布版本。
+          prerelease: true
+          generate_release_notes: true
+          files: md3music-windows-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

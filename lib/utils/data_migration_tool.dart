@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/utils/app_toast.dart';
+
 /// 数据迁移工具 - 清除旧版本的全局键名，避免数据混乱
 /// 
 /// 在登录页面调用此方法，或创建一个设置选项让用户手动执行
@@ -58,12 +60,7 @@ class DataMigrationTool {
     final hasOldData = await hasOldGlobalKeys();
     
     if (!hasOldData) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ 没有发现旧数据，无需迁移'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('没有发现旧数据，无需迁移', long: true);
       return;
     }
     
@@ -88,12 +85,7 @@ class DataMigrationTool {
               Navigator.pop(ctx);
               await clearOldGlobalKeys();
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('✅ 数据迁移完成，请重新登录'),
-                    behavior: SnackBarBehavior.floating,
-                  ),
-                );
+                showToast('数据迁移完成，请重新登录', long: true);
               }
             },
             child: const Text('执行迁移'),

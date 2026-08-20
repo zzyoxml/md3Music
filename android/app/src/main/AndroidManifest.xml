@@ -1,14 +1,27 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- SuperLyricApi 3.4 声明 minSdk 26，项目保持 minSdk 24（Android 7.0）。
+         overrideLibrary 强制放行以便构建；minSdk 由 build.gradle 提供（此处不重复声明）。
+         设置页已按 Android 版本（API 26+）禁用开关，低版本不会触发运行调用。 -->
+    <uses-sdk tools:overrideLibrary="com.hchen.superlyricapi" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 悬浮窗识曲：Android 14+ 使用 MediaProjection 的前台服务必须声明此类型权限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Android 15+（API 35+）：MediaProjection 前台服务还需 PROJECT_MEDIA 权限，
+         否则 targetSDK 35 在 Android 15/16 上 startForeground 抛 SecurityException；
+         低版本不认识此权限名会自动忽略，声明无害 -->
+    <uses-permission android:name="com.android.permission.PROJECT_MEDIA" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 悬浮窗识曲：拖拽悬浮窗到底部删除时提供震动反馈 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.MEDIA_AUDIO_UPLOAD" />
     <uses-permission android:name="android.permission.MEDIA_VIDEO_UPLOAD" />
@@ -25,7 +38,7 @@
         android:label="MD3MusicPro"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:usesCleartextTraffic="true"
+        android:allowBackup="false"
         android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
@@ -35,7 +48,8 @@
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize"
+            android:supportsPictureInPicture="true">
             <!-- Specifies an Android theme to apply to this Activity as soon as
                  the Android process has started. This theme is visible to the user
                  while the Flutter UI initializes. After that, this theme continues
@@ -77,6 +91,29 @@
             android:name=".FloatingLyricService"
             android:foregroundServiceType="specialUse"
             android:exported="false" />
+        <!-- 悬浮窗听歌识曲：AudioPlaybackCapture 采集系统音频识别，需前台服务保活；
+             mediaProjection 类型为 Android 14+ 使用 MediaProjection 的前台服务硬性要求 -->
+        <service
+            android:name=".FloatingRecognitionService"
+            android:foregroundServiceType="specialUse|mediaProjection"
+            android:exported="false" />
+        <!-- 锁屏歌词：全屏覆盖在锁屏上方，显示逐字歌词 -->
+        <activity
+            android:name=".LockScreenLyricActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.MD3Music.LockScreen" />
+        <!-- Miuix 风格发现页测试（原生 Compose + miuix 组件），由设置页经 MethodChannel 打开 -->
+        <activity
+            android:name=".MiuixDiscoverActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:windowSoftInputMode="adjustResize" />
         <!-- 桌面播放器小组件 -->
         <receiver
             android:name=".MusicWidgetProvider"
@@ -95,10 +132,6 @@
         <meta-data android:name="lyricon_module_author" android:value="𝒗𝒄𝒆𝒙𝒎𝒍 &amp; Little-White3110" />
         <meta-data android:name="lyricon_module_description" android:value="MD3Music Lyricon Provider" />
         <meta-data android:name="lyricon_module_tags" android:resource="@array/lyricon_module_tags" />
-        <!-- 静态 App Shortcuts：长按桌面图标显示快捷方式 -->
-        <meta-data
-            android:name="android.app.shortcuts"
-            android:resource="@xml/shortcuts" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

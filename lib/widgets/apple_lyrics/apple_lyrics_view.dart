@@ -12,6 +12,7 @@
 /// - [LineScaleController] 仅管理当前行 scale 弹簧，非当前行直接用 inactiveScale
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -207,14 +208,28 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   // P0: 间奏点动画降频（30fps）用的帧时间累积器
   double _interludeAccumulator = 0;
 
-  // ============== 歌词省电模式（60fps 限帧，默认关闭） ==============
-  // 开启后歌词渲染推进频率锁定 60fps（_ecoFrameInterval），
-  // 用户上下滑动歌词（拖动/惯性/等待回弹/回弹动画）时解锁，
-  // 以最高刷新率渲染保证滑动顺滑；滚动收敛后自动重新锁定。
-  // 跳过帧的 dt 已通过 _lastElapsed 累积，动画推进保持真实时间进度。
+  /// 逐字动画平滑时间的权威位置校正：
+  ///
+  /// - [_smoothPosSeekJumpMs]：权威位置跳变超过此值视为 seek/大跳变，直接吸附。
+  /// - [_smoothPosCorrRate]：正常 position 更新时平滑逼近权威位置的速率（指数衰减系数）。
+  ///   平滑逼近而非硬跳，避免音频时钟与帧时钟漂移导致权威位置硬跳跨过逐字边界、
+  ///   字切换来回抖动（英文歌字短、边界密集时更明显，表现为"下一个字闪一下"）。
+  static const int _smoothPosSeekJumpMs = 500;
+  static const double _smoothPosCorrRate = 20.0;
 
-  /// 省电模式下的推进间隔（60fps ≈ 16.67ms）
-  static const double _ecoFrameInterval = 1.0 / 60.0;
+  // ============== 歌词省电模式（60fps 限帧，默认关闭） ==============
+  // 开启后歌词渲染推进锁定 60fps，用户上下滑动歌词（拖动/惯性/自动回弹动画）时
+  // 解锁为最高刷新率；滚动视觉静止后自动重新锁定。
+  //
+  // **为什么必须停 Ticker 换 Timer**：仅在 _onTick 内节流跳过计算无法降低实际
+  // 渲染帧率——Ticker 每帧都会 scheduleFrame()，引擎每帧 compositeFrame 提交
+  // 场景，120Hz 屏上即便内容不变仍保持 120fps 刷新（CPU/GPU 白耗，这正是
+  // "开了开关仍锁不住 60fps"的根因）。因此 eco 锁定时停掉 Ticker、改用
+  // 16.67ms Timer 驱动 _onTick，帧生产被真正限制到 60fps；解锁/关闭 eco 时
+  // 切回 Ticker 满帧。
+
+  /// eco 锁定时的 60fps 限帧定时器（真正的帧率限制驱动源）。
+  Timer? _ecoTimer;
 
   /// Ticker 帧间隔跳变阈值（秒）。
   ///
@@ -224,11 +239,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 此时需把间奏点动画时钟重新对齐到真实窗口进度（O(1) 检测，无额外功耗）。
   static const double _tickerGapResumeThreshold = 0.5;
 
-  /// 省电模式帧时间累积器：未到推进间隔时跳过本帧
-  double _ecoAccumulator = 0;
-
-  /// 省电模式是否被用户滚动解锁（true = 每帧推进）
+  /// 省电模式是否被用户滚动解锁（true = Ticker 满帧推进）。
   bool _ecoUnlocked = false;
+
+  /// 省电模式是否处于解锁状态（仅测试用，避免 widget 测试无法观测限帧状态）。
+  @visibleForTesting
+  bool get ecoUnlockedForTest => _ecoUnlocked;
 
   /// P1-C：上次间奏检测时的权威播放时间（毫秒）。
   ///
@@ -446,6 +462,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   // 字体缓存：字体变化时强制重算行高 + 失效所有模糊图片缓存
   // （TextPainter 用 fontFamily 测量，旧缓存会与新字体渲染尺寸不一致）
   String? _cachedFontFamily;
+  // 字重缓存：字重变化时同样需强制重算行高 + 失效模糊图片缓存
+  int _cachedFontWeight = -1;
   // 翻译副行缓存：当前行变化或 showTranslation 开关切换时，
   // 当前行高度需重算（副行高度仅计入当前行）
   // displayMode 切换也需重算（虽副行高度不变，但需触发重绘）
@@ -480,6 +498,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   void _recomputeLineHeightsIfNeeded(double fontSize, double viewportWidth) {
     final identitySame = identical(_cleanedLines, _cachedLinesRef);
     final currentFontFamily = LyricLayout.fontFamily;
+    final currentFontWeight = LyricLayout.fontWeight.value;
     final currentShowTranslation = LyricPreferences.instance.showTranslation;
     final currentDisplayMode = LyricPreferences.instance.displayMode;
     if (fontSize == _cachedFontSize &&
@@ -488,6 +507,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         identitySame &&
         _lineHeights.length == _cleanedLines.length &&
         currentFontFamily == _cachedFontFamily &&
+        currentFontWeight == _cachedFontWeight &&
         _currentLineIndex == _cachedCurrentLineIndex &&
         currentShowTranslation == _cachedShowTranslation &&
         currentDisplayMode == _cachedDisplayMode) {
@@ -498,6 +518,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _cachedLinesLength = _cleanedLines.length;
     _cachedLinesRef = _cleanedLines;
     _cachedFontFamily = currentFontFamily;
+    _cachedFontWeight = currentFontWeight;
     _cachedCurrentLineIndex = _currentLineIndex;
     _cachedShowTranslation = currentShowTranslation;
     _cachedDisplayMode = currentDisplayMode;
@@ -590,6 +611,40 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     _ticker.stop();
   }
 
+  /// 省电模式驱动源同步：在 Ticker（满帧）与 60fps Timer 之间切换。
+  ///
+  /// - eco 开启且锁定 → 停 Ticker，用 16.67ms Timer 驱动 _onTick，
+  ///   把实际帧生产限制到 60fps（Ticker 每帧 scheduleFrame 会让 120Hz 屏
+  ///   始终 120fps，仅节流 _onTick 计算省不掉帧）。
+  /// - 解锁 / eco 关闭 → 取消 Timer，恢复 Ticker 满帧。
+  void _syncEcoDriver() {
+    final bool wantTimer = LyricPreferences.instance.ecoMode && !_ecoUnlocked;
+    if (wantTimer) {
+      if (_isTickerRunning) {
+        _stopTickerIfNeeded();
+      }
+      _ecoTimer ??= Timer.periodic(
+        const Duration(milliseconds: 16),
+        _onEcoTimerTick,
+      );
+    } else {
+      _ecoTimer?.cancel();
+      _ecoTimer = null;
+      if (!_isTickerRunning) {
+        // 复用幂等启动：Ticker 重启后首帧回调传 elapsed=0，必须重置 _lastElapsed
+        // 使首帧 dt=0，否则会算出负 dt（blurFade 指数爆炸超出 [0,1]）。
+        _startTickerIfNeeded();
+      }
+    }
+  }
+
+  /// eco 锁定态下由 60fps Timer 驱动：以 16ms 步进推进帧时钟，调用 [_onTick]。
+  void _onEcoTimerTick(Timer timer) {
+    if (!mounted || _isTickerRunning) return;
+    // 用 _lastElapsed + 16ms 作为本帧时间：_onTick 内 dt 即 16ms，动画按真实时间推进
+    _onTick(_lastElapsed + const Duration(milliseconds: 16));
+  }
+
   /// v3 优化：检测所有 perLine 偏移弹簧是否已收敛。
   /// P0 修复：只检查视口范围内的弹簧（与 _onTick 的 tick 范围一致，±15 行）。
   /// 此前遍历所有 _perLineSprings：行切换时为当前行下方所有行创建弹簧，
@@ -641,11 +696,14 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// - WordRenderer/LineRenderer 内部绑定：清空 _wordRenderers/_lineRenderers,
   ///   让它们用新字体重新测量 word 宽度（_ensureBound）并重置 alpha 状态
   void _onPreferencesChanged() {
-    // 字体变化时失效所有依赖字体测量的缓存
+    // 字体/字重变化时失效所有依赖字体测量的缓存
     final currentFontFamily = LyricLayout.fontFamily;
-    if (currentFontFamily != _cachedFontFamily) {
+    final currentFontWeight = LyricLayout.fontWeight.value;
+    if (currentFontFamily != _cachedFontFamily ||
+        currentFontWeight != _cachedFontWeight) {
       // 失效行高缓存（让 _recomputeLineHeightsIfNeeded 重算）
       _cachedFontFamily = null;
+      _cachedFontWeight = -1;
       // 失效模糊图片缓存（dispose 图片资源 + 清空 Map）
       for (final entry in _lineBlurImages.values) {
         entry.$1.dispose();
@@ -660,6 +718,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     }
     // 始终重启 ticker + setState，确保偏好变化（如 useDuetLayout）触发 build
     _startTickerIfNeeded();
+    // eco 开关变化时同步驱动源：锁定 → 60fps Timer 限帧；解锁/关闭 → Ticker 满帧
+    _syncEcoDriver();
     setState(() {});
   }
 
@@ -669,29 +729,53 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // lines 列表缩短时，清理不再存在的行索引对应的 renderer 缓存，避免内存泄漏
     _wordRenderers.removeWhere((key, _) => key >= widget.lines.length);
     _lineRenderers.removeWhere((key, _) => key >= widget.lines.length);
-    // v3 优化：恢复播放或切歌时立即重启 Ticker（停止态恢复）
+    // v3 优化：恢复播放或切歌时立即重启驱动（停止态恢复）。
+    //
+    // **省电模式关键**：eco 开启且锁定（_ecoUnlocked=false）时，驱动源是
+    // 60fps Timer，这里**绝不能**直接 `_startTickerIfNeeded()`——否则每 ~200ms
+    // position 更新（ListenableBuilder 重建本 widget）都会把 Ticker 以 120Hz
+    // 重启一帧，即便画面静止也持续产生额外帧，破坏"锁 60fps"（这正是
+    // "开了开关仍锁不住 60fps"的一个因素）。统一走 [_syncEcoDriver] 决策：
+    // 锁定 → 确保 60fps Timer 在跑；解锁/关闭 eco → 才用 Ticker 满帧。
+    final bool ecoLocked =
+        LyricPreferences.instance.ecoMode && !_ecoUnlocked;
     if (oldWidget.isPlaying != widget.isPlaying && widget.isPlaying) {
-      _startTickerIfNeeded();
+      if (ecoLocked) {
+        _syncEcoDriver();
+      } else {
+        _startTickerIfNeeded();
+      }
     }
-    // v3 优化：切歌（lines 引用变化）时重启 Ticker，重新推进新行的 renderer
+    // v3 优化：切歌（lines 引用变化）时重启驱动，重新推进新行的 renderer
     if (!identical(oldWidget.lines, widget.lines)) {
       // P2-K: 清理按行索引缓存的弹簧与延迟记录——它们只增不减，
       // 长歌曲 + 多次切歌会持续累积内存（Spring 对象虽小但按行数增长）。
       // 新歌行数不同，旧索引无意义，直接整体清空。
       _perLineSprings.clear();
       _delayStartTimes.clear();
-      _startTickerIfNeeded();
+      if (ecoLocked) {
+        _syncEcoDriver();
+      } else {
+        _startTickerIfNeeded();
+      }
     }
     // P0-A: 非逐字歌词在播放中可能已停 Ticker（静止省电）。position 更新
     //（约 200ms，经 ListenableBuilder 重建本 widget）时唤醒一帧：若确实
     // 发生行切换 / 滚动回弹 / 间奏等动画则继续跑，否则下一帧再次收敛停止。
+    // **省电模式锁定态**：由 60fps Timer 持续驱动，无需（也不应）重启 Ticker。
     if (oldWidget.currentTimeMs != widget.currentTimeMs && widget.isPlaying) {
-      _startTickerIfNeeded();
+      if (ecoLocked) {
+        _syncEcoDriver();
+      } else {
+        _startTickerIfNeeded();
+      }
     }
   }
 
   @override
   void dispose() {
+    _ecoTimer?.cancel();
+    _ecoTimer = null;
     _ticker.dispose();
     _scrollController.dispose();
     _repaintNotifier.dispose();
@@ -733,16 +817,21 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     if (_reusedPerLineOffsets.length != len) {
       _reusedPerLineOffsets = List<double>.filled(len, 0.0);
     } else if (_currentLineIndex > 0) {
-      // 性能优化：上方行无 spring（永远 0），清零当前行上方的残留值
-      // 当前行下方由后续循环覆盖，无需清零
-      for (int i = 0; i < _currentLineIndex && i < len; i++) {
+      // 性能优化：上方行无 spring（永远 0），清零当前行上方且落在视口内的残留值。
+      // 视口外（< currentLineIndex - overscan）的偏移值从不被 _buildBlurLayers 读取，
+      // 无需清零，收窄遍历减少 O(N) 开销。
+      final int clearStart = math.max(0, _currentLineIndex - _overscan);
+      for (int i = clearStart; i < _currentLineIndex && i < len; i++) {
         _reusedPerLineOffsets[i] = 0.0;
       }
     }
     // 性能优化：_perLineSprings 只为当前行下方的行设置 spring（见 _onTick 行切换逻辑），
-    // 上方行永远返回 0。跳过上方行减少无意义遍历（200+ 行 → 仅遍历当前行到末尾）。
+    // 上方行永远返回 0。且 perLineOffsets 仅被 _buildBlurLayers 消费（只遍历视口内
+    // _cachedBlurLevels），故填充只需覆盖到 currentLineIndex + overscan，
+    // 视口外值不被读取，跳过减少 O(N) 遍历。
     final int startI = math.max(0, _currentLineIndex);
-    for (int i = startI; i < len; i++) {
+    final int endI = math.min(len, _currentLineIndex + _overscan);
+    for (int i = startI; i < endI; i++) {
       _reusedPerLineOffsets[i] = _perLineSprings[i]?.position ?? 0.0;
     }
     _perLineOffsetsGeneration++;
@@ -764,39 +853,45 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 该检测为 O(1) 比较，不增加每帧开销。
     final bool tickerGapResume = dt > _tickerGapResumeThreshold;
 
-    // ============== 歌词省电模式：限帧到 60fps ==============
-    // 滚动中（拖动/惯性/等待回弹/回弹动画）解锁帧率限制，每帧推进；
-    // 滚动收敛后自动重新锁定，未到推进间隔的帧直接跳过（省 CPU + 重绘）。
-    // 跳过帧的 dt 累加进 [_ecoAccumulator]；执行帧用累积后的 dt 推进，
-    // 保证动画（逐字渐变/间奏点/弹簧）按真实时间速度前进，限帧不变慢。
+    // ============== 歌词省电模式：锁定 60fps ==============
+    // 解锁（120Hz 满帧）仅限"用户驱动"的滚动：
+    //   1. 手指正按住拖动（isUserScrolling）
+    //   2. 松手后惯性仍在滑行（isWaitingForAutoReturn 且弹簧未静止）——惯性速度高，
+    //      60fps 会明显发卡，必须保持满帧顺滑
+    // 其余一律保持 60fps：
+    //   - 惯性已停、仅等待自动回弹倒计时（画面静止）→ 锁 60fps（这正是"拖动后要锁回"的原始 bug）
+    //   - 自动回弹动画 / 播放行切换的自动滚动 → 60fps 足够顺滑
+    // **真正限帧由 [_syncEcoDriver] 切换 Ticker/Timer 实现**：锁定 → 停 Ticker、
+    // 用 60fps Timer 驱动 _onTick（限制实际帧生产）；解锁/关闭 eco → Ticker 满帧。
     if (LyricPreferences.instance.ecoMode) {
       _ecoUnlocked = _scrollController.isUserScrolling ||
-          _scrollController.isWaitingForAutoReturn ||
-          !_scrollController.isConverged;
-      if (!_ecoUnlocked) {
-        _ecoAccumulator += dt;
-        if (_ecoAccumulator < _ecoFrameInterval) {
-          return; // 未到推进时机：跳过本帧全部动画计算与重绘
-        }
-        // 修复：把累积的跳过帧时间一并作为本帧 dt 推进动画。
-        // 之前只累加到 _ecoAccumulator 做节流判断，执行帧仍用本帧单帧 dt：
-        // 120Hz 屏上每 2 帧才执行一次但 dt 只有 8.3ms，
-        // 导致间奏点时钟/逐字渐变等 dt 驱动动画以真实时间一半的速度运行。
-        dt = _ecoAccumulator;
-        _ecoAccumulator = 0;
-      }
+          (_scrollController.isWaitingForAutoReturn &&
+              !_scrollController.isPosYSpringSettled);
+      _syncEcoDriver();
     }
 
     // P0: 推进逐字动画平滑时间（上浮/字内渐变的进度来源）。
     // positionStream 每 ~200ms 才给一个权威位置，播放中若直接用它会
     // 造成动画"追到旧目标后冻结 ~120ms"的卡顿；这里用帧时钟每帧推进，
-    // 收到新权威位置时对齐校正（偏差一般 <20ms，不可见）。
-    // 暂停时冻结在权威位置；seek/切歌等大跳变随权威位置直接吸附。
+    // 收到新权威位置时对齐校正。
+    //
+    // 校正策略：正常 position 更新用**平滑逼近**而非硬跳。音频时钟与帧时钟
+    // 存在漂移，若权威位置硬跳跨过逐字边界，字切换会来回抖动（英文歌字短、
+    // 边界密集时更明显，表现为"下一个字闪一下"）。seek/切歌等大跳变仍直接吸附。
+    // 暂停时冻结在权威位置。
     if (widget.isPlaying) {
       _smoothPosMs += dt * 1000;
       if (widget.currentTimeMs != _lastAuthorityPosMs) {
+        final int jump = (widget.currentTimeMs - _lastAuthorityPosMs).abs();
         _lastAuthorityPosMs = widget.currentTimeMs;
-        _smoothPosMs = widget.currentTimeMs.toDouble();
+        if (jump > _smoothPosSeekJumpMs) {
+          // seek/大跳变：直接吸附，避免平滑拖尾
+          _smoothPosMs = widget.currentTimeMs.toDouble();
+        } else {
+          // 正常 position 更新：平滑逼近权威，避免硬跳跨字边界造成闪烁
+          final double corr = 1.0 - math.exp(-_smoothPosCorrRate * dt);
+          _smoothPosMs += (widget.currentTimeMs - _smoothPosMs) * corr;
+        }
       } else if ((_smoothPosMs - _lastAuthorityPosMs).abs() > 300) {
         // 兜底：权威位置长时间不更新（缓冲等）时防止平滑值漂移过大
         _smoothPosMs = _lastAuthorityPosMs.toDouble();
@@ -1061,6 +1156,10 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     if (animConverged && deepConverged &&
         (!widget.isPlaying || canStopWhilePlaying)) {
       _stopTickerIfNeeded();
+      // 同时停掉 eco 限帧 Timer：静态画面无需继续驱动 _onTick
+      //（否则 Timer 每 16ms 触发一次 setState，仍会产生 60fps 空帧）。
+      _ecoTimer?.cancel();
+      _ecoTimer = null;
       // 最后一帧 setState 确保稳态画面渲染
       setState(() {});
       return;
@@ -1285,8 +1384,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 用户滚动后 5s 自动回弹到当前行）。这里补上 onVerticalDragUpdate/End。
   void _onVerticalDragUpdate(DragUpdateDetails details) {
     _startTickerIfNeeded(); // v3 优化：用户滚动时重启 Ticker
-    // 省电模式：用户开始滑动歌词立即解锁帧率限制（保持 120Hz 顺滑滚动）
+    // 省电模式：用户开始滑动歌词立即解锁帧率限制（保持 120Hz 顺滑滚动）。
+    // 必须立刻同步驱动源：取消 60fps Timer、确认 Ticker 在跑，
+    // 否则要等下一帧 _onTick 里的 _syncEcoDriver 才切，拖动首帧会多走一次 60fps。
     _ecoUnlocked = true;
+    _syncEcoDriver();
     _scrollController.onUserScroll(details.primaryDelta ?? 0);
   }
 
@@ -1679,6 +1781,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
           // 显式注入歌词 fontFamily，与清晰层保持一致，
           // 否则模糊层尺寸与清晰层不匹配
           fontFamily: LyricLayout.fontFamily,
+          fontWeight: LyricLayout.fontWeight,
         ),
       );
       textPainter.layout(maxWidth: maxTextWidth);

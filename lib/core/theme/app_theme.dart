@@ -1,15 +1,53 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../widgets/app_background.dart';
+
+/// 路由过渡：M3 FadeForwards 动效 + 页面自带背景。
+///
+/// 启用全局背景图时页面背景透明，路由过渡中新旧页面内容会叠加重叠。
+/// 本 builder 给每个 MaterialPageRoute 的过渡 child **内嵌 [AppBackground]**，
+/// 使背景图作为页面的一部分一起滑动入场（随画面位移，无跳变），且背景图
+/// 不透明盖住下层旧页面（无重叠）。对所有 MaterialPageRoute 全局生效。
+class _BgSafeFadeForwardsBuilder extends PageTransitionsBuilder {
+  const _BgSafeFadeForwardsBuilder();
+
+  @override
+  Widget buildTransitions<T>(
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    // 背景作为页面底层，随 FadeForwards 一起滑动/淡入
+    final withBg = Stack(
+      fit: StackFit.expand,
+      children: [
+        const AppBackground(),
+        child,
+      ],
+    );
+    // FadeForwards 基础动效：新页面右侧滑入 + 淡入（无白色屏障层）
+    return FadeForwardsPageTransitionsBuilder().buildTransitions(
+      route,
+      context,
+      animation,
+      secondaryAnimation,
+      withBg,
+    );
+  }
+}
+
 class AppTheme {
   AppTheme._();
 
   /// 8 个预设种子色，取自 Material 3 官方 Theme Builder 的 key tone 40。
-  /// 顺序：色环顺序（紫→蓝→青→绿→黄→橙→红→粉）。
+  /// 顺序：色环顺序（蓝→紫→青→绿→黄→橙→红→粉）。
   /// 索引 0 是默认色，与 [defaultSeedColor] 保持一致。
   static const List<Color> presetSeedColors = [
+    Color(0xFF0061A4), // 蓝（默认）
     Color(0xFF6750A4), // 紫（M3 默认）
-    Color(0xFF0061A4), // 蓝
     Color(0xFF006A6A), // 青绿
     Color(0xFF386A20), // 绿
     Color(0xFF7E5700), // 黄
@@ -18,9 +56,9 @@ class AppTheme {
     Color(0xFF984061), // 粉
   ];
 
-  /// 默认种子色（紫色），用于未启用系统主题色且未手动选择时的兜底。
+  /// 默认种子色（蓝色），用于未启用系统主题色且未手动选择时的兜底。
   /// 必须独立定义为 const，不能引用 [presetSeedColors] 的索引（非常量表达式）。
-  static const Color defaultSeedColor = Color(0xFF6750A4);
+  static const Color defaultSeedColor = Color(0xFF0061A4);
 
   // CJK 字体回退链 - 按平台优先级排序:
   // 1) Web 浏览器(Windows + Edge) 优先用系统自带的 "Microsoft YaHei" (无需下载)
@@ -120,6 +158,14 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       brightness: brightness,
+      // 全局路由过渡：Android 用 FadeForwards（滑动 + 淡入）+ 过渡期间
+      // 背景遮罩（避免透明页面过渡重叠，完成后再露出背景图）。
+      // 其余平台（iOS/macOS）保留系统默认 Cupertino 过渡。
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: _BgSafeFadeForwardsBuilder(),
+        },
+      ),
       // fontFamily 为 null 时，Flutter 会走系统字体链（Android 上是 Roboto +
       // Noto Sans CJK），符合"优先展示用户手机字体"需求。
       // fontFamilyFallback 兜底链保证 SimHei 在系统字体缺字符时仍能命中。

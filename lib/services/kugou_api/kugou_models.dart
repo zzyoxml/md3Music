@@ -517,7 +517,7 @@ class KugouSongDetail {
             json['Hash128'] ??
             json['trans_param']?['ogg_128_hash'],
       ),
-      lyrics: _strNull(json['lyrics'] ?? json['Lyrics']),
+      lyrics: _strNull(json['lyrics'] ?? json['Lyrics'] ?? json['Lyric']),
       albumAudioId: _strNull(
         json['album_audio_id'] ??
             json['AlbumAudioID'] ??
@@ -1506,6 +1506,62 @@ class KugouUserVipDetail {
   }
 }
 
+/// 听歌等级信息（/user/grade/info，v2/lite 协议）。
+class KugouGradeInfo {
+  /// 服务器当前累计听歌时长（秒）
+  final int? dSec;
+
+  /// 时长（秒，与 d_sec 近似，取其一展示）
+  final int? duration;
+
+  /// 当前等级（如 3）
+  final int? pGrade;
+
+  /// 当前成长值/积分
+  final int? pCurrentPoint;
+
+  /// 本级所需成长值（升到本级时）
+  final int? pGradePoint;
+
+  /// 下一等级
+  final int? pNextGrade;
+
+  /// 升到下一级所需成长值
+  final int? pNextGradePoint;
+
+  /// 服务器时间（字符串）
+  final String? serverTime;
+
+  const KugouGradeInfo({
+    this.dSec,
+    this.duration,
+    this.pGrade,
+    this.pCurrentPoint,
+    this.pGradePoint,
+    this.pNextGrade,
+    this.pNextGradePoint,
+    this.serverTime,
+  });
+
+  factory KugouGradeInfo.fromJson(Map<String, dynamic> json) {
+    final data = json['data'] as Map<String, dynamic>? ?? json;
+    return KugouGradeInfo(
+      dSec: _parseInt(data['d_sec'] ?? data['dSec']),
+      duration: _parseInt(data['duration']),
+      pGrade: _parseInt(data['p_grade'] ?? data['pGrade']),
+      pCurrentPoint: _parseInt(
+        data['p_current_point'] ?? data['pCurrentPoint'],
+      ),
+      pGradePoint: _parseInt(data['p_grade_point'] ?? data['pGradePoint']),
+      pNextGrade: _parseInt(data['p_next_grade'] ?? data['pNextGrade']),
+      pNextGradePoint: _parseInt(
+        data['p_next_grade_point'] ?? data['pNextGradePoint'],
+      ),
+      serverTime: _strNull(data['servertime'] ?? data['serverTime']),
+    );
+  }
+}
+
 class KugouSongClimax {
   final String? climaxStart;
   final String? climaxEnd;
@@ -1941,6 +1997,35 @@ class KugouLongAudioAudio {
       ),
       albumAudioId: _strNull(json['album_audio_id']),
       albumId: _strNull(json['album_id']),
+    );
+  }
+}
+
+/// 手机验证码登录的多账号候选（酷狗 `/v7/login_by_verifycode` 返回的
+/// `data.user_list` 条目）。一个手机号绑定多个账号时，需展示此列表让用户
+/// 选择，再携带选中账号的 [userid] 二次请求完成登录。
+class KugouLoginAccount {
+  final String userid;
+  final String? nickname;
+  final String? avatar;
+
+  const KugouLoginAccount({
+    required this.userid,
+    this.nickname,
+    this.avatar,
+  });
+
+  factory KugouLoginAccount.fromJson(Map<String, dynamic> json) {
+    return KugouLoginAccount(
+      userid: _str(
+        json['userid'] ?? json['userId'] ?? json['id'] ?? json['user_id'],
+      ),
+      nickname: _strNull(
+        json['nickname'] ?? json['user_name'] ?? json['name'],
+      ),
+      avatar: _resolveArtworkUri(
+        json['avatar'] ?? json['pic'] ?? json['img'] ?? json['imgurl'],
+      ),
     );
   }
 }

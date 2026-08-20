@@ -31,6 +31,10 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
 import io.flutter.embedding.engine.dart.DartExecutor
 import io.flutter.plugin.common.MethodChannel
+import com.hchen.superlyricapi.SuperLyricData
+import com.hchen.superlyricapi.SuperLyricHelper
+import com.hchen.superlyricapi.SuperLyricLine
+import com.hchen.superlyricapi.SuperLyricWord
 import io.flutter.plugins.GeneratedPluginRegistrant
 import io.github.proify.lyricon.provider.ConnectionListener
 import java.util.concurrent.CountDownLatch
@@ -65,6 +69,9 @@ class AudioPlaybackService : Service() {
         const val EXTRA_IS_FAVORITED = "isFavorited"
         const val EXTRA_BT_LYRIC_TEXT = "btLyricText"
         const val EXTRA_BT_LYRIC_ENABLED = "btLyricEnabled"
+        // LyricInfo 歌词转发：通过 MediaSession 元数据 extras.lyricInfo 发布整首歌词
+        const val ACTION_UPDATE_LYRIC_INFO = "com.md3music.premium.ACTION_UPDATE_LYRIC_INFO"
+        const val EXTRA_LYRIC_INFO = "lyricInfo"
         // 桌面小组件按钮动作（由 MusicWidgetProvider 转发）
         const val ACTION_WIDGET_PLAY_PAUSE = "com.md3music.premium.ACTION_WIDGET_PLAY_PAUSE"
         const val ACTION_WIDGET_NEXT = "com.md3music.premium.ACTION_WIDGET_NEXT"
@@ -82,6 +89,10 @@ class AudioPlaybackService : Service() {
         /// Dart 端 PlayerProvider 完成状态恢复后会通过 playerReady 通知置为 true。
         @Volatile
         var playerReadyReceived = false
+
+        /// 当前是否正在播放（供 LockScreenLyricReceiver 判断锁屏时是否拉起歌词界面）。
+        @Volatile
+        var isNowPlaying = false
 
         fun setFlutterEngine(engine: FlutterEngine) {
             staticFlutterEngine = engine
@@ -370,11 +381,74 @@ class AudioPlaybackService : Service() {
                 }
             }
         }
+
+        /**
+         * 注册 SuperLyric MethodChannel（Dart → 原生单向）。
+         * 由 MainActivity（正常启动）与 setupHeadlessChannels（进程被杀唤醒）共用。
+         * Dart 端在切歌 / 歌词行变化时推送当前行，本 handler 组装 SuperLyricData
+         * 经 SuperLyricHelper.sendLyric 发布到系统服务。播放/暂停由 SuperLyric
+         * 自动监听 App 的 MediaSession 处理（sendStop），此处不手动发送。
+         */
+        fun registerSuperLyricChannel(engine: FlutterEngine) {
+            val channel = MethodChannel(
+                engine.dartExecutor.binaryMessenger,
+                "com.md3music.premium/super_lyric"
+            )
+            channel.setMethodCallHandler { call, result ->
+                if (call.method != "sendLyric") {
+                    result.notImplemented()
+                    return@setMethodCallHandler
+                }
+                val arg = call.arguments as? Map<*, *> ?: run {
+                    result.success(false)
+                    return@setMethodCallHandler
+                }
+                @Suppress("UNCHECKED_CAST")
+                val wordsRaw = arg["words"] as? List<Map<*, *>> ?: emptyList()
+                val words = wordsRaw.mapNotNull { w ->
+                    val text = w["text"] as? String ?: return@mapNotNull null
+                    val start = (w["start"] as? Number)?.toLong() ?: 0L
+                    val end = (w["end"] as? Number)?.toLong() ?: 0L
+                    SuperLyricWord(text, start, end)
+                }
+                val startTime = (arg["startTime"] as? Number)?.toLong() ?: 0L
+                val endTime = (arg["endTime"] as? Number)?.toLong() ?: 0L
+                val text = arg["text"] as? String
+                val translation = arg["translation"] as? String
+                val roma = arg["roma"] as? String
+
+                val data = SuperLyricData()
+                (arg["title"] as? String)?.let { data.setTitle(it) }
+                (arg["artist"] as? String)?.let { data.setArtist(it) }
+                if (!text.isNullOrEmpty()) {
+                    data.setLyric(SuperLyricLine(text, words.toTypedArray(), startTime, endTime))
+                }
+                if (!translation.isNullOrEmpty()) {
+                    data.setTranslation(SuperLyricLine(translation, startTime, endTime))
+                }
+                if (!roma.isNullOrEmpty()) {
+                    data.setSecondary(SuperLyricLine(roma, startTime, endTime))
+                }
+
+                try {
+                    SuperLyricHelper.sendLyric(data)
+                    android.util.Log.d("SuperLyricDebug",
+                        "sendLyric: title='${arg["title"]}', artist='${arg["artist"]}', " +
+                        "text='$text', words=${words.size}, translation='$translation', roma='$roma'")
+                    result.success(true)
+                } catch (e: Exception) {
+                    android.util.Log.w("SuperLyricDebug",
+                        "sendLyric failed: ${e.javaClass.simpleName}: ${e.message}")
+                    result.success(false)
+                }
+            }
+        }
     }
 
     private var mediaSession: MediaSessionCompat? = null
     private var notificationManager: NotificationManager? = null
     private var receiver: BroadcastReceiver? = null
+    private var lockScreenReceiver: BroadcastReceiver? = null
     private var flutterEngine: FlutterEngine? = null
     // Lyricon Provider 是否已 register（restoreLyriconStateIfNeeded 可能被调用多次，需幂等）
     private var lyriconRegistered = false
@@ -384,6 +458,12 @@ class AudioPlaybackService : Service() {
     private var currentBtLyricText = ""
     private var originalTitle = ""
     private var originalArtist = ""
+    // LyricInfo 歌词转发：缓存整首歌词 JSON（空 = 不发布），
+    // 写入 MediaSession 元数据 extras.lyricInfo 供第三方系统读取
+    @Volatile
+    private var currentLyricInfo = ""
+    // 上次已写入元数据的 lyricInfo，用于 refreshMetadata 判断是否需强制刷新
+    private var lastShownLyricInfo = ""
     // 封面缓存：后台封面线程写入，主线程 refreshMetadata（蓝牙歌词）读取，
     // 必须 @Volatile 保证跨线程可见性
     @Volatile
@@ -438,6 +518,19 @@ class AudioPlaybackService : Service() {
         notificationManager = getSystemService(NotificationManager::class.java)
         initMediaSession()
         registerReceiver()
+        // 锁屏歌词：动态注册 SCREEN_OFF/SCREEN_ON 广播（前台服务存活期间注册，
+        // 比 manifest 静态广播在 MIUI 等 ROM 上更可靠）
+        try {
+            lockScreenReceiver = LockScreenLyricReceiver()
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_OFF)
+                addAction(Intent.ACTION_SCREEN_ON)
+            }
+            registerReceiver(lockScreenReceiver, filter)
+            android.util.Log.i("LockScreenLyric", "AudioPlaybackService.onCreate: lock screen receiver registered")
+        } catch (e: Exception) {
+            android.util.Log.e("LockScreenLyric", "register lock screen receiver failed: $e")
+        }
         // P0: 不再在 onCreate 无条件持有 WakeLock（此时未必在播放）。
         // 仅当 onStartCommand 收到 isPlaying=true 时才持有，暂停时释放。
 
@@ -479,6 +572,11 @@ class AudioPlaybackService : Service() {
         // 创建 provider 后立即读 SharedPreferences 恢复 enabled，并通知 Dart
         // 端通过 auto_restored 事件触发重推当前歌曲。
         restoreLyriconStateIfNeeded()
+        // 注册 SuperLyric 发布者（应用播放服务启动即首次播放时注册，进程终止后系统自动清理；
+        // 播放/暂停由 SuperLyric 自动监听 App 的 MediaSession 处理）
+        try {
+            SuperLyricHelper.registerPublisher()
+        } catch (_: Exception) {}
         // 恢复蓝牙歌词开关：避免冷启动后开关丢失（Flutter 端也会再推一次，幂等）
         restoreBluetoothLyricState()
     }
@@ -539,6 +637,9 @@ class AudioPlaybackService : Service() {
             ACTION_STOP -> {
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 releaseWakeLock()
+                isNowPlaying = false
+                // 停止播放/退出 App 后锁屏歌词不应残留
+                LockScreenLyricActivity.dismiss()
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -562,6 +663,11 @@ class AudioPlaybackService : Service() {
             }
             ACTION_SET_BT_LYRIC_ENABLED -> {
                 bluetoothLyricEnabled = intent?.getBooleanExtra(EXTRA_BT_LYRIC_ENABLED, false) ?: false
+                refreshMetadata()
+                return START_STICKY
+            }
+            ACTION_UPDATE_LYRIC_INFO -> {
+                currentLyricInfo = intent?.getStringExtra(EXTRA_LYRIC_INFO) ?: ""
                 refreshMetadata()
                 return START_STICKY
             }
@@ -854,6 +960,8 @@ class AudioPlaybackService : Service() {
                     "hideNotification" -> {
                         stopForeground(STOP_FOREGROUND_REMOVE)
                         releaseWakeLock()
+                        isNowPlaying = false
+                        LockScreenLyricActivity.dismiss()
                         stopSelf()
                         result.success(true)
                     }
@@ -867,6 +975,18 @@ class AudioPlaybackService : Service() {
                         refreshMetadata()
                         result.success(true)
                     }
+                    // 锁屏歌词：开关 / 数据推送（正常启动走 MainActivity，headless 在此兜底）
+                    "showLockScreenLyric" -> {
+                        result.success(true)
+                    }
+                    "hideLockScreenLyric" -> {
+                        LockScreenLyricActivity.dismiss()
+                        result.success(true)
+                    }
+                    "updateLockScreenLyric" -> {
+                        LockScreenLyricActivity.applyCall(call)
+                        result.success(true)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -874,6 +994,8 @@ class AudioPlaybackService : Service() {
             // （无 MainActivity），注册后重新通知 Dart 端 Lyricon 已自动恢复，
             // 否则词幕不会随播放自动连接（Dart 端 _state 一直停留在 disabled）。
             registerLyriconChannel(engine)
+            // SuperLyric channel 原生 handler 同样只能在 headless 场景下在此注册
+            registerSuperLyricChannel(engine)
             restoreLyriconStateIfNeeded()
         } catch (_: Exception) {}
     }
@@ -1088,6 +1210,8 @@ class AudioPlaybackService : Service() {
         originalArtist = artist
         lastArtUrl = artUrl
         lastIsPlaying = isPlaying
+        // 同步「正在播放」状态，供锁屏歌词广播（ACTION_SCREEN_OFF）判断
+        isNowPlaying = isPlaying
         lastDesktopLyricEnabled = desktopLyricEnabled
         lastIsFavorited = isFavorited
         lastDuration = duration
@@ -1240,6 +1364,11 @@ class AudioPlaybackService : Service() {
         if (!artUri.isNullOrEmpty()) {
             metaBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artUri)
         }
+        // LyricInfo 歌词转发：发布整首歌词 JSON 到 MediaMetadata.extras，
+        // 供 ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取（空则不发布）
+        if (currentLyricInfo.isNotEmpty()) {
+            metaBuilder.putString(EXTRA_LYRIC_INFO, currentLyricInfo)
+        }
         mediaSession?.setMetadata(metaBuilder.build())
     }
 
@@ -1259,10 +1388,15 @@ class AudioPlaybackService : Service() {
             displayArtist = originalArtist
         }
 
-        // P0: 文本未变化（歌词行未变 / 开关未切换）时直接跳过，避免无效刷新
-        if (displayTitle == lastShownBtLyricTitle && displayArtist == lastShownBtLyricArtist) return
+        // P0: 文本未变化（歌词行未变 / 开关未切换）时直接跳过，避免无效刷新。
+        // 但 LyricInfo 歌词转发（currentLyricInfo 变化）不依赖 title/artist 变化，
+        // 即使 title/artist 未变也需要更新 MediaSession 元数据以写入 extras.lyricInfo，
+        // 因此本跳过逻辑仅在 lyricInfo 不变时生效。
+        val lyricInfoChanged = currentLyricInfo != lastShownLyricInfo
+        if (displayTitle == lastShownBtLyricTitle && displayArtist == lastShownBtLyricArtist && !lyricInfoChanged) return
         lastShownBtLyricTitle = displayTitle
         lastShownBtLyricArtist = displayArtist
+        lastShownLyricInfo = currentLyricInfo
 
         // P0: 通知重建节流：逐字歌词每句（50-100ms）都会走到这里，
         // 通知栏重建限制为最少 500ms 一次（车机 AVRCP 歌词读的是 MediaSession，不受节流影响）
@@ -1315,6 +1449,10 @@ class AudioPlaybackService : Service() {
         if (!lastArtUrl.isNullOrEmpty()) {
             metaBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, lastArtUrl)
         }
+        // LyricInfo 歌词转发：蓝牙歌词刷新路径也保留 lyricInfo（空则不发布）
+        if (currentLyricInfo.isNotEmpty()) {
+            metaBuilder.putString(EXTRA_LYRIC_INFO, currentLyricInfo)
+        }
         mediaSession?.setMetadata(metaBuilder.build())
     }
 
@@ -1324,6 +1462,12 @@ class AudioPlaybackService : Service() {
                 unregisterReceiver(it)
             } catch (_: Exception) {}
         }
+        lockScreenReceiver?.let {
+            try {
+                unregisterReceiver(it)
+            } catch (_: Exception) {}
+        }
+        lockScreenReceiver = null
         mediaSession?.release()
         // 释放 Lyricon Provider
         try {

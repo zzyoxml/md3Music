@@ -1,12 +1,13 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:m3e_core/m3e_core.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../data/models/song.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/song_list_item.dart';
 import '../album/album_detail_page.dart';
@@ -257,7 +258,7 @@ class _IpDetailPageState extends State<IpDetailPage>
   /// 通用加载中/空态包装
   Widget _wrapTab(int index, Widget Function() builder) {
     if (_loading[index]) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
     return builder();
   }
@@ -489,9 +490,7 @@ class _IpDetailPageState extends State<IpDetailPage>
   void _playVideo(Map<String, dynamic> b, String title, String? cover) {
     final albumAudioId = b['album_audio_id']?.toString();
     if (albumAudioId == null || albumAudioId.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('该视频无法播放')),
-      );
+      showToast('该视频无法播放', long: true);
       return;
     }
     final song = Song(

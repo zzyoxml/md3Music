@@ -1,5 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models/song.dart';
@@ -7,7 +9,6 @@ import '../../providers/comment_display_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 
 /// 统一的评论面板入口。
 ///
@@ -133,6 +134,16 @@ class _CommentsViewState extends State<CommentsView> {
 
   /// 楼层评论状态（按评论 ID 索引）
   final Map<String, _FloorState> _floorStates = {};
+
+  /// 评论项 GlobalKey（按评论 ID 索引），用于收起楼中楼后定位滚动
+  final Map<String, GlobalKey> _commentItemKeys = {};
+
+  GlobalKey _keyForComment(String id) =>
+      _commentItemKeys.putIfAbsent(id, () => GlobalKey());
+
+  /// 收起滚动操作序号：每次收起自增，异步滚动前校验，只允许最新一次生效，
+  /// 避免多个收起操作并发时滚动互相干扰。
+  int _collapseScrollSeq = 0;
 
   @override
   void initState() {
@@ -317,6 +328,18 @@ class _CommentsViewState extends State<CommentsView> {
 
   void _toggleFloor(KugouComment comment) {
     final state = _getFloorState(comment.id);
+    final wasExpanded = state.expanded;
+    // 收起前记录评论项顶部相对视口的位置与滚动偏移，供收起后精确定位。
+    // 此时楼中楼仍在展开、评论项通常未被懒加载回收，位置可可靠读取。
+    // 用局部变量随本次收起一起传递，避免多个评论项收起时相互覆盖。
+    final double? recorded = wasExpanded
+        ? _commentTopInViewport(comment.id)
+        : null;
+    final double? beforeOffset =
+        wasExpanded && _scrollController.hasClients
+        ? _scrollController.offset
+        : null;
+    final int seq = wasExpanded ? ++_collapseScrollSeq : _collapseScrollSeq;
     setState(() {
       if (!state.expanded) {
         state.expanded = true;
@@ -327,6 +350,59 @@ class _CommentsViewState extends State<CommentsView> {
         state.expanded = false;
       }
     });
+    // 收起楼中楼后，若楼主评论已超出视口则自然滚动回其位置
+    if (wasExpanded && !state.expanded) {
+      _scrollToCommentAfterCollapse(comment.id, seq, recorded, beforeOffset);
+    }
+  }
+
+  /// 计算评论项顶部相对视口顶部的偏移（负数表示在视口上方）。
+  double? _commentTopInViewport(String commentId) {
+    final rb = _keyForComment(commentId).currentContext?.findRenderObject();
+    if (rb is! RenderBox || !rb.attached) return null;
+    final viewport = RenderAbstractViewport.of(rb) as RenderBox;
+    final viewportTop = viewport.localToGlobal(Offset.zero).dy;
+    return rb.localToGlobal(Offset.zero).dy - viewportTop;
+  }
+
+  /// 收起楼中楼后把视口自然滚动回楼主评论位置。
+  ///
+  /// 用收起前记录的评论项顶部位置计算目标滚动偏移（不依赖评论项是否仍
+  /// 在 widget 树中），等待 [AnimatedSize] 收缩动画结束、布局稳定后滚动，
+  /// 滚动后再校准，确保评论项顶部对齐视口顶部。
+  /// [seq] 为本次收起操作的序号，异步期间若又有新的收起操作则放弃本次，
+  /// 避免多个收起并发滚动互相干扰。
+  Future<void> _scrollToCommentAfterCollapse(
+    String commentId,
+    int seq,
+    double? recorded,
+    double? beforeOffset,
+  ) async {
+    // 等待 AnimatedSize 收缩动画结束、布局稳定
+    await Future<void>.delayed(const Duration(milliseconds: 350));
+    if (!mounted || seq != _collapseScrollSeq) return;
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || seq != _collapseScrollSeq) return;
+    final controller = _scrollController;
+    if (!controller.hasClients) return;
+    if (recorded == null || beforeOffset == null) return;
+    // 评论项顶部已在视口内则不滚动
+    if (recorded >= 0) return;
+    // 评论项顶部在滚动内容中的位置（收起前后不变）
+    final target = (beforeOffset + recorded)
+        .clamp(0.0, controller.position.maxScrollExtent);
+    // 滚动 + 校准：一次滚动可能因列表高度收缩没完全到位，滚动后再测量校准
+    for (int attempt = 0; attempt < 3; attempt++) {
+      if (seq != _collapseScrollSeq) return;
+      if ((target - controller.offset).abs() < 1.0) break;
+      await controller.animateTo(
+        target,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      );
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted) return;
+    }
   }
 
   // ---- 工具方法 ----
@@ -379,7 +455,7 @@ class _CommentsViewState extends State<CommentsView> {
     }
 
     if (_isLoading) {
-      return Center(child: MD3ELoadingIndicator(color: primaryTextColor));
+      return Center(child: M3ELoadingIndicator(color: primaryTextColor));
     }
 
     if (_error != null) {
@@ -470,7 +546,9 @@ class _CommentsViewState extends State<CommentsView> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: _isLoadingMore
-                    ? MD3ELoadingIndicator(size: 24, color: primaryTextColor)
+                    ? M3ELoadingIndicator(
+                        constraints: BoxConstraints.tightFor(width: 24, height: 24),
+                        color: primaryTextColor)
                     : TextButton(
                         onPressed: _loadMore,
                         style: TextButton.styleFrom(
@@ -522,6 +600,7 @@ class _CommentsViewState extends State<CommentsView> {
   ) {
     final floorState = _floorStates[comment.id];
     return Padding(
+      key: _keyForComment(comment.id),
       padding: const EdgeInsets.symmetric(vertical: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -630,13 +709,31 @@ class _CommentsViewState extends State<CommentsView> {
                   curve: Curves.easeInOut,
                   alignment: Alignment.topLeft,
                   child: floorState?.expanded == true
-                      ? _buildFloorReplies(
-                          comment,
-                          floorState!,
-                          primaryTextColor,
-                          secondaryTextColor,
-                          usernameColor,
-                          replyFontSize,
+                      // 左侧竖条收纳按钮 + 楼中楼内容
+                      ? IntrinsicHeight(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _buildFloorCollapseHandle(
+                                onTap: () => _toggleFloor(comment),
+                                lineColor: secondaryTextColor.withValues(
+                                  alpha: 0.28,
+                                ),
+                                iconColor: usernameColor,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _buildFloorReplies(
+                                  comment,
+                                  floorState!,
+                                  primaryTextColor,
+                                  secondaryTextColor,
+                                  usernameColor,
+                                  replyFontSize,
+                                ),
+                              ),
+                            ],
+                          ),
                         )
                       : const SizedBox.shrink(),
                 ),
@@ -731,6 +828,60 @@ class _CommentsViewState extends State<CommentsView> {
     );
   }
 
+  /// 楼中楼左侧的竖条收纳按钮。
+  ///
+  /// 一条与楼中楼等高的竖线 + 底部向上箭头，整条可点击收起楼中楼，
+  /// 方便在楼中楼较长时无需滚回顶部即可收纳。仅在展开楼中楼时渲染。
+  Widget _buildFloorCollapseHandle({
+    required VoidCallback onTap,
+    required Color lineColor,
+    required Color iconColor,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: SizedBox(
+        width: 20,
+        child: Column(
+          children: [
+            // 顶部圆点：与右侧楼中楼矩形顶部（margin top 10）对齐
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Container(
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: lineColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+            ),
+            // 竖线：从圆点下方延伸到楼中楼底部
+            Expanded(
+              child: Container(
+                width: 2,
+                margin: const EdgeInsets.only(top: 3),
+                decoration: BoxDecoration(
+                  color: lineColor,
+                  borderRadius: BorderRadius.circular(1),
+                ),
+              ),
+            ),
+            // 底部收纳图标
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Icon(
+                Icons.keyboard_arrow_up,
+                size: 16,
+                color: iconColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildFloorReplies(
     KugouComment comment,
     _FloorState state,
@@ -757,13 +908,16 @@ class _CommentsViewState extends State<CommentsView> {
               secondaryTextColor,
               usernameColor,
               replyFontSize,
+              comment.username,
             ),
           // 加载中
           if (state.loading)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 8),
               child: Center(
-                child: MD3ELoadingIndicator(size: 16, color: usernameColor),
+                child: M3ELoadingIndicator(
+                    constraints: BoxConstraints.tightFor(width: 16, height: 16),
+                    color: usernameColor),
               ),
             ),
           // 空状态
@@ -814,12 +968,29 @@ class _CommentsViewState extends State<CommentsView> {
     );
   }
 
+  /// 清理楼中楼回复的引用后缀。
+  ///
+  /// 酷狗楼中楼回复内容形如「回复正文//@被回复用户名:被回复内容」。
+  /// 仅当被回复用户是楼主（[ownerName]）时去掉引用后缀、只显示回复正文；
+  /// 楼中楼用户互相回复时保留引用，便于看出回复对象。
+  String _cleanFloorReplyContent(String content, String ownerName) {
+    final idx = content.lastIndexOf('//@');
+    if (idx <= 0) return content;
+    final ref = content.substring(idx + 3);
+    final colon = ref.indexOf(':');
+    if (colon <= 0) return content;
+    if (ref.substring(0, colon).trim() != ownerName) return content;
+    final text = content.substring(0, idx).trim();
+    return text.isEmpty ? content : text;
+  }
+
   Widget _buildFloorReplyItem(
     KugouComment reply,
     Color primaryTextColor,
     Color secondaryTextColor,
     Color usernameColor,
     double fontSize,
+    String ownerName,
   ) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6),
@@ -856,7 +1027,7 @@ class _CommentsViewState extends State<CommentsView> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  reply.content,
+                  _cleanFloorReplyContent(reply.content, ownerName),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: primaryTextColor,
                     height: 1.3,

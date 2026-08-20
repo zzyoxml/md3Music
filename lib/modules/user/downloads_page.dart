@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models/download_task.dart';
@@ -108,7 +109,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
             ),
           ),
           const SizedBox(height: 4),
-          LinearProgressIndicator(
+          M3ELinearProgressIndicator(
             value: task.progress,
             backgroundColor: cs.surfaceContainerHighest,
           ),

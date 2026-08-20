@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -47,7 +48,7 @@ class LyricPreferences extends ChangeNotifier {
   static const double minFontSize = 12;
 
   /// 字号最大值（px）
-  static const double maxFontSize = 30;
+  static const double maxFontSize = 50;
 
   /// 字号默认值（px）
   ///
@@ -72,10 +73,41 @@ class LyricPreferences extends ChangeNotifier {
   /// 行间距系数默认值
   static const double defaultLineSpacing = 1.5;
 
+  /// 字重最小值（FontWeight.value，细体）
+  static const int minFontWeight = 300;
+
+  /// 字重最大值（FontWeight.value，黑体）
+  static const int maxFontWeight = 900;
+
+  /// 字重默认值（FontWeight.value，常规）
+  ///
+  /// 与当前未设置字重时的渲染外观（Flutter 默认 FontWeight.normal=400）一致。
+  static const int defaultFontWeight = 400;
+
+  // ============== 按设备类型的默认值（手机 / Pad） ==============
+
+  /// 按设备类型的字号默认：手机 29px，Pad 40px。
+  static double get _deviceDefaultFontSize => _isPadDevice() ? 40 : 29;
+
+  /// 按设备类型的字重默认：手机半粗(w600)，Pad 黑体(w900)。
+  static int get _deviceDefaultFontWeight => _isPadDevice() ? 900 : 600;
+
+  /// 按设备类型的行间距默认：手机 1.4x，Pad 0.9x。
+  static double get _deviceDefaultLineSpacing => _isPadDevice() ? 0.9 : 1.4;
+
+  /// 是否 Pad 设备（物理屏幕最短边 >= 600dp），与 DeviceProvider 判断一致。
+  /// 用于首次使用 / 重置时按设备类型提供差异化歌词默认值。
+  static bool _isPadDevice() {
+    final view = ui.PlatformDispatcher.instance.views.first;
+    final size = view.physicalSize / view.devicePixelRatio;
+    return size.shortestSide >= 600;
+  }
+
   // ============== SharedPreferences keys ==============
 
   static const String _keyFontSize = 'lyric_font_size';
   static const String _keyLineSpacing = 'lyric_line_spacing';
+  static const String _keyFontWeight = 'lyric_font_weight';
   static const String _keyUseGaussianBlur = 'lyric_use_gaussian_blur';
   static const String _keyUseGlowEffect = 'lyric_use_glow_effect';
   static const String _keyUseFlowingBackground = 'lyric_use_flowing_background';
@@ -91,24 +123,31 @@ class LyricPreferences extends ChangeNotifier {
 
   double _fontSize = defaultUserFontSize;
   double _lineSpacing = defaultLineSpacing;
+  int _fontWeight = defaultFontWeight;
   bool _useGaussianBlur = true;
   bool _useGlowEffect = true;
-  bool _useFlowingBackground = true;
-  bool _useDuetLayout = false;
+  bool _useFlowingBackground = false;
+  bool _useDuetLayout = true;
   bool _showTranslation = true;
   LyricDisplayMode _displayMode = LyricDisplayMode.translation;
   LyricFontSource _fontSource = LyricFontSource.system;
   String? _customFontPath;
-  // 歌词省电模式（默认关闭）：开启后歌词界面锁定 60fps，用户上下滑动歌词时临时解锁
-  bool _ecoMode = false;
-  // 动态字体颜色（默认关闭，仅 AM 播放器可用）：当前行歌词颜色按「70% 白 + 30% 封面提取色」混色
-  bool _useDynamicLyricColor = false;
+  // 歌词省电模式（默认开启）：开启后歌词界面锁定 60fps，用户上下滑动歌词时临时解锁
+  bool _ecoMode = true;
+  // 动态字体颜色（默认开启，仅 AM 播放器可用）：当前行歌词颜色按「70% 白 + 30% 封面提取色」混色
+  bool _useDynamicLyricColor = true;
   // 运行时加载成功后填充的 family（仅 custom 模式且加载成功时非 null）
   String? _loadedCustomFontFamily;
   bool _loaded = false;
 
   double get fontSize => _fontSize;
   double get lineSpacing => _lineSpacing;
+
+  /// 歌词字重（FontWeight.value 数值，范围 [minFontWeight]~[maxFontWeight]）。
+  int get fontWeightValue => _fontWeight;
+
+  /// 歌词字重对应 [FontWeight]（供 TextStyle 使用）。
+  FontWeight get fontWeight => FontWeight(_fontWeight);
   bool get useGaussianBlur => _useGaussianBlur;
   bool get useGlowEffect => _useGlowEffect;
   bool get useFlowingBackground => _useFlowingBackground;
@@ -118,10 +157,10 @@ class LyricPreferences extends ChangeNotifier {
   LyricFontSource get fontSource => _fontSource;
   String? get customFontPath => _customFontPath;
 
-  /// 歌词省电模式是否开启（默认关闭）。
+  /// 歌词省电模式是否开启（默认开启）。
   bool get ecoMode => _ecoMode;
 
-  /// 歌词动态字体颜色是否开启（默认关闭，仅 AM 播放器生效）。
+  /// 歌词动态字体颜色是否开启（默认开启，仅 AM 播放器生效）。
   bool get useDynamicLyricColor => _useDynamicLyricColor;
 
   /// 当前生效的 fontFamily（传给 TextPainter 的 TextStyle）：
@@ -154,18 +193,24 @@ class LyricPreferences extends ChangeNotifier {
   Future<void> load() async {
     if (_loaded) return;
     final prefs = await SharedPreferences.getInstance();
-    _fontSize = prefs.getDouble(_keyFontSize) ?? defaultUserFontSize;
-    _lineSpacing = prefs.getDouble(_keyLineSpacing) ?? defaultLineSpacing;
+    // 首次使用（key 不存在）时按设备类型提供差异化默认：
+    // 手机 29px/半粗(600)/1.4x；Pad 40px/黑体(900)/0.9x。
+    // 用户后续手动调整后会持久化，届时尊重用户设置。
+    _fontSize = prefs.getDouble(_keyFontSize) ?? _deviceDefaultFontSize;
+    _lineSpacing = prefs.getDouble(_keyLineSpacing) ?? _deviceDefaultLineSpacing;
+    _fontWeight =
+        (prefs.getInt(_keyFontWeight) ?? _deviceDefaultFontWeight)
+            .clamp(minFontWeight, maxFontWeight);
     _useGaussianBlur = prefs.getBool(_keyUseGaussianBlur) ?? true;
     _useGlowEffect = prefs.getBool(_keyUseGlowEffect) ?? true;
-    _useFlowingBackground = prefs.getBool(_keyUseFlowingBackground) ?? true;
-    _useDuetLayout = prefs.getBool(_keyUseDuetLayout) ?? false;
+    _useFlowingBackground = prefs.getBool(_keyUseFlowingBackground) ?? false;
+    _useDuetLayout = prefs.getBool(_keyUseDuetLayout) ?? true;
     _showTranslation = prefs.getBool(_keyShowTranslation) ?? true;
     _displayMode = _displayModeFromName(prefs.getString(_keyDisplayMode));
     _fontSource = _fontSourceFromName(prefs.getString(_keyFontSource));
     _customFontPath = prefs.getString(_keyCustomFontPath);
-    _ecoMode = prefs.getBool(_keyEcoMode) ?? false;
-    _useDynamicLyricColor = prefs.getBool(_keyUseDynamicLyricColor) ?? false;
+    _ecoMode = prefs.getBool(_keyEcoMode) ?? true;
+    _useDynamicLyricColor = prefs.getBool(_keyUseDynamicLyricColor) ?? true;
     _loaded = true;
     notifyListeners();
     // 若已配置自定义字体，立即尝试加载（Fire-and-forget，加载完成后会 notifyListeners）
@@ -192,6 +237,16 @@ class LyricPreferences extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyLineSpacing, _lineSpacing);
+  }
+
+  /// 设置字重并持久化。会触发 [notifyListeners]。
+  Future<void> setFontWeight(int value) async {
+    final clamped = value.clamp(minFontWeight, maxFontWeight);
+    if (clamped == _fontWeight) return;
+    _fontWeight = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyFontWeight, _fontWeight);
   }
 
   /// 设置高斯模糊开关并持久化。
@@ -345,25 +400,27 @@ class LyricPreferences extends ChangeNotifier {
     return name == 'roma' ? LyricDisplayMode.roma : LyricDisplayMode.translation;
   }
 
-  /// 重置为默认值。
+  /// 重置为默认值（按设备类型：手机 / Pad 差异化默认）。
   Future<void> reset() async {
-    _fontSize = defaultUserFontSize;
-    _lineSpacing = defaultLineSpacing;
+    _fontSize = _deviceDefaultFontSize;
+    _lineSpacing = _deviceDefaultLineSpacing;
+    _fontWeight = _deviceDefaultFontWeight;
     _useGaussianBlur = true;
     _useGlowEffect = true;
-    _useFlowingBackground = true;
-    _useDuetLayout = false;
+    _useFlowingBackground = false;
+    _useDuetLayout = true;
     _showTranslation = true;
     _displayMode = LyricDisplayMode.translation;
     _fontSource = LyricFontSource.system;
     _customFontPath = null;
     _loadedCustomFontFamily = null;
-    _ecoMode = false;
-    _useDynamicLyricColor = false;
+    _ecoMode = true;
+    _useDynamicLyricColor = true;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyFontSize, _fontSize);
     await prefs.setDouble(_keyLineSpacing, _lineSpacing);
+    await prefs.setInt(_keyFontWeight, _fontWeight);
     await prefs.setBool(_keyUseGaussianBlur, _useGaussianBlur);
     await prefs.setBool(_keyUseGlowEffect, _useGlowEffect);
     await prefs.setBool(_keyUseFlowingBackground, _useFlowingBackground);

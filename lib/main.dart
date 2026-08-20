@@ -9,16 +9,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
 import 'core/services/desktop_lyric_service.dart';
+import 'modules/recognition/floating_recognition_service.dart';
 import 'core/services/equalizer_service.dart';
 import 'core/services/local_http_server.dart';
 import 'core/services/lyricon_provider_service.dart';
+import 'core/services/listening_grade_service.dart';
 import 'core/services/media_notification_service.dart';
 import 'core/services/usb_audio_service.dart';
 import 'core/services/wakelock_service.dart';
 import 'data/repositories/settings_repository.dart';
 import 'modules/onboarding/user_agreement_page.dart';
-import 'modules/recognition/song_recognition_page.dart';
-import 'modules/search/search_page.dart';
 import 'services/kugou_server.dart';
 import 'widgets/apple_lyrics/layout/lyric_preferences.dart';
 import 'widgets/md3_lyric_preferences.dart';
@@ -33,11 +33,11 @@ final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 /// 因此把 shortcut 类型暂存到该字段，由 _AppView 在首帧处理后清空。
 String? pendingShortcutType;
 
-/// 用于通知 _MainLayout 切换底部 tab。
-/// shortcut 入口「我的收藏」需要切换到主页第 3 个 tab（index=2），
-/// 而非 push 一个新的 FavoritesPage 路由（避免页面重复）。
-/// _MainLayout 在 initState 中监听此 notifier，收到非 null 值后切换 tab 并清空。
-final ValueNotifier<int?> shortcutTabRequest = ValueNotifier<int?>(null);
+/// 用于通知 _MainLayout 切换到指定 tab（携带 tab id，而非写死索引）。
+/// shortcut 入口按 tab id 解析实际索引：tab 可见则切主 tab，被隐藏则以
+/// 二级页面打开（避免依赖固定索引导致 tab 排序/隐藏后跳错）。
+/// _MainLayout 在 initState 中监听此 notifier，收到非 null 值后处理并清空。
+final ValueNotifier<String?> shortcutTabRequest = ValueNotifier<String?>(null);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,14 +55,17 @@ Future<void> main() async {
     WakelockService.instance.init().catchError((_) {}),
     // 初始化均衡器服务（恢复偏好设置，监听播放状态自动绑定）
     EqualizerService.instance.init().catchError((_) {}),
-    // 恢复蓝牙歌词开关状态：让歌词服务定时器在需要时启动。
+    // 恢复蓝牙歌词开关 + 实时歌词推送协议（Lyricon/SuperLyric/LyricInfo 三选一）：
+    // 让歌词服务定时器在需要时启动、启用选中协议。
     // 原生端 AudioPlaybackService.onCreate 会自行从 SharedPreferences 恢复开关。
-    _restoreBluetoothLyricPref(),
+    _restoreLyricPushPref(),
   ]);
 
   // 注册通知栏/悬浮窗回调（悬浮窗内按钮 → DesktopLyricService；通知栏桌面歌词按钮 → toggle）
   MediaNotificationService.initCallbacks();
   DesktopLyricService.instance.registerNativeCallbacks();
+  // 注册悬浮窗识曲原生回调（PCM 段回传 / MediaProjection 授权结果 / 悬浮窗按钮动作）
+  FloatingRecognitionService.instance.registerNativeCallbacks();
   // 注册 Lyricon 反向回调（连接状态变更 → UI 刷新）
   // initialize 内部仅 setMethodCallHandler，同步完成，无需 await
   LyriconProviderService.instance.initialize();
@@ -71,13 +74,17 @@ Future<void> main() async {
     UsbAudioService.instance.init();
   }
 
+  // 启动听歌等级：本地听歌时长累计 + 自动上报（内部按平台/登录态自行处理）
+  ListeningGradeService.instance.init();
+
   // P0: 本地 API 服务器与 DLNA 本地 HTTP 服务器改为后台启动（不阻塞 runApp）。
   // 之前 await KugouApiServer.start() 在首帧前完成，其中
   // DynamicLibrary.open('libkugou_server.so')（dlopen，so 可达 10MB+）与
   // 服务器初始化可能耗时数秒 → 用户看到长时间启动画面/白屏。
   // 现在首帧立即渲染；发现页等首屏请求通过 KugouApiClient 的
   // serverReady 信号等待服务器就绪后再放行，不会因服务器未启动而失败。
-  if (!kIsWeb && Platform.isAndroid) {
+  // 桌面与 Android 都启动本地服务器（桌面走 dart:ffi 加载 kugou_server.dll）。
+  if (!kIsWeb) {
     unawaited(KugouApiServer.start().catchError((_) {}));
     unawaited(LocalHttpServer.instance.start().catchError((_) {}));
   }
@@ -126,37 +133,82 @@ Future<void> main() async {
   });
 }
 
-/// 恢复蓝牙歌词开关：从 SettingsRepository 读取并同步到歌词服务。
-Future<void> _restoreBluetoothLyricPref() async {
+/// 恢复蓝牙歌词开关 + 实时歌词推送协议（Lyricon/SuperLyric/LyricInfo 三选一 + 关闭）。
+/// 从 SettingsRepository 读取协议与共用偏好，启用选中协议、禁用其他，并同步偏好。
+Future<void> _restoreLyricPushPref() async {
   try {
     final settings = SettingsRepository();
+    // 逐字歌词时间偏移：加载到内存缓存（播放页每帧读取），默认 0
+    await settings.getLyricTimeOffset();
+
+    // 蓝牙歌词（独立开关）
     final btLyricEnabled = await settings.getBluetoothLyricEnabled();
     await DesktopLyricService.instance.setBluetoothLyricEnabled(btLyricEnabled);
+
+    // 锁屏歌词（独立开关）：开启后歌词服务定时器运行以推送逐字数据
+    final lockScreenLyricEnabled = await settings.getLockScreenLyricEnabled();
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setLockScreenLyricEnabled(lockScreenLyricEnabled);
+
+    // 锁屏歌词独立字体（字号/粗细，默认跟随 AM 歌词偏好）
+    final lockScreenLyricFontSize = await settings.getLockScreenLyricFontSize();
+    DesktopLyricService.instance.setLockScreenLyricFontSize(lockScreenLyricFontSize);
+    final lockScreenLyricFontWeight = await settings.getLockScreenLyricFontWeight();
+    DesktopLyricService.instance.setLockScreenLyricFontWeight(lockScreenLyricFontWeight);
+
+    // 实时歌词推送协议
+    final protocol = await settings.getLyricPushProtocol();
+    final translation = await settings.getLyricPushTranslation();
+    final roma = await settings.getLyricPushRoma();
+    final preferTranslation = await settings.getLyricPushPreferTranslation();
+    // 记录各协议 enabled key（兼容 Kotlin restoreLyricon 读 lyricon_enabled）
+    await settings.setLyriconEnabled(protocol == 'lyricon');
+    await settings.setSuperLyricEnabled(protocol == 'super_lyric');
+    await settings.setLyricInfoEnabled(protocol == 'lyric_info');
+    // 应用共用偏好
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setLyricPushPreferences(
+      translation: translation,
+      roma: roma,
+      preferTranslation: preferTranslation,
+    );
+    // 启用选中协议
+    if (protocol == 'lyricon') {
+      try {
+        await LyriconProviderService.instance.setDisplayTranslation(translation);
+        await LyriconProviderService.instance.setDisplayRoma(roma);
+        await LyriconProviderService.instance.setEnabled(true);
+      } catch (_) {}
+    } else if (protocol == 'super_lyric') {
+      // ignore: discarded_futures
+      DesktopLyricService.instance.setSuperLyricEnabled(true);
+    } else if (protocol == 'lyric_info') {
+      // ignore: discarded_futures
+      await DesktopLyricService.instance.setLyricInfoEnabled(true);
+    }
   } catch (_) {}
 }
 
 /// 根据 shortcut 类型路由到对应页面。
 /// 通过全局 [appNavigatorKey] 获取 NavigatorState，避免依赖具体 BuildContext。
+///
+/// 快捷方式类型统一为 `action_open_<tabId>`（与现有
+/// action_open_favorites/recognition/search 兼容）。这里只把 tab id 交给
+/// _MainLayout，由它按当前 tab 配置解析：可见 → 切主 tab；隐藏 → 二级页打开。
 void handleShortcut(String shortcutType) {
   final nav = appNavigatorKey.currentState;
   if (nav == null) return;
-  switch (shortcutType) {
-    case 'action_open_favorites':
-      // 切换到主页底部 tab index=2（我的收藏），而非 push 新路由
-      shortcutTabRequest.value = 2;
-      break;
-    case 'action_open_recognition':
-      nav.push(MaterialPageRoute(builder: (_) => const SongRecognitionPage()));
-      break;
-    case 'action_open_search':
-      nav.push(MaterialPageRoute(builder: (_) => const SearchPage()));
-      break;
-  }
+  if (!shortcutType.startsWith('action_open_')) return;
+  final tabId = shortcutType.substring('action_open_'.length);
+  if (tabId.isEmpty) return;
+  shortcutTabRequest.value = tabId;
 }
 
 Future<void> _requestPermissions() async {
   // Web 平台不支持 permission_handler，跳过所有权限请求
   if (kIsWeb) return;
+  // 桌面端无 Android 专属权限，跳过（permission_handler 桌面语义不同）
+  if (!Platform.isAndroid) return;
 
   // Android 13+ 通知权限
   if (await Permission.notification.isDenied) {

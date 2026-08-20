@@ -298,5 +298,110 @@ void main() {
       expect(controller.currentStiffness, closeTo(stiffness, 1e-9));
       controller.dispose();
     });
+
+    test('12. 拖动被取消（未调 onUserScrollEnd）会卡死 isUserScrolling / 永不收敛', () {
+      final controller = LyricScrollController();
+      controller.setViewportSize(const Size(400, 600));
+      controller.setCurrentLine(
+        0,
+        isSeeking: false,
+        lineHeight: 40,
+        intervalMs: 500,
+      );
+      // 推进到稳定
+      for (int i = 0; i < 300; i++) {
+        controller.tick(0.016);
+      }
+      // 用户开始拖动（对应 onVerticalDragUpdate）
+      controller.onUserScroll(80);
+      expect(controller.isUserScrolling, isTrue);
+
+      // 模拟拖动被取消：GestureDetector 只回调 onVerticalDragCancel、
+      // 不再回调 onUserScrollEnd。若漏处理，isUserScrolling 永远为 true。
+      for (int i = 0; i < 1000; i++) {
+        controller.tick(0.016);
+      }
+      expect(controller.isUserScrolling, isTrue,
+          reason: '取消拖动后 isUserScrolling 不得卡死为 true');
+      expect(controller.isConverged, isFalse,
+          reason: '取消拖动后不得永不收敛（否则省电模式无法锁回 60fps）');
+      controller.dispose();
+    });
+
+    test('13. 拖动取消后以 0 速度结束（onUserScrollEnd）→ 恢复收敛', () {
+      final controller = LyricScrollController();
+      controller.setViewportSize(const Size(400, 600));
+      controller.setCurrentLine(
+        0,
+        isSeeking: false,
+        lineHeight: 40,
+        intervalMs: 500,
+      );
+      for (int i = 0; i < 300; i++) {
+        controller.tick(0.016);
+      }
+      final double stableY = controller.posY;
+
+      controller.onUserScroll(80);
+      expect(controller.isUserScrolling, isTrue);
+
+      // 取消处理：等价于以 0 速度松手，启动 5s 自动回弹倒计时
+      controller.onUserScrollEnd(velocity: 0);
+      expect(controller.isUserScrolling, isFalse);
+      expect(controller.isWaitingForAutoReturn, isTrue);
+
+      // 推进 6s（5s 回弹 + 收敛），应回弹回当前行并收敛
+      for (int i = 0; i < 400; i++) {
+        controller.tick(0.016);
+      }
+      expect(controller.isWaitingForAutoReturn, isFalse);
+      expect(controller.isConverged, isTrue,
+          reason: '取消后恢复结束应能重新收敛（省电模式可锁回 60fps）');
+      expect(controller.posY, closeTo(stableY, 1.0),
+          reason: '取消后应自动回弹到当前行');
+      controller.dispose();
+    });
+
+    test('14. 回弹后位移先于严格收敛进入 0.5px（省电模式可提前锁回 60fps）', () {
+      final controller = LyricScrollController();
+      controller.setViewportSize(const Size(400, 600));
+      controller.setCurrentLine(
+        0,
+        isSeeking: false,
+        lineHeight: 40,
+        intervalMs: 500,
+      );
+      // 推进到稳定
+      for (int i = 0; i < 300; i++) {
+        controller.tick(0.016);
+      }
+      // 拖动 + 松手，进入 3s 自动回弹
+      controller.onUserScroll(80);
+      controller.onUserScrollEnd(velocity: 0);
+
+      // 记录两个时点（跳过 3s 等待期，此时位移为 0 不代表收敛）：
+      //  - visualTick：回弹开始后，posY 距 target < 0.5px（省电模式"视觉收敛"阈值）
+      //  - strictTick：isConverged（Spring.isSettled，需位移收敛到 ~0.0001px）
+      int visualTick = -1;
+      int strictTick = -1;
+      for (int i = 0; i < 2000; i++) {
+        controller.tick(0.016);
+        if (controller.isWaitingForAutoReturn) continue; // 等待期不计入
+        if (visualTick < 0 &&
+            (controller.posY - controller.currentTarget).abs() < 0.5) {
+          visualTick = i;
+        }
+        if (strictTick < 0 && controller.isConverged) {
+          strictTick = i;
+        }
+      }
+      expect(visualTick, greaterThan(0), reason: '回弹后位移应进入 0.5px');
+      expect(strictTick, greaterThan(0), reason: '回弹后最终应严格收敛');
+      // 修复依据：省电模式用 <0.5px 判定收敛，比严格 Spring.isSettled 提前
+      // 数百毫秒，避免弹簧"肉眼到目标后"仍长时间不锁回 60fps。
+      expect(strictTick, greaterThan(visualTick),
+          reason: '位移进入 0.5px 应先于严格收敛，省电模式才能及时锁回 60fps');
+      controller.dispose();
+    });
   });
 }

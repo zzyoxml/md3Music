@@ -2,12 +2,15 @@ package com.md3music.premium
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PictureInPictureParams
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.support.v4.media.session.MediaSessionCompat
+import android.util.Rational
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -21,15 +24,26 @@ class MainActivity : FlutterActivity() {
     private val FLOATING_CHANNEL = "com.md3music.premium/floating_lyric"
     private val FOLDER_PICKER_CHANNEL = "com.md3music.premium/folder_picker"
     private val FONT_PICKER_CHANNEL = "com.md3music.premium/font_picker"
+    private val BACKGROUND_PICKER_CHANNEL = "com.md3music.premium/background_picker"
     private val MEDIA_STORE_CHANNEL = "com.md3music.premium/media_store"
     private val HOME_WIDGET_CHANNEL = "com.md3music.premium/home_widget"
+    private val RECOGNITION_CHANNEL = "com.md3music.premium/floating_recognition"
+    private val PIP_CHANNEL = "com.md3music.premium/pip"
+    private val MIUIX_DISCOVER_CHANNEL = "com.md3music.premium/miuix_discover"
     private var pendingDesktopLyricAction: String? = null
     private var folderPickerResult: MethodChannel.Result? = null
     private var fontPickerResult: MethodChannel.Result? = null
+    private var backgroundPickerResult: MethodChannel.Result? = null
+    // 悬浮窗识曲 channel：MediaProjection 授权结果等原生→Dart 回调
+    private var recognitionChannel: MethodChannel? = null
+    // MV 画中画 channel：原生→Dart 回调 onPipModeChanged
+    private var pipChannel: MethodChannel? = null
 
     companion object {
         private const val FOLDER_PICKER_REQUEST_CODE = 9999
         private const val FONT_PICKER_REQUEST_CODE = 10000
+        private const val RECOGNITION_PROJECTION_REQUEST = 10001
+        private const val BACKGROUND_PICKER_REQUEST_CODE = 10002
 
         // 静态引用：让 Service 也能调用 MethodChannel（无 FlutterEngine 缓存时走这里）
         private var cachedEngine: FlutterEngine? = null
@@ -38,6 +52,11 @@ class MainActivity : FlutterActivity() {
         @Volatile private var kugouApiService: KugouApiService? = null
         // 频谱插件引用，Activity 销毁时释放 Visualizer
         @Volatile private var spectrumPlugin: SpectrumPlugin? = null
+
+        // MV 画中画：Dart 端标记视频是否播放中（按 Home 自动进入画中画用）
+        @Volatile private var pipVideoActive = false
+        // MV 视频宽高比（宽/高），用于画中画窗口比例
+        @Volatile private var pipAspectRatio: Rational = Rational(16, 9)
 
         // 记录自定义插件已注册到的引擎：provideFlutterEngine 复用后台（headless）
         // 引擎时 configureFlutterEngine 会再次执行，若对同一引擎重复注册
@@ -64,6 +83,56 @@ class MainActivity : FlutterActivity() {
 
         fun sendDesktopLyricConfigChanged(config: Map<String, Any?>) {
             cachedChannel?.invokeMethod("desktopLyricConfigChanged", config)
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // 高刷新率适配：主动向系统声明最高刷新率偏好，避免被 ROM 的高刷新率管理
+        // 归为「跟随应用内设置」而锁在 60Hz。Flutter 引擎从不调用
+        // Surface.setFrameRate()，系统无法得知 App 需要高刷，须在此显式声明。
+        applyOptimalRefreshRate()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 回到前台（如从画中画/锁屏/切后台返回）时重新应用，
+        // 防止被系统降频后未恢复（偶现锁 60Hz 的场景之一）。
+        applyOptimalRefreshRate()
+    }
+
+    /// 向系统请求当前分辨率下可用的最高刷新率。
+    ///
+    /// - API 30+：设置 `preferredRefreshRate`（只改刷新率、不改分辨率，
+    ///   LTPO 屏仍可动态降频省电），为 refresh_rate 插件推荐做法。
+    /// - API 23~29：设置 `preferredDisplayModeId`（无 preferredRefreshRate 时
+    ///   只能指定完整显示模式，故保持当前分辨率匹配，避免分辨率被切换）。
+    /// - API 34+：开启触摸提频（触摸/滚动时升到高刷，更跟手）。
+    private fun applyOptimalRefreshRate() {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+            val display = windowManager.defaultDisplay
+            val currentMode = display.mode
+            // 与当前分辨率一致、刷新率最高的显示模式
+            val best = display.supportedModes
+                .filter {
+                    it.physicalWidth == currentMode.physicalWidth &&
+                        it.physicalHeight == currentMode.physicalHeight
+                }
+                .maxByOrNull { it.refreshRate }
+                ?: return
+            val lp = window.attributes
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                lp.preferredRefreshRate = best.refreshRate
+            } else {
+                lp.preferredDisplayModeId = best.modeId
+            }
+            window.attributes = lp // 重新 setAttributes 使偏好生效
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                window.frameRateBoostOnTouchEnabled = true
+            }
+        } catch (_: Exception) {
+            // 个别 ROM 可能不支持，忽略即可（高刷非致命）
         }
     }
 
@@ -107,6 +176,29 @@ class MainActivity : FlutterActivity() {
 
             // 注册 USB 独占输出插件：MethodChannel + 动态拔插广播 + AudioSink 拦截桥接
             UsbAudioPlugin(this).register(flutterEngine)
+
+            // 注册 Miuix 发现页测试通道：Dart 设置页点击后打开原生 Compose + miuix 页面，
+            // 并携带本地 Rust API 服务器当前端口（原生页据此直连取数）。
+            MethodChannel(
+                flutterEngine.dartExecutor.binaryMessenger,
+                MIUIX_DISCOVER_CHANNEL,
+            ).setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "open" -> {
+                        val port = call.argument<Number>("port")?.toInt() ?: 0
+                        try {
+                            startActivity(
+                                Intent(this, MiuixDiscoverActivity::class.java)
+                                    .putExtra(MiuixDiscoverActivity.EXTRA_PORT, port),
+                            )
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("OPEN_FAILED", e.message, null)
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         }
 
         // 初始化本地 API 服务器（KugouApiService 含 JNI external 方法，
@@ -274,6 +366,144 @@ class MainActivity : FlutterActivity() {
                     startService(intent)
                     result.success(true)
                 }
+                // LyricInfo 歌词转发：写入 MediaSession 元数据 extras.lyricInfo
+                // （空字符串表示移除，切歌/功能关闭时使用）
+                "updateLyricInfo" -> {
+                    val intent = Intent(this, AudioPlaybackService::class.java).apply {
+                        action = AudioPlaybackService.ACTION_UPDATE_LYRIC_INFO
+                        putExtra(
+                            AudioPlaybackService.EXTRA_LYRIC_INFO,
+                            call.argument<String>("lyricInfo") ?: ""
+                        )
+                    }
+                    startService(intent)
+                    result.success(true)
+                }
+                // 锁屏歌词：开关 / 数据推送（headless 唤醒场景由 AudioPlaybackService 兜底）
+                "showLockScreenLyric" -> {
+                    result.success(true)
+                }
+                "hideLockScreenLyric" -> {
+                    LockScreenLyricActivity.dismiss()
+                    result.success(true)
+                }
+                "updateLockScreenLyric" -> {
+                    LockScreenLyricActivity.applyCall(call)
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // 注册悬浮窗识曲 MethodChannel：Dart 控制悬浮窗服务 + MediaProjection 授权
+        // （原生→Dart 回调 onProjectionResult/onSegmentCaptured/onFloatingAction
+        //  由 Service 经 FlutterEngineCache 直接 invokeMethod，见 FloatingRecognitionService）
+        val recognitionChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            RECOGNITION_CHANNEL
+        )
+        this.recognitionChannel = recognitionChannel
+        recognitionChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    if (Build.VERSION.SDK_INT < 29) {
+                        result.error("UNSUPPORTED", "仅支持 Android 10 及以上", null)
+                    } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:$packageName")
+                        )
+                        startActivity(intent)
+                        result.error("PERMISSION_DENIED", "需要悬浮窗权限", null)
+                    } else {
+                        val intent = Intent(this, FloatingRecognitionService::class.java)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            startForegroundService(intent)
+                        } else {
+                            startService(intent)
+                        }
+                        result.success(true)
+                    }
+                }
+                "stop" -> {
+                    // 服务未运行时直接返回，避免 startService 复活已停止的悬浮窗
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_STOP
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "requestProjection" -> {
+                    val pm = getSystemService(android.media.projection.MediaProjectionManager::class.java)
+                    startActivityForResult(pm.createScreenCaptureIntent(), RECOGNITION_PROJECTION_REQUEST)
+                    result.success(true)
+                }
+                "continueCapture" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_CONTINUE
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "stopCapture" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_STOP_CAPTURE
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "setResult" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_SET_RESULT
+                                putExtra(
+                                    FloatingRecognitionService.EXTRA_RESULT,
+                                    call.argument<String>("result") ?: ""
+                                )
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "setStatus" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_SET_STATUS
+                                putExtra(
+                                    FloatingRecognitionService.EXTRA_STATUS,
+                                    call.argument<String>("status") ?: ""
+                                )
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
+                "setThemeColors" -> {
+                    if (FloatingRecognitionService.isRunning()) {
+                        startService(
+                            Intent(this, FloatingRecognitionService::class.java).apply {
+                                action = FloatingRecognitionService.ACTION_SET_THEME
+                                // Dart int（64 位）解码为 Long，用 Number 接收
+                                val colors = call.argument<HashMap<String, Number>>("colors")
+                                if (colors != null) {
+                                    putExtra(FloatingRecognitionService.EXTRA_THEME_COLORS, colors)
+                                }
+                            }
+                        )
+                    }
+                    result.success(true)
+                }
                 else -> result.notImplemented()
             }
         }
@@ -281,6 +511,8 @@ class MainActivity : FlutterActivity() {
         // 注册 Lyricon Provider MethodChannel，让 Dart 端能控制 Lyricon 播放器
         // （逻辑与 AudioPlaybackService.setupHeadlessChannels 共用，见该函数）
         AudioPlaybackService.registerLyriconChannel(flutterEngine)
+        // 注册 SuperLyric MethodChannel，让 Dart 端能推送当前歌词行到 SuperLyric
+        AudioPlaybackService.registerSuperLyricChannel(flutterEngine)
 
         // 注册文件夹选择器 MethodChannel
         val folderPickerChannel = MethodChannel(
@@ -349,6 +581,29 @@ class MainActivity : FlutterActivity() {
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
                     startActivityForResult(intent, FONT_PICKER_REQUEST_CODE)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // 注册背景图片选择器 MethodChannel
+        // 用 ACTION_OPEN_DOCUMENT 打开系统图片选择器，过滤常见图片 MIME
+        // 选中后原生端把 content URI 流拷贝到 filesDir/background/bg.<ext>
+        // 返回真实路径给 Dart 端用 Image.file 渲染 + PaletteGenerator 莫奈取色
+        val backgroundPickerChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            BACKGROUND_PICKER_CHANNEL
+        )
+        backgroundPickerChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "pickBackgroundImage" -> {
+                    backgroundPickerResult = result
+                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "image/*"
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    startActivityForResult(intent, BACKGROUND_PICKER_REQUEST_CODE)
                 }
                 else -> result.notImplemented()
             }
@@ -446,6 +701,73 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // 注册 MV 画中画 MethodChannel：Dart 端进入画中画 / 标记视频播放中
+        // （API 26+ 才支持，低版本由 Dart 端隐藏入口）
+        val pipChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            PIP_CHANNEL
+        )
+        this.pipChannel = pipChannel
+        pipChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isPipSupported" -> {
+                    result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                }
+                "enterPip" -> {
+                    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                        result.error("UNSUPPORTED", "仅支持 Android 8.0 及以上", null)
+                    } else {
+                        enterPipMode()
+                        result.success(true)
+                    }
+                }
+                "setVideoActive" -> {
+                    val active = call.argument<Boolean>("active") ?: false
+                    val width = call.argument<Number>("width")?.toInt()
+                    val height = call.argument<Number>("height")?.toInt()
+                    if (width != null && height != null && width > 0 && height > 0) {
+                        pipAspectRatio = Rational(width, height)
+                    }
+                    pipVideoActive = active
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /// 以当前保存的视频宽高比进入画中画（API 26+）。
+    private fun enterPipMode() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (isInPictureInPictureMode) return
+        val params = PictureInPictureParams.Builder()
+            .setAspectRatio(pipAspectRatio)
+            .build()
+        enterPictureInPictureMode(params)
+    }
+
+    /// 画中画模式切换回调：通知 Dart 端切换到纯视频布局 / 恢复完整页面。
+    override fun onPictureInPictureModeChanged(
+        isInPictureInPictureMode: Boolean,
+        newConfig: Configuration
+    ) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        try {
+            pipChannel?.invokeMethod("onPipModeChanged", isInPictureInPictureMode)
+        } catch (_: Exception) {
+            // Flutter 引擎可能尚未就绪，忽略
+        }
+    }
+
+    /// 用户按 Home 离开当前页面：视频播放中自动进入画中画（MV 播放场景）。
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            pipVideoActive && !isInPictureInPictureMode
+        ) {
+            enterPipMode()
+        }
     }
 
     @Deprecated("Deprecated in Java")
@@ -498,6 +820,71 @@ class MainActivity : FlutterActivity() {
                 fontPickerResult?.success(null)
                 fontPickerResult = null
             }
+        } else if (requestCode == BACKGROUND_PICKER_REQUEST_CODE) {
+            if (resultCode == RESULT_OK && data?.data != null) {
+                val uri = data.data!!
+                // 后台线程：把 content URI 流拷贝到 filesDir/background/bg_<ts>.<ext>
+                Thread {
+                    try {
+                        val targetDir = File(filesDir, "background").apply { mkdirs() }
+                        // 时间戳命名：每次更换图片路径必然不同，Dart 端据此触发刷新
+                        // + 新的 FileImage 缓存键（固定文件名会导致更换后仍显示旧图）
+                        val targetFile = File(
+                            targetDir,
+                            "bg_${System.currentTimeMillis()}.${guessImageExtension(uri)}"
+                        )
+                        contentResolver.openInputStream(uri).use { input ->
+                            targetFile.outputStream().use { output ->
+                                input?.copyTo(output)
+                            }
+                        }
+                        // 拷贝成功后清理旧背景文件，避免累积
+                        targetDir.listFiles()?.forEach { old ->
+                            if (old.isFile && old.absolutePath != targetFile.absolutePath) old.delete()
+                        }
+                        // 与字体选择器同理：success 与清空 result 必须同一主线程任务原子完成
+                        runOnUiThread {
+                            backgroundPickerResult?.success(targetFile.absolutePath)
+                            backgroundPickerResult = null
+                        }
+                    } catch (e: Exception) {
+                        runOnUiThread {
+                            backgroundPickerResult?.error("COPY_FAILED", e.message, null)
+                            backgroundPickerResult = null
+                        }
+                    }
+                }.start()
+            } else {
+                backgroundPickerResult?.success(null)
+                backgroundPickerResult = null
+            }
+        } else if (requestCode == RECOGNITION_PROJECTION_REQUEST) {
+            // 悬浮窗识曲：MediaProjection 授权结果 → 注入服务 + 通知 Dart
+            val granted = resultCode == RESULT_OK && data != null
+            recognitionChannel?.invokeMethod("onProjectionResult", granted)
+            FloatingRecognitionService.onProjectionResult(resultCode, data)
+        }
+    }
+
+    /// 根据 content URI 推断图片扩展名（MIME → ext；取不到时用 URI 文件名后缀，再兜底 jpg）。
+    private fun guessImageExtension(uri: Uri): String {
+        return try {
+            val mime = contentResolver.getType(uri)
+            when (mime) {
+                "image/png" -> "png"
+                "image/webp" -> "webp"
+                "image/gif" -> "gif"
+                "image/bmp" -> "bmp"
+                "image/heic", "image/heif" -> "heic"
+                "image/svg+xml" -> "svg"
+                else -> {
+                    uri.lastPathSegment?.substringAfterLast('.', "")
+                        ?.takeIf { it.isNotBlank() && it.length <= 5 }
+                        ?: "jpg"
+                }
+            }
+        } catch (_: Exception) {
+            "jpg"
         }
     }
 
@@ -510,6 +897,9 @@ class MainActivity : FlutterActivity() {
         spectrumPlugin = null
         cachedEngine = null
         cachedChannel = null
+        recognitionChannel = null
+        pipChannel = null
+        pipVideoActive = false
         super.onDestroy()
     }
 }

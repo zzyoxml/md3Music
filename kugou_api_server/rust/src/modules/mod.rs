@@ -23,6 +23,7 @@ pub mod login;
 pub mod longaudio;
 pub mod lyric;
 pub mod misc;
+pub mod pcm;
 pub mod playlist;
 pub mod rank;
 pub mod register_dev;
@@ -95,10 +96,13 @@ pub fn register(routes: &mut Vec<(&'static str, ModuleFn)>) {
     routes.push(("/user/video/love", user::handle_video_love));
     routes.push(("/user/vip/detail", user::handle_vip_detail));
     routes.push(("/user/playlist", user::handle_playlist));
+    routes.push(("/user/purchased/songs", user::handle_purchased_songs));
+    routes.push(("/user/purchased/albums", user::handle_purchased_albums));
     routes.push(("/user/listen", user::handle_listen));
     routes.push(("/user/history", user::handle_history));
     routes.push(("/user/follow/message", user::handle_follow_message));
     routes.push(("/user/follow", user::handle_follow));
+    routes.push(("/user/grade/info", user::handle_grade_info));
     routes.push(("/user/detail", user::handle_detail));
     routes.push(("/user/cloud/upload", user::handle_cloud_upload));
     routes.push(("/user/cloud/del", user::handle_cloud_del));
@@ -230,6 +234,7 @@ pub fn register(routes: &mut Vec<(&'static str, ModuleFn)>) {
     routes.push(("/lyric", lyric::handle));
     routes.push(("/comment/music", comment_music::handle));
     routes.push(("/audio/match", audio_match::handle));
+    routes.push(("/extras/pcm-process", pcm::handle));
     routes.push(("/audio", audio::handle));
     routes.push(("/ip", ip::handle));
 }

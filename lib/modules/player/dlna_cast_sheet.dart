@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/services/dlna_service.dart';
@@ -89,7 +90,7 @@ class _DlnaCastSheetState extends State<DlnaCastSheet> {
                   const SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
+                    child: M3ECircularProgressIndicator(size: 20, strokeWidth: 2),
                   ),
               ],
             ),
@@ -141,6 +142,22 @@ class _DlnaCastSheetState extends State<DlnaCastSheet> {
                     onTap: () => _onDeviceSelected(device),
                   );
                 },
+              ),
+            ),
+          // 设备断开/投屏出错后：提供明确的结束投屏入口
+          // （控制面板此时已隐藏，若不提供该按钮用户将无法退出）
+          if (dlna.state == DlnaCastState.error)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: FilledButton.icon(
+                onPressed: () async {
+                  await dlna.stop();
+                  if (!context.mounted) return;
+                  await dlna.restoreLocalPlayback(context);
+                  if (context.mounted) Navigator.pop(context);
+                },
+                icon: const Icon(Icons.stop),
+                label: const Text('结束投屏'),
               ),
             ),
           // 重新搜索按钮
@@ -200,22 +217,60 @@ class _DlnaCastSheetState extends State<DlnaCastSheet> {
               ],
             ),
             const SizedBox(height: 16),
+            // 错误提示横幅（控制失败等，保持投屏态）
+            if (dlna.errorMessage != null) ...[
+              Card(
+                color: theme.colorScheme.errorContainer,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          dlna.errorMessage!,
+                          style: TextStyle(
+                            color: theme.colorScheme.onErrorContainer,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        color: theme.colorScheme.onErrorContainer,
+                        onPressed: () => dlna.clearError(),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
             // 连接中提示
             if (dlna.state == DlnaCastState.connecting)
               const Padding(
                 padding: EdgeInsets.all(16),
-                child: Center(child: CircularProgressIndicator()),
+                child: Center(child: M3ECircularProgressIndicator()),
               )
             else ...[
-              // 进度条
+              // 进度条（设备不支持 Seek 时降级为只读进度）
               if (totalSeconds > 0) ...[
-                Slider(
-                  value: positionSeconds.toDouble().clamp(0, totalSeconds.toDouble()),
-                  max: totalSeconds.toDouble(),
-                  onChanged: (v) {
-                    dlna.seek(Duration(seconds: v.round()));
-                  },
-                ),
+                if (dlna.canSeek)
+                  Slider(
+                    value: positionSeconds.toDouble().clamp(0, totalSeconds.toDouble()),
+                    max: totalSeconds.toDouble(),
+                    onChanged: (v) {
+                      dlna.seek(Duration(seconds: v.round()));
+                    },
+                  )
+                else
+                  M3ELinearProgressIndicator(
+                    value: positionSeconds / totalSeconds,
+                  ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
@@ -230,7 +285,7 @@ class _DlnaCastSheetState extends State<DlnaCastSheet> {
                 ),
               ],
               const SizedBox(height: 8),
-              // 播放控制
+              // 播放控制（设备不支持 Pause 时隐藏暂停/播放切换按钮）
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
@@ -240,21 +295,23 @@ class _DlnaCastSheetState extends State<DlnaCastSheet> {
                         ? () => dlna.castPreviousSong(context)
                         : null,
                   ),
-                  const SizedBox(width: 16),
-                  IconButton.filled(
-                    icon: Icon(
-                      dlna.isPlaying ? Icons.pause : Icons.play_arrow,
-                      size: 36,
+                  if (dlna.canPause) ...[
+                    const SizedBox(width: 16),
+                    IconButton.filled(
+                      icon: Icon(
+                        dlna.isPlaying ? Icons.pause : Icons.play_arrow,
+                        size: 36,
+                      ),
+                      onPressed: () {
+                        if (dlna.isPlaying) {
+                          dlna.pause();
+                        } else {
+                          dlna.play();
+                        }
+                      },
                     ),
-                    onPressed: () {
-                      if (dlna.isPlaying) {
-                        dlna.pause();
-                      } else {
-                        dlna.play();
-                      }
-                    },
-                  ),
-                  const SizedBox(width: 16),
+                    const SizedBox(width: 16),
+                  ],
                   IconButton(
                     icon: const Icon(Icons.skip_next, size: 36),
                     onPressed: widget.mvUrl == null

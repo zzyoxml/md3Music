@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:m3e_core/m3e_core.dart';
 
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
@@ -10,7 +11,6 @@ import '../../providers/player_provider.dart';
 import '../../services/kugou_api/cloud_song_mapper.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/song_list_item.dart';
 import '../album/album_detail_page.dart';
@@ -52,7 +52,7 @@ class _SearchPageState extends State<SearchPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 5, vsync: this);
+    _tabController = TabController(length: 6, vsync: this);
     _tabController.addListener(_onTabChanged);
     _loadSearchHistory();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -70,7 +70,7 @@ class _SearchPageState extends State<SearchPage>
 
   void _onTabChanged() {
     if (_tabController.indexIsChanging) return;
-    final types = ['song', 'album', 'artist', 'special', 'cloud'];
+    final types = ['song', 'album', 'artist', 'special', 'cloud', 'lyric'];
     final newType = types[_tabController.index];
     if (newType != _currentSearchType && _query.isNotEmpty) {
       _currentSearchType = newType;
@@ -219,6 +219,7 @@ class _SearchPageState extends State<SearchPage>
                             Tab(text: '歌手'),
                             Tab(text: '歌单'),
                             Tab(text: '云盘'),
+                            Tab(text: '歌词'),
                           ],
                         ),
                       ),
@@ -330,6 +331,7 @@ class _SearchPageState extends State<SearchPage>
         _buildArtistResults(),
         _buildPlaylistResults(),
         _buildCloudResults(),
+        _buildLyricResults(),
       ],
     );
   }
@@ -370,7 +372,7 @@ class _SearchPageState extends State<SearchPage>
 
     if (kugouProvider.isLoading &&
         (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null &&
@@ -422,7 +424,69 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: MD3ELoadingIndicator(size: 24),
+              child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24)),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 歌词搜索结果：按歌词片段搜索到的歌曲列表，每项副标题显示匹配的歌词片段。
+  Widget _buildLyricResults() {
+    final kugouProvider = context.watch<KugouProvider>();
+
+    if (kugouProvider.isLoading &&
+        (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
+      return const Center(child: M3ELoadingIndicator());
+    }
+
+    if (kugouProvider.error != null &&
+        (kugouProvider.searchResults?.songs.isEmpty ?? true)) {
+      return _buildErrorState(kugouProvider.error!, () {
+        kugouProvider.clearError();
+        _performSearchByType(_query, 'lyric');
+      });
+    }
+
+    final results = kugouProvider.searchResults?.songs ?? const <KugouSongDetail>[];
+
+    if (results.isEmpty) {
+      return _buildNoResult();
+    }
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification &&
+            notification.metrics.pixels >=
+                notification.metrics.maxScrollExtent - 200) {
+          context.read<KugouProvider>().loadMoreSearchResults(type: 'lyric');
+        }
+        return false;
+      },
+      child: Column(
+        children: [
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              itemCount: results.length,
+              itemBuilder: (context, index) {
+                final detail = results[index];
+                return _LyricSearchResultItem(
+                  song: detail.toSong(),
+                  lyricSnippet: detail.lyrics ?? '',
+                  onTap: () {
+                    final songs = results
+                        .map((e) => e.toSong())
+                        .toList();
+                    context.read<PlayerProvider>().playOnlinePlaylist(songs, index);
+                  },
+                );
+              },
+            ),
+          ),
+          if (kugouProvider.isLoading)
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24)),
             ),
         ],
       ),
@@ -440,7 +504,7 @@ class _SearchPageState extends State<SearchPage>
 
     if (kugouProvider.isLoading &&
         (kugouProvider.searchResults?.albums.isEmpty ?? true)) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null &&
@@ -501,7 +565,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: MD3ELoadingIndicator(size: 24),
+              child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24)),
             ),
         ],
       ),
@@ -513,7 +577,7 @@ class _SearchPageState extends State<SearchPage>
 
     if (kugouProvider.isLoading &&
         (kugouProvider.searchResults?.artists.isEmpty ?? true)) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null &&
@@ -589,7 +653,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: MD3ELoadingIndicator(size: 24),
+              child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24)),
             ),
         ],
       ),
@@ -601,7 +665,7 @@ class _SearchPageState extends State<SearchPage>
 
     if (kugouProvider.isLoading &&
         (kugouProvider.searchResults?.playlists.isEmpty ?? true)) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (kugouProvider.error != null &&
@@ -664,7 +728,7 @@ class _SearchPageState extends State<SearchPage>
           if (kugouProvider.isLoading)
             const Padding(
               padding: EdgeInsets.all(12),
-              child: MD3ELoadingIndicator(size: 24),
+              child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 24, height: 24)),
             ),
         ],
       ),
@@ -755,7 +819,7 @@ class _SearchPageState extends State<SearchPage>
 
   Widget _buildCloudResults() {
     if (_cloudLoading) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
     if (_cloudError != null) {
       return _buildErrorState(_cloudError!, _loadCloudSongsForSearch);
@@ -767,7 +831,7 @@ class _SearchPageState extends State<SearchPage>
           _loadCloudSongsForSearch();
         }
       });
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
     final results = _filteredCloudSongs;
     if (results.isEmpty) {
@@ -1032,6 +1096,99 @@ class _SearchAlbumCard extends StatelessWidget {
       width: double.infinity,
       color: colorScheme.surfaceContainerHighest,
       child: Icon(icon, size: 40, color: colorScheme.onSurfaceVariant),
+    );
+  }
+}
+
+/// 歌词搜索结果项：封面 + 歌名/歌手 + 匹配的歌词片段，点击播放。
+class _LyricSearchResultItem extends StatelessWidget {
+  final Song song;
+  final String lyricSnippet;
+  final VoidCallback? onTap;
+
+  const _LyricSearchResultItem({
+    required this.song,
+    required this.lyricSnippet,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    const imgSize = 52.0;
+
+    return InkWell(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: song.artworkUri != null
+                  ? CachedNetworkImage(
+                      imageUrl: song.artworkUri!,
+                      memCacheWidth: 144,
+                      memCacheHeight: 144,
+                      width: imgSize,
+                      height: imgSize,
+                      fit: BoxFit.cover,
+                      placeholder: (_, _) => _buildPlaceholder(colorScheme),
+                      errorWidget: (_, _, _) => _buildPlaceholder(colorScheme),
+                    )
+                  : _buildPlaceholder(colorScheme),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    song.displayName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    lyricSnippet.isNotEmpty
+                        ? lyricSnippet
+                        : song.artist,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: textTheme.labelSmall?.copyWith(
+                      color: lyricSnippet.isNotEmpty
+                          ? colorScheme.primary.withValues(alpha: 0.85)
+                          : colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Icon(Icons.play_arrow, size: 22, color: colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholder(ColorScheme colorScheme) {
+    return Container(
+      width: 52,
+      height: 52,
+      decoration: BoxDecoration(
+        color: colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Icon(Icons.music_note, size: 26, color: colorScheme.onSurfaceVariant),
     );
   }
 }

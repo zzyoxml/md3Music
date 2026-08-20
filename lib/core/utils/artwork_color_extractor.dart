@@ -50,8 +50,11 @@ class ArtworkColorExtractor {
       // 本地封面：统一「读字节 → MemoryImage → PaletteGenerator」
       final bytes = await _loadLocalBytes(url);
       if (bytes == null) return null;
+      // ResizeImage 限制解码宽度：背景图/本地大图取色时避免全尺寸解码
+      // 造成的内存峰值（高清照片解码可达上百 MB，低内存设备会闪退）。
+      // 取色分析的是色彩分布，缩到 480 宽足够且结果几乎不变。
       final palette = await PaletteGenerator.fromImageProvider(
-        MemoryImage(bytes),
+        ResizeImage(MemoryImage(bytes), width: 480),
         maximumColorCount: 12,
       );
       return _analyzePalette(palette, url);

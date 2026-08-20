@@ -1,7 +1,9 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:m3e_core/m3e_core.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/song.dart';
 import '../../data/repositories/collected_playlist_store.dart';
@@ -13,10 +15,10 @@ import '../../providers/player_provider.dart';
 import '../../providers/downloads_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
+import '../../services/kugou_api/kugou_models.dart';
 import '../../services/stream_cache_manager.dart';
 import '../../widgets/song_list_item.dart';
 import '../../widgets/playlist_comments_view.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../player/mini_player.dart';
 
 class PlaylistPage extends StatefulWidget {
@@ -314,12 +316,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
   void _showBatchDownloadDialog() {
     final api = KugouApiClient();
     if (!api.isLoggedIn) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('请先登录'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('请先登录', long: true);
       return;
     }
 
@@ -394,7 +391,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              LinearProgressIndicator(
+              M3ELinearProgressIndicator(
                 value: total > 0 ? progress.value / total : 0,
               ),
               const SizedBox(height: 16),
@@ -548,31 +545,16 @@ class _PlaylistPageState extends State<PlaylistPage> {
         // 通知「我的收藏」刷新歌曲数
         context.read<PlaylistCollectionNotifier>().notifyChanged();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('已删除 $count 首歌曲'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          showToast('已删除 $count 首歌曲', long: true);
         }
       } else if (mounted) {
         setState(() => _isDeleting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('删除失败，请重试'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('删除失败，请重试', long: true);
       }
     } catch (e) {
       if (mounted) {
         setState(() => _isDeleting = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('删除失败: $e'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('删除失败: $e', long: true);
       }
     }
   }
@@ -601,12 +583,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final index = displayList.indexWhere((s) => s.id == currentSong.id);
     // 随机播放 / 跨歌单场景：当前歌曲可能不在本歌单显示列表中，提示而非静默失败
     if (index == -1) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('当前播放歌曲不在本歌单中'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      showToast('当前播放歌曲不在本歌单中', long: true);
       return;
     }
 
@@ -782,6 +759,40 @@ class _PlaylistPageState extends State<PlaylistPage> {
     );
   }
 
+  /// 「相似歌单」底部弹窗：调 /playlist/similar 获取相似歌单并展示。
+  /// 使用 original 歌单的 global_collection_id（listCreateGid 兜底 id）。
+  void _showSimilarPlaylists(BuildContext context) {
+    final gid = widget.playlist.listCreateGid ?? widget.playlist.id;
+    if (gid.isEmpty) return;
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.6,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) {
+          final colorScheme = Theme.of(context).colorScheme;
+          return Container(
+            decoration: BoxDecoration(
+              color: colorScheme.surface,
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
+            ),
+            child: _SimilarPlaylistsView(
+              gid: gid,
+              scrollController: scrollController,
+              colorScheme: colorScheme,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   // ==================== 收藏本地缓存（解决后端 user/playlist 列表 ~1-2 分钟缓存才同步的问题）====================
 
   /// 查询当前歌单是否已被收藏。
@@ -873,12 +884,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final api = KugouApiClient();
     if (!api.isLoggedIn) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('请先登录'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('请先登录', long: true);
       }
       return;
     }
@@ -902,12 +908,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
       );
       if (result == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('收藏失败，请重试'),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
+          showToast('收藏失败，请重试', long: true);
         }
         return;
       }
@@ -922,21 +923,11 @@ class _PlaylistPageState extends State<PlaylistPage> {
         });
         // 通知「我的收藏」tab 立即刷新（绕过本地代理 2 分钟缓存）
         context.read<PlaylistCollectionNotifier>().notifyChanged();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('收藏成功'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('收藏成功', long: true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('收藏失败'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('收藏失败', long: true);
       }
     }
   }
@@ -951,12 +942,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
     listId ??= await _findCollectedListId(api);
     if (listId == null || listId.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('找不到收藏记录，无法取消'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('找不到收藏记录，无法取消', long: true);
       }
       return;
     }
@@ -972,28 +958,13 @@ class _PlaylistPageState extends State<PlaylistPage> {
         });
         // 通知「我的收藏」tab 立即刷新（绕过本地代理 2 分钟缓存）
         context.read<PlaylistCollectionNotifier>().notifyChanged();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('已取消收藏'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('已取消收藏', long: true);
       } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('取消收藏失败，请重试'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('取消收藏失败，请重试', long: true);
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('取消收藏失败'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
+        showToast('取消收藏失败', long: true);
       }
     }
   }
@@ -1166,7 +1137,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
       body: Column(
         children: [
           if (_isLoading)
-            const Expanded(child: Center(child: MD3ELoadingIndicator()))
+            const Expanded(child: Center(child: M3ELoadingIndicator()))
           else ...[
             // 加载失败时显示顶部 banner（不再完全覆盖 UI，
             // 歌单的元数据/封面/描述仍可见）
@@ -1225,6 +1196,13 @@ class _PlaylistPageState extends State<PlaylistPage> {
                               icon: const Icon(Icons.my_location),
                               onPressed: _scrollToPlayingSong,
                               tooltip: '定位正在播放',
+                            ),
+                          if (_songs.isNotEmpty)
+                            IconButton(
+                              icon: const Icon(Icons.auto_awesome),
+                              onPressed: () =>
+                                  _showSimilarPlaylists(context),
+                              tooltip: '相似歌单',
                             ),
                           if (_songs.isNotEmpty)
                             PopupMenuButton<_SortBy>(
@@ -1319,7 +1297,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                 end: Alignment.bottomCenter,
                                 colors: [
                                   colorScheme.primaryContainer,
-                                  colorScheme.surface,
+                                  // 底部渐变到透明：启用全局背景图（页面背景透明）时，
+                                  // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
+                                  colorScheme.surface.withValues(alpha: 0),
                                 ],
                               ),
                             ),
@@ -1821,7 +1801,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
               if (_isDeleting)
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 12),
-                  child: MD3ELoadingIndicator(size: 20),
+                  child: M3ELoadingIndicator(constraints: BoxConstraints.tightFor(width: 20, height: 20)),
                 )
               else ...[
                 IconButton(
@@ -1852,6 +1832,257 @@ class _PlaylistPageState extends State<PlaylistPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// 「相似歌单」底部弹窗内容：拉取 /playlist/similar 并展示相似歌单列表。
+class _SimilarPlaylistsView extends StatefulWidget {
+  final String gid;
+  final ScrollController scrollController;
+  final ColorScheme colorScheme;
+
+  const _SimilarPlaylistsView({
+    required this.gid,
+    required this.scrollController,
+    required this.colorScheme,
+  });
+
+  @override
+  State<_SimilarPlaylistsView> createState() => _SimilarPlaylistsViewState();
+}
+
+class _SimilarPlaylistsViewState extends State<_SimilarPlaylistsView> {
+  List<KugouPlaylistBrief> _playlists = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final result = await KugouApiClient().getPlaylistSimilar(widget.gid);
+      debugPrint('[SimilarPL] gid=${widget.gid} rawResult=${result}');
+      final parsed = _parseSimilarList(result);
+      debugPrint('[SimilarPL] parsed=${parsed.length}');
+      if (parsed.isNotEmpty) {
+        debugPrint('[SimilarPL] first name=${parsed.first.name} id=${parsed.first.id} gid=${parsed.first.globalCollectionId}');
+      }
+      if (!mounted) return;
+      setState(() {
+        _playlists = parsed;
+        _loading = false;
+      });
+    } catch (e) {
+      debugPrint('[SimilarPL] error=$e');
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = '加载失败，请稍后重试';
+      });
+    }
+  }
+
+  /// 从 /playlist/similar 响应中自适应提取相似歌单列表。
+  ///
+  /// 实测返回结构：`data: [{ collection_list: [ { collection_name, flexible_cover,
+  /// global_collection_id, heat, ... }, ... ] }]`，需先解 `collection_list`，
+  /// 再用针对性的字段映射（而非 KugouPlaylistBrief.fromJson 的标准字段）。
+  List<KugouPlaylistBrief> _parseSimilarList(Map<String, dynamic>? r) {
+    if (r == null) return const [];
+    final d = r['data'];
+    List<dynamic> raw = const [];
+    if (d is Map<String, dynamic>) {
+      final list = d['collection_list'] ?? d['list'] ?? d['info'] ?? d['songs'] ?? d['data'];
+      if (list is List) raw = list;
+    } else if (d is List) {
+      raw = d;
+    }
+    final out = <KugouPlaylistBrief>[];
+    for (final e in raw) {
+      if (e is! Map<String, dynamic>) continue;
+      // 兼容 { collection_list: [...] } 的包装层
+      final cl = e['collection_list'];
+      if (cl is List) {
+        for (final item in cl) {
+          if (item is Map<String, dynamic>) {
+            final b = _mapSimilarPlaylist(item);
+            if (b != null) out.add(b);
+          }
+        }
+      } else {
+        final b = _mapSimilarPlaylist(e);
+        if (b != null) out.add(b);
+      }
+    }
+    return out;
+  }
+
+  /// 针对 /playlist/similar 单项字段的映射：collection_name / flexible_cover /
+  /// global_collection_id / songs（数量）。
+  KugouPlaylistBrief? _mapSimilarPlaylist(Map<String, dynamic> item) {
+    final gid = (item['global_collection_id'] ?? item['gid'] ?? '').toString();
+    if (gid.isEmpty) return null;
+    final name = (item['collection_name'] ?? item['name'] ?? item['specialname'] ?? '')
+        .toString()
+        .replaceAll(RegExp(r'<[^>]*>'), '')
+        .trim();
+    if (name.isEmpty) return null;
+    int songCount = 0;
+    final songs = item['songs'];
+    if (songs is List) songCount = songs.length;
+    return KugouPlaylistBrief(
+      id: gid,
+      name: name,
+      coverUrl: _resolveSimilarCover(item['flexible_cover'] ?? item['cover'] ?? item['imgurl'] ?? item['sizable_cover']),
+      songCount: songCount,
+      globalCollectionId: gid,
+    );
+  }
+
+  /// 封面 URL：处理 `//` 协议相对路径与 `{size}` 占位符。
+  String? _resolveSimilarCover(dynamic v) {
+    if (v == null) return null;
+    var s = v.toString();
+    if (s.isEmpty) return null;
+    if (s.startsWith('//')) s = 'https:$s';
+    s = s.replaceAll('{size}', '200');
+    return s;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final cs = widget.colorScheme;
+    return Column(
+      children: [
+        // 拖动手柄
+        Container(
+          margin: const EdgeInsets.only(top: 12),
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(
+            color: cs.onSurfaceVariant.withValues(alpha: 0.4),
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        // 标题栏
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            children: [
+              Icon(Icons.auto_awesome, size: 20, color: cs.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Text(
+                '相似歌单',
+                style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w600),
+              ),
+              const Spacer(),
+              IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ],
+          ),
+        ),
+        Divider(height: 1, color: cs.outlineVariant.withValues(alpha: 0.3)),
+        Expanded(child: _buildBody(cs, tt)),
+      ],
+    );
+  }
+
+  Widget _buildBody(ColorScheme cs, TextTheme tt) {
+    if (_loading) return const Center(child: M3ELoadingIndicator());
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 48,
+              color: cs.onSurfaceVariant.withValues(alpha: 0.4),
+            ),
+            const SizedBox(height: 8),
+            Text(_error!, style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+            const SizedBox(height: 8),
+            TextButton(onPressed: _load, child: const Text('重试')),
+          ],
+        ),
+      );
+    }
+    if (_playlists.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.queue_music,
+              size: 48,
+              color: cs.onSurfaceVariant.withValues(alpha: 0.4),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              '暂无相似歌单',
+              style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ],
+        ),
+      );
+    }
+    return ListView.builder(
+      controller: widget.scrollController,
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      itemCount: _playlists.length,
+      itemBuilder: (context, i) {
+        final pl = _playlists[i];
+        final cleanName = pl.name.replaceAll(RegExp(r'<[^>]*>'), '');
+        return ListTile(
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SizedBox(
+              width: 48,
+              height: 48,
+              child: pl.coverUrl != null
+                  ? CachedNetworkImage(
+                      imageUrl: pl.coverUrl!,
+                      fit: BoxFit.cover,
+                      errorWidget: (_, _, _) => _coverPlaceholder(cs),
+                    )
+                  : _coverPlaceholder(cs),
+            ),
+          ),
+          title: Text(cleanName, maxLines: 2, overflow: TextOverflow.ellipsis),
+          subtitle: pl.songCount > 0 ? Text('${pl.songCount} 首歌曲') : null,
+          onTap: () {
+            // 先取 navigator 再 pop，避免 pop 后使用已销毁的 context
+            final navigator = Navigator.of(context);
+            navigator.pop();
+            navigator.push(
+              MaterialPageRoute(
+                builder: (_) => PlaylistPage(playlist: pl.toPlaylist()),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _coverPlaceholder(ColorScheme cs) {
+    return Container(
+      color: cs.surfaceContainerHighest,
+      child: const Center(
+        child: Icon(Icons.queue_music, color: Colors.grey),
       ),
     );
   }

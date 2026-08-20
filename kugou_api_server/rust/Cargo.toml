@@ -22,9 +22,12 @@ rand = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 libc = "0.2"
-jni = "0.21"
 qrcode = { version = "0.14.0", features = ["image"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+
+# jni 仅 Android 需要（JNI 导出符号），桌面构建不引入，避免无谓编译与符号污染
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
 
 [profile.release]
 # P0: "s"（体积优先）禁用循环展开/函数内联，HTTP 服务器是 CPU 密集型

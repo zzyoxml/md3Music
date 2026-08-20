@@ -1,11 +1,11 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:m3e_core/m3e_core.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../data/models/playlist.dart';
 import '../../providers/kugou_provider.dart';
-import '../../widgets/md3e_loading_indicator.dart';
-import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../playlist/playlist_page.dart';
@@ -75,7 +75,7 @@ class _IpPageState extends State<IpPage> {
         scrollController: _scrollController,
       ),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : Selector<KugouProvider, (List<dynamic>, List<dynamic>)>(
               selector: (_, kugou) =>
                   (_listOf(kugou.ipHomeData), _listOf(kugou.ipZoneData)),
@@ -112,7 +112,7 @@ class _IpPageState extends State<IpPage> {
                     ),
                   );
                 }
-                return MD3ERefreshIndicator(
+                return M3EPullToRefreshIndicator(
                   onRefresh: _load,
                   child: ListView(
                     controller: _scrollController,
@@ -282,9 +282,7 @@ class _IpPageState extends State<IpPage> {
   }
 
   void _showUnavailable(String title) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('「$title」暂无可浏览内容')));
+    showToast('「$title」暂无可浏览内容', long: true);
   }
 
   // ---------- 防御性字段解析 ----------

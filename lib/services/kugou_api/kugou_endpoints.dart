@@ -161,6 +161,7 @@ class KugouEndpoints {
   // User
   static const String userDetail = '/user/detail';
   static const String userVipDetail = '/user/vip/detail';
+  static const String userGradeInfo = '/user/grade/info';
   static const String userPlaylist = '/user/playlist';
   static const String userFollow = '/user/follow';
   static const String userFollowMessage = '/user/follow/message';
@@ -168,6 +169,8 @@ class KugouEndpoints {
   static const String userCloudUrl = '/user/cloud/url';
   static const String userCloudUpload = '/user/cloud/upload';
   static const String userCloudDel = '/user/cloud/del';
+  static const String userPurchasedSongs = '/user/purchased/songs';
+  static const String userPurchasedAlbums = '/user/purchased/albums';
   static const String userVideoCollect = '/user/video/collect';
   static const String userVideoLove = '/user/video/love';
   static const String userListen = '/user/listen';
@@ -211,6 +214,7 @@ class KugouEndpoints {
   static const String brush = '/brush';
   static const String aiRecommend = '/ai/recommend';
   static const String audioMatch = '/audio/match';
+  static const String pcmProcess = '/extras/pcm-process';
   static const String lastestSongsListenList = '/lastest/songs/listen';
   static const String ip = '/ip';
   static const String privilegeLite = '/privilege/lite';

@@ -3,16 +3,16 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/services/media_store_service.dart';
+import '../../core/utils/app_toast.dart';
 import '../../data/models/song.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/cloud_song_mapper.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
-import '../../widgets/md3e_loading_indicator.dart';
-import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
 
@@ -354,39 +354,6 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
     }
   }
 
-  /// 统一的提示条样式：floating 悬浮 + 底部上移避开 MiniPlayer，
-  /// 避免上传过程中遮挡播放器控件影响使用。
-  /// [progress] 为 true 时显示常驻的转圈进度条。
-  SnackBar _snack(String msg, {bool progress = false}) {
-    return SnackBar(
-      content: progress
-          ? Row(
-              children: [
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    msg,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            )
-          : Text(msg),
-      behavior: SnackBarBehavior.floating,
-      // bottom: 96 使提示条悬浮在 MiniPlayer（约 70px + 系统手势条）之上
-      margin: const EdgeInsets.only(left: 12, right: 12, bottom: 96),
-      duration: progress
-          ? const Duration(days: 1)
-          : const Duration(seconds: 3),
-    );
-  }
-
   /// 上传单首本地歌曲到云盘。
   ///
   /// 返回 (ok, reason)：ok 为是否真正上传成功（服务端 add_files 返回
@@ -395,23 +362,20 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
   /// [showResult] 为 false 时（批量上传）不弹单首成功/失败提示，只显示进度。
   Future<({bool ok, String? reason})> _uploadSong(
     Song song, {
-    ScaffoldMessengerState? messenger,
     bool showResult = true,
   }) async {
     final api = KugouApiClient();
-    // await 前捕获 messenger，避免 async gap 后使用 BuildContext
-    final msgr = messenger ?? ScaffoldMessenger.of(context);
 
     try {
       if (!api.isLoggedIn) {
-        if (showResult) msgr.showSnackBar(_snack('请先登录'));
+        if (showResult) showToast('请先登录', long: true);
         return (ok: false, reason: '未登录');
       }
 
       final bytes = await _readSongBytes(song);
       if (bytes == null || bytes.isEmpty) {
         if (showResult) {
-          msgr.showSnackBar(_snack('读取文件失败：${song.displayName}'));
+          showToast('读取文件失败：${song.displayName}', long: true);
         }
         return (ok: false, reason: '读取文件失败');
       }
@@ -423,17 +387,11 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
           ? raw.substring(dotIdx + 1).toLowerCase()
           : 'mp3';
 
-      // 上传中提示（不阻塞 UI，仅顶部 SnackBar 展示进度）
-      // clearSnackBars：清空队列中未显示的 SnackBar，避免进度条堆积导致
-      // 批量上传完成后汇总提示排队等待、界面一直停留在"正在上传"
-      msgr
-        ..clearSnackBars()
-        ..showSnackBar(
-          _snack(
-            '正在上传「${song.displayName}」(${_formatSize(bytes.length)})…',
-            progress: true,
-          ),
-        );
+      // 上传中提示（toast 展示进行中的歌曲）
+      showToast(
+        '正在上传「${song.displayName}」(${_formatSize(bytes.length)})…',
+        long: true,
+      );
 
       final result = await api.uploadCloudSong(
         bytes,
@@ -444,7 +402,6 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
             ? song.duration.inMilliseconds
             : null,
       );
-      msgr.clearSnackBars();
 
       // 关键：只有服务端明确返回 status == 1 才算成功。
       // 服务端在授权/分片/完成/添加到云盘任一环节失败时返回 {status: 0, msg: ...}，
@@ -452,20 +409,19 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
       final status = result?['status'];
       if (status == 1) {
         if (showResult) {
-          msgr.showSnackBar(_snack('「${song.displayName}」已上传到云盘'));
+          showToast('「${song.displayName}」已上传到云盘', long: true);
         }
         return (ok: true, reason: null);
       }
       final msg = (result?['msg'] ?? result?['error_msg'] ?? '未知错误')
           .toString();
       if (showResult) {
-        msgr.showSnackBar(_snack('上传失败：$msg'));
+        showToast('上传失败：$msg', long: true);
       }
       return (ok: false, reason: msg);
     } catch (e) {
-      msgr.clearSnackBars();
       if (showResult) {
-        msgr.showSnackBar(_snack('上传失败：$e'));
+        showToast('上传失败：$e', long: true);
       }
       return (ok: false, reason: '$e');
     }
@@ -486,23 +442,17 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
   /// 成功数 > 0 时刷新云盘列表。
   Future<void> _uploadBatch(List<Song> songs) async {
     if (songs.isEmpty) return;
-    // await 前捕获 messenger，避免 async gap 后使用 BuildContext
-    final messenger = ScaffoldMessenger.of(context);
 
     var ok = 0;
     final failed = <String>[];
     for (var i = 0; i < songs.length; i++) {
       final song = songs[i];
-      // clearSnackBars：清空排队中的 SnackBar，保证当前进度条立即显示
-      messenger
-        ..clearSnackBars()
-        ..showSnackBar(
-          _snack(
-            '正在上传 (${i + 1}/${songs.length})「${song.displayName}」…',
-            progress: true,
-          ),
-        );
-      final r = await _uploadSong(song, messenger: messenger, showResult: false);
+      // toast 展示当前上传进度（toast 自动消失，无需手动清理队列）
+      showToast(
+        '正在上传 (${i + 1}/${songs.length})「${song.displayName}」…',
+        long: true,
+      );
+      final r = await _uploadSong(song, showResult: false);
       if (r.ok) {
         ok++;
       } else if (r.reason != null && r.reason!.isNotEmpty) {
@@ -514,10 +464,7 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
         ? '全部上传成功（$ok 首）'
         : '上传完成：成功 $ok 首，失败 ${songs.length - ok} 首'
             '${failed.isEmpty ? '' : '\n${failed.take(3).join('\n')}'}';
-    // clearSnackBars：清掉常驻的"正在上传"进度条与队列残留，确保汇总立即显示
-    messenger
-      ..clearSnackBars()
-      ..showSnackBar(_snack(summary));
+    showToast(summary, long: true);
     if (ok > 0) {
       await _loadCloudSongs();
     }
@@ -610,17 +557,17 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
               ],
       ),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : _error != null
               ? _buildError()
               : _songs.isEmpty
-                  ? MD3ERefreshIndicator(
+                  ? M3EPullToRefreshIndicator(
                       onRefresh: _loadCloudSongs,
                       child: ListView(
                         children: [_buildEmpty()],
                       ),
                     )
-                  : MD3ERefreshIndicator(
+                  : M3EPullToRefreshIndicator(
                       onRefresh: _loadCloudSongs,
                       child: Column(
                         children: [
@@ -769,8 +716,6 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
   /// 删除确认对话框，确认后调用 [_deleteCloudSongs] 并刷新列表。
   Future<void> _confirmDelete(List<Song> songs) async {
     if (songs.isEmpty) return;
-    // await 前捕获 messenger，避免 async gap 后使用 BuildContext
-    final messenger = ScaffoldMessenger.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -799,10 +744,10 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
     if (!mounted) return;
     if (r.ok) {
       if (_isSelectMode) _exitSelectMode();
-      messenger.showSnackBar(_snack('已删除 ${songs.length} 首'));
+      showToast('已删除 ${songs.length} 首', long: true);
       await _loadCloudSongs();
     } else {
-      messenger.showSnackBar(_snack('删除失败：${r.reason ?? '未知错误'}'));
+      showToast('删除失败：${r.reason ?? '未知错误'}', long: true);
     }
   }
 

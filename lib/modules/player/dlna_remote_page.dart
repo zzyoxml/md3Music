@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/dlna_provider.dart';
@@ -58,6 +59,39 @@ class _DlnaRemotePageState extends State<DlnaRemotePage> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
+                  // 错误提示横幅（设备断开/控制失败等）
+                  if (dlna.errorMessage != null) ...[
+                    Card(
+                      color: theme.colorScheme.errorContainer,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 4),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.error_outline,
+                              color: theme.colorScheme.onErrorContainer,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                dlna.errorMessage!,
+                                style: TextStyle(
+                                  color: theme.colorScheme.onErrorContainer,
+                                ),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              color: theme.colorScheme.onErrorContainer,
+                              onPressed: () => dlna.clearError(),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   // 设备名
                   Icon(
                     Icons.cast_connected,
@@ -80,15 +114,20 @@ class _DlnaRemotePageState extends State<DlnaRemotePage> {
                     ),
                   ),
                   const SizedBox(height: 32),
-                  // 进度条
+                  // 进度条（设备不支持 Seek 时降级为只读进度）
                   if (totalSeconds > 0) ...[
-                    Slider(
-                      value: positionSeconds.toDouble(),
-                      max: totalSeconds.toDouble(),
-                      onChanged: (v) {
-                        dlna.seek(Duration(seconds: v.round()));
-                      },
-                    ),
+                    if (dlna.canSeek)
+                      Slider(
+                        value: positionSeconds.toDouble(),
+                        max: totalSeconds.toDouble(),
+                        onChanged: (v) {
+                          dlna.seek(Duration(seconds: v.round()));
+                        },
+                      )
+                    else
+                      M3ELinearProgressIndicator(
+                        value: positionSeconds / totalSeconds,
+                      ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       child: Row(
@@ -110,7 +149,7 @@ class _DlnaRemotePageState extends State<DlnaRemotePage> {
                       ),
                     ),
                   const SizedBox(height: 24),
-                  // 播放控制
+                  // 播放控制（设备不支持 Pause 时隐藏暂停/播放切换按钮）
                   Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -119,21 +158,23 @@ class _DlnaRemotePageState extends State<DlnaRemotePage> {
                         icon: const Icon(Icons.skip_previous),
                         onPressed: () => dlna.castPreviousSong(context),
                       ),
-                      const SizedBox(width: 24),
-                      IconButton.filled(
-                        iconSize: 56,
-                        icon: Icon(
-                          dlna.isPlaying ? Icons.pause : Icons.play_arrow,
+                      if (dlna.canPause) ...[
+                        const SizedBox(width: 24),
+                        IconButton.filled(
+                          iconSize: 56,
+                          icon: Icon(
+                            dlna.isPlaying ? Icons.pause : Icons.play_arrow,
+                          ),
+                          onPressed: () {
+                            if (dlna.isPlaying) {
+                              dlna.pause();
+                            } else {
+                              dlna.play();
+                            }
+                          },
                         ),
-                        onPressed: () {
-                          if (dlna.isPlaying) {
-                            dlna.pause();
-                          } else {
-                            dlna.play();
-                          }
-                        },
-                      ),
-                      const SizedBox(width: 24),
+                        const SizedBox(width: 24),
+                      ],
                       IconButton(
                         iconSize: 48,
                         icon: const Icon(Icons.skip_next),

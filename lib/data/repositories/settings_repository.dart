@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../services/kugou_api/kugou_api_client.dart';
+import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
+
 class SettingsRepository {
   static const String _keyThemeMode = 'settings_theme_mode';
   static const String _keyDefaultQuality = 'settings_default_quality';
@@ -12,7 +15,6 @@ class SettingsRepository {
   static const String _keyAutoPlay = 'settings_auto_play';
   static const String _keyShowLyrics = 'settings_show_lyrics';
   static const String _keyAutoReceiveVip = 'settings_auto_receive_vip';
-  static const String _keySignedDays = 'settings_signed_days';
   // 自定义下载目录：空字符串表示使用默认目录（应用私有 documents/downloads）
   static const String _keyDownloadDir = 'settings_download_dir';
   // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
@@ -20,18 +22,29 @@ class SettingsRepository {
   static const String _keyUiScale = 'settings_ui_scale';
   // Pad 端网格页面列数偏好
   static const String _keyGridColumns = 'grid_columns';
+  // MV 画中画：按 Home 自动进入画中画（默认关闭，手动按钮不受影响）
+  static const String _keyAutoPip = 'settings_auto_pip';
+  // 逐字歌词时间偏移（ms，默认 0；仅在线音乐生效，正值 = 歌词延后显示）
+  static const String _keyLyricTimeOffset = 'lyric_time_offset_ms';
+
+  /// 签到日历键：登录时按账号隔离（`settings_signed_days_$userid`），
+  /// 未登录（游客）用全局键。
+  String get _signedDaysKey {
+    final uid = KugouApiClient().userid;
+    return uid == null ? 'settings_signed_days' : 'settings_signed_days_$uid';
+  }
 
   /// 读取本地打卡日期集合（格式 yyyy-MM-dd）
   Future<Set<String>> getSignedDays() async {
     final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList(_keySignedDays);
+    final list = prefs.getStringList(_signedDaysKey);
     return list != null ? Set<String>.from(list) : {};
   }
 
   /// 持久化本地打卡日期集合
   Future<void> setSignedDays(Set<String> days) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList(_keySignedDays, days.toList());
+    await prefs.setStringList(_signedDaysKey, days.toList());
   }
 
   Future<ThemeMode> getThemeMode() async {
@@ -118,6 +131,37 @@ class SettingsRepository {
   Future<void> setAutoReceiveVip(bool autoReceive) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyAutoReceiveVip, autoReceive);
+  }
+
+  /// MV 画中画：按 Home 自动进入画中画是否开启（默认关闭）。
+  Future<bool> getAutoPipEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyAutoPip) ?? false;
+  }
+
+  Future<void> setAutoPipEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyAutoPip, value);
+  }
+
+  /// 逐字歌词时间偏移（ms，内存缓存）。播放页每帧高频读取，
+  /// 用 ValueNotifier 避免重复异步读 SharedPreferences；设置页修改后即时生效。
+  static final ValueNotifier<int> lyricTimeOffsetMs = ValueNotifier<int>(0);
+
+  /// 读取逐字歌词时间偏移（限制 ±10000ms，默认 0）。
+  Future<int> getLyricTimeOffset() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = (prefs.getInt(_keyLyricTimeOffset) ?? 0).clamp(-10000, 10000);
+    lyricTimeOffsetMs.value = v;
+    return v;
+  }
+
+  /// 保存逐字歌词时间偏移（限制 ±10000ms），并同步内存缓存。
+  Future<void> setLyricTimeOffset(int v) async {
+    final clamped = v.clamp(-10000, 10000);
+    lyricTimeOffsetMs.value = clamped;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyLyricTimeOffset, clamped);
   }
 
   /// 读取用户配置的自定义下载目录。
@@ -224,6 +268,53 @@ class SettingsRepository {
     await prefs.setBool('settings_dl_locked', v);
   }
 
+  // ===== 实时歌词推送协议 =====
+  // 三种协议（Lyricon / SuperLyric / LyricInfo）三选一 + 关闭，翻译/罗马音等偏好共用。
+
+  /// 当前选中的推送协议：'none' / 'lyricon' / 'super_lyric' / 'lyric_info'。
+  Future<String> getLyricPushProtocol() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('lyric_push_protocol') ?? 'none';
+  }
+
+  Future<void> setLyricPushProtocol(String v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lyric_push_protocol', v);
+  }
+
+  /// 共用：是否推送翻译（默认 true）。
+  Future<bool> getLyricPushTranslation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('lyric_push_translation') ?? true;
+  }
+
+  Future<void> setLyricPushTranslation(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lyric_push_translation', v);
+  }
+
+  /// 共用：是否推送罗马音（默认 false）。
+  Future<bool> getLyricPushRoma() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('lyric_push_roma') ?? false;
+  }
+
+  Future<void> setLyricPushRoma(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lyric_push_roma', v);
+  }
+
+  /// 共用：同时存在翻译和罗马音时是否优先推送翻译（默认 true）。
+  Future<bool> getLyricPushPreferTranslation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('lyric_push_prefer_translation') ?? true;
+  }
+
+  Future<void> setLyricPushPreferTranslation(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('lyric_push_prefer_translation', v);
+  }
+
   // ===== Lyricon 配置 =====
 
   Future<bool> getLyriconEnabled() async {
@@ -270,6 +361,27 @@ class SettingsRepository {
     await prefs.setBool('lyricon_prefer_translation', v);
   }
 
+  Future<bool> getSuperLyricEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('super_lyric_enabled') ?? false;
+  }
+
+  Future<void> setSuperLyricEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('super_lyric_enabled', v);
+  }
+
+  /// SuperLyric：同时存在翻译和罗马音时是否优先推送翻译（默认 true）。
+  Future<bool> getSuperLyricPreferTranslation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('super_lyric_prefer_translation') ?? true;
+  }
+
+  Future<void> setSuperLyricPreferTranslation(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('super_lyric_prefer_translation', v);
+  }
+
   // ===== 蓝牙歌词配置 =====
   // 通过修改 MediaSession 元数据（title 显示歌词，artist 显示「作者 - 标题」），
   // 在蓝牙 AVRCP 协议下让汽车主机等设备显示当前歌词。
@@ -283,6 +395,62 @@ class SettingsRepository {
   Future<void> setBluetoothLyricEnabled(bool v) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyBluetoothLyricEnabled, v);
+  }
+
+  // ===== LyricInfo 歌词转发 =====
+  // 通过 MediaSession 元数据 extras.lyricInfo 发布整首歌词（LRC/ELRC），
+  // 供 ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取。
+  static const String _keyLyricInfoEnabled = 'settings_lyric_info_enabled';
+
+  Future<bool> getLyricInfoEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyLyricInfoEnabled) ?? false;
+  }
+
+  Future<void> setLyricInfoEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyLyricInfoEnabled, v);
+  }
+
+  // ===== 锁屏歌词 =====
+  // 锁屏时全屏显示逐字歌词（覆盖在系统锁屏上方），默认关闭。
+  static const String _keyLockScreenLyricEnabled = 'settings_lock_screen_lyric_enabled';
+
+  Future<bool> getLockScreenLyricEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyLockScreenLyricEnabled) ?? false;
+  }
+
+  Future<void> setLockScreenLyricEnabled(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyLockScreenLyricEnabled, v);
+  }
+
+  // ===== 锁屏歌词字体 =====
+  // 字号/粗细独立于 App 内歌词设置；默认跟随 AM 歌词偏好（未单独设置过时一致）。
+  static const String _keyLockScreenLyricFontSize = 'settings_lock_screen_lyric_font_size';
+  static const String _keyLockScreenLyricFontWeight = 'settings_lock_screen_lyric_font_weight';
+
+  Future<double> getLockScreenLyricFontSize() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getDouble(_keyLockScreenLyricFontSize) ??
+        LyricPreferences.instance.fontSize;
+  }
+
+  Future<void> setLockScreenLyricFontSize(double v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyLockScreenLyricFontSize, v);
+  }
+
+  Future<int> getLockScreenLyricFontWeight() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keyLockScreenLyricFontWeight) ??
+        LyricPreferences.instance.fontWeightValue;
+  }
+
+  Future<void> setLockScreenLyricFontWeight(int v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyLockScreenLyricFontWeight, v);
   }
 
   // ===== UI 缩放 =====
@@ -419,10 +587,10 @@ class SettingsRepository {
     await prefs.setDouble(_keySpectrumCurveOpacity, value);
   }
 
-  /// 频谱动态取色开关（默认关闭）。
+  /// 频谱动态取色开关（默认开启）。
   Future<bool> getSpectrumDynamicColor() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keySpectrumDynamicColor) ?? false;
+    return prefs.getBool(_keySpectrumDynamicColor) ?? true;
   }
 
   Future<void> setSpectrumDynamicColor(bool value) async {
@@ -470,6 +638,52 @@ class SettingsRepository {
   Future<void> setHiddenTabs(Set<String> hidden) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_keyHiddenTabs, hidden.toList());
+  }
+
+  // ===== 桌面快捷方式配置 =====
+  static const String _keyDesktopShortcutOrder =
+      'settings_desktop_shortcut_order';
+  static const String _keyHiddenDesktopShortcuts =
+      'settings_hidden_desktop_shortcuts';
+
+  /// 读取桌面快捷方式排序（存储为快捷方式 id 列表）。
+  /// 返回 null 表示使用默认顺序。
+  Future<List<String>?> getDesktopShortcutOrder() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getStringList(_keyDesktopShortcutOrder);
+  }
+
+  Future<void> setDesktopShortcutOrder(List<String> order) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyDesktopShortcutOrder, order);
+  }
+
+  /// 读取关闭（隐藏）的桌面快捷方式 id 集合。
+  Future<Set<String>> getHiddenDesktopShortcuts() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList(_keyHiddenDesktopShortcuts);
+    return list != null ? Set<String>.from(list) : {};
+  }
+
+  Future<void> setHiddenDesktopShortcuts(Set<String> hidden) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_keyHiddenDesktopShortcuts, hidden.toList());
+  }
+
+  // ===== 收藏歌单排序 =====
+  static const String _keySortCollectedByLatestClick =
+      'settings_sort_collected_by_latest_click';
+
+  /// 收藏页歌单是否按「最近点击」排序（默认开启）。
+  /// 开启：最近点击的歌单排最前；关闭：按服务端返回顺序排列。
+  Future<bool> getSortCollectedByLatestClick() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keySortCollectedByLatestClick) ?? true;
+  }
+
+  Future<void> setSortCollectedByLatestClick(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keySortCollectedByLatestClick, value);
   }
 
   // ===== Pad 端网格列数 =====

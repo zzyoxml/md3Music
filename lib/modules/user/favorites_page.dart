@@ -2,17 +2,17 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/repositories/collected_playlist_store.dart';
 import '../../data/repositories/favorite_lists_cache.dart';
+import '../../data/repositories/settings_repository.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/md3e_loading_indicator.dart';
-import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
@@ -66,6 +66,10 @@ class _FavoritesPageState extends State<FavoritesPage>
   Map<String, int> _playlistAccessOrder = {};
   static const _accessOrderKey = 'playlist_access_order';
 
+  // 是否按「最近点击」排序（设置页可开关，默认开启）
+  final SettingsRepository _settingsRepository = SettingsRepository();
+  bool _sortByLatestClick = true;
+
   // 管理模式（批量选择）
   bool _isManaging = false;
   final Set<int> _selectedIndices = {};
@@ -89,7 +93,10 @@ class _FavoritesPageState extends State<FavoritesPage>
       // 导致 banner 在 cache 显示后才被清掉，闪烁）。
       await _loadCachedData();
       await _loadAccessOrder();
+      _sortByLatestClick = await _settingsRepository
+          .getSortCollectedByLatestClick();
       if (!mounted) return;
+      setState(() {});
       _loadAllData();
       context.read<PlaylistCollectionNotifier>().addListener(
         _onCollectionChanged,
@@ -212,13 +219,21 @@ class _FavoritesPageState extends State<FavoritesPage>
   int _getAccessTime(KugouPlaylistBrief p) =>
       _playlistAccessOrder[p.globalCollectionId ?? p.id] ?? 0;
 
-  List<KugouPlaylistBrief> get _createdPlaylists =>
-      _playlists.where(_isCreated).toList()
-        ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+  List<KugouPlaylistBrief> get _createdPlaylists {
+    final list = _playlists.where(_isCreated).toList();
+    if (_sortByLatestClick) {
+      list.sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+    }
+    return list;
+  }
 
-  List<KugouPlaylistBrief> get _collectedPlaylists =>
-      _playlists.where((p) => !_isCreated(p)).toList()
-        ..sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+  List<KugouPlaylistBrief> get _collectedPlaylists {
+    final list = _playlists.where((p) => !_isCreated(p)).toList();
+    if (_sortByLatestClick) {
+      list.sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
+    }
+    return list;
+  }
 
   // ==================== 数据加载 ====================
 
@@ -227,6 +242,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     // 重置分页状态
     _playlistPage = 1;
     _hasMorePlaylists = true;
+    // 刷新时重新读取「最近点击排序」开关，使设置改动无需重启即可生效
+    _sortByLatestClick = await _settingsRepository
+        .getSortCollectedByLatestClick();
     setState(() => _isLoadingPlaylists = true);
 
     try {
@@ -666,7 +684,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildPlaylistsTab() {
     if (_isLoadingPlaylists) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (_playlists.isEmpty) {
@@ -700,7 +718,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return MD3ERefreshIndicator(
+    return M3EPullToRefreshIndicator(
       onRefresh: () => _loadPlaylists(forceNoCache: true),
       child: NotificationListener<ScrollNotification>(
         onNotification: (notification) {
@@ -739,7 +757,7 @@ class _FavoritesPageState extends State<FavoritesPage>
             if (_isLoadingMorePlaylists)
               const Padding(
                 padding: EdgeInsets.all(16),
-                child: Center(child: MD3ELoadingIndicator()),
+                child: Center(child: M3ELoadingIndicator()),
               )
             else if (!_hasMorePlaylists &&
                 _playlists.length > _playlistPageSize)
@@ -891,7 +909,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildAlbumsTab() {
     if (_isLoadingAlbums) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (_albums.isEmpty) {
@@ -918,7 +936,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return MD3ERefreshIndicator(
+    return M3EPullToRefreshIndicator(
       onRefresh: () => _loadAlbums(),
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1036,7 +1054,7 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildArtistsTab() {
     if (_isLoadingArtists) {
-      return const Center(child: MD3ELoadingIndicator());
+      return const Center(child: M3ELoadingIndicator());
     }
 
     if (_artists.isEmpty) {
@@ -1063,7 +1081,7 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return MD3ERefreshIndicator(
+    return M3EPullToRefreshIndicator(
       onRefresh: () => _loadArtists(),
       child: ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: 8),
@@ -1195,7 +1213,7 @@ class _GroupSectionState extends State<_GroupSection>
   void initState() {
     super.initState();
     _controller = AnimationController(
-      duration: const Duration(milliseconds: 300),
+      duration: const Duration(milliseconds: 200),
       vsync: this,
       value: widget.expanded ? 1.0 : 0.0,
     );
@@ -1237,11 +1255,11 @@ class _GroupSectionState extends State<_GroupSection>
             child: Row(
               children: [
                 AnimatedRotation(
-                  turns: widget.expanded ? 0.25 : 0.0,
-                  duration: const Duration(milliseconds: 300),
+                  turns: widget.expanded ? 0.5 : 0.0,
+                  duration: const Duration(milliseconds: 200),
                   curve: Curves.easeInOut,
                   child: Icon(
-                    Icons.chevron_right,
+                    Icons.expand_more,
                     color: colorScheme.onSurfaceVariant,
                     size: 20,
                   ),

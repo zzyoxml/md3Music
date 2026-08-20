@@ -3,13 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:m3e_core/m3e_core.dart';
+
 import '../../data/models/album.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/album_card.dart';
-import '../../widgets/md3e_loading_indicator.dart';
-import '../../widgets/md3e_refresh_indicator.dart';
 import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/song_list_item.dart';
@@ -222,10 +222,10 @@ class _DiscoverPageState extends State<DiscoverPage> {
           ),
         ],
       ),
-      body: MD3ERefreshIndicator(
+      body: M3EPullToRefreshIndicator(
         onRefresh: _loadAllData,
         child: _isLoading
-            ? const Center(child: MD3ELoadingIndicator())
+            ? const Center(child: M3ELoadingIndicator())
             : _error != null
             ? _buildError(colorScheme)
             : CustomScrollView(
@@ -458,15 +458,9 @@ class _DiscoverPageState extends State<DiscoverPage> {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      '主题歌单',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    TextButton(onPressed: () {}, child: const Text('查看更多')),
-                  ],
+                child: Text(
+                  '主题歌单',
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
               SizedBox(
@@ -739,7 +733,7 @@ class _PlaylistBrowsePageState extends State<_PlaylistBrowsePage> {
     return Scaffold(
       appBar: AppBar(title: const Text('热门歌单')),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : Selector<KugouProvider, List<KugouPlaylistBrief>>(
               selector: (_, kugou) => kugou.playlistList,
               builder: (context, list, _) {
@@ -798,7 +792,7 @@ class _DailyRecommendDetailPageState extends State<_DailyRecommendDetailPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('每日推荐')),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : Selector<KugouProvider, List<KugouSongDetail>>(
               selector: (_, kugou) => kugou.recommendSongs,
               builder: (context, recommendSongs, _) {
@@ -852,7 +846,7 @@ class _RankDetailPageState extends State<_RankDetailPage> {
     return Scaffold(
       appBar: AppBar(title: Text(widget.rankName)),
       body: _isLoading
-          ? const Center(child: MD3ELoadingIndicator())
+          ? const Center(child: M3ELoadingIndicator())
           : Selector<KugouProvider, List<KugouSongDetail>>(
               selector: (_, kugou) => kugou.rankSongs,
               builder: (context, songs, _) {
@@ -948,7 +942,7 @@ class _CollapsibleSection extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         AnimatedRotation(
-                          turns: isExpanded ? 0 : 0.5,
+                          turns: isExpanded ? 0.5 : 0,
                           duration: const Duration(milliseconds: 200),
                           child: Icon(
                             Icons.expand_more,

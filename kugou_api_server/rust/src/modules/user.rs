@@ -1,17 +1,17 @@
 //! user 系列：cloud / cloud_url / detail / follow / follow_message /
-//! history / listen / playlist / video_collect / video_love / vip_detail
+//! grade_info / history / listen / playlist / video_collect / video_love / vip_detail
 //! 对应 JS module/user*.js
 
 use crate::cache::now_epoch_secs;
 use crate::config::{APP_ID, CLIENT_VER};
 use crate::crypto::{
-    base64_decode, crypto_rsa_encrypt, md5_hex, playlist_aes_decrypt, playlist_aes_encrypt,
-    rsa_encrypt2,
+    base64_decode, crypto_md5_str, crypto_rsa_encrypt, md5_hex, playlist_aes_decrypt,
+    playlist_aes_encrypt, rsa_encrypt2,
 };
 use crate::helper::{sign_cloud_key, sign_params_key};
 use crate::modules::{
-    c_str, cookie_or_param_str, forward, param_or_cookie_str, q_cookie, q_num, q_raw_or, q_str,
-    Ctx,
+    c_str, cookie_or_param_num, cookie_or_param_str, forward, param_or_cookie_str, q_cookie,
+    q_num, q_raw_or, q_str, Ctx,
 };
 use crate::request::{raw_request, BodyData, BodyValue, ModuleResponse, RequestOptions};
 use crate::util::json_stringify;
@@ -652,5 +652,145 @@ pub fn handle_vip_detail(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleR
     forward(
         q, ctx, "GET", "/v1/get_union_vip", Some("https://kugouvip.kugou.com"),
         Some(json!({ "busi_type": "concept" })), None, "android", &[], false, false,
+    )
+}
+
+/// user_grade_info.js → /user/grade/info（听歌等级信息查询与听歌时长上报，v2/lite 协议）。
+///
+/// 本工程为概念版（lite）平台（appid=3116, clientver=11440, lite key），
+/// 只走 v2 协议（userinfo.user.kugou.com/v2/get_grade_info），上报按 diff_sec 累加记账。
+/// - 查询模式（默认）：返回服务器当前累计听歌时长/等级/积分
+/// - 上报模式（同时传 d_sec + diff_sec）：同步本地累计时长
+///
+/// 对齐 JS buildV2：dataMap 经 JSON.stringify 作为 text/plain body，p 为
+/// RSA raw 加密（查询 {clienttime,userid} / 上报 {token,md5}），key 为
+/// MD5(appid + liteKey + clientver + clienttime)。
+pub fn handle_grade_info(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
+    let token = param_or_cookie_str(q, "token", "");
+    // JS `Number(params?.userid || params?.cookie?.userid || 0)`：body 中为数字
+    let userid = param_or_cookie_str(q, "userid", "0")
+        .trim()
+        .parse::<i64>()
+        .unwrap_or(0);
+    let mid = c_str(q, "KUGOU_API_MID");
+    let dfid = param_or_cookie_str(q, "dfid", "-");
+    let uuid = param_or_cookie_str(q, "uuid", "-");
+    let type_ = q_num(q, "type", 1);
+    let clienttime = now_secs();
+
+    // 上报模式：d_sec 与 diff_sec 同时存在（JS `params?.d_sec != null && params?.diff_sec != null`）
+    let is_report = q.get("d_sec").is_some() && q.get("diff_sec").is_some();
+
+    // p：查询 RSA({clienttime,userid})；上报 RSA({token,md5})
+    let p = if is_report {
+        let d_sec = q_num(q, "d_sec", 0);
+        let diff_sec = q_num(q, "diff_sec", 0);
+        let y_type = q_num(q, "y_type", 0);
+        let m_type = q_num(q, "m_type", 0);
+        // md5 = MD5(d_sec + diff_sec + y_type + m_type)
+        let md5 = crypto_md5_str(&format!("{}{}{}{}", d_sec, diff_sec, y_type, m_type));
+        crypto_rsa_encrypt(&json_stringify(&json!({ "token": token, "md5": md5 })), None)
+            .to_uppercase()
+    } else {
+        crypto_rsa_encrypt(
+            &json_stringify(&json!({ "clienttime": clienttime, "userid": userid })),
+            None,
+        )
+        .to_uppercase()
+    };
+
+    // 请求校验 key：MD5(appid + appkey + clientver + clienttime)
+    let key = sign_params_key(&clienttime.to_string(), APP_ID, CLIENT_VER);
+
+    // dataMap：按 JS 插入顺序（serde_json preserve_order），appid/clientver 为字符串，
+    // clienttime/userid/type 与上报数值为数字。
+    let mut dm: Map<String, Value> = Map::new();
+    dm.insert("mid".to_string(), json!(mid));
+    dm.insert("type".to_string(), json!(type_));
+    dm.insert("uuid".to_string(), json!(uuid));
+    dm.insert("userid".to_string(), json!(userid));
+    if is_report {
+        dm.insert("d_sec".to_string(), json!(q_num(q, "d_sec", 0)));
+        dm.insert("diff_sec".to_string(), json!(q_num(q, "diff_sec", 0)));
+        dm.insert("y_type".to_string(), json!(q_num(q, "y_type", 0)));
+        dm.insert("m_type".to_string(), json!(q_num(q, "m_type", 0)));
+    }
+    dm.insert("p".to_string(), json!(p));
+    dm.insert("appid".to_string(), json!(APP_ID));
+    dm.insert("clientver".to_string(), json!(CLIENT_VER));
+    dm.insert("clienttime".to_string(), json!(clienttime));
+    dm.insert("key".to_string(), json!(key));
+
+    // 模拟客户端随机 KG-THash（固定 7 位 hex，与 handle_cloud_upload 一致）
+    let thash = format!("{:07x}", (now_epoch_secs() as u64) & 0x0FFF_FFFF);
+
+    // 先序列化 body（dm 随后被 move 进 body，日志复用该字符串）
+    let body_str = json_stringify(&Value::Object(dm));
+
+    let opts = RequestOptions::new("/v2/get_grade_info")
+        .base_url("http://userinfo.user.kugou.com")
+        .post("/v2/get_grade_info")
+        .params(json!({ "dfid": dfid }))
+        .string_body(body_str.clone())
+        .cookie(q_cookie(q))
+        .header("Content-Type", "text/plain; charset=ISO-8859-1")
+        .header("User-Agent", "Android15-1070-11440-201-0-get_user_grade_info-wifi")
+        .header("KG-THash", &thash)
+        .header("KG-Rec", "1")
+        .header("KG-RC", "1")
+        .clear_default_params(true)
+        .not_signature(true);
+
+    // 调试日志：确认上报/查询请求与上游返回（听歌时长不生效排查用）
+    eprintln!(
+        "[GRADE-DEBUG] is_report={} userid={} mid={} dfid={} body={}",
+        is_report, userid, mid, dfid, body_str,
+    );
+    let res = ctx.send(&opts)?;
+    eprintln!(
+        "[GRADE-DEBUG] status={} body={}",
+        res.status,
+        json_stringify(&res.body.to_json()),
+    );
+    Ok(res)
+}
+
+/// user_purchased_songs.js → /user/purchased/songs（已购单曲列表）。
+pub fn handle_purchased_songs(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
+    let userid = cookie_or_param_num(q, "userid", 0);
+    let token = cookie_or_param_str(q, "token", "");
+    let dm = json!({
+        "appid": APP_ID,
+        "userid": userid,
+        "token": token,
+        "page": q_num(q, "page", 1),
+        "pagesize": q_num(q, "pagesize", 50),
+        "clientver": CLIENT_VER.to_string(),
+        "deleted": 0,
+        "need_audio_info": 1,
+        "area_code": "1",
+    });
+    forward(
+        q, ctx, "POST", "/openapi/copyright/v1/audio/get_goods", None,
+        None, Some(dm), "android", &[], false, false,
+    )
+}
+
+/// user_purchased_albums.js → /user/purchased/albums（已购专辑列表）。
+pub fn handle_purchased_albums(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
+    let userid = cookie_or_param_num(q, "userid", 0);
+    let token = cookie_or_param_str(q, "token", "");
+    let dm = json!({
+        "appid": APP_ID,
+        "userid": userid,
+        "token": token,
+        "page": q_num(q, "page", 1),
+        "pagesize": q_num(q, "pagesize", 15),
+        "clientver": CLIENT_VER.to_string(),
+        "deleted": 0,
+    });
+    forward(
+        q, ctx, "POST", "/openapi/v1/copyright/get_album_goods", None,
+        None, Some(dm), "android", &[], false, false,
     )
 }

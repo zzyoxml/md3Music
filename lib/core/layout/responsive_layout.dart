@@ -127,25 +127,25 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
           Visibility(
             visible: !widget.hideNavigation,
             maintainState: true,
-            // tab 项过多时 NavigationRail 内容超出高度，包一层可滚动容器：
-            // 内容少时 ConstrainedBox(minHeight) 撑满视口保持 groupAlignment 居中，
-            // 内容多时 SingleChildScrollView 支持上下滑动查看全部 tab。
+            // NavigationRail 高度必须等于视口（有界高度）：它内部含 flex 子项，
+            // 若放在 SingleChildScrollView 这样的垂直滚动容器里会得到「无界高度」
+            // 约束，导致 performLayout 抛 「non-zero flex + unbounded height」异常
+            // → 整帧崩溃白屏（桌面宽屏必踩）。所以固定 High 为视口高度，
+            // NavigationRail 内部自带滚动，无需外部 ScrollView 包裹。
             child: LayoutBuilder(
               builder: (context, constraints) {
-                return SingleChildScrollView(
-                  scrollDirection: Axis.vertical,
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      minHeight: constraints.maxHeight,
-                    ),
-                    child: NavigationRail(
-                      selectedIndex: widget.selectedIndex,
-                      onDestinationSelected: widget.onDestinationSelected,
-                      destinations: widget.railDestinations,
-                      leading: widget.floatingActionButton,
-                      groupAlignment: 0.0,
-                      labelType: NavigationRailLabelType.all,
-                    ),
+                return ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: constraints.maxHeight,
+                    maxHeight: constraints.maxHeight,
+                  ),
+                  child: NavigationRail(
+                    selectedIndex: widget.selectedIndex,
+                    onDestinationSelected: widget.onDestinationSelected,
+                    destinations: widget.railDestinations,
+                    leading: widget.floatingActionButton,
+                    groupAlignment: 0.0,
+                    labelType: NavigationRailLabelType.all,
                   ),
                 );
               },

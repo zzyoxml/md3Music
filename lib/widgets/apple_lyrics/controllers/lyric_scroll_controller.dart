@@ -89,6 +89,12 @@ class LyricScrollController {
   bool get isConverged =>
       !isUserScrolling && !isWaitingForAutoReturn && _posYSpring.isSettled;
 
+  /// posY 弹簧是否已静止。
+  ///
+  /// 供省电模式区分"松手后仍在惯性滑行"（弹簧未静止，需保持 120Hz 顺滑）
+  /// 与"惯性已停、仅等待自动回弹倒计时"（弹簧静止，画面不动，可锁 60fps）。
+  bool get isPosYSpringSettled => _posYSpring.isSettled;
+
   /// 当前 posY（用于绘制时偏移）
   double get posY => _posYSpring.position;
 

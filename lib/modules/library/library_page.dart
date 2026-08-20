@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/app_toast.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/local_favorites_provider.dart';
-import '../../widgets/md3e_loading_indicator.dart';
 import '../player/full_player_route.dart';
 import 'albums_page.dart';
 import 'artists_page.dart';
@@ -206,9 +207,7 @@ class _LibraryPageState extends State<LibraryPage>
                   Navigator.pop(ctx);
                   final success = await provider.addScanFolder();
                   if (success && context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('已添加文件夹，点击扫描音乐')),
-                    );
+                    showToast('已添加文件夹，点击扫描音乐', long: true);
                   }
                 },
               ),
@@ -320,11 +319,7 @@ class _LibraryPageState extends State<LibraryPage>
                           if (success) {
                             setModalState(() {});
                             if (context.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('已添加排除文件夹，重新扫描后生效'),
-                                ),
-                              );
+                              showToast('已添加排除文件夹，重新扫描后生效', long: true);
                             }
                           }
                         },
@@ -348,7 +343,7 @@ class _LibraryPageState extends State<LibraryPage>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const MD3ELoadingIndicator(),
+          const M3ELoadingIndicator(),
           const SizedBox(height: 16),
           Text(
             '正在扫描本地音乐...',

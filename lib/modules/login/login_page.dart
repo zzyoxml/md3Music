@@ -2,10 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
-import '../../widgets/md3e_loading_indicator.dart';
+import '../../services/kugou_api/kugou_models.dart';
 
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
@@ -256,21 +257,21 @@ class _LoginPageState extends State<LoginPage> {
                   horizontal: 24,
                   vertical: 8,
                 ),
-                child: SegmentedButton<int>(
-                  segments: const [
-                    ButtonSegment(
-                      value: 0,
+                child: M3EToggleButtonGroup(
+                  actions: const [
+                    M3EToggleButtonGroupAction(
                       icon: Icon(Icons.qr_code),
                       label: Text('扫码'),
                     ),
-                    ButtonSegment(
-                      value: 1,
+                    M3EToggleButtonGroupAction(
                       icon: Icon(Icons.phone_android),
                       label: Text('手机'),
                     ),
                   ],
-                  selected: {_tabIndex},
-                  onSelectionChanged: (s) => _switchTab(s.first),
+                  selectedIndex: _tabIndex,
+                  onSelectedIndexChanged: (index) {
+                    if (index != null) _switchTab(index);
+                  },
                 ),
               ),
               const SizedBox(height: 16),
@@ -331,7 +332,7 @@ class _LoginPageState extends State<LoginPage> {
                           },
                         ),
                       )
-                    : const Center(child: MD3ELoadingIndicator()),
+                    : const Center(child: M3ELoadingIndicator()),
               ),
               const SizedBox(height: 24),
               FilledButton.icon(
@@ -390,7 +391,12 @@ class _LoginPageState extends State<LoginPage> {
           FilledButton.icon(
             onPressed: _loggingIn ? null : _onLoginPhone,
             icon: _loggingIn
-                ? const MD3ELoadingIndicator(size: 16)
+                ? const M3ELoadingIndicator(
+                    constraints: BoxConstraints.tightFor(
+                      width: 16,
+                      height: 16,
+                    ),
+                  )
                 : const Icon(Icons.login),
             label: const Text('登录'),
           ),
@@ -422,7 +428,7 @@ class _LoginPageState extends State<LoginPage> {
                     borderRadius: BorderRadius.circular(12),
                     child: Image.memory(bytes, fit: BoxFit.cover),
                   )
-                : const Center(child: MD3ELoadingIndicator()),
+                : const Center(child: M3ELoadingIndicator()),
           ),
           const SizedBox(height: 16),
           FilledButton.icon(
@@ -493,15 +499,108 @@ class _LoginPageState extends State<LoginPage> {
       _loggingIn = true;
       _statusText = '登录中...';
     });
-    final ok = await kugou.loginByPhone(phone, code);
+    final result = await kugou.loginByPhone(phone, code);
+    if (!mounted) return;
+    setState(() => _loggingIn = false);
+
+    switch (result.status) {
+      case PhoneLoginStatus.success:
+        await _onPhoneLoginSuccess();
+      case PhoneLoginStatus.needChooseAccount:
+        // 该手机号绑定多个账号：弹出账号选择，二次登录
+        await _choosePhoneAccount(phone, code);
+      case PhoneLoginStatus.failed:
+        setState(() => _statusText = kugou.error ?? '登录失败');
+    }
+  }
+
+  /// 手机验证码登录成功后的收尾：同步收藏 → 提示 → 关闭登录页
+  Future<void> _onPhoneLoginSuccess() async {
+    if (!mounted) return;
+    // 登录后重新从云端同步「我喜欢的」，让红心立即生效
+    unawaited(context.read<FavoritesProvider>().loadFavorites());
+    setState(() => _statusText = '登录成功！');
+    await Future.delayed(const Duration(milliseconds: 800));
+    if (mounted) Navigator.of(context).pop();
+  }
+
+  /// 一个手机号绑定多个账号：弹出候选列表，选择后携 userid 二次登录
+  Future<void> _choosePhoneAccount(String phone, String code) async {
+    final kugou = context.read<KugouProvider>();
+    final accounts = kugou.pendingLoginAccounts;
+    if (accounts.isEmpty) {
+      setState(() => _statusText = kugou.error ?? '登录失败');
+      return;
+    }
+
+    final selected = await showModalBottomSheet<KugouLoginAccount>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final cs = Theme.of(ctx).colorScheme;
+        final tt = Theme.of(ctx).textTheme;
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  '该手机号绑定多个账号，请选择要登录的账号',
+                  style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                ),
+              ),
+              Flexible(
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: accounts.length,
+                  separatorBuilder: (_, index) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final a = accounts[index];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: cs.primary.withValues(alpha: 0.15),
+                        child: Text(
+                          (a.nickname != null && a.nickname!.isNotEmpty)
+                              ? a.nickname!.characters.first
+                              : '?',
+                          style: TextStyle(color: cs.onPrimaryContainer),
+                        ),
+                      ),
+                      title: Text(
+                        (a.nickname != null && a.nickname!.isNotEmpty)
+                            ? a.nickname!
+                            : '账号 ${a.userid}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text('ID: ${a.userid}'),
+                      onTap: () => Navigator.pop(ctx, a),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (selected == null || !mounted) return;
+    setState(() {
+      _loggingIn = true;
+      _statusText = '登录中...';
+    });
+    final ok = await kugou.loginByPhoneWithAccount(
+      phone,
+      code,
+      selected.userid,
+    );
     if (!mounted) return;
     setState(() => _loggingIn = false);
     if (ok) {
-      // 登录后重新从云端同步「我喜欢的」，让红心立即生效
-      unawaited(context.read<FavoritesProvider>().loadFavorites());
-      setState(() => _statusText = '登录成功！');
-      await Future.delayed(const Duration(milliseconds: 800));
-      if (mounted) Navigator.of(context).pop();
+      await _onPhoneLoginSuccess();
     } else {
       setState(() => _statusText = kugou.error ?? '登录失败');
     }

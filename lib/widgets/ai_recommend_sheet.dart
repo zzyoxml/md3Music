@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:m3e_core/m3e_core.dart';
 
+import '../core/utils/app_toast.dart';
 import '../data/models/song.dart';
 import '../providers/player_provider.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import '../services/kugou_api/kugou_models.dart';
-import 'md3e_loading_indicator.dart';
 import 'song_list_item.dart';
 
 /// 统一的 AI 推荐歌曲面板入口。
@@ -16,12 +17,7 @@ import 'song_list_item.dart';
 void showAiRecommendSheet(BuildContext context, Song song) {
   final albumAudioId = song.albumAudioId;
   if (albumAudioId == null || albumAudioId.isEmpty) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('该歌曲缺少专辑 ID，无法获取 AI 推荐'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    showToast('该歌曲缺少专辑 ID，无法获取 AI 推荐', long: true);
     return;
   }
   showModalBottomSheet(
@@ -130,7 +126,7 @@ class _AiRecommendSheetState extends State<_AiRecommendSheet> {
           const Divider(height: 1),
           Expanded(
             child: _isLoading
-                ? const Center(child: MD3ELoadingIndicator())
+                ? const Center(child: M3ELoadingIndicator())
                 : _error.isNotEmpty
                     ? Center(
                         child: Column(
