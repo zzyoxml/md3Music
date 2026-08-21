@@ -33,6 +33,12 @@ class KrcParser {
   /// property 字段可选（可能是 0 或其他整数，解析时忽略）
   static final RegExp _wordTagRegex = RegExp(r'<(-?\d+),(-?\d+)(?:,-?\d+)?>');
 
+  /// 通用 KRC 元数据文本头正则：`[字母开头的文本标识符:...]`。
+  ///
+  /// 覆盖 [id:、[ar:、[manualoffset:] 等全部字母型文本头，避免枚举遗漏。
+  /// 以数字开头的行（KRC 时间戳 `[123,456]`）不会命中。
+  static final RegExp _metadataHeaderRegex = RegExp(r'^\[[A-Za-z][A-Za-z0-9]*:');
+
   /// KRC 元数据行前缀列表
   ///
   /// 这些前缀匹配的行将被跳过，不进入歌词列表。
@@ -133,6 +139,8 @@ class KrcParser {
 
   /// 判断是否为元数据行
   static bool _isMetadata(String line) {
+    // 通用字母文本头（覆盖 [id:/[ar:/[manualoffset: 等全部字母头，防枚举遗漏）
+    if (_metadataHeaderRegex.hasMatch(line)) return true;
     for (final prefix in _metadataPrefixes) {
       if (line.startsWith(prefix)) return true;
     }

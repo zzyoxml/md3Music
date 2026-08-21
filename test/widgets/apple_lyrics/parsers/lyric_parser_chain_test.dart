@@ -37,6 +37,29 @@ void main() {
       expect(result.first.words, hasLength(4));
     });
 
+    test('1b. KRC 检测：含 manualoffset 元数据头也应识别为 KRC 并保留逐字', () {
+      // 部分歌曲的 KRC 带 [manualoffset:0] 头，旧实现枚举遗漏导致误判 plaintext，
+      // 逐字信息全丢。回归用例（参照真实样本 Light of Love）。
+      const input = '''[id:\$00000000]
+[ar:ARForest]
+[ti:Light of Love]
+[manualoffset:0]
+[total:151000]
+[12500,4200]<0,300,0>運<300,400,0>命<700,500,0>の<1200,600,0>華
+[16700,3800]<0,350,0>泣
+''';
+      // 自动检测应识别为 KRC（而非 plaintext）
+      expect(LyricParserChain.detectFormat(input), LyricFormat.krc);
+      final result = LyricParserChain.parse(input);
+
+      expect(result, isNotEmpty);
+      expect(result.first.hasWordTiming, isTrue);
+      expect(result.first.text, '運命の華');
+      expect(result.first.words, hasLength(4));
+      // [manualoffset:0] 头本身不应进入歌词列表
+      expect(result.any((l) => l.text.contains('manualoffset')), isFalse);
+    });
+
     test('2. LRC 自动检测：返回非空列表且 hasWordTiming=false', () {
       const input = '''[ti:Sample Song]
 [ar:Artist]

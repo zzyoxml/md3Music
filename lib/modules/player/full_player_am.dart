@@ -704,6 +704,74 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     return !_parsedLyrics.any((line) => line.hasWordTiming);
   }
 
+  /// 构建 AM 播放器的歌词区内容，统一处理三种状态：
+  /// 加载中（loading）→ 无歌词（"暂无歌词"提示）→ 正常（AppleLyricsView）。
+  ///
+  /// [applyOffset] 为 true 时（对唱/卡拉OK Tab）应用在线歌曲的逐字时间偏移；
+  /// 其余布局传 false 用原始播放位置。
+  Widget _buildAmLyricsContent(
+    PlayerProvider playerProvider,
+    dynamic currentSong, {
+    required bool applyOffset,
+    required bool lyricDoubleTap,
+  }) {
+    // 歌词加载中
+    if (_isLoadingLyrics) {
+      // AM 风格：歌词 loading 改为白色，与深色背景协调
+      return const Center(child: M3ELoadingIndicator(color: Colors.white));
+    }
+    // 取词失败/酷狗无词（_parsedLyrics 为空）：给出"暂无歌词"提示，避免空白
+    // 样式与评论区"暂无评论"空状态一致：同字重（titleMedium w500）与同亮度（白 70%）
+    if (_parsedLyrics.isEmpty) {
+      final emptyColor = Colors.white70; // 与评论区深色背景的 secondaryTextColor 一致
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.lyrics_outlined, size: 48, color: emptyColor),
+            const SizedBox(height: 12),
+            Text(
+              '暂无歌词',
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(color: emptyColor),
+            ),
+          ],
+        ),
+      );
+    }
+    // P0: ListenableBuilder 同时订阅 positionNotifier（高频 200ms）与 playerProvider
+    //（播放/暂停切换等低频通知），保证暂停后 isPlaying 更新、Ticker 收敛后停止。
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        playerProvider.positionNotifier,
+        playerProvider,
+      ]),
+      builder: (context, _) {
+        // 逐字歌词时间偏移（仅在线音乐且 applyOffset 时生效）：渲染位置 = 播放位置 - 偏移
+        final int offset;
+        if (applyOffset && currentSong != null && currentSong.isOnline) {
+          offset = SettingsRepository.lyricTimeOffsetMs.value;
+        } else {
+          offset = 0;
+        }
+        final rawMs =
+            playerProvider.positionNotifier.value.inMilliseconds;
+        return AppleLyricsView(
+          lines: _parsedLyrics,
+          currentTimeMs: applyOffset ? (rawMs > offset ? rawMs - offset : 0) : rawMs,
+          isPlaying: playerProvider.isPlaying,
+          forceDarkBackground: true,
+          // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+          enableInterludeDots: !_isLocalLrcLyricWithoutWordTiming(currentSong),
+          doubleTapToJump: lyricDoubleTap,
+          accentColor: _lyricAccentColor,
+          onSeek: (ms) => playerProvider.seek(Duration(milliseconds: ms)),
+        );
+      },
+    );
+  }
+
   /// 构建横屏布局的封面内容：style 0/1 用 SpectrumArtwork（白色），style 2 用原封面
   Widget _buildLandscapeArtworkContent(
     PlayerProvider playerProvider,
@@ -1328,48 +1396,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   // RepaintBoundary 隔离 AppleLyricsView 每帧 setState 的重绘范围，
                   // 避免父级 TabBarView/Column 被牵连重建
                   child: RepaintBoundary(
-                    child: _isLoadingLyrics
-                        // AM 风格：歌词 loading 改为白色，与深色背景协调
-                        ? const Center(
-                            child: M3ELoadingIndicator(color: Colors.white),
-                          )
-                        // P0: 用 ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
-                        // 与 playerProvider（播放/暂停切换等低频通知）。
-                        // 修复：暂停后 positionStream 只发相同值 → ValueNotifier 不通知 →
-                        // AppleLyricsView 的 isPlaying 停留旧值 → 内部 Ticker 永不收敛停止 → 120fps。
-                        // 监听 provider 后，暂停瞬间 notifyListeners → 重建 → isPlaying 更新。
-                        : ListenableBuilder(
-                            listenable: Listenable.merge([
-                              playerProvider.positionNotifier,
-                              playerProvider,
-                            ]),
-                            builder: (context, _) {
-                              // 逐字歌词时间偏移（仅在线音乐生效）：渲染位置 = 播放位置 - 偏移
-                              final offset = (currentSong != null && currentSong.isOnline)
-                                  ? SettingsRepository.lyricTimeOffsetMs.value
-                                  : 0;
-                              final rawMs = playerProvider
-                                  .positionNotifier
-                                  .value
-                                  .inMilliseconds;
-                              return AppleLyricsView(
-                                lines: _parsedLyrics,
-                                currentTimeMs: rawMs > offset ? rawMs - offset : 0,
-                                isPlaying: playerProvider.isPlaying,
-                                forceDarkBackground: true,
-                                // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                                enableInterludeDots:
-                                    !_isLocalLrcLyricWithoutWordTiming(
-                                      currentSong,
-                                    ),
-                                doubleTapToJump: lyricDoubleTap,
-                                accentColor: _lyricAccentColor,
-                                onSeek: (ms) => playerProvider.seek(
-                                  Duration(milliseconds: ms),
-                                ),
-                              );
-                            },
-                          ),
+                    child: _buildAmLyricsContent(
+                      playerProvider,
+                      currentSong,
+                      applyOffset: true,
+                      lyricDoubleTap: lyricDoubleTap,
+                    ),
                   ),
                 ),
                 // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
@@ -1579,43 +1611,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 },
                               ),
                             ),
-                            _isLoadingLyrics
-                                // AM 风格：歌词 loading 改为白色，与深色背景协调
-                                ? const Center(
-                                    child: M3ELoadingIndicator(
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : RepaintBoundary(
-                                    // P0: ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
-                                    // 与 playerProvider（播放/暂停切换低频通知），保证暂停时
-                                    // AppleLyricsView 的 isPlaying 更新、Ticker 收敛后停止
-                                    child: ListenableBuilder(
-                                      listenable: Listenable.merge([
-                                        playerProvider.positionNotifier,
-                                        playerProvider,
-                                      ]),
-                                      builder: (context, _) => AppleLyricsView(
-                                        lines: _parsedLyrics,
-                                        currentTimeMs: playerProvider
-                                            .positionNotifier
-                                            .value
-                                            .inMilliseconds,
-                                        isPlaying: playerProvider.isPlaying,
-                                        forceDarkBackground: true,
-                                        // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                                        enableInterludeDots:
-                                            !_isLocalLrcLyricWithoutWordTiming(
-                                              currentSong,
-                                            ),
-                                        doubleTapToJump: lyricDoubleTap,
-                                        accentColor: _lyricAccentColor,
-                                        onSeek: (ms) => playerProvider.seek(
-                                          Duration(milliseconds: ms),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
+                            RepaintBoundary(
+                              child: _buildAmLyricsContent(
+                                playerProvider,
+                                currentSong,
+                                applyOffset: false,
+                                lyricDoubleTap: lyricDoubleTap,
+                              ),
+                            ),
                             // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
                             Selector<PlayerProvider, String?>(
                               selector: (_, p) => p.currentSong?.id,
@@ -1837,43 +1840,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 },
                               ),
                             ),
-                            _isLoadingLyrics
-                                // AM 风格：歌词 loading 改为白色，与深色背景协调
-                                ? const Center(
-                                    child: M3ELoadingIndicator(
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : RepaintBoundary(
-                                    // P0: ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
-                                    // 与 playerProvider（播放/暂停切换低频通知），保证暂停时
-                                    // AppleLyricsView 的 isPlaying 更新、Ticker 收敛后停止
-                                    child: ListenableBuilder(
-                                      listenable: Listenable.merge([
-                                        playerProvider.positionNotifier,
-                                        playerProvider,
-                                      ]),
-                                      builder: (context, _) => AppleLyricsView(
-                                        lines: _parsedLyrics,
-                                        currentTimeMs: playerProvider
-                                            .positionNotifier
-                                            .value
-                                            .inMilliseconds,
-                                        isPlaying: playerProvider.isPlaying,
-                                        forceDarkBackground: true,
-                                        // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                                        enableInterludeDots:
-                                            !_isLocalLrcLyricWithoutWordTiming(
-                                              currentSong,
-                                            ),
-                                        doubleTapToJump: lyricDoubleTap,
-                                        accentColor: _lyricAccentColor,
-                                        onSeek: (ms) => playerProvider.seek(
-                                          Duration(milliseconds: ms),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
+                            RepaintBoundary(
+                              child: _buildAmLyricsContent(
+                                playerProvider,
+                                currentSong,
+                                applyOffset: false,
+                                lyricDoubleTap: lyricDoubleTap,
+                              ),
+                            ),
                             // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
                             Selector<PlayerProvider, String?>(
                               selector: (_, p) => p.currentSong?.id,
@@ -2543,104 +2517,172 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   ),
                 ),
               ),
-              // 2. 播放列表 — 切换到播放列表面板（长按进 Zen 模式）
+              // 2-5. 页面切换组：播放列表/封面/歌词/评论。
+              // 底部「高亮球」随 _tabController 动画值在 4 个按钮间平滑移动，
+              // 点击切换（animateTo）与 TabBarView 滑动都驱动该动画，因而同步跟随。
               Expanded(
-                child: InkWell(
-                  onTap: () {
-                    if (_tabController.index != 0) {
-                      _tabController.animateTo(0);
-                    }
+                flex: 4,
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final switchWidth = constraints.maxWidth;
+                    final btnW = switchWidth / 4;
+                    const capsuleSize = 34.0;
+                    return Stack(
+                      children: [
+                        AnimatedBuilder(
+                          // 必须监听 animation 动画对象本身，而不是 TabController：
+                          // _changeIndex 只在动画开始/结束时 notify，动画期间的每帧进度
+                          // （点击 animateTo 的 Curves.ease 与手指拖拽的 offset）只在新
+                          // value 上体现，监听它才能在拖拽/切换时平滑连贯地跟随滑动。
+                          animation: _tabController.animation ??
+                              const AlwaysStoppedAnimation<double>(0),
+                          builder: (context, _) {
+                            final anim = (_tabController.animation?.value ??
+                                    _tabController.index.toDouble())
+                                .clamp(0.0, 3.0);
+                            return Positioned(
+                              left: anim * btnW + (btnW - capsuleSize) / 2,
+                              top: (48 - capsuleSize) / 2,
+                              width: capsuleSize,
+                              height: capsuleSize,
+                              child: IgnorePointer(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.white.withValues(
+                                      alpha: 0.25,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                        Row(
+                          children: [
+                            // 播放列表 — 切换到播放列表面板（长按进 Zen 模式）
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  if (_tabController.index != 0) {
+                                    _tabController.animateTo(0);
+                                  }
+                                },
+                                onLongPress: () {
+                                  HapticFeedback.lightImpact();
+                                  _enterZenMode();
+                                },
+                                child: Center(
+                                  child: Icon(
+                                    Icons.queue_music,
+                                    size: 22,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  if (_tabController.index != 1) {
+                                    _tabController.animateTo(1);
+                                  }
+                                },
+                                onLongPress: song != null && isOnline
+                                    ? () {
+                                        HapticFeedback.lightImpact();
+                                        _downloadSong(song);
+                                      }
+                                    : null,
+                                child: Center(
+                                  child: Icon(
+                                    Icons.album,
+                                    size: 22,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // 歌词 — 短按跳转到歌词 tab，长按开关桌面歌词
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  if (_tabController.index != 2) {
+                                    _tabController.animateTo(2);
+                                  }
+                                },
+                                onLongPress: () async {
+                                  HapticFeedback.lightImpact();
+                                  await DesktopLyricService.instance.toggle();
+                                  if (mounted) {
+                                    // 同步通知栏"桌面歌词"按钮状态
+                                    final player =
+                                        context.read<PlayerProvider>();
+                                    final curSong = player.currentSong;
+                                    // 收藏状态需实时查询，避免暂停时显示为未收藏
+                                    bool isFavorited = false;
+                                    if (curSong != null) {
+                                      try {
+                                        isFavorited = context
+                                            .read<FavoritesProvider>()
+                                            .isFavorite(curSong.id);
+                                      } catch (_) {}
+                                    }
+                                    await MediaNotificationService
+                                        .updateNotification(
+                                          // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
+                                          title: curSong?.displayName ?? '',
+                                          artist: curSong?.artist ?? '',
+                                          artUrl: curSong?.artworkUri,
+                                          isPlaying: player.isPlaying,
+                                          position: player.position,
+                                          duration:
+                                              player.duration ?? Duration.zero,
+                                          desktopLyricEnabled: DesktopLyricService
+                                              .instance.enabled,
+                                          isFavorited: isFavorited,
+                                        );
+                                  }
+                                },
+                                child: Center(
+                                  child: Icon(
+                                    // 桌面歌词开启时用实心 icon + 纯白，与 mini_player 一致
+                                    DesktopLyricService.instance.enabled
+                                        ? Icons.lyrics
+                                        : Icons.lyrics_outlined,
+                                    size: 22,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // 评论 — 跳转到评论 tab
+                            Expanded(
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onTap: () {
+                                  if (_tabController.index != 3) {
+                                    _tabController.animateTo(3);
+                                  }
+                                },
+                                child: Center(
+                                  child: Icon(
+                                    Icons.comment_outlined,
+                                    size: 22,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
                   },
-                  onLongPress: _enterZenMode,
-                  child: Center(
-                    child: Icon(
-                      Icons.queue_music,
-                      size: 22,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-              // 3. 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
-              Expanded(
-                child: InkWell(
-                  onTap: () {
-                    if (_tabController.index != 1) {
-                      _tabController.animateTo(1);
-                    }
-                  },
-                  onLongPress: song != null && isOnline
-                      ? () => _downloadSong(song)
-                      : null,
-                  child: Center(
-                    child: Icon(Icons.album, size: 22, color: Colors.white),
-                  ),
-                ),
-              ),
-              // 4. 歌词 — 短按跳转到歌词 tab，长按开关桌面歌词
-              Expanded(
-                child: InkWell(
-                  onTap: () {
-                    if (_tabController.index != 2) {
-                      _tabController.animateTo(2);
-                    }
-                  },
-                  onLongPress: () async {
-                    await DesktopLyricService.instance.toggle();
-                    if (mounted) {
-                      // 同步通知栏"桌面歌词"按钮状态
-                      final player = context.read<PlayerProvider>();
-                      final curSong = player.currentSong;
-                      // 收藏状态需实时查询，避免暂停时显示为未收藏
-                      bool isFavorited = false;
-                      if (curSong != null) {
-                        try {
-                          isFavorited = context
-                              .read<FavoritesProvider>()
-                              .isFavorite(curSong.id);
-                        } catch (_) {}
-                      }
-                      await MediaNotificationService.updateNotification(
-                        // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
-                        title: curSong?.displayName ?? '',
-                        artist: curSong?.artist ?? '',
-                        artUrl: curSong?.artworkUri,
-                        isPlaying: player.isPlaying,
-                        position: player.position,
-                        duration: player.duration ?? Duration.zero,
-                        desktopLyricEnabled:
-                            DesktopLyricService.instance.enabled,
-                        isFavorited: isFavorited,
-                      );
-                    }
-                  },
-                  child: Center(
-                    child: Icon(
-                      // 桌面歌词开启时用实心 icon + 纯白，与 mini_player 一致
-                      DesktopLyricService.instance.enabled
-                          ? Icons.lyrics
-                          : Icons.lyrics_outlined,
-                      size: 22,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-              // 5. 评论 — 跳转到评论 tab
-              Expanded(
-                child: InkWell(
-                  onTap: () {
-                    if (_tabController.index != 3) {
-                      _tabController.animateTo(3);
-                    }
-                  },
-                  child: Center(
-                    child: Icon(
-                      Icons.comment_outlined,
-                      size: 22,
-                      color: Colors.white,
-                    ),
-                  ),
                 ),
               ),
               // 6. 收藏

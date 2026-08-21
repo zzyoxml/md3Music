@@ -88,6 +88,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
             },
             child: CustomScrollView(
               controller: _scrollController,
+              // 内容不满屏时也允许下拉触发刷新
+              physics: const AlwaysScrollableScrollPhysics(),
               slivers: [
                 _buildUserHeader(cs, tt, kugou),
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),
@@ -686,82 +688,87 @@ class _UserCenterPageState extends State<UserCenterPage> {
     return SliverToBoxAdapter(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 16),
-        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(16),
-          // 实心矩形包裹：填充主题容器色，而非仅单一描边
+          // 实心纯色圆角矩形：不描边
           color: cs.surfaceContainer,
-          border: Border.all(color: cs.outlineVariant),
         ),
-        // IntrinsicHeight：让左侧入口与右侧两行会员等高
-        child: IntrinsicHeight(
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildCalendarEntry(cs, tt),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
+        clipBehavior: Clip.antiAlias,
+        child: Material(
+          color: Colors.transparent,
+          // 整卡可点击进入签到日历页
+          child: InkWell(
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const SignInCalendarPage()),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              // IntrinsicHeight：让左侧入口与右侧两行会员等高
+              child: IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _buildVipRow(
-                      cs: cs,
-                      tt: tt,
-                      active: tvip,
-                      title: '畅听会员',
-                      icon: Icons.headphones,
-                      iconBg: cs.secondaryContainer,
-                      iconFg: cs.onSecondaryContainer,
-                    ),
-                    const SizedBox(height: 8),
-                    _buildVipRow(
-                      cs: cs,
-                      tt: tt,
-                      active: svip,
-                      title: '概念会员',
-                      icon: Icons.workspace_premium,
-                      iconBg: cs.primaryContainer,
-                      iconFg: cs.onPrimaryContainer,
+                    _buildCalendarEntry(cs, tt),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildVipRow(
+                            cs: cs,
+                            tt: tt,
+                            active: tvip,
+                            title: '畅听会员',
+                            icon: Icons.headphones,
+                            iconBg: cs.secondaryContainer,
+                            iconFg: cs.onSecondaryContainer,
+                          ),
+                          const SizedBox(height: 8),
+                          _buildVipRow(
+                            cs: cs,
+                            tt: tt,
+                            active: svip,
+                            title: '概念会员',
+                            icon: Icons.workspace_premium,
+                            iconBg: cs.primaryContainer,
+                            iconFg: cs.onPrimaryContainer,
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
               ),
-            ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  /// 签到日历入口：点击进入二级页面签到 / 查看本月打卡情况。
+  /// 签到日历展示位：仅做视觉提示，点击由整张会员卡片统一处理。
   Widget _buildCalendarEntry(ColorScheme cs, TextTheme tt) {
-    return Material(
-      color: cs.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(12),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => const SignInCalendarPage()),
-        ),
-        child: SizedBox(
-          width: 76,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.event_available, color: cs.primary),
-              const SizedBox(height: 4),
-              Text(
-                '签到日历',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: tt.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: cs.onSurface,
-                ),
-              ),
-            ],
+    return Container(
+      width: 76,
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.event_available, color: cs.primary),
+          const SizedBox(height: 4),
+          Text(
+            '签到日历',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: tt.labelMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: cs.onSurface,
+            ),
           ),
-        ),
+        ],
       ),
     );
   }

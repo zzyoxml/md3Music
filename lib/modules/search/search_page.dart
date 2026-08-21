@@ -154,6 +154,9 @@ class _SearchPageState extends State<SearchPage>
                   SliverAppBar(
                     floating: true,
                     pinned: true,
+                    // 不透明背景，避免滚动时透出下方搜索结果列表
+                    backgroundColor: colorScheme.surface,
+                    surfaceTintColor: Colors.transparent,
                     title: SizedBox(
                       height: 40,
                       child: TextField(

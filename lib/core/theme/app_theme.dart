@@ -106,12 +106,22 @@ class AppTheme {
   /// - null：使用系统字体优先（让 Flutter 走系统字体链，SimHei 仅作 fallback）
   /// - 'SimHei'：使用内置打包的 SimHei
   /// - 'UserCustomFont'：使用用户通过 SAF 选择并加载的自定义字体
-  static ThemeData lightThemeFromSeed(Color seedColor, {String? fontFamily}) {
+  static ThemeData lightThemeFromSeed(
+    Color seedColor, {
+    String? fontFamily,
+    NavigationDestinationLabelBehavior labelBehavior =
+        NavigationDestinationLabelBehavior.alwaysHide,
+  }) {
     final colorScheme = ColorScheme.fromSeed(
       seedColor: seedColor,
       brightness: Brightness.light,
     );
-    return _buildTheme(colorScheme, Brightness.light, fontFamily: fontFamily);
+    return _buildTheme(
+      colorScheme,
+      Brightness.light,
+      fontFamily: fontFamily,
+      labelBehavior: labelBehavior,
+    );
   }
 
   /// 根据传入的种子色构建深色主题。
@@ -126,6 +136,8 @@ class AppTheme {
     Color seedColor, {
     bool useOledBlack = false,
     String? fontFamily,
+    NavigationDestinationLabelBehavior labelBehavior =
+        NavigationDestinationLabelBehavior.alwaysHide,
   }) {
     var colorScheme = ColorScheme.fromSeed(
       seedColor: seedColor,
@@ -144,13 +156,20 @@ class AppTheme {
         // inverseSurface 保持不变，确保 Snackbar 反色正常
       );
     }
-    return _buildTheme(colorScheme, Brightness.dark, fontFamily: fontFamily);
+    return _buildTheme(
+      colorScheme,
+      Brightness.dark,
+      fontFamily: fontFamily,
+      labelBehavior: labelBehavior,
+    );
   }
 
   static ThemeData _buildTheme(
     ColorScheme colorScheme,
     Brightness brightness, {
     String? fontFamily,
+    NavigationDestinationLabelBehavior labelBehavior =
+        NavigationDestinationLabelBehavior.alwaysHide,
   }) {
     final isLight = brightness == Brightness.light;
 
@@ -212,9 +231,9 @@ class AppTheme {
         indicatorColor: Colors.transparent,
         surfaceTintColor: colorScheme.surfaceTint,
         elevation: 0,
-        // 底栏不显示文字：只保留图标 + _AnimatedTabIcon 的胶囊指示器。
+        // 底栏文字行为：由用户设置控制（始终显示 / 仅当前页 / 始终不显示）。
         // NavigationDestination.label 仍需传（API 必填），作为无障碍朗读文本。
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
+        labelBehavior: labelBehavior,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return IconThemeData(color: colorScheme.onSecondaryContainer);

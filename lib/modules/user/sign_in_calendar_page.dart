@@ -6,6 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../core/utils/app_toast.dart';
 import '../../providers/kugou_provider.dart';
+import 'vip_status.dart';
 
 /// 签到日历二级页面：从「我的」页面会员卡片左侧入口进入。
 ///
@@ -130,6 +131,8 @@ class _SignInCalendarPageState extends State<SignInCalendarPage> {
               ),
               const SizedBox(height: 20),
               _buildStatFooter(cs, tt, receivedDays.length),
+              const SizedBox(height: 12),
+              _buildVipExpirySection(cs, tt, kugou),
             ],
           ),
         ),
@@ -506,6 +509,86 @@ class _SignInCalendarPageState extends State<SignInCalendarPage> {
             ),
         ],
       ),
+    );
+  }
+
+  /// 日历下方的会员到期区块：列出畅听/概念会员的具体到期时间。
+  Widget _buildVipExpirySection(
+    ColorScheme cs,
+    TextTheme tt,
+    KugouProvider kugou,
+  ) {
+    final busiList = kugou.vipInfo?.busiVipList;
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '会员到期时间',
+            style: tt.labelMedium?.copyWith(color: cs.onSurfaceVariant),
+          ),
+          const SizedBox(height: 12),
+          _buildExpiryRow(
+            tt,
+            cs,
+            '畅听会员',
+            findActiveBusiVip(busiList, 'tvip'),
+          ),
+          const SizedBox(height: 8),
+          _buildExpiryRow(
+            tt,
+            cs,
+            '概念会员',
+            findActiveBusiVip(busiList, 'svip'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 单行会员到期信息：相对时间优先，右侧展示具体到期日期；未开通显示「未开通」。
+  Widget _buildExpiryRow(
+    TextTheme tt,
+    ColorScheme cs,
+    String title,
+    Map<String, dynamic>? active,
+  ) {
+    final endTime = active?['vip_end_time']?.toString();
+    final relText = active != null ? formatVipExpireText(endTime) : null;
+    final absText = active != null ? formatVipDateTime(endTime) : null;
+    final dimmed = active == null;
+    final status = dimmed
+        ? '未开通'
+        : (relText != null ? '$relText · $absText' : '$absText');
+    return Row(
+      children: [
+        Text(
+          title,
+          style: tt.labelLarge?.copyWith(
+            fontWeight: FontWeight.w600,
+            color: dimmed ? cs.onSurfaceVariant : null,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            status,
+            textAlign: TextAlign.right,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: tt.bodySmall?.copyWith(
+              color: dimmed
+                  ? cs.onSurfaceVariant.withValues(alpha: 0.7)
+                  : cs.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

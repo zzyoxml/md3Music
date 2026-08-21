@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 import '../../providers/tab_config_provider.dart';
 
 /// LaunchPad 导航页：以"导航网站"的形式列出所有可用 Tab（除"我的"和自身），
-/// 按「已固定 / 未固定」两个分区展示（固定 = 出现在底部导航栏）。
+/// 按「未固定 / 已固定」两个分区展示（固定 = 出现在底部导航栏，置底显示）。
 ///
 /// 交互规则：
 /// - 点击可见 tab：直接切换主 tab；
@@ -132,13 +132,14 @@ class _LaunchPadPageState extends State<LaunchPadPage> {
           ? _buildEditList(tabConfig, tabs)
           : CustomScrollView(
               slivers: [
-                if (pinned.isNotEmpty) ...[
-                  _buildSectionHeader('已固定', pinned.length),
-                  _buildGrid(tabConfig, pinned, columns),
-                ],
+                // 未固定在前，已固定分区置底
                 if (unpinned.isNotEmpty) ...[
                   _buildSectionHeader('未固定', unpinned.length),
                   _buildGrid(tabConfig, unpinned, columns),
+                ],
+                if (pinned.isNotEmpty) ...[
+                  _buildSectionHeader('已固定', pinned.length),
+                  _buildGrid(tabConfig, pinned, columns),
                 ],
                 const SliverToBoxAdapter(child: SizedBox(height: 88)),
               ],

@@ -43,31 +43,41 @@ class AlbumCard extends StatelessWidget {
   }
 
   Widget _buildInfo(ColorScheme colorScheme, TextTheme textTheme) {
-    return Padding(
+    final hasArtist = album.artist.isNotEmpty;
+    return Container(
+      // 文字信息块在卡片下方区域内垂直居中（minHeight 兜住单行标题）
+      constraints: const BoxConstraints(minHeight: 40),
+      width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            album.name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.w500,
-              color: colorScheme.onSurface,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              album.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: textTheme.labelMedium?.copyWith(
+                fontWeight: FontWeight.w500,
+                color: colorScheme.onSurface,
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            album.artist,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: textTheme.labelSmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
+            // 无副标题（如热门歌单 artist 为空）时不渲染空行，避免文字下方留大片空白
+            if (hasArtist) ...[
+              const SizedBox(height: 2),
+              Text(
+                album.artist,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: textTheme.labelSmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
