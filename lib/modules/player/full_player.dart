@@ -889,6 +889,12 @@ class _FullPlayerState extends State<FullPlayer>
         await kugouProvider.getLyric(lyricHash, songName: searchName);
         if (mounted) {
           final lyric = kugouProvider.lyric;
+          debugPrint(
+            '[LyricDebug] full_player _fetchLyrics songId=$songId '
+            'krcLen=${lyric?.displayKrcLyric?.length} '
+            'lrcLen=${lyric?.displayLrcLyric?.length} '
+            'displayLen=${lyric?.displayLyric.length}',
+          );
           lyricText =
               lyric?.displayKrcLyric ??
               lyric?.displayLrcLyric ??

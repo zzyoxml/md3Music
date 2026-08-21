@@ -142,7 +142,14 @@ class LyricsViewState extends State<LyricsView> {
   void _parseLyrics() {
     _layoutDirty = true;
     _parsedLyrics = [];
-    if (widget.lyrics.isEmpty) return;
+    if (widget.lyrics.isEmpty) {
+      debugPrint('[LyricDebug] LyricsView.parse raw EMPTY');
+      return;
+    }
+    debugPrint(
+      '[LyricDebug] LyricsView.parse rawLen=${widget.lyrics.length} '
+      'firstLine=${widget.lyrics.split('\n').first.length > 80 ? widget.lyrics.split('\n').first.substring(0, 80) : widget.lyrics.split('\n').first}',
+    );
 
     final lines = widget.lyrics.split('\n');
     // LRC 格式: [mm:ss.fff]text
@@ -259,6 +266,10 @@ class LyricsViewState extends State<LyricsView> {
     }
 
     _parsedLyrics.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    debugPrint(
+      '[LyricDebug] LyricsView.parse done parsed=${_parsedLyrics.length} '
+      'of rawLines=${widget.lyrics.split('\n').length}',
+    );
   }
 
   void _updateCurrentLine() {

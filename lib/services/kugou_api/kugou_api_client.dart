@@ -1385,52 +1385,73 @@ class KugouApiClient {
 
     Map<String, dynamic>? searchResult;
 
-    // 本地歌曲 hash 为空时，跳过 hash 搜索，直接用关键词搜索
+    // 1) 有 hash 时先精确搜索（在线歌曲通常直接命中官方歌词）
     if (hash.isNotEmpty) {
-      searchResult = await _get(
+      final byHash = await _get(
         KugouEndpoints.searchLyric,
         queryParameters: {'hash': hash.toLowerCase()},
       );
+      if (byHash != null && _hasCandidates(byHash)) {
+        searchResult = byHash;
+      } else {
+        debugPrint(
+          '[LyricDebug] getLyric hash miss hash=$hash songName=$songName',
+        );
+      }
     }
 
-    if (searchResult != null &&
-        !_hasCandidates(searchResult) &&
+    // 2) hash 搜索未命中且是失效 hash → 歌曲搜索找回正确 hash 再 hash 搜索。
+    // 优先走此路径是因为 keyword 歌词搜索可能命中无翻译版本，而用正确 hash
+    // 搜索通常命中官方完整版（含翻译），与官方 App 行为一致。
+    if ((searchResult == null || !_hasCandidates(searchResult)) &&
+        hash.isNotEmpty &&
         songName != null &&
         songName.isNotEmpty) {
-      // 关键词搜索：hash 为空时不传 hash 参数，避免 API 干扰
-      final params = <String, dynamic>{'keywords': songName};
-      if (hash.isNotEmpty) {
-        params['hash'] = hash.toLowerCase();
-      }
-      searchResult = await _get(
-        KugouEndpoints.searchLyric,
-        queryParameters: params,
+      debugPrint(
+        '[LyricDebug] getLyric recover via song search songName=$songName',
       );
-    } else if (searchResult == null &&
-        hash.isEmpty &&
-        songName != null &&
-        songName.isNotEmpty) {
-      // hash 为空且第一次搜索被跳过时，用关键词搜索
+      final recovered = await _recoverLyricIdBySongSearch(songName);
+      if (recovered != null) {
+        lyricId = recovered.$1;
+        lyricAccesskey = recovered.$2;
+      }
+    }
+
+    // 3) 仍无结果（本地歌曲 hash 为空等）→ 关键词歌词搜索兜底。
+    // 只传 keywords，不携带原 hash：hash 在歌词库匹配失败时，酷狗会优先按
+    // 无效 hash 过滤导致关键词搜索同样返回空（部分歌曲歌词空白）。
+    if (lyricId == null && songName != null && songName.isNotEmpty) {
+      debugPrint(
+        '[LyricDebug] getLyric keyword-fallback hash=$hash songName=$songName',
+      );
       searchResult = await _get(
         KugouEndpoints.searchLyric,
         queryParameters: {'keywords': songName},
       );
-    }
-
-    if (searchResult != null) {
-      try {
+      if (searchResult != null) {
         final candidates = searchResult['candidates'];
+        debugPrint(
+          '[LyricDebug] getLyric keyword search hash=$hash songName=$songName '
+          'candidatesLen=${candidates is List ? candidates.length : -1}',
+        );
         if (candidates is List && candidates.isNotEmpty) {
           final first = candidates.first as Map<String, dynamic>;
           lyricId = first['id']?.toString();
           lyricAccesskey = first['accesskey']?.toString();
         }
-      } catch (e) {}
+      }
     }
 
     if (lyricId == null) {
+      debugPrint(
+        '[LyricDebug] getLyric lyricId NULL for hash=$hash songName=$songName '
+        'searchResult=${searchResult == null ? 'null' : 'present'}',
+      );
       return null;
     }
+    debugPrint(
+      '[LyricDebug] getLyric found lyricId=$lyricId hash=$hash songName=$songName',
+    );
 
     // 默认 fmt='lrc' 触发并发双请求（LRC + KRC）；显式传 fmt='krc' 走单请求路径（向后兼容）
     final bool dualRequest = (fmt == 'lrc');
@@ -1473,11 +1494,57 @@ class KugouApiClient {
       if (lyricAccesskey != null) params['accesskey'] = lyricAccesskey;
       final json = await _get(KugouEndpoints.lyric, queryParameters: params);
       if (json == null) return null;
-      return json['data'] as Map<String, dynamic>? ?? json;
+      final data = json['data'] as Map<String, dynamic>? ?? json;
+      debugPrint(
+        '[LyricDebug] _fetchLyricContent fmt=$fmt id=$lyricId '
+        'contentLen=${(data['content']?.toString() ?? '').length} '
+        'decodeContentLen=${(data['decodeContent']?.toString() ?? '').length} '
+        'contenttype=${data['contenttype']} '
+        'decodedPrefix=${(data['decodeContent']?.toString() ?? '').substring(0, (data['decodeContent']?.toString().length ?? 0).clamp(0, 100))}',
+      );
+      return data;
     } catch (e) {
       // 单点失败不影响另一个并发请求
       return null;
     }
+  }
+
+  /// hash 找回：hash 搜索 + 关键词搜索都失败时，用歌曲搜索接口找回正确的
+  /// 酷狗 hash，再用该 hash 查一次歌词。解决歌曲条目 hash 失效导致歌词空白。
+  ///
+  /// 返回 `(lyricId, lyricAccesskey?)`；找不到返回 null。
+  Future<(String, String?)?> _recoverLyricIdBySongSearch(String songName) async {
+    try {
+      final searchResult = await search(songName, pagesize: 5);
+      if (searchResult == null || searchResult.songs.isEmpty) {
+        debugPrint(
+          '[LyricDebug] recover song search empty songName=$songName',
+        );
+        return null;
+      }
+      // 取第一首歌的 FileHash 作为正确 hash
+      final correctHash = searchResult.songs.first.hash;
+      if (correctHash.isEmpty) return null;
+      debugPrint(
+        '[LyricDebug] recover found correctHash=$correctHash songName=$songName',
+      );
+      final lyricSearch = await _get(
+        KugouEndpoints.searchLyric,
+        queryParameters: {'hash': correctHash.toLowerCase()},
+      );
+      if (lyricSearch == null) return null;
+      final candidates = lyricSearch['candidates'];
+      if (candidates is List && candidates.isNotEmpty) {
+        final first = candidates.first as Map<String, dynamic>;
+        final id = first['id']?.toString();
+        if (id != null && id.isNotEmpty) {
+          return (id, first['accesskey']?.toString());
+        }
+      }
+    } catch (e) {
+      debugPrint('[LyricDebug] recover song search error: $e');
+    }
+    return null;
   }
 
   /// 合并 LRC 与 KRC 两个响应，构造同时携带两种明文的 KugouLyric。
@@ -1542,6 +1609,14 @@ class KugouApiClient {
       decodedKrcContent: krcContent,
       translatedContent: translationLrc,
       romaContent: romaLrc,
+    );
+    debugPrint(
+      '[LyricDebug] mergeLyricResponses '
+      'decodedContentLen=${merged.decodedContent?.length} '
+      'decodedKrcContentLen=${merged.decodedKrcContent?.length} '
+      'translatedLen=${merged.translatedContent?.length} '
+      'romaLen=${merged.romaContent?.length} '
+      'displayLyric=${merged.displayLyric.length}',
     );
     return merged;
   }
