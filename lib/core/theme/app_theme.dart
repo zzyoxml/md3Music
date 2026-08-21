@@ -212,9 +212,9 @@ class AppTheme {
         indicatorColor: Colors.transparent,
         surfaceTintColor: colorScheme.surfaceTint,
         elevation: 0,
-        // 只有选中 tab 显示文字：原生会自动上移 icon 让位 + 淡入 label
-        // （见 navigation_bar.dart _NavigationDestinationLayoutDelegate）
-        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+        // 底栏不显示文字：只保留图标 + _AnimatedTabIcon 的胶囊指示器。
+        // NavigationDestination.label 仍需传（API 必填），作为无障碍朗读文本。
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysHide,
         iconTheme: WidgetStateProperty.resolveWith((states) {
           if (states.contains(WidgetState.selected)) {
             return IconThemeData(color: colorScheme.onSecondaryContainer);

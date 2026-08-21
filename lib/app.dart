@@ -540,18 +540,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         );
         break;
       case 'discover':
-        page = DiscoverPage(
-          onAvatarTap: () {
-            final tabConfig = context.read<TabConfigProvider>();
-            final userIdx = tabConfig.visibleIndexOf('user');
-            if (userIdx >= 0) {
-              setState(() {
-                _previousSelectedIndex = _selectedIndex;
-                _selectedIndex = userIdx;
-              });
-            }
-          },
-        );
+        page = const DiscoverPage();
         break;
       case 'coverflow':
         page = const CoverFlowPage();
@@ -1465,10 +1454,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
 /// - 胶囊做 **单轴 X 拉伸**（0.4 → 1.0），对齐 Flutter 原生 NavigationIndicator 的形变方式
 /// - 图标在胶囊弹起过程中完成 outlined → filled 切换，被弹跳掩盖
 ///
-/// **文字行为**：由 `NavigationBarThemeData.labelBehavior = onlyShowSelected` 控制，
-/// Flutter 原生 `_NavigationDestinationLayoutDelegate` 会自动处理：
-/// - 未选中：label 隐藏，icon 垂直居中
-/// - 选中：label 淡入 + icon 上移让位（见 navigation_bar.dart 第 1103-1130 行）
+/// **文字行为**：由 `NavigationBarThemeData.labelBehavior = alwaysHide` 控制，
+/// 底栏只显示图标 + 胶囊指示器；`NavigationDestination.label` 仅用于无障碍朗读。
 ///
 /// 不使用 NavigationDestination.selectedIcon（Flutter 原生内部是硬切）。
 class _AnimatedTabIcon extends StatefulWidget {
