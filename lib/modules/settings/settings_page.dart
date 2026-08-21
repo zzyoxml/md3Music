@@ -112,6 +112,8 @@ class _SettingsPageState extends State<SettingsPage>
   bool _sortCollectedByLatestClick = true;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
+  // 播放详情页底栏切分开关（默认关闭，保持单条长 pill）
+  bool _splitActionBar = false;
   // 自定义背景图片（全局界面背景）
   bool _useBackgroundImage = false;
   String? _backgroundImagePath;
@@ -248,6 +250,7 @@ class _SettingsPageState extends State<SettingsPage>
     final lyricDoubleTapToJump = context
         .read<ThemeProvider>()
         .lyricDoubleTapToJump;
+    final splitActionBar = context.read<ThemeProvider>().splitActionBar;
     final useArtistPhotoBackground = context
         .read<ThemeProvider>()
         .useArtistPhotoBackground;
@@ -302,6 +305,7 @@ class _SettingsPageState extends State<SettingsPage>
       _useCoverSeedColor = useCoverSeedColor;
       _useAmStylePlayer = useAmStylePlayer;
       _lyricDoubleTapToJump = lyricDoubleTapToJump;
+      _splitActionBar = splitActionBar;
       _useArtistPhotoBackground = useArtistPhotoBackground;
       _artistPhotoInterval = artistPhotoInterval;
       _artistPhotoOpacity = artistPhotoOpacity;
@@ -523,6 +527,7 @@ class _SettingsPageState extends State<SettingsPage>
     (label: '背景图片透明度', category: '外观', aliases: '透明度 背景'),
     (label: '背景图片莫奈取色', category: '外观', aliases: '莫奈 取色 动态取色 背景'),
     // 播放页样式
+    (label: '底栏切分', category: '播放页样式', aliases: '底栏 切分 分离 操作栏 底部 全屏'),
     (label: '歌词双击跳转', category: '播放页样式', aliases: '双击 跳转'),
     (label: '歌手写真背景轮播', category: '播放页样式', aliases: '写真 背景 轮播'),
     (label: '写真背景透明度', category: '播放页样式', aliases: '写真 透明度'),
@@ -1529,6 +1534,16 @@ class _SettingsPageState extends State<SettingsPage>
           child: _buildStyleCards(colorScheme),
         ),
         SwitchListTile(
+          title: const Text('底栏切分'),
+          subtitle: const Text('播放页底栏按作用分成两组：左侧切换页面，右侧功能按钮（含全屏）'),
+          value: _splitActionBar,
+          onChanged: (v) {
+            HapticFeedback.lightImpact();
+            setState(() => _splitActionBar = v);
+            context.read<ThemeProvider>().setSplitActionBar(v);
+          },
+        ),
+        SwitchListTile(
           title: const Text('歌词双击跳转'),
           subtitle: const Text('开启后需双击歌词行才能跳转播放位置'),
           value: _lyricDoubleTapToJump,
@@ -2393,12 +2408,19 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Widget _buildOnlineMusicSection(ColorScheme colorScheme) {
+    // 端口为 0 表示本地 Rust 服务器从未启动成功（桌面缺 kugou_server.dll 最常见）。
+    // 此前这里无条件显示"运行中"，服务器挂了也照样显示，反而掩盖了故障。
+    final port = KugouApiServer.currentPort;
+    final running = port > 0;
     return Column(
       children: [
         ListTile(
-          leading: Icon(Icons.dns, color: colorScheme.primary),
+          leading: Icon(
+            Icons.dns,
+            color: running ? colorScheme.primary : colorScheme.error,
+          ),
           title: const Text('本地数据接口'),
-          subtitle: Text('端口：${KugouApiServer.currentPort}'),
+          subtitle: Text(running ? '端口：$port' : '未启动'),
           trailing: _isRestarting
               ? SizedBox(
                   width: 20,
@@ -2412,13 +2434,17 @@ class _SettingsPageState extends State<SettingsPage>
               : Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: colorScheme.primaryContainer,
+                    color: running
+                        ? colorScheme.primaryContainer
+                        : colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    '运行中',
+                    running ? '运行中' : '未启动',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: colorScheme.onPrimaryContainer,
+                      color: running
+                          ? colorScheme.onPrimaryContainer
+                          : colorScheme.onErrorContainer,
                     ),
                   ),
                 ),
@@ -2427,9 +2453,15 @@ class _SettingsPageState extends State<SettingsPage>
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Text(
-            '本地 Rust 服务器运行中，推荐/排行/搜索/播放/登录等数据接口均通过本地处理（点击上方可重启）',
+            running
+                ? '本地 Rust 服务器运行中，推荐/排行/搜索/播放/登录等数据接口均通过本地处理（点击上方可重启）'
+                : '本地 Rust 服务器未启动，推荐/排行/搜索/播放/登录等在线功能全部不可用。'
+                    '${Platform.isWindows ? "Windows 上通常是安装包缺少 kugou_server.dll。" : ""}'
+                    '（点击上方可重试启动）',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+              color: running
+                  ? colorScheme.onSurfaceVariant
+                  : colorScheme.error,
             ),
           ),
         ),
@@ -2438,13 +2470,17 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   /// 询问是否重启本地 API 服务器，确认后重启并更新端口展示。
+  /// 服务器未启动（端口 0）时同一入口用于「重试启动」。
   Future<void> _confirmRestartServer() async {
     final port = KugouApiServer.currentPort;
+    final running = port > 0;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('重启本地 API 服务器'),
-        content: Text('确定要重启本地 Rust API 服务器吗？\n当前端口：$port\n重启后将重新分配随机端口。\n如果你遇到了玄学问题，那就重启一下试试吧（）'),
+        title: Text(running ? '重启本地 API 服务器' : '重试启动本地 API 服务器'),
+        content: Text(running
+            ? '确定要重启本地 Rust API 服务器吗？\n当前端口：$port\n重启后将重新分配随机端口。\n如果你遇到了玄学问题，那就重启一下试试吧（）'
+            : '本地 Rust API 服务器当前未启动，在线功能全部不可用。\n要重试启动吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -2452,7 +2488,7 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('重启'),
+            child: Text(running ? '重启' : '重试'),
           ),
         ],
       ),
