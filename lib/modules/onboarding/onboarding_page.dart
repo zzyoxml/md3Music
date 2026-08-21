@@ -310,10 +310,10 @@ class _OnboardingPageState extends State<OnboardingPage>
         onColor: colorScheme.onTertiary,
       ),
       _HiddenOp(
-        icon: Icons.queue_music,
+        icon: Icons.album,
         gesture: '长按',
-        target: '播放列表图标',
-        action: '进入 Zen 沉浸模式',
+        target: '专辑封面',
+        action: '进入 / 退出 Zen 沉浸模式',
         color: colorScheme.secondary,
         onColor: colorScheme.onSecondary,
       ),
