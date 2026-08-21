@@ -66,6 +66,47 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 add_subdirectory("runner")
 
 
+# === 预下载 WIL (Windows Implementation Library) NuGet 包 ===
+# video_player_win 在【构建期】用自定义目标下载 WIL，却没为 video_player_win_plugin
+# 声明对该目标的依赖；而 CMake 生成的 vcxproj 里 WIL 的 .targets 导入带
+# Condition="Exists(...)"。MSBuild 并行构建时插件工程可能先于下载完成被加载 →
+# 导入被静默跳过 → AdditionalIncludeDirectories 缺 WIL 头文件路径 →
+# error C1083: Cannot open include file: 'wil/com.h'。
+# 本机因 packages/ 有上次构建的残留而侥幸成功，CI 全新 clone 必然失败。
+# 这里在【配置期】提前装好，保证生成 vcxproj 时 .targets 已存在。
+# 版本须与 video_player_win/windows/CMakeLists.txt 的 WIL_VERSION 保持一致。
+if(EXISTS "${FLUTTER_MANAGED_DIR}/ephemeral/.plugin_symlinks/video_player_win")
+  set(WIL_VERSION "1.0.220914.1")
+  set(WIL_TARGETS_FILE
+    "${CMAKE_BINARY_DIR}/packages/Microsoft.Windows.ImplementationLibrary/build/native/Microsoft.Windows.ImplementationLibrary.targets")
+  if(NOT EXISTS "${WIL_TARGETS_FILE}")
+    find_program(NUGET_EXE nuget)
+    if(NOT NUGET_EXE)
+      set(NUGET_EXE "${CMAKE_BINARY_DIR}/nuget.exe")
+      if(NOT EXISTS "${NUGET_EXE}")
+        message(STATUS "下载 nuget.exe ...")
+        file(DOWNLOAD
+          "https://dist.nuget.org/win-x86-commandline/v5.10.0/nuget.exe"
+          "${NUGET_EXE}"
+          EXPECTED_HASH SHA256=852b71cc8c8c2d40d09ea49d321ff56fd2397b9d6ea9f96e532530307bbbafd3)
+      endif()
+    endif()
+    message(STATUS "预下载 WIL ${WIL_VERSION}（video_player_win 依赖）...")
+    execute_process(
+      COMMAND "${NUGET_EXE}" install Microsoft.Windows.ImplementationLibrary
+              -Version ${WIL_VERSION} -ExcludeVersion
+              -OutputDirectory "${CMAKE_BINARY_DIR}/packages"
+      RESULT_VARIABLE WIL_INSTALL_RESULT
+      OUTPUT_VARIABLE WIL_INSTALL_OUTPUT
+      ERROR_VARIABLE WIL_INSTALL_OUTPUT)
+    if(NOT WIL_INSTALL_RESULT EQUAL 0 OR NOT EXISTS "${WIL_TARGETS_FILE}")
+      message(FATAL_ERROR
+        "WIL NuGet 包预下载失败，video_player_win 将因缺少 wil/com.h 编译失败：\n"
+        "${WIL_INSTALL_OUTPUT}")
+    endif()
+  endif()
+endif()
+
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
