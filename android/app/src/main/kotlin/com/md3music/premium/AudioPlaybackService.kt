@@ -143,6 +143,10 @@ class AudioPlaybackService : Service() {
         @Volatile
         private var lyriconRetryScheduled = false
 
+        // C 方案探针：缓存最近一次 isPlaying，供 setPosition 组装 Auto PlaybackState
+        @Volatile
+        private var lyriconIsPlaying = false
+
         fun setLyriconChannel(channel: MethodChannel?) {
             lyriconChannel = channel
         }
@@ -257,6 +261,25 @@ class AudioPlaybackService : Service() {
         }
 
         /**
+         * C 方案探针：组装带时间戳的 framework PlaybackState，走 SDK 的 Auto 同步路径。
+         * PlaybackState.Builder 会自动把构造时刻的 SystemClock.elapsedRealtime() 记为
+         * lastPositionUpdateTime，SDK 的 Auto 模式据此按时间差插值推进播放时间轴，
+         * 从而在两次更新之间平滑走时（消除 200ms 播步）。
+         */
+        fun buildLyriconPlaybackState(
+            positionMs: Long,
+            isPlaying: Boolean,
+        ): android.media.session.PlaybackState {
+            return android.media.session.PlaybackState.Builder()
+                .setState(
+                    if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
+                    positionMs,
+                    if (isPlaying) 1f else 0f,
+                )
+                .build()
+        }
+
+        /**
          * 注册 Lyricon Provider MethodChannel（Dart ↔ 原生双向）。
          * 由 MainActivity（正常启动）与 setupHeadlessChannels（进程被杀唤醒）
          * 共用，避免 headless 场景下 Dart 的 setSong/setEnabled 等调用因缺少
@@ -320,7 +343,11 @@ class AudioPlaybackService : Service() {
                     "setPosition" -> {
                         val pos = call.argument<Number>("positionMs")?.toLong() ?: 0L
                         try {
-                            provider?.player?.setPosition(pos)
+                            // C 方案探针：不再调 setPosition（会切成 Manually 同步），
+                            // 改喂带时间戳的 Auto PlaybackState，SDK 在两次更新间插值平滑
+                            provider?.player?.setPlaybackState(
+                                buildLyriconPlaybackState(pos, lyriconIsPlaying)
+                            )
                             result.success(true)
                         } catch (_: Exception) {
                             result.success(false)
@@ -332,10 +359,12 @@ class AudioPlaybackService : Service() {
                         val pos = call.argument<Number>("position")?.toLong() ?: 0L
                         // SDK 的 setPlaybackState 接受 Boolean，从 PlaybackStateCompat 状态码推导 isPlaying
                         val isPlaying = state == PlaybackStateCompat.STATE_PLAYING
+                        lyriconIsPlaying = isPlaying
                         try {
-                            // 位置通过 setPosition 同步（原本打包在 PlaybackStateCompat 中）
-                            provider?.player?.setPosition(pos)
-                            provider?.player?.setPlaybackState(isPlaying)
+                            // C 方案探针：统一走 Auto PlaybackState，附带 position+speed 时间戳
+                            provider?.player?.setPlaybackState(
+                                buildLyriconPlaybackState(pos, isPlaying)
+                            )
                             result.success(true)
                         } catch (_: Exception) {
                             result.success(false)
@@ -344,7 +373,11 @@ class AudioPlaybackService : Service() {
                     "seekTo" -> {
                         val pos = call.argument<Number>("positionMs")?.toLong() ?: 0L
                         try {
-                            provider?.player?.seekTo(pos)
+                            // 统一走 Auto PlaybackState：seek 仅需把新位置作为基点喂给 SDK，
+                            // 若用 player.seekTo 会切回 Manually，下一次 syncs 会 seekTo(旧 lastPosition=0) 闪回开头
+                            provider?.player?.setPlaybackState(
+                                buildLyriconPlaybackState(pos, lyriconIsPlaying)
+                            )
                             result.success(true)
                         } catch (_: Exception) {
                             result.success(false)
@@ -1337,9 +1370,13 @@ class AudioPlaybackService : Service() {
                 .build()
         )
 
-        // 同步播放状态到 Lyricon（SDK 的 setPlaybackState 接受 Boolean 重载）
+        // 同步播放状态到 Lyricon：必须走 Auto PlaybackState（带 position+speed 时间戳）。
+        // 不能调 Boolean 重载 / setPosition / seekTo，否则会切回 Manually 并 seek 到
+        // 旧位置（lastPosition=0），导致歌词每隔一次同步就闪回开头。
         try {
-            lyriconProvider?.player?.setPlaybackState(isPlaying)
+            lyriconProvider?.player?.setPlaybackState(
+                buildLyriconPlaybackState(position, isPlaying)
+            )
         } catch (_: Exception) {}
     }
 
