@@ -1382,8 +1382,22 @@ class KugouApiClient {
   }) async {
     String? lyricId;
     String? lyricAccesskey;
-
     Map<String, dynamic>? searchResult;
+
+    // 从 /search/lyric 响应的 candidates 中取第一个候选，解析 lyricId/accesskey。
+    void resolveCandidate(Map<String, dynamic>? result) {
+      if (result == null) return;
+      final candidates = result['candidates'];
+      debugPrint(
+        '[LyricDebug] getLyric search hash=$hash songName=$songName '
+        'candidatesLen=${candidates is List ? candidates.length : -1}',
+      );
+      if (candidates is List && candidates.isNotEmpty) {
+        final first = candidates.first as Map<String, dynamic>;
+        lyricId = first['id']?.toString();
+        lyricAccesskey = first['accesskey']?.toString();
+      }
+    }
 
     // 1) 有 hash 时先精确搜索（在线歌曲通常直接命中官方歌词）
     if (hash.isNotEmpty) {
@@ -1393,6 +1407,7 @@ class KugouApiClient {
       );
       if (byHash != null && _hasCandidates(byHash)) {
         searchResult = byHash;
+        resolveCandidate(searchResult);
       } else {
         debugPrint(
           '[LyricDebug] getLyric hash miss hash=$hash songName=$songName',
@@ -1403,7 +1418,7 @@ class KugouApiClient {
     // 2) hash 搜索未命中且是失效 hash → 歌曲搜索找回正确 hash 再 hash 搜索。
     // 优先走此路径是因为 keyword 歌词搜索可能命中无翻译版本，而用正确 hash
     // 搜索通常命中官方完整版（含翻译），与官方 App 行为一致。
-    if ((searchResult == null || !_hasCandidates(searchResult)) &&
+    if (lyricId == null &&
         hash.isNotEmpty &&
         songName != null &&
         songName.isNotEmpty) {
@@ -1428,18 +1443,7 @@ class KugouApiClient {
         KugouEndpoints.searchLyric,
         queryParameters: {'keywords': songName},
       );
-      if (searchResult != null) {
-        final candidates = searchResult['candidates'];
-        debugPrint(
-          '[LyricDebug] getLyric keyword search hash=$hash songName=$songName '
-          'candidatesLen=${candidates is List ? candidates.length : -1}',
-        );
-        if (candidates is List && candidates.isNotEmpty) {
-          final first = candidates.first as Map<String, dynamic>;
-          lyricId = first['id']?.toString();
-          lyricAccesskey = first['accesskey']?.toString();
-        }
-      }
+      resolveCandidate(searchResult);
     }
 
     if (lyricId == null) {
@@ -1453,14 +1457,18 @@ class KugouApiClient {
       '[LyricDebug] getLyric found lyricId=$lyricId hash=$hash songName=$songName',
     );
 
+    // 闭包内赋值使类型仍为 String?，此处已确认非空，断言收窄
+    final String resolvedLyricId = lyricId!;
+    final String? resolvedAccesskey = lyricAccesskey;
+
     // 默认 fmt='lrc' 触发并发双请求（LRC + KRC）；显式传 fmt='krc' 走单请求路径（向后兼容）
     final bool dualRequest = (fmt == 'lrc');
 
     if (dualRequest) {
       // 并发双请求：Future.wait 同时发起，每个请求独立 try/catch 防止单点失败
       final results = await Future.wait([
-        _fetchLyricContent(lyricId, lyricAccesskey, 'lrc', decode),
-        _fetchLyricContent(lyricId, lyricAccesskey, 'krc', decode),
+        _fetchLyricContent(resolvedLyricId, resolvedAccesskey, 'lrc', decode),
+        _fetchLyricContent(resolvedLyricId, resolvedAccesskey, 'krc', decode),
       ]);
       final lrcJson = results[0];
       final krcJson = results[1];
@@ -1468,7 +1476,8 @@ class KugouApiClient {
     }
 
     // 单请求路径（显式 fmt=krc 等非 lrc 场景）
-    final json = await _fetchLyricContent(lyricId, lyricAccesskey, fmt, decode);
+    final json =
+        await _fetchLyricContent(resolvedLyricId, resolvedAccesskey, fmt, decode);
     if (json == null) return null;
     try {
       return KugouLyric.fromJson(json);
