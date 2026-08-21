@@ -311,6 +311,7 @@ class _AppViewState extends State<_AppView> {
         AppTheme.lightThemeFromSeed(
           themeProvider.effectiveSeedColor,
           fontFamily: fontFamily,
+          labelBehavior: themeProvider.navLabelBehavior,
         ),
         themeProvider,
       ),
@@ -319,6 +320,7 @@ class _AppViewState extends State<_AppView> {
           themeProvider.effectiveSeedColor,
           useOledBlack: themeProvider.useOledBlack,
           fontFamily: fontFamily,
+          labelBehavior: themeProvider.navLabelBehavior,
         ),
         themeProvider,
       ),

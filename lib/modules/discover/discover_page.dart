@@ -28,8 +28,17 @@ class DiscoverPage extends StatefulWidget {
 class _DiscoverPageState extends State<DiscoverPage> {
   static const String _kDiscoverLastDateKey = 'discover_last_date';
 
+  // 三个可折叠区块的折叠状态（true=折叠）。SharedPreferences 存"是否折叠"。
+  static const String _kCollapsedDaily = 'discover_collapsed_daily';
+  static const String _kCollapsedPlaylist = 'discover_collapsed_playlist';
+  static const String _kCollapsedRank = 'discover_collapsed_rank';
+
   bool _isLoading = true;
   String? _error;
+
+  bool _isDailyExpanded = true;
+  bool _isPlaylistExpanded = true;
+  bool _isRankExpanded = true;
 
   /// 顶栏渐变 ScrollController：与 ScrollAwareAppBar 共享，监听滚动 offset
   final ScrollController _scrollController = ScrollController();
@@ -40,11 +49,35 @@ class _DiscoverPageState extends State<DiscoverPage> {
     super.dispose();
   }
 
+  /// 从 SharedPreferences 恢复三个 section 的折叠状态
+  Future<void> _loadCollapseStates() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _isDailyExpanded = !(prefs.getBool(_kCollapsedDaily) ?? false);
+      _isPlaylistExpanded = !(prefs.getBool(_kCollapsedPlaylist) ?? false);
+      _isRankExpanded = !(prefs.getBool(_kCollapsedRank) ?? false);
+    });
+  }
+
+  /// 切换 section 展开/折叠并持久化
+  Future<void> _toggleCollapse({
+    required String prefKey,
+    required bool currentlyExpanded,
+    required ValueChanged<bool> apply,
+  }) async {
+    final next = !currentlyExpanded;
+    setState(() => apply(next));
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(prefKey, !next);
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initIfNeeded();
+      _loadCollapseStates();
     });
   }
 
@@ -292,7 +325,13 @@ class _DiscoverPageState extends State<DiscoverPage> {
         return SliverToBoxAdapter(
           child: _Section(
             title: '每日推荐',
-            trailing: TextButton(
+            isExpanded: _isDailyExpanded,
+            onToggle: () => _toggleCollapse(
+              prefKey: _kCollapsedDaily,
+              currentlyExpanded: _isDailyExpanded,
+              apply: (v) => _isDailyExpanded = v,
+            ),
+            trailing: IconButton(
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -300,7 +339,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                   ),
                 );
               },
-              child: const Text('查看更多'),
+              icon: const Icon(Icons.chevron_right),
             ),
             child: SizedBox(
               height: 76,
@@ -479,13 +518,19 @@ class _DiscoverPageState extends State<DiscoverPage> {
         return SliverToBoxAdapter(
           child: _Section(
             title: '热门歌单',
-            trailing: TextButton(
+            isExpanded: _isPlaylistExpanded,
+            onToggle: () => _toggleCollapse(
+              prefKey: _kCollapsedPlaylist,
+              currentlyExpanded: _isPlaylistExpanded,
+              apply: (v) => _isPlaylistExpanded = v,
+            ),
+            trailing: IconButton(
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => const _PlaylistBrowsePage(),
                 ),
               ),
-              child: const Text('查看更多'),
+              icon: const Icon(Icons.chevron_right),
             ),
             child: SizedBox(
               height: 200,
@@ -535,11 +580,17 @@ class _DiscoverPageState extends State<DiscoverPage> {
         return SliverToBoxAdapter(
           child: _Section(
             title: '排行榜',
-            trailing: TextButton(
+            isExpanded: _isRankExpanded,
+            onToggle: () => _toggleCollapse(
+              prefKey: _kCollapsedRank,
+              currentlyExpanded: _isRankExpanded,
+              apply: (v) => _isRankExpanded = v,
+            ),
+            trailing: IconButton(
               onPressed: () => Navigator.of(
                 context,
               ).push(MaterialPageRoute(builder: (_) => const ChartsPage())),
-              child: const Text('查看更多'),
+              icon: const Icon(Icons.chevron_right),
             ),
             child: SizedBox(
               height: 200,
@@ -764,16 +815,29 @@ TextStyle? _sectionTitleStyle(BuildContext context) =>
       fontWeight: FontWeight.w600,
     );
 
-/// 区块容器：标题行（标题 + 右侧可选 widget）+ 内容，不可折叠。
+/// 可折叠的区块容器：
+/// - 标题行左侧可点击区域（仅标题，无箭头图标）触发 onToggle 折叠/展开
+/// - 标题行右侧可放额外 widget（如"查看更多"按钮）
+/// - 内容用 AnimatedCrossFade 在展示态和零高度态间平滑过渡
+/// - 不传 onToggle 时退化为普通（不可折叠）标题行
 class _Section extends StatelessWidget {
-  const _Section({required this.title, required this.child, this.trailing});
+  const _Section({
+    required this.title,
+    required this.child,
+    this.trailing,
+    this.isExpanded = true,
+    this.onToggle,
+  });
 
   final String title;
   final Widget child;
   final Widget? trailing;
+  final bool isExpanded;
+  final VoidCallback? onToggle;
 
   @override
   Widget build(BuildContext context) {
+    final collapsible = onToggle != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -782,18 +846,36 @@ class _Section extends StatelessWidget {
           child: Row(
             children: [
               Expanded(
-                child: Text(
-                  title,
-                  style: _sectionTitleStyle(context),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                child: InkWell(
+                  onTap: collapsible ? onToggle : null,
+                  borderRadius: BorderRadius.circular(8),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Text(
+                      title,
+                      style: _sectionTitleStyle(context),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ),
               ),
               ?trailing,
             ],
           ),
         ),
-        child,
+        if (collapsible)
+          AnimatedCrossFade(
+            duration: const Duration(milliseconds: 200),
+            crossFadeState: isExpanded
+                ? CrossFadeState.showFirst
+                : CrossFadeState.showSecond,
+            sizeCurve: Curves.easeInOut,
+            firstChild: child,
+            secondChild: const SizedBox(width: double.infinity),
+          )
+        else
+          child,
       ],
     );
   }

@@ -1274,6 +1274,58 @@ class _SettingsPageState extends State<SettingsPage>
             ),
           ),
         ),
+        const Divider(height: 16),
+        // 底部导航栏文字显示行为：始终显示 / 仅当前页 / 始终不显示
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '底部导航栏文字',
+                  style: Theme.of(context).textTheme.bodyLarge,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: M3EToggleButtonGroup(
+            actions: const [
+              M3EToggleButtonGroupAction(
+                label: Text('始终显示'),
+                icon: Icon(Icons.label),
+              ),
+              M3EToggleButtonGroupAction(
+                label: Text('仅当前页'),
+                icon: Icon(Icons.tab_unselected),
+              ),
+              M3EToggleButtonGroupAction(
+                label: Text('始终不显示'),
+                icon: Icon(Icons.label_off),
+              ),
+            ],
+            selectedIndex: const [
+              NavigationDestinationLabelBehavior.alwaysShow,
+              NavigationDestinationLabelBehavior.onlyShowSelected,
+              NavigationDestinationLabelBehavior.alwaysHide,
+            ].indexOf(
+              context.watch<ThemeProvider>().navLabelBehavior,
+            ),
+            onSelectedIndexChanged: (index) {
+              if (index == null) return;
+              const behaviors = [
+                NavigationDestinationLabelBehavior.alwaysShow,
+                NavigationDestinationLabelBehavior.onlyShowSelected,
+                NavigationDestinationLabelBehavior.alwaysHide,
+              ];
+              context.read<ThemeProvider>().setNavLabelBehavior(
+                behaviors[index],
+              );
+            },
+          ),
+        ),
         const Divider(height: 32),
         // 界面背景：独立子区块（保留与外观其他条目分隔的独立包裹）
         Padding(

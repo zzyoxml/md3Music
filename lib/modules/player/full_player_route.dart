@@ -99,6 +99,7 @@ class PlayerSystemUiScope extends StatelessWidget {
     super.key,
     required this.dragRoute,
     this.forceMainStyle = false,
+    this.expandedOverlayStyle,
     required this.child,
   });
 
@@ -107,6 +108,10 @@ class PlayerSystemUiScope extends StatelessWidget {
 
   /// 覆盖层渲染场景（非路由）：拖拽期间系统栏保持主页面样式。
   final bool forceMainStyle;
+
+  /// 完全展开后的系统栏样式；null 时用 [kPlayerOverlayStyle]（固定浅色）。
+  /// md 播放器按主题亮度传入（浅色主题黑字 / 深色主题白字），AM 保持默认。
+  final SystemUiOverlayStyle? expandedOverlayStyle;
 
   final Widget child;
 
@@ -120,7 +125,9 @@ class PlayerSystemUiScope extends StatelessWidget {
             dragRoute == null || dragRoute!.controller.value >= 1.0;
         final useMain = forceMainStyle || (dragRoute != null && !expanded);
         return AnnotatedRegion<SystemUiOverlayStyle>(
-          value: useMain ? mainPageOverlayStyle(context) : kPlayerOverlayStyle,
+          value: useMain
+              ? mainPageOverlayStyle(context)
+              : (expandedOverlayStyle ?? kPlayerOverlayStyle),
           child: child,
         );
       },
