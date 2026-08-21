@@ -615,28 +615,37 @@ class _FavoritesPageState extends State<FavoritesPage>
       },
       child: Scaffold(
         appBar: AppBar(
+          // 标题左对齐（全局 appBarTheme.centerTitle=true，这里单独覆盖）
+          centerTitle: false,
           title: Text(
             '我的收藏',
             style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
           ),
           actions: [
+            // 新建歌单入口已移到「我创建的歌单」分组标题右侧，
+            // 这里只在批量管理模式下保留删除按钮。
             if (_isManaging)
               IconButton(
                 icon: const Icon(Icons.delete),
                 onPressed: _deleteSelectedPlaylists,
-              )
-            else
-              IconButton(
-                icon: const Icon(Icons.add),
-                onPressed: _showCreatePlaylistDialog,
               ),
           ],
           bottom: TabBar(
             controller: _tabController,
+            // 图标与文字都比顶栏标题小一档；分组标题（_GroupSection）再小一档
+            labelStyle: textTheme.labelMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+            unselectedLabelStyle: textTheme.labelMedium,
+            labelPadding: const EdgeInsets.symmetric(vertical: 2),
             tabs: const [
-              Tab(icon: Icon(Icons.queue_music), text: '歌单'),
-              Tab(icon: Icon(Icons.album), text: '专辑'),
-              Tab(icon: Icon(Icons.person), text: '歌手'),
+              Tab(
+                height: 52,
+                icon: Icon(Icons.queue_music, size: 18),
+                text: '歌单',
+              ),
+              Tab(height: 52, icon: Icon(Icons.album, size: 18), text: '专辑'),
+              Tab(height: 52, icon: Icon(Icons.person, size: 18), text: '歌手'),
             ],
           ),
         ),
@@ -713,6 +722,13 @@ class _FavoritesPageState extends State<FavoritesPage>
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
+            const SizedBox(height: 16),
+            // 空列表时分组标题不渲染，这里补一个新建歌单入口
+            FilledButton.tonalIcon(
+              onPressed: _showCreatePlaylistDialog,
+              icon: const Icon(Icons.add),
+              label: const Text('新建歌单'),
+            ),
           ],
         ),
       );
@@ -733,16 +749,25 @@ class _FavoritesPageState extends State<FavoritesPage>
           controller: _scrollController,
           padding: const EdgeInsets.symmetric(vertical: 8),
           children: [
-            if (_createdPlaylists.isNotEmpty)
-              _GroupSection(
-                title: '我创建的歌单',
-                expanded: _createdExpanded,
-                onToggle: () =>
-                    setState(() => _createdExpanded = !_createdExpanded),
-                playlists: _createdPlaylists,
-                onBuildTile: (playlist) =>
-                    _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
-              ),
+            // 分组标题常驻（即使暂无自建歌单），保证右侧「+」新建入口始终可达
+            _GroupSection(
+              title: '我创建的歌单',
+              expanded: _createdExpanded,
+              onToggle: () =>
+                  setState(() => _createdExpanded = !_createdExpanded),
+              playlists: _createdPlaylists,
+              onBuildTile: (playlist) =>
+                  _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
+              // 新建歌单：原顶栏右上角的 "+" 移到此处
+              trailing: _isManaging
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.add, size: 20),
+                      visualDensity: VisualDensity.compact,
+                      tooltip: '新建歌单',
+                      onPressed: _showCreatePlaylistDialog,
+                    ),
+            ),
             if (_collectedPlaylists.isNotEmpty)
               _GroupSection(
                 title: '我收藏的歌单',
@@ -1192,12 +1217,16 @@ class _GroupSection extends StatefulWidget {
   final List<KugouPlaylistBrief> playlists;
   final Widget Function(KugouPlaylistBrief) onBuildTile;
 
+  /// 标题行最右侧的附加控件（如「我创建的歌单」的新建按钮）。
+  final Widget? trailing;
+
   const _GroupSection({
     required this.title,
     required this.expanded,
     required this.onToggle,
     required this.playlists,
     required this.onBuildTile,
+    this.trailing,
   });
 
   @override
@@ -1248,39 +1277,56 @@ class _GroupSectionState extends State<_GroupSection>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        InkWell(
-          onTap: widget.onToggle,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                AnimatedRotation(
-                  turns: widget.expanded ? 0.5 : 0.0,
-                  duration: const Duration(milliseconds: 200),
-                  curve: Curves.easeInOut,
-                  child: Icon(
-                    Icons.expand_more,
-                    color: colorScheme.onSurfaceVariant,
-                    size: 20,
+        Row(
+          children: [
+            Expanded(
+              child: InkWell(
+                onTap: widget.onToggle,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 12,
+                  ),
+                  child: Row(
+                    children: [
+                      AnimatedRotation(
+                        turns: widget.expanded ? 0.5 : 0.0,
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeInOut,
+                        child: Icon(
+                          Icons.expand_more,
+                          color: colorScheme.onSurfaceVariant,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      // 分组标题：比 TabBar 的「歌单/专辑/歌手」再小一档
+                      Text(
+                        widget.title,
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                          color: colorScheme.onSurface,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${widget.playlists.length}',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 4),
-                Text(
-                  widget.title,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  '${widget.playlists.length}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+            if (widget.trailing != null)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: widget.trailing,
+              ),
+          ],
         ),
         ClipRect(
           child: SizeTransition(

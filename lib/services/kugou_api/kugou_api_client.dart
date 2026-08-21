@@ -121,11 +121,25 @@ class KugouApiClient {
   static final Completer<void> _serverReady = Completer<void>();
   static bool _serverReadyMarked = false;
 
+  /// 本地 API 服务器启动已明确失败（桌面缺 kugou_server.dll、端口 10 次全部
+  /// 占用等）。此时 [_serverReady] 永远不会完成，若仍逐请求 await 其 8s 超时，
+  /// 每个请求都要白等满 8 秒才失败（观感即"延迟极高"）。置位后直接快速失败。
+  static bool _serverStartFailed = false;
+
   /// 标记本地 API 服务器已就绪（幂等，可重复调用）。
   static void markServerReady() {
+    // restart() 成功时清除失败态，重新按就绪信号放行。
+    _serverStartFailed = false;
     if (_serverReadyMarked) return;
     _serverReadyMarked = true;
     _serverReady.complete();
+  }
+
+  /// 标记本地 API 服务器启动失败。由 [KugouApiServer] 在所有启动路径都失败后
+  /// 调用；已就绪时忽略（restart 中途的瞬时失败不该让已可用的服务器被判死）。
+  static void markServerStartFailed() {
+    if (_serverReadyMarked) return;
+    _serverStartFailed = true;
   }
 
   /// 服务器就绪 Future（带超时保护：启动失败时请求不会永久挂起）。
@@ -141,9 +155,13 @@ class KugouApiClient {
 
     // P0: 等待本地 API 服务器就绪。带 8s 超时：
     // 服务器异常时继续请求（失败由调用方处理），避免首屏永久转圈。
-    try {
-      await serverReady.timeout(const Duration(seconds: 8));
-    } catch (_) {}
+    // 启动已明确失败时跳过等待：_serverReady 永不完成，逐请求 await 会让
+    // 每个请求都白等满 8s（Windows 缺 dll 时的"延迟极高"就是这么来的）。
+    if (!_serverReadyMarked && !_serverStartFailed) {
+      try {
+        await serverReady.timeout(const Duration(seconds: 8));
+      } catch (_) {}
+    }
 
     // 登录等全部请求统一走本地 API 服务器（Rust），不再依赖第三方云端
     options.baseUrl = KugouEndpoints.baseUrl;

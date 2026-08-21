@@ -6,12 +6,15 @@
 .DESCRIPTION
   完整流程：
     1. 检测 Visual Studio（Flutter Windows 桌面构建硬依赖 MSVC，缺则明确报错）
-    2. 构建 Rust 桌面版 kugou_server.dll（走 build_desktop.ps1，GNU toolchain）
+    2. 构建 Rust 桌面版 kugou_server.dll（走 build_desktop.ps1，自动选 MSVC/GNU 工具链）
     3. flutter build windows --release
     4. 把 kugou_server.dll 复制到 exe 同目录
     5. 压缩整个 Release 输出为便携版 zip
 
   产出：build\windows\md3music-windows-<版本>.zip（自包含，考到任意机器即可运行）
+
+.PARAMETER ForceRust
+  强制重编 Rust，忽略"无改动"判断。
 
 .PARAMETER SkipRust
   跳过 Rust 编译（若 dll 已存在且未改 Rust 代码）。
@@ -30,6 +33,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $RepoRoot   = Split-Path -Parent $PSScriptRoot          # scripts/.. = 项目根
 $RustDir    = Join-Path $RepoRoot 'kugou_api_server\rust'
+$DllPath    = Join-Path $RustDir 'target\release\kugou_server.dll'
 $ReleaseDir = Join-Path $RepoRoot 'build\windows\x64\runner\Release'
 $CargoBin   = Join-Path $env:USERPROFILE '.cargo\bin'
 $env:Path   = "$CargoBin;$env:Path"
@@ -50,7 +54,7 @@ $vsInstalled = $false
 if (Test-Path $vsWhere) {
     # 注意：必须带 `-products *`，否则 vswhere 默认只匹配 Visual Studio IDE 实例，
     # 只装了 Build Tools（无 IDE）时会返回空 → 误判"未安装 VS"导致打包中止。
-    # 本机即只装了 VS 2022 Build Tools，无 -products * 一定失败。
+    # 带上后 Community/Professional/Build Tools 都能识别，只要有「使用 C++ 的桌面开发」。
     $vsInstalled = (& $vsWhere -latest -products * -property installationPath 2>$null)
 }
 if (-not $vsInstalled) {
@@ -73,26 +77,38 @@ Write-Host "Visual Studio: $vsInstalled" -ForegroundColor Green
 
 # ---------- 2. 判断是否需要构建 Rust（智能检测，逻辑同 build_android.ps1） ----------
 $needRust = $ForceRust
-if (-not $needRust -and -not $SkipRust -and (Get-Command git -ErrorAction SilentlyContinue)) {
-    # 工作区未提交改动（含未跟踪文件）
-    $st = & git -C $RepoRoot status --porcelain -- kugou_api_server/rust/ 2>$null
-    if ($LASTEXITCODE -eq 0 -and $st) { $needRust = $true }
-}
-if (-not $needRust -and (Test-Path (Join-Path $RustDir 'target\release\kugou_server.dll'))) {
-    # 兜底：dll 比 Cargo.toml/src 旧说明 Rust 改过但未同步
-    $dllTime = (Get-Item (Join-Path $RustDir 'target\release\kugou_server.dll')).LastWriteTime
-    $anyNewer = Get-ChildItem (Join-Path $RustDir 'src'), (Join-Path $RustDir 'Cargo.toml') -Recurse -File -ErrorAction SilentlyContinue |
-        Where-Object { $_.LastWriteTime -gt $dllTime }
-    if ($anyNewer) { $needRust = $true }
+if (-not $needRust -and -not $SkipRust) {
+    # a) dll 不存在就必须编。此前缺这一条：干净 checkout（Rust 无改动）且没编过
+    #    dll 时，下面三个条件全不成立 → 落到 else 分支直接 throw，还提示"去掉
+    #    -SkipRust 或加 -ForceRust"，而用户并没传 -SkipRust，照提示做也没有出路。
+    if (-not (Test-Path $DllPath)) { $needRust = $true }
+
+    # b) Rust 工作区有未提交改动（含未跟踪文件）
+    if (-not $needRust -and (Get-Command git -ErrorAction SilentlyContinue)) {
+        $st = & git -C $RepoRoot status --porcelain -- kugou_api_server/rust/ 2>$null
+        if ($LASTEXITCODE -eq 0 -and $st) { $needRust = $true }
+    }
+
+    # c) 兜底：dll 比 Cargo.toml/src 旧说明 Rust 改过但未同步
+    #    （a) 已保证走到这里时 dll 必然存在）
+    if (-not $needRust) {
+        $dllTime = (Get-Item $DllPath).LastWriteTime
+        $anyNewer = Get-ChildItem (Join-Path $RustDir 'src'), (Join-Path $RustDir 'Cargo.toml') -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.LastWriteTime -gt $dllTime }
+        if ($anyNewer) { $needRust = $true }
+    }
 }
 
 if ($needRust) {
     Write-Step '构建 Rust 桌面 kugou_server.dll'
     Invoke-Native { & (Join-Path $RustDir 'build_desktop.ps1') }
 } else {
-    Write-Step 'Rust 无改动，跳过交叉编译（-ForceRust 强制，-SkipRust 手动跳过）'
-    if (-not (Test-Path (Join-Path $RustDir 'target\release\kugou_server.dll'))) {
-        Write-Host '[错误] 未找到 kugou_server.dll，且 Rust 无改动可跳过；请去掉 -SkipRust 或加 -ForceRust' -ForegroundColor Yellow
+    # 整块检测包在 -not $SkipRust 里：此前 c) 漏判 $SkipRust，传了 -SkipRust
+    # 但源码比 dll 新时照样会去编译。
+    if ($SkipRust) { Write-Step '按 -SkipRust 跳过 Rust 构建' }
+    else { Write-Step 'Rust 无改动且 dll 已最新，跳过构建（-ForceRust 强制重编）' }
+    if (-not (Test-Path $DllPath)) {
+        Write-Host '[错误] 未找到 kugou_server.dll，请去掉 -SkipRust 让脚本自行构建' -ForegroundColor Yellow
         throw '缺少 kugou_server.dll'
     }
 }
@@ -105,10 +121,9 @@ finally { Pop-Location }
 
 # ---------- 4. 复制 dll 到 exe 同目录 ----------
 Write-Step '复制 kugou_server.dll 到 Release 目录'
-$dll = Join-Path $RustDir 'target\release\kugou_server.dll'
-if (-not (Test-Path $dll)) { throw "未找到 kugou_server.dll：$dll（请先用 build_desktop.ps1 或去掉 -SkipRust）" }
+if (-not (Test-Path $DllPath)) { throw "未找到 kugou_server.dll：$DllPath（请先用 build_desktop.ps1 或去掉 -SkipRust）" }
 if (-not (Test-Path $ReleaseDir)) { throw "未找到 Release 目录：$ReleaseDir" }
-Copy-Item $dll $ReleaseDir -Force
+Copy-Item $DllPath $ReleaseDir -Force
 Write-Host "    kugou_server.dll -> $ReleaseDir" -ForegroundColor Green
 
 # ---------- 5. 压缩为便携 zip ----------
