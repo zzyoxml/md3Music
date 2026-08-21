@@ -127,3 +127,14 @@ Write-Host "    $zip  $([math]::Round((Get-Item $zip).Length / 1MB, 1)) MB" -For
 Write-Step '打包完成'
 Write-Host "便携版：$zip" -ForegroundColor Green
 Write-Host "把它拷贝到任意 Windows 机器解压，运行 md3music.exe 即可（无需安装）。"
+
+# 打包完成后停留，窗口不自动关闭，方便查看结果
+Write-Host ""
+Write-Host "构建结束。按任意键关闭窗口..." -ForegroundColor Cyan
+try {
+    # 交互控制台：等待按键，窗口保持打开
+    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+} catch {
+    # 非交互宿主（如某些工具/CI 调用）：ReadKey 不可用，改为延时停留，避免闪退
+    Start-Sleep -Seconds 10
+}

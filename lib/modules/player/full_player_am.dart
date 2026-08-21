@@ -704,6 +704,63 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     return !_parsedLyrics.any((line) => line.hasWordTiming);
   }
 
+  /// 构建 AM 播放器的歌词区内容，统一处理三种状态：
+  /// 加载中（loading）→ 无歌词（"暂无歌词"提示）→ 正常（AppleLyricsView）。
+  ///
+  /// [applyOffset] 为 true 时（对唱/卡拉OK Tab）应用在线歌曲的逐字时间偏移；
+  /// 其余布局传 false 用原始播放位置。
+  Widget _buildAmLyricsContent(
+    PlayerProvider playerProvider,
+    dynamic currentSong, {
+    required bool applyOffset,
+    required bool lyricDoubleTap,
+  }) {
+    // 歌词加载中
+    if (_isLoadingLyrics) {
+      // AM 风格：歌词 loading 改为白色，与深色背景协调
+      return const Center(child: M3ELoadingIndicator(color: Colors.white));
+    }
+    // 取词失败/酷狗无词（_parsedLyrics 为空）：给出"暂无歌词"提示，避免空白
+    if (_parsedLyrics.isEmpty) {
+      return const Center(
+        child: Text(
+          '暂无歌词',
+          style: TextStyle(color: Colors.white54, fontSize: 16),
+        ),
+      );
+    }
+    // P0: ListenableBuilder 同时订阅 positionNotifier（高频 200ms）与 playerProvider
+    //（播放/暂停切换等低频通知），保证暂停后 isPlaying 更新、Ticker 收敛后停止。
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        playerProvider.positionNotifier,
+        playerProvider,
+      ]),
+      builder: (context, _) {
+        // 逐字歌词时间偏移（仅在线音乐且 applyOffset 时生效）：渲染位置 = 播放位置 - 偏移
+        final int offset;
+        if (applyOffset && currentSong != null && currentSong.isOnline) {
+          offset = SettingsRepository.lyricTimeOffsetMs.value;
+        } else {
+          offset = 0;
+        }
+        final rawMs =
+            playerProvider.positionNotifier.value.inMilliseconds;
+        return AppleLyricsView(
+          lines: _parsedLyrics,
+          currentTimeMs: applyOffset ? (rawMs > offset ? rawMs - offset : 0) : rawMs,
+          isPlaying: playerProvider.isPlaying,
+          forceDarkBackground: true,
+          // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+          enableInterludeDots: !_isLocalLrcLyricWithoutWordTiming(currentSong),
+          doubleTapToJump: lyricDoubleTap,
+          accentColor: _lyricAccentColor,
+          onSeek: (ms) => playerProvider.seek(Duration(milliseconds: ms)),
+        );
+      },
+    );
+  }
+
   /// 构建横屏布局的封面内容：style 0/1 用 SpectrumArtwork（白色），style 2 用原封面
   Widget _buildLandscapeArtworkContent(
     PlayerProvider playerProvider,
@@ -1328,48 +1385,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   // RepaintBoundary 隔离 AppleLyricsView 每帧 setState 的重绘范围，
                   // 避免父级 TabBarView/Column 被牵连重建
                   child: RepaintBoundary(
-                    child: _isLoadingLyrics
-                        // AM 风格：歌词 loading 改为白色，与深色背景协调
-                        ? const Center(
-                            child: M3ELoadingIndicator(color: Colors.white),
-                          )
-                        // P0: 用 ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
-                        // 与 playerProvider（播放/暂停切换等低频通知）。
-                        // 修复：暂停后 positionStream 只发相同值 → ValueNotifier 不通知 →
-                        // AppleLyricsView 的 isPlaying 停留旧值 → 内部 Ticker 永不收敛停止 → 120fps。
-                        // 监听 provider 后，暂停瞬间 notifyListeners → 重建 → isPlaying 更新。
-                        : ListenableBuilder(
-                            listenable: Listenable.merge([
-                              playerProvider.positionNotifier,
-                              playerProvider,
-                            ]),
-                            builder: (context, _) {
-                              // 逐字歌词时间偏移（仅在线音乐生效）：渲染位置 = 播放位置 - 偏移
-                              final offset = (currentSong != null && currentSong.isOnline)
-                                  ? SettingsRepository.lyricTimeOffsetMs.value
-                                  : 0;
-                              final rawMs = playerProvider
-                                  .positionNotifier
-                                  .value
-                                  .inMilliseconds;
-                              return AppleLyricsView(
-                                lines: _parsedLyrics,
-                                currentTimeMs: rawMs > offset ? rawMs - offset : 0,
-                                isPlaying: playerProvider.isPlaying,
-                                forceDarkBackground: true,
-                                // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                                enableInterludeDots:
-                                    !_isLocalLrcLyricWithoutWordTiming(
-                                      currentSong,
-                                    ),
-                                doubleTapToJump: lyricDoubleTap,
-                                accentColor: _lyricAccentColor,
-                                onSeek: (ms) => playerProvider.seek(
-                                  Duration(milliseconds: ms),
-                                ),
-                              );
-                            },
-                          ),
+                    child: _buildAmLyricsContent(
+                      playerProvider,
+                      currentSong,
+                      applyOffset: true,
+                      lyricDoubleTap: lyricDoubleTap,
+                    ),
                   ),
                 ),
                 // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
@@ -1579,43 +1600,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 },
                               ),
                             ),
-                            _isLoadingLyrics
-                                // AM 风格：歌词 loading 改为白色，与深色背景协调
-                                ? const Center(
-                                    child: M3ELoadingIndicator(
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : RepaintBoundary(
-                                    // P0: ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
-                                    // 与 playerProvider（播放/暂停切换低频通知），保证暂停时
-                                    // AppleLyricsView 的 isPlaying 更新、Ticker 收敛后停止
-                                    child: ListenableBuilder(
-                                      listenable: Listenable.merge([
-                                        playerProvider.positionNotifier,
-                                        playerProvider,
-                                      ]),
-                                      builder: (context, _) => AppleLyricsView(
-                                        lines: _parsedLyrics,
-                                        currentTimeMs: playerProvider
-                                            .positionNotifier
-                                            .value
-                                            .inMilliseconds,
-                                        isPlaying: playerProvider.isPlaying,
-                                        forceDarkBackground: true,
-                                        // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                                        enableInterludeDots:
-                                            !_isLocalLrcLyricWithoutWordTiming(
-                                              currentSong,
-                                            ),
-                                        doubleTapToJump: lyricDoubleTap,
-                                        accentColor: _lyricAccentColor,
-                                        onSeek: (ms) => playerProvider.seek(
-                                          Duration(milliseconds: ms),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
+                            RepaintBoundary(
+                              child: _buildAmLyricsContent(
+                                playerProvider,
+                                currentSong,
+                                applyOffset: false,
+                                lyricDoubleTap: lyricDoubleTap,
+                              ),
+                            ),
                             // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
                             Selector<PlayerProvider, String?>(
                               selector: (_, p) => p.currentSong?.id,
@@ -1837,43 +1829,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 },
                               ),
                             ),
-                            _isLoadingLyrics
-                                // AM 风格：歌词 loading 改为白色，与深色背景协调
-                                ? const Center(
-                                    child: M3ELoadingIndicator(
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : RepaintBoundary(
-                                    // P0: ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
-                                    // 与 playerProvider（播放/暂停切换低频通知），保证暂停时
-                                    // AppleLyricsView 的 isPlaying 更新、Ticker 收敛后停止
-                                    child: ListenableBuilder(
-                                      listenable: Listenable.merge([
-                                        playerProvider.positionNotifier,
-                                        playerProvider,
-                                      ]),
-                                      builder: (context, _) => AppleLyricsView(
-                                        lines: _parsedLyrics,
-                                        currentTimeMs: playerProvider
-                                            .positionNotifier
-                                            .value
-                                            .inMilliseconds,
-                                        isPlaying: playerProvider.isPlaying,
-                                        forceDarkBackground: true,
-                                        // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                                        enableInterludeDots:
-                                            !_isLocalLrcLyricWithoutWordTiming(
-                                              currentSong,
-                                            ),
-                                        doubleTapToJump: lyricDoubleTap,
-                                        accentColor: _lyricAccentColor,
-                                        onSeek: (ms) => playerProvider.seek(
-                                          Duration(milliseconds: ms),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
+                            RepaintBoundary(
+                              child: _buildAmLyricsContent(
+                                playerProvider,
+                                currentSong,
+                                applyOffset: false,
+                                lyricDoubleTap: lyricDoubleTap,
+                              ),
+                            ),
                             // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
                             Selector<PlayerProvider, String?>(
                               selector: (_, p) => p.currentSong?.id,

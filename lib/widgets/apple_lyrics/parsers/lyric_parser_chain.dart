@@ -33,6 +33,12 @@ class LyricParserChain {
   /// LRC 行首时间戳正则：`[mm:ss.xx]` 或 `[mm:ss.xxx]` 后接任意内容。
   static final RegExp _lrcLineRegex = RegExp(r'^\[\d{2}:\d{2}\.\d{2,3}\]');
 
+  /// 通用 KRC/LRC 元数据文本头正则：`[字母开头的文本标识符:...]`。
+  ///
+  /// 覆盖所有字母型文本头（[id:、[ar:、[ti:、[total:、[language:[manualoffset:] 等），
+  /// 避免枚举遗漏导致格式误判。以数字开头的行（KRC `[123,456]`、LRC `[01:02.03]`）不会命中。
+  static final RegExp _metadataHeaderRegex = RegExp(r'^\[[A-Za-z][A-Za-z0-9]*:');
+
   /// 元数据行前缀列表（KRC 与 LRC 合并去重，两者完全一致）。
   ///
   /// 这些前缀匹配的行在自动检测时会被跳过，不参与首行格式判断。
@@ -213,6 +219,8 @@ class LyricParserChain {
 
   /// 判断是否为元数据行（KRC 与 LRC 共用同一套前缀）。
   static bool _isMetadata(String line) {
+    // 通用字母文本头（覆盖 [id:/[ar:/[manualoffset: 等全部字母头，防枚举遗漏）
+    if (_metadataHeaderRegex.hasMatch(line)) return true;
     for (final prefix in _metadataPrefixes) {
       if (line.startsWith(prefix)) return true;
     }
