@@ -60,6 +60,7 @@ import 'providers/shortcut_config_provider.dart';
 import 'providers/tab_config_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/comment_display_provider.dart';
+import 'services/kugou_api/kugou_api_client.dart';
 import 'services/kugou_server.dart';
 import 'widgets/dlna_casting_overlay.dart';
 
@@ -219,6 +220,10 @@ class _AppViewState extends State<_AppView> {
   /// 根据 ShortcutConfigProvider 当前配置，整体替换 Android 桌面快捷方式列表。
   /// type 统一为 `action_open_<tabId>`，由 main.dart handleShortcut 路由到对应页。
   void _applyDesktopShortcuts() {
+    // quick_actions 只有 Android/iOS 实现，Windows 上没有注册插件，
+    // setShortcutItems 会抛 MissingPluginException（initState 与配置变更各抛一次）。
+    // main.dart 的 quickActions.initialize 已按 Platform.isAndroid 守卫，这里同步。
+    if (!Platform.isAndroid) return;
     final config = context.read<ShortcutConfigProvider>();
     const quickActions = QuickActions();
     quickActions.setShortcutItems([
@@ -1334,6 +1339,13 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
 
     return Column(
       children: [
+        // 本地 API 服务器启动失败提示：在线内容全部不可用，但页面本身仍能渲染
+        // 成空列表/转圈，用户无从判断原因。这里把状态显式摆到所有 tab 顶部。
+        ValueListenableBuilder<bool>(
+          valueListenable: KugouApiClient.localServerAvailable,
+          builder: (context, available, _) =>
+              available ? const SizedBox.shrink() : const _LocalServerDownBanner(),
+        ),
         Expanded(
           child: AnimatedSwitcher(
             duration: M3ExpressiveMotion.defaultDuration,
@@ -1557,6 +1569,51 @@ class _AnimatedTabIconState extends State<_AnimatedTabIcon>
           ],
         );
       },
+    );
+  }
+}
+
+/// 本地 API 服务器未启动提示条（所有 tab 顶部）。
+///
+/// 触发条件：[KugouApiClient.localServerAvailable] 为 false，即本地 Rust
+/// 服务器连端口都没拿到。此时所有在线接口都会被拦截器立即拒绝，
+/// 页面只会显示空状态，必须告知用户真正的原因。
+class _LocalServerDownBanner extends StatelessWidget {
+  const _LocalServerDownBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final textTheme = Theme.of(context).textTheme;
+    // Windows 上最常见的成因是打包时漏了 kugou_server.dll，直接给出可操作提示。
+    final hint = Platform.isWindows
+        ? '本地数据接口未启动，在线内容不可用（可能缺少 kugou_server.dll）'
+        : '本地数据接口未启动，在线内容不可用';
+
+    return Material(
+      color: colorScheme.errorContainer.withValues(alpha: 0.85),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Icon(
+              Icons.dns_outlined,
+              size: 18,
+              color: colorScheme.onErrorContainer,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                hint,
+                style: textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onErrorContainer,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

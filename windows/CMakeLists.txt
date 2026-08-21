@@ -130,9 +130,14 @@ if(EXISTS "${KUGOU_SERVER_DLL}")
       "$<TARGET_FILE_DIR:${BINARY_NAME}>/kugou_server.dll"
     COMMENT "复制 kugou_server.dll 到 exe 目录")
 else()
-  message(WARNING
+  # 必须是 FATAL_ERROR 而不是 WARNING：缺 dll 的包能构建成功、能启动、能显示 UI，
+  # 但 DynamicLibrary.open 失败后所有 API 请求都打不出去（历史上表现为
+  # "延迟极高 + 资源加载不出来"）。WARNING 会被 flutter build 的输出刷掉，
+  # 残包直到用户运行时才暴露问题。宁可构建期就失败。
+  message(FATAL_ERROR
     "未找到 kugou_server.dll：${KUGOU_SERVER_DLL}\n"
-    "先运行 kugou_api_server\\rust\\build_desktop.ps1 编译，否则本地 API 服务器无法启动，App 无法联网。")
+    "先运行 kugou_api_server\\rust\\build_desktop.ps1 编译（或直接用 scripts\\build_windows.ps1 一键构建），"
+    "否则本地 API 服务器无法启动，App 无法联网。")
 endif()
 
 
