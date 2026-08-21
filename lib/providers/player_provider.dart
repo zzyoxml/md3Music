@@ -379,10 +379,17 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
               'dur=${duration.inSeconds}s)');
           _handlePlaybackCompleted();
         }
-        // 不再播放中周期性 setPosition 推给 Lyricon：
-        // Kotlin 侧保留 autoSync=true，由 SDK 基于系统时钟自行平滑推进时间轴，
-        // 避免 200ms 阶梯 + IPC 延迟驱动远端逐字高亮造成"一卡一卡"。
-        // 位置同步改由播放/暂停切换（setPlaybackState）与 seekTo 承担。
+        // 直接转发给 Lyricon，无节流。
+        // positionStream 本身就是 ~200ms 周期（just_audio 默认），是天然节流。
+        // MethodChannel 是异步的，不阻塞 Dart UI；setPosition 是 fire-and-forget。
+        // 仅在播放中推送，暂停时跳过避免无意义 IPC。
+        if (LyriconProviderService.instance.enabled && _isPlaying) {
+          try {
+            LyriconProviderService.instance.setPosition(
+              position.inMilliseconds,
+            );
+          } catch (_) {}
+        }
       }, onError: (e) {});
 
       _durationSubscription = _audioService.durationStream.listen((duration) {
