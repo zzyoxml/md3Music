@@ -51,31 +51,43 @@ class KugouApiServer {
         _started = true;
         return;
       } catch (e) {
-        print('dart:ffi start failed, falling back to MethodChannel: $e');
+        if (Platform.isAndroid) {
+          print('dart:ffi start failed, falling back to MethodChannel: $e');
+        } else {
+          // 桌面没有 MethodChannel 兜底，FFI 失败即彻底失败。最常见原因是
+          // 原生库没有跟 exe 放在一起（需先跑
+          // kugou_api_server/rust/build_desktop.ps1 产出 dll）。
+          print('dart:ffi start failed and no fallback on this platform '
+              '(missing ${_libraryName()}?): $e');
+        }
       }
 
-      // MethodChannel（JNI 方式）仅 Android 有该通道，桌面直接返回
-      if (!Platform.isAndroid) return;
-      for (int attempt = 0; attempt < 2; attempt++) {
-        try {
-          final port = await _channel.invokeMethod<int>('startServer');
-          if (port != null && port > 0) {
-            _applyPort(port);
-            _started = true;
-            await _waitForReady(port);
-            return;
+      // MethodChannel（JNI 方式）仅 Android 有该通道，桌面直接走下方失败处理
+      if (Platform.isAndroid) {
+        for (int attempt = 0; attempt < 2; attempt++) {
+          try {
+            final port = await _channel.invokeMethod<int>('startServer');
+            if (port != null && port > 0) {
+              _applyPort(port);
+              _started = true;
+              await _waitForReady(port);
+              return;
+            }
+            print('MethodChannel start returned invalid port: $port');
+          } catch (e) {
+            print('MethodChannel start failed (attempt ${attempt + 1}): $e');
+            await Future.delayed(const Duration(seconds: 1));
           }
-          print('MethodChannel start returned invalid port: $port');
-        } catch (e) {
-          print('MethodChannel start failed (attempt ${attempt + 1}): $e');
-          await Future.delayed(const Duration(seconds: 1));
         }
       }
     } catch (e) {
       print('KugouApiServer start failed: $e');
     }
-    // 启动失败：重置去重 Future，允许后续调用重试（如播放前兜底）
+    // 启动失败：重置去重 Future，允许后续调用重试（如播放前兜底）。
+    // 之前桌面分支在此之前直接 return，既跳过了这行（start() 再也不会重试），
+    // 也从不置错误态，导致 KugouApiClient 每个请求都白等满 8s 就绪超时。
     _startFuture = null;
+    KugouApiClient.markServerStartFailed();
   }
 
   /// 返回当前平台的原生库文件名（桌面与 Android 命名不同）。
@@ -150,6 +162,8 @@ class KugouApiServer {
       }
     }
     print('Local API server did not become ready within 30 seconds');
+    // 同上：就绪信号永远不会来，若不置错误态，后续每个请求都要白等满 8s。
+    KugouApiClient.markServerStartFailed();
   }
 
   static Future<bool> isRunning() async {
