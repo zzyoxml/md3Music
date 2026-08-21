@@ -2200,11 +2200,115 @@ class _FullPlayerState extends State<FullPlayer>
   ///
   /// 替代原 `_buildSecondaryControls` 的 9 个独立按钮。
   /// 不在 ActionBar 中的动作（下载/音量/音质/歌单）通过 more_vert 菜单访问。
+  ///
+  /// 开启设置「底栏切分」后拆成两条并排 pill：左侧「切换页面」组（4 个 tab），
+  /// 右侧「功能性」组（倍速 / 收藏 / 全屏）。此时全屏从长按播放列表拆分为独立
+  /// 按钮，播放列表不再响应长按；其余长按（下载 / 桌面歌词 / AI 推荐）保持原位。
   Widget _buildActionBar(
     PlayerProvider playerProvider,
     ColorScheme colorScheme, {
     bool isExpanded = false,
   }) {
+    final split = context.watch<ThemeProvider>().splitActionBar;
+
+    if (!split) {
+      return _buildActionBarPill(
+        colorScheme,
+        children: [
+          // 1. 倍速指示（纯文字）
+          _buildSpeedCell(playerProvider, colorScheme),
+          // 2-5. 页面切换组：播放列表/封面/歌词/评论
+          Expanded(
+            flex: 4,
+            child: _buildTabSwitchGroup(
+              playerProvider,
+              colorScheme,
+              split: false,
+            ),
+          ),
+          // 6. 收藏
+          _buildFavoriteCell(playerProvider, colorScheme),
+        ],
+      );
+    }
+
+    // 切分模式：左「切换页面」组、右「功能性」组。
+    // flex 取各组按钮数（4 : 3），使两条 pill 内每个按钮等宽。
+    return Row(
+      children: [
+        Expanded(
+          flex: 4,
+          child: _buildActionBarPill(
+            colorScheme,
+            children: [
+              Expanded(
+                child: _buildTabSwitchGroup(
+                  playerProvider,
+                  colorScheme,
+                  split: true,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          flex: 3,
+          child: _buildActionBarPill(
+            colorScheme,
+            children: [
+              _buildSpeedCell(playerProvider, colorScheme),
+              _buildFavoriteCell(playerProvider, colorScheme),
+              _buildFullscreenCell(colorScheme),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 底栏 pill 容器：48 高、StadiumBorder、primaryContainer 底色。
+  ///
+  /// 高度 48 与 [_buildTabSwitchGroup] 里高亮球的 `top` 计算强耦合，改动需同步。
+  Widget _buildActionBarPill(
+    ColorScheme colorScheme, {
+    required List<Widget> children,
+  }) {
+    return Material(
+      color: colorScheme.primaryContainer,
+      shape: const StadiumBorder(),
+      clipBehavior: Clip.antiAlias,
+      child: SizedBox(height: 48, child: Row(children: children)),
+    );
+  }
+
+  /// 倍速指示单元（纯文字）：点击弹出倍速选择。
+  Widget _buildSpeedCell(
+    PlayerProvider playerProvider,
+    ColorScheme colorScheme,
+  ) {
+    final textTheme = Theme.of(context).textTheme;
+    return Expanded(
+      child: InkWell(
+        onTap: () => _showSpeedDialog(playerProvider),
+        child: Center(
+          child: Text(
+            '${playerProvider.speed}x',
+            style: textTheme.labelLarge?.copyWith(
+              color: colorScheme.onPrimaryContainer,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 收藏单元：短按切换收藏，长按（在线歌曲）弹出 AI 推荐面板。
+  Widget _buildFavoriteCell(
+    PlayerProvider playerProvider,
+    ColorScheme colorScheme,
+  ) {
     final song = playerProvider.currentSong;
     // 根据歌曲来源（本地/在线）选择对应的收藏 Provider
     final isOnline = song is Song && song.isOnline;
@@ -2213,255 +2317,254 @@ class _FullPlayerState extends State<FullPlayer>
         (isOnline
             ? context.watch<FavoritesProvider>().isFavorite(song.id)
             : context.watch<LocalFavoritesProvider>().isFavorite(song.id));
-    final textTheme = Theme.of(context).textTheme;
+    return Expanded(
+      child: InkWell(
+        onTap: song != null
+            ? () {
+                // 本地歌曲走 LocalFavoritesProvider，在线走 FavoritesProvider
+                if (isOnline) {
+                  context.read<FavoritesProvider>().toggleFavorite(song);
+                } else {
+                  context.read<LocalFavoritesProvider>().toggleFavorite(song.id);
+                }
+              }
+            : null,
+        // 长按：在线歌曲弹出 AI 推荐歌曲面板
+        onLongPress: song != null && isOnline
+            ? () => showAiRecommendSheet(context, song)
+            : null,
+        child: Center(
+          child: Icon(
+            isFavorited ? Icons.favorite : Icons.favorite_border,
+            size: 22,
+            color: isFavorited
+                ? colorScheme.error
+                : colorScheme.onPrimaryContainer,
+          ),
+        ),
+      ),
+    );
+  }
 
-    return Material(
-      color: colorScheme.primaryContainer,
-      shape: const StadiumBorder(),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: 48,
-        child: Row(
-          children: [
-            // 1. 倍速指示（纯文字）
-            Expanded(
-              child: InkWell(
-                onTap: () => _showSpeedDialog(playerProvider),
-                child: Center(
-                  child: Text(
-                    '${playerProvider.speed}x',
-                    style: textTheme.labelLarge?.copyWith(
-                      color: colorScheme.onPrimaryContainer,
-                      fontWeight: FontWeight.w600,
+  /// 全屏单元：仅底栏切分开启时出现，从原「长按播放列表」拆分而来。
+  ///
+  /// 只负责进入 Zen 模式——进入后整条操作栏被 [_ZenFade] 折叠为 0 高度，
+  /// 退出仍是长按封面 2000ms（见 [_onArtworkLongPressStart]）。
+  Widget _buildFullscreenCell(ColorScheme colorScheme) {
+    return Expanded(
+      child: InkWell(
+        onTap: () {
+          HapticFeedback.lightImpact();
+          _enterZenMode();
+        },
+        child: Center(
+          child: Icon(
+            Icons.fullscreen,
+            size: 22,
+            color: colorScheme.onPrimaryContainer,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 页面切换组：播放列表/封面/歌词/评论 4 个 tab 按钮。
+  ///
+  /// 底部「高亮球」随 _tabController 动画值在 4 个按钮间平滑移动（莫奈色适配，
+  /// 球用主题 primary），点击切换（animateTo）与 TabBarView 滑动都驱动该动画，
+  /// 因而同步跟随；按钮去除水波纹，长按保留触觉反馈。
+  ///
+  /// [split] 为 true（底栏切分开启）时全屏已是独立按钮，播放列表不再响应长按。
+  Widget _buildTabSwitchGroup(
+    PlayerProvider playerProvider,
+    ColorScheme colorScheme, {
+    required bool split,
+  }) {
+    final song = playerProvider.currentSong;
+    final isOnline = song is Song && song.isOnline;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final switchWidth = constraints.maxWidth;
+        final btnW = switchWidth / 4;
+        const capsuleSize = 34.0;
+        // 整体包在 AnimatedBuilder 里：tab 切换/滑动时连同 4 个按钮的
+        // 图标选中态一起重建，否则只有高亮球移动、图标颜色不更新。
+        return AnimatedBuilder(
+          // 监听 animation 动画对象本身而非 TabController：
+          // _changeIndex 只在开始/结束时 notify，动画期间每帧进度
+          // （animateTo 的 Curves.ease 与手指拖拽 offset）在 animation 上。
+          animation:
+              _tabController.animation ??
+              const AlwaysStoppedAnimation<double>(0),
+          builder: (context, _) {
+            final anim =
+                (_tabController.animation?.value ??
+                        _tabController.index.toDouble())
+                    .clamp(0.0, 3.0);
+            return Stack(
+              children: [
+                Positioned(
+                  left: anim * btnW + (btnW - capsuleSize) / 2,
+                  top: (48 - capsuleSize) / 2,
+                  width: capsuleSize,
+                  height: capsuleSize,
+                  child: IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        // 高亮球用主题深色（莫奈 primary），选中 icon 在其上改浅色
+                        color: colorScheme.primary,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
-            // 2-5. 页面切换组：播放列表/封面/歌词/评论。
-            // 底部「高亮球」随 _tabController 动画值在 4 个按钮间平滑移动（莫奈色适配，
-            // 球用主题 secondaryContainer），点击切换（animateTo）与 TabBarView 滑动都
-            // 驱动该动画，因而同步跟随；按钮去除水波纹，长按保留触觉反馈。
-            Expanded(
-              flex: 4,
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final switchWidth = constraints.maxWidth;
-                  final btnW = switchWidth / 4;
-                  const capsuleSize = 34.0;
-                    // 整体包在 AnimatedBuilder 里：tab 切换/滑动时连同 4 个按钮的
-                    // 图标选中态一起重建，否则只有高亮球移动、图标颜色不更新。
-                    return AnimatedBuilder(
-                      // 监听 animation 动画对象本身而非 TabController：
-                      // _changeIndex 只在开始/结束时 notify，动画期间每帧进度
-                      // （animateTo 的 Curves.ease 与手指拖拽 offset）在 animation 上。
-                      animation: _tabController.animation ??
-                          const AlwaysStoppedAnimation<double>(0),
-                      builder: (context, _) {
-                        final anim = (_tabController.animation?.value ??
-                                _tabController.index.toDouble())
-                            .clamp(0.0, 3.0);
-                        return Stack(
-                          children: [
-                            Positioned(
-                              left: anim * btnW + (btnW - capsuleSize) / 2,
-                              top: (48 - capsuleSize) / 2,
-                              width: capsuleSize,
-                              height: capsuleSize,
-                              child: IgnorePointer(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    // 高亮球用主题深色（莫奈 primary），选中 icon 在其上改浅色
-                                    color: colorScheme.primary,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Row(
-                              children: [
-                          // 播放列表 — 切换到播放列表 tab（index 0，最左侧）
-                          Expanded(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                if (_tabController.index != 0) {
-                                  _tabController.animateTo(0);
-                                }
-                              },
-                              onLongPress: () {
+                Row(
+                  children: [
+                    // 播放列表 — 切换到播放列表 tab（index 0，最左侧）。
+                    // 未切分时长按进 Zen 模式；切分后全屏已拆为独立按钮，不再响应长按。
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          if (_tabController.index != 0) {
+                            _tabController.animateTo(0);
+                          }
+                        },
+                        onLongPress: split
+                            ? null
+                            : () {
                                 HapticFeedback.lightImpact();
                                 _enterZenMode();
                               },
-                              child: Center(
-                                child: Icon(
-                                  Icons.queue_music,
-                                  size: 22,
-                                  // 选中：浅色（在深色高亮球上）；未选中：深色；用连续动画值做平滑过渡
-                                  color: Color.lerp(
-                                    colorScheme.onPrimaryContainer,
-                                    colorScheme.onPrimary,
-                                    (1 - anim.abs().clamp(0.0, 1.0)),
-                                  ),
-                                ),
-                              ),
+                        child: Center(
+                          child: Icon(
+                            Icons.queue_music,
+                            size: 22,
+                            // 选中：浅色（在深色高亮球上）；未选中：深色；用连续动画值做平滑过渡
+                            color: Color.lerp(
+                              colorScheme.onPrimaryContainer,
+                              colorScheme.onPrimary,
+                              (1 - anim.abs().clamp(0.0, 1.0)),
                             ),
                           ),
-                          // 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
-                          Expanded(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                if (_tabController.index != 1) {
-                                  _tabController.animateTo(1);
-                                }
-                              },
-                              onLongPress: song != null && isOnline
-                                  ? () {
-                                      HapticFeedback.lightImpact();
-                                      _downloadSong(song);
-                                    }
-                                  : null,
-                              child: Center(
-                                child: Icon(
-                                  Icons.album,
-                                  size: 22,
-                                  color: Color.lerp(
-                                    colorScheme.onPrimaryContainer,
-                                    colorScheme.onPrimary,
-                                    (1 - (anim - 1).abs().clamp(0.0, 1.0)),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          // 歌词 — 短按跳转到歌词 tab，长按开关桌面歌词
-                          Expanded(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                if (_tabController.index != 2) {
-                                  _tabController.animateTo(2);
-                                }
-                              },
-                              onLongPress: () async {
-                                HapticFeedback.lightImpact();
-                                await DesktopLyricService.instance.toggle();
-                                if (mounted) {
-                                  // 同步通知栏"桌面歌词"按钮状态
-                                  final player =
-                                      context.read<PlayerProvider>();
-                                  final song = player.currentSong;
-                                  // 收藏状态需实时查询，避免暂停时显示为未收藏
-                                  bool isFavorited = false;
-                                  if (song != null) {
-                                    try {
-                                      isFavorited = context
-                                          .read<FavoritesProvider>()
-                                          .isFavorite(song.id);
-                                    } catch (_) {}
-                                  }
-                                  await MediaNotificationService
-                                      .updateNotification(
-                                        // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
-                                        title: song?.displayName ?? '',
-                                        artist: song?.artist ?? '',
-                                        artUrl: song?.artworkUri,
-                                        isPlaying: player.isPlaying,
-                                        position: player.position,
-                                        duration:
-                                            player.duration ?? Duration.zero,
-                                        desktopLyricEnabled: DesktopLyricService
-                                            .instance.enabled,
-                                        isFavorited: isFavorited,
-                                      );
-                                }
-                              },
-                              child: Center(
-                                child: Icon(
-                                  // 桌面歌词开启时用实心 icon + primary 色，与 mini_player 一致
-                                  DesktopLyricService.instance.enabled
-                                      ? Icons.lyrics
-                                      : Icons.lyrics_outlined,
-                                  size: 22,
-                                  // 选中浅色 / 未选中深色，用连续动画值平滑过渡
-                                  color: Color.lerp(
-                                    DesktopLyricService.instance.enabled
-                                        ? colorScheme.primary
-                                        : colorScheme.onPrimaryContainer,
-                                    colorScheme.onPrimary,
-                                    (1 - (anim - 2).abs().clamp(0.0, 1.0)),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                          // 评论 — 跳转到评论 tab
-                          Expanded(
-                            child: GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onTap: () {
-                                if (_tabController.index != 3) {
-                                  _tabController.animateTo(3);
-                                }
-                              },
-                              child: Center(
-                                child: Icon(
-                                  Icons.comment_outlined,
-                                  size: 22,
-                                  color: Color.lerp(
-                                    colorScheme.onPrimaryContainer,
-                                    colorScheme.onPrimary,
-                                    (1 - (anim - 3).abs().clamp(0.0, 1.0)),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ],
-                  );
-                },
-              );
-            },
-          ),
-        ),
-        // 6. 收藏
-            Expanded(
-              child: InkWell(
-                onTap: song != null
-                    ? () {
-                        // 本地歌曲走 LocalFavoritesProvider，在线走 FavoritesProvider
-                        if (isOnline) {
-                          context.read<FavoritesProvider>().toggleFavorite(
-                            song,
-                          );
-                        } else {
-                          context.read<LocalFavoritesProvider>().toggleFavorite(
-                            song.id,
-                          );
-                        }
-                      }
-                    : null,
-                // 长按：在线歌曲弹出 AI 推荐歌曲面板
-                onLongPress: song != null && isOnline
-                    ? () => showAiRecommendSheet(context, song)
-                    : null,
-                child: Center(
-                  child: Icon(
-                    isFavorited ? Icons.favorite : Icons.favorite_border,
-                    size: 22,
-                    color: isFavorited
-                        ? colorScheme.error
-                        : colorScheme.onPrimaryContainer,
-                  ),
+                    ),
+                    // 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          if (_tabController.index != 1) {
+                            _tabController.animateTo(1);
+                          }
+                        },
+                        onLongPress: song != null && isOnline
+                            ? () {
+                                HapticFeedback.lightImpact();
+                                _downloadSong(song);
+                              }
+                            : null,
+                        child: Center(
+                          child: Icon(
+                            Icons.album,
+                            size: 22,
+                            color: Color.lerp(
+                              colorScheme.onPrimaryContainer,
+                              colorScheme.onPrimary,
+                              (1 - (anim - 1).abs().clamp(0.0, 1.0)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 歌词 — 短按跳转到歌词 tab，长按开关桌面歌词
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          if (_tabController.index != 2) {
+                            _tabController.animateTo(2);
+                          }
+                        },
+                        onLongPress: () async {
+                          HapticFeedback.lightImpact();
+                          await DesktopLyricService.instance.toggle();
+                          if (mounted) {
+                            // 同步通知栏"桌面歌词"按钮状态
+                            final player = context.read<PlayerProvider>();
+                            final song = player.currentSong;
+                            // 收藏状态需实时查询，避免暂停时显示为未收藏
+                            bool isFavorited = false;
+                            if (song != null) {
+                              try {
+                                isFavorited = context
+                                    .read<FavoritesProvider>()
+                                    .isFavorite(song.id);
+                              } catch (_) {}
+                            }
+                            await MediaNotificationService.updateNotification(
+                              // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
+                              title: song?.displayName ?? '',
+                              artist: song?.artist ?? '',
+                              artUrl: song?.artworkUri,
+                              isPlaying: player.isPlaying,
+                              position: player.position,
+                              duration: player.duration ?? Duration.zero,
+                              desktopLyricEnabled:
+                                  DesktopLyricService.instance.enabled,
+                              isFavorited: isFavorited,
+                            );
+                          }
+                        },
+                        child: Center(
+                          child: Icon(
+                            // 桌面歌词开启时用实心 icon + primary 色，与 mini_player 一致
+                            DesktopLyricService.instance.enabled
+                                ? Icons.lyrics
+                                : Icons.lyrics_outlined,
+                            size: 22,
+                            // 选中浅色 / 未选中深色，用连续动画值平滑过渡
+                            color: Color.lerp(
+                              DesktopLyricService.instance.enabled
+                                  ? colorScheme.primary
+                                  : colorScheme.onPrimaryContainer,
+                              colorScheme.onPrimary,
+                              (1 - (anim - 2).abs().clamp(0.0, 1.0)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    // 评论 — 跳转到评论 tab
+                    Expanded(
+                      child: GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onTap: () {
+                          if (_tabController.index != 3) {
+                            _tabController.animateTo(3);
+                          }
+                        },
+                        child: Center(
+                          child: Icon(
+                            Icons.comment_outlined,
+                            size: 22,
+                            color: Color.lerp(
+                              colorScheme.onPrimaryContainer,
+                              colorScheme.onPrimary,
+                              (1 - (anim - 3).abs().clamp(0.0, 1.0)),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ),
-          ],
-        ),
-      ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 
