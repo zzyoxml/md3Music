@@ -16,6 +16,8 @@ class ThemeProvider extends ChangeNotifier {
   static const String _uiScaleKey = 'ui_scale';
   // 底部导航栏文字显示行为：始终显示 / 仅当前页 / 始终不显示
   static const String _navLabelBehaviorKey = 'nav_label_behavior';
+  // 播放详情页底栏切分：按按钮作用拆成「切换页面」+「功能性」两条 pill
+  static const String _splitActionBarKey = 'split_player_action_bar';
   static const String _fontSourceKey = 'font_source';
   static const String _customFontPathKey = 'custom_font_path';
   static const String _artistPhotoBgKey = 'use_artist_photo_background';
@@ -44,6 +46,8 @@ class ThemeProvider extends ChangeNotifier {
   // 底部导航栏文字显示行为（默认始终不显示）
   NavigationDestinationLabelBehavior _navLabelBehavior =
       NavigationDestinationLabelBehavior.alwaysHide;
+  // 播放详情页底栏切分（默认关闭，保持单条长 pill）
+  bool _splitActionBar = false;
   // 字体来源（system / bundled / custom）
   FontSource _fontSource = FontSource.system;
   // 用户选择的字体文件路径（原生端拷贝到 filesDir 后的真实路径）
@@ -75,6 +79,7 @@ class ThemeProvider extends ChangeNotifier {
   bool get useOledBlack => _useOledBlack;
   double get uiScale => _uiScale;
   NavigationDestinationLabelBehavior get navLabelBehavior => _navLabelBehavior;
+  bool get splitActionBar => _splitActionBar;
   FontSource get fontSource => _fontSource;
   String? get customFontPath => _customFontPath;
   bool get useArtistPhotoBackground => _useArtistPhotoBackground;
@@ -135,6 +140,7 @@ class ThemeProvider extends ChangeNotifier {
     _loadOledBlack();
     _loadUiScale();
     _loadNavLabelBehavior();
+    _loadSplitActionBar();
     _loadFontSource();
     _loadArtistPhotoBackground();
     _loadLyricDoubleTapToJump();
@@ -405,6 +411,25 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_navLabelBehaviorKey, value.index);
+  }
+
+  /// 加载「播放详情页底栏切分」开关持久化值，默认关闭。
+  Future<void> _loadSplitActionBar() async {
+    final prefs = await SharedPreferences.getInstance();
+    _splitActionBar = prefs.getBool(_splitActionBarKey) ?? false;
+    notifyListeners();
+  }
+
+  /// 切换「播放详情页底栏切分」开关（MD3 / AM 风格播放页均生效）。
+  /// - 开启：底栏拆成「切换页面」+「功能性」两条 pill，全屏从长按播放列表
+  ///   拆出为功能组内的独立按钮
+  /// - 关闭：保持单条长 pill，全屏仍靠长按播放列表进入
+  Future<void> setSplitActionBar(bool enabled) async {
+    if (_splitActionBar == enabled) return;
+    _splitActionBar = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_splitActionBarKey, enabled);
   }
 
   void toggleTheme() {

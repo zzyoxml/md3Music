@@ -112,6 +112,8 @@ class _SettingsPageState extends State<SettingsPage>
   bool _sortCollectedByLatestClick = true;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
+  // 播放详情页底栏切分开关（默认关闭，保持单条长 pill）
+  bool _splitActionBar = false;
   // 自定义背景图片（全局界面背景）
   bool _useBackgroundImage = false;
   String? _backgroundImagePath;
@@ -248,6 +250,7 @@ class _SettingsPageState extends State<SettingsPage>
     final lyricDoubleTapToJump = context
         .read<ThemeProvider>()
         .lyricDoubleTapToJump;
+    final splitActionBar = context.read<ThemeProvider>().splitActionBar;
     final useArtistPhotoBackground = context
         .read<ThemeProvider>()
         .useArtistPhotoBackground;
@@ -302,6 +305,7 @@ class _SettingsPageState extends State<SettingsPage>
       _useCoverSeedColor = useCoverSeedColor;
       _useAmStylePlayer = useAmStylePlayer;
       _lyricDoubleTapToJump = lyricDoubleTapToJump;
+      _splitActionBar = splitActionBar;
       _useArtistPhotoBackground = useArtistPhotoBackground;
       _artistPhotoInterval = artistPhotoInterval;
       _artistPhotoOpacity = artistPhotoOpacity;
@@ -523,6 +527,7 @@ class _SettingsPageState extends State<SettingsPage>
     (label: '背景图片透明度', category: '外观', aliases: '透明度 背景'),
     (label: '背景图片莫奈取色', category: '外观', aliases: '莫奈 取色 动态取色 背景'),
     // 播放页样式
+    (label: '底栏切分', category: '播放页样式', aliases: '底栏 切分 分离 操作栏 底部 全屏'),
     (label: '歌词双击跳转', category: '播放页样式', aliases: '双击 跳转'),
     (label: '歌手写真背景轮播', category: '播放页样式', aliases: '写真 背景 轮播'),
     (label: '写真背景透明度', category: '播放页样式', aliases: '写真 透明度'),
@@ -1527,6 +1532,16 @@ class _SettingsPageState extends State<SettingsPage>
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: _buildStyleCards(colorScheme),
+        ),
+        SwitchListTile(
+          title: const Text('底栏切分'),
+          subtitle: const Text('播放页底栏按作用分成两组：左侧切换页面，右侧功能按钮（含全屏）'),
+          value: _splitActionBar,
+          onChanged: (v) {
+            HapticFeedback.lightImpact();
+            setState(() => _splitActionBar = v);
+            context.read<ThemeProvider>().setSplitActionBar(v);
+          },
         ),
         SwitchListTile(
           title: const Text('歌词双击跳转'),
