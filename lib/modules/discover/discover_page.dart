@@ -14,6 +14,7 @@ import '../../widgets/pinchable_grid_view.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/song_list_item.dart';
 import '../charts/charts_page.dart';
+import '../personal_fm/personal_fm_page.dart';
 import '../playlist/playlist_page.dart';
 import '../recognition/song_recognition_page.dart';
 import '../search/search_page.dart';
@@ -32,6 +33,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
   static const String _kCollapsedDaily = 'discover_collapsed_daily';
   static const String _kCollapsedPlaylist = 'discover_collapsed_playlist';
   static const String _kCollapsedRank = 'discover_collapsed_rank';
+  static const String _kCollapsedFm = 'discover_collapsed_fm';
 
   bool _isLoading = true;
   String? _error;
@@ -39,6 +41,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
   bool _isDailyExpanded = true;
   bool _isPlaylistExpanded = true;
   bool _isRankExpanded = true;
+  bool _isFmExpanded = true;
 
   /// 顶栏渐变 ScrollController：与 ScrollAwareAppBar 共享，监听滚动 offset
   final ScrollController _scrollController = ScrollController();
@@ -57,6 +60,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
       _isDailyExpanded = !(prefs.getBool(_kCollapsedDaily) ?? false);
       _isPlaylistExpanded = !(prefs.getBool(_kCollapsedPlaylist) ?? false);
       _isRankExpanded = !(prefs.getBool(_kCollapsedRank) ?? false);
+      _isFmExpanded = !(prefs.getBool(_kCollapsedFm) ?? false);
     });
   }
 
@@ -207,6 +211,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
                 controller: _scrollController,
                 slivers: [
                   _buildBannerSection(colorScheme),
+                  _buildPersonalFmSection(colorScheme),
                   _buildDailySection(colorScheme),
                   _buildThemeMusicSection(colorScheme),
                   _buildSceneSection(colorScheme),
@@ -226,6 +231,28 @@ class _DiscoverPageState extends State<DiscoverPage> {
     if (h < 14) return '中午好';
     if (h < 18) return '下午好';
     return '晚上好';
+  }
+
+  /// 私人 FM 区块：内嵌 [PersonalFmPage]，可折叠；仅登录后显示。
+  Widget _buildPersonalFmSection(ColorScheme cs) {
+    return Selector<KugouProvider, bool>(
+      selector: (_, kugou) => kugou.isLoggedIn,
+      builder: (context, isLoggedIn, _) {
+        if (!isLoggedIn) return const SliverToBoxAdapter(child: SizedBox());
+        return SliverToBoxAdapter(
+          child: _Section(
+            title: '私人 FM',
+            isExpanded: _isFmExpanded,
+            onToggle: () => _toggleCollapse(
+              prefKey: _kCollapsedFm,
+              currentlyExpanded: _isFmExpanded,
+              apply: (v) => _isFmExpanded = v,
+            ),
+            child: const PersonalFmPage(embedded: true),
+          ),
+        );
+      },
+    );
   }
 
   Widget _buildError(ColorScheme cs) {
