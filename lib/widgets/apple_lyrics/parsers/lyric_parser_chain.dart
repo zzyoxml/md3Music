@@ -73,11 +73,6 @@ class LyricParserChain {
     try {
       final format = detectFormat(text);
       var lines = _delegate(text, format);
-      debugPrint(
-        '[LyricDebug] LyricParserChain.parse format=$format '
-        'textLen=${text.length} lines=${lines.length} '
-        'trans=${translationText?.length} roma=${romaText?.length}',
-      );
       if (translationText != null && translationText.isNotEmpty) {
         lines = _mergeField(lines, translationText, isRoma: false);
       }

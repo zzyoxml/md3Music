@@ -1388,10 +1388,6 @@ class KugouApiClient {
     void resolveCandidate(Map<String, dynamic>? result) {
       if (result == null) return;
       final candidates = result['candidates'];
-      debugPrint(
-        '[LyricDebug] getLyric search hash=$hash songName=$songName '
-        'candidatesLen=${candidates is List ? candidates.length : -1}',
-      );
       if (candidates is List && candidates.isNotEmpty) {
         final first = candidates.first as Map<String, dynamic>;
         lyricId = first['id']?.toString();
@@ -1408,10 +1404,6 @@ class KugouApiClient {
       if (byHash != null && _hasCandidates(byHash)) {
         searchResult = byHash;
         resolveCandidate(searchResult);
-      } else {
-        debugPrint(
-          '[LyricDebug] getLyric hash miss hash=$hash songName=$songName',
-        );
       }
     }
 
@@ -1422,9 +1414,6 @@ class KugouApiClient {
         hash.isNotEmpty &&
         songName != null &&
         songName.isNotEmpty) {
-      debugPrint(
-        '[LyricDebug] getLyric recover via song search songName=$songName',
-      );
       final recovered = await _recoverLyricIdBySongSearch(songName);
       if (recovered != null) {
         lyricId = recovered.$1;
@@ -1436,9 +1425,6 @@ class KugouApiClient {
     // 只传 keywords，不携带原 hash：hash 在歌词库匹配失败时，酷狗会优先按
     // 无效 hash 过滤导致关键词搜索同样返回空（部分歌曲歌词空白）。
     if (lyricId == null && songName != null && songName.isNotEmpty) {
-      debugPrint(
-        '[LyricDebug] getLyric keyword-fallback hash=$hash songName=$songName',
-      );
       searchResult = await _get(
         KugouEndpoints.searchLyric,
         queryParameters: {'keywords': songName},
@@ -1447,15 +1433,8 @@ class KugouApiClient {
     }
 
     if (lyricId == null) {
-      debugPrint(
-        '[LyricDebug] getLyric lyricId NULL for hash=$hash songName=$songName '
-        'searchResult=${searchResult == null ? 'null' : 'present'}',
-      );
       return null;
     }
-    debugPrint(
-      '[LyricDebug] getLyric found lyricId=$lyricId hash=$hash songName=$songName',
-    );
 
     // 闭包内赋值使类型仍为 String?，此处已确认非空，断言收窄
     final String resolvedLyricId = lyricId!;
@@ -1503,15 +1482,7 @@ class KugouApiClient {
       if (lyricAccesskey != null) params['accesskey'] = lyricAccesskey;
       final json = await _get(KugouEndpoints.lyric, queryParameters: params);
       if (json == null) return null;
-      final data = json['data'] as Map<String, dynamic>? ?? json;
-      debugPrint(
-        '[LyricDebug] _fetchLyricContent fmt=$fmt id=$lyricId '
-        'contentLen=${(data['content']?.toString() ?? '').length} '
-        'decodeContentLen=${(data['decodeContent']?.toString() ?? '').length} '
-        'contenttype=${data['contenttype']} '
-        'decodedPrefix=${(data['decodeContent']?.toString() ?? '').substring(0, (data['decodeContent']?.toString().length ?? 0).clamp(0, 100))}',
-      );
-      return data;
+      return json['data'] as Map<String, dynamic>? ?? json;
     } catch (e) {
       // 单点失败不影响另一个并发请求
       return null;
@@ -1526,17 +1497,11 @@ class KugouApiClient {
     try {
       final searchResult = await search(songName, pagesize: 5);
       if (searchResult == null || searchResult.songs.isEmpty) {
-        debugPrint(
-          '[LyricDebug] recover song search empty songName=$songName',
-        );
         return null;
       }
       // 取第一首歌的 FileHash 作为正确 hash
       final correctHash = searchResult.songs.first.hash;
       if (correctHash.isEmpty) return null;
-      debugPrint(
-        '[LyricDebug] recover found correctHash=$correctHash songName=$songName',
-      );
       final lyricSearch = await _get(
         KugouEndpoints.searchLyric,
         queryParameters: {'hash': correctHash.toLowerCase()},
@@ -1550,8 +1515,8 @@ class KugouApiClient {
           return (id, first['accesskey']?.toString());
         }
       }
-    } catch (e) {
-      debugPrint('[LyricDebug] recover song search error: $e');
+    } catch (_) {
+      return null;
     }
     return null;
   }
@@ -1618,14 +1583,6 @@ class KugouApiClient {
       decodedKrcContent: krcContent,
       translatedContent: translationLrc,
       romaContent: romaLrc,
-    );
-    debugPrint(
-      '[LyricDebug] mergeLyricResponses '
-      'decodedContentLen=${merged.decodedContent?.length} '
-      'decodedKrcContentLen=${merged.decodedKrcContent?.length} '
-      'translatedLen=${merged.translatedContent?.length} '
-      'romaLen=${merged.romaContent?.length} '
-      'displayLyric=${merged.displayLyric.length}',
     );
     return merged;
   }
