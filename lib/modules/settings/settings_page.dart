@@ -2408,12 +2408,19 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Widget _buildOnlineMusicSection(ColorScheme colorScheme) {
+    // 端口为 0 表示本地 Rust 服务器从未启动成功（桌面缺 kugou_server.dll 最常见）。
+    // 此前这里无条件显示"运行中"，服务器挂了也照样显示，反而掩盖了故障。
+    final port = KugouApiServer.currentPort;
+    final running = port > 0;
     return Column(
       children: [
         ListTile(
-          leading: Icon(Icons.dns, color: colorScheme.primary),
+          leading: Icon(
+            Icons.dns,
+            color: running ? colorScheme.primary : colorScheme.error,
+          ),
           title: const Text('本地数据接口'),
-          subtitle: Text('端口：${KugouApiServer.currentPort}'),
+          subtitle: Text(running ? '端口：$port' : '未启动'),
           trailing: _isRestarting
               ? SizedBox(
                   width: 20,
@@ -2427,13 +2434,17 @@ class _SettingsPageState extends State<SettingsPage>
               : Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: colorScheme.primaryContainer,
+                    color: running
+                        ? colorScheme.primaryContainer
+                        : colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    '运行中',
+                    running ? '运行中' : '未启动',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: colorScheme.onPrimaryContainer,
+                      color: running
+                          ? colorScheme.onPrimaryContainer
+                          : colorScheme.onErrorContainer,
                     ),
                   ),
                 ),
@@ -2442,9 +2453,15 @@ class _SettingsPageState extends State<SettingsPage>
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Text(
-            '本地 Rust 服务器运行中，推荐/排行/搜索/播放/登录等数据接口均通过本地处理（点击上方可重启）',
+            running
+                ? '本地 Rust 服务器运行中，推荐/排行/搜索/播放/登录等数据接口均通过本地处理（点击上方可重启）'
+                : '本地 Rust 服务器未启动，推荐/排行/搜索/播放/登录等在线功能全部不可用。'
+                    '${Platform.isWindows ? "Windows 上通常是安装包缺少 kugou_server.dll。" : ""}'
+                    '（点击上方可重试启动）',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
+              color: running
+                  ? colorScheme.onSurfaceVariant
+                  : colorScheme.error,
             ),
           ),
         ),
@@ -2453,13 +2470,17 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   /// 询问是否重启本地 API 服务器，确认后重启并更新端口展示。
+  /// 服务器未启动（端口 0）时同一入口用于「重试启动」。
   Future<void> _confirmRestartServer() async {
     final port = KugouApiServer.currentPort;
+    final running = port > 0;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('重启本地 API 服务器'),
-        content: Text('确定要重启本地 Rust API 服务器吗？\n当前端口：$port\n重启后将重新分配随机端口。\n如果你遇到了玄学问题，那就重启一下试试吧（）'),
+        title: Text(running ? '重启本地 API 服务器' : '重试启动本地 API 服务器'),
+        content: Text(running
+            ? '确定要重启本地 Rust API 服务器吗？\n当前端口：$port\n重启后将重新分配随机端口。\n如果你遇到了玄学问题，那就重启一下试试吧（）'
+            : '本地 Rust API 服务器当前未启动，在线功能全部不可用。\n要重试启动吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -2467,7 +2488,7 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('重启'),
+            child: Text(running ? '重启' : '重试'),
           ),
         ],
       ),

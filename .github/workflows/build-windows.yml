@@ -59,6 +59,26 @@ jobs:
           Copy-Item kugou_api_server/rust/target/release/kugou_server.dll build/windows/x64/runner/Release/ -Force
           Get-ChildItem build/windows/x64/runner/Release/
 
+      # 7.5 复制 VC++ 运行库到 exe 同目录（app-local 部署）
+      #     exe / flutter_windows.dll / 各插件 dll / kugou_server.dll 都是 /MD
+      #     动态链接 MSVC 运行库；目标机没装「VC++ 2015-2022 可再发行组件包」时
+      #     直接起不来（缺 VCRUNTIME140.dll）。便携版 zip 号称解压即用，必须自带。
+      #     逻辑与 scripts\build_windows.ps1 的同名步骤一致。
+      - name: Bundle VC++ runtime into Release
+        shell: pwsh
+        run: |
+          $vsWhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsRoot = @(& $vsWhere -latest -products * -property installationPath)[0]
+          if (-not $vsRoot) { throw '未能定位 Visual Studio 安装目录' }
+          $crtDir = Get-ChildItem (Join-Path $vsRoot 'VC\Redist\MSVC') -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-ChildItem (Join-Path $_.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue } |
+            Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $crtDir) { throw "未找到 Microsoft.VC*.CRT：$(Join-Path $vsRoot 'VC\Redist\MSVC')" }
+          $dlls = @(Get-ChildItem (Join-Path $crtDir.FullName '*.dll'))
+          if (-not $dlls.Count) { throw "CRT 目录为空：$($crtDir.FullName)" }
+          Copy-Item $dlls.FullName build/windows/x64/runner/Release/ -Force
+          Write-Host "已随包 $($dlls.Count) 个运行库：$($dlls.Name -join ', ')"
+
       # 8. 压缩为便携 zip
       - name: Package portable zip
         shell: pwsh

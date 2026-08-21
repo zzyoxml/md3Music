@@ -130,6 +130,7 @@ class KugouApiClient {
   static void markServerReady() {
     // restart() 成功时清除失败态，重新按就绪信号放行。
     _serverStartFailed = false;
+    localServerAvailable.value = true;
     if (_serverReadyMarked) return;
     _serverReadyMarked = true;
     _serverReady.complete();
@@ -140,7 +141,17 @@ class KugouApiClient {
   static void markServerStartFailed() {
     if (_serverReadyMarked) return;
     _serverStartFailed = true;
+    // 判据与拦截器短路一致：_applyPort 先于 TCP 就绪探测写入 baseUrl，
+    // 慢设备上"探测超时但端口有效"的请求仍会成功，不该弹提示；
+    // 只有连端口都没拿到（dlopen 失败等）才是真的不可用。
+    localServerAvailable.value = KugouEndpoints.hasBaseUrl;
   }
+
+  /// 本地 API 服务器可用性。启动失败（桌面缺 kugou_server.dll、端口全占用等）
+  /// 时置 false，UI 据此显示"本地数据接口未启动"提示——否则用户只能看到
+  /// 一片加载不出来的空页面，无从判断是网络问题还是安装包残缺。
+  /// 初值 true：正常启动过程中不闪提示。
+  static final ValueNotifier<bool> localServerAvailable = ValueNotifier(true);
 
   /// 服务器就绪 Future（带超时保护：启动失败时请求不会永久挂起）。
   static Future<void> get serverReady => _serverReady.future;
@@ -161,6 +172,21 @@ class KugouApiClient {
       try {
         await serverReady.timeout(const Duration(seconds: 8));
       } catch (_) {}
+    }
+
+    // 端口未知（本地服务器从未启动成功）时立即失败，不要盲发请求。
+    // 判据用 baseUrl 而不是 _serverStartFailed：_applyPort 在 TCP 就绪探测
+    // 之前就写入了 baseUrl，所以"探测超时但端口有效"（慢设备）仍应放行；
+    // 只有连端口都没拿到（dlopen 失败等）才是真的无处可发。
+    if (!KugouEndpoints.hasBaseUrl) {
+      handler.reject(
+        DioException.connectionError(
+          requestOptions: options,
+          reason: '本地 API 服务器未启动，端口未知',
+        ),
+        true,
+      );
+      return;
     }
 
     // 登录等全部请求统一走本地 API 服务器（Rust），不再依赖第三方云端

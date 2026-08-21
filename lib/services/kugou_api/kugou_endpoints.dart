@@ -1,10 +1,18 @@
 class KugouEndpoints {
   KugouEndpoints._();
 
-  /// 默认 API 服务地址。
-  /// 本地服务器启动成功后，KugouApiServer 会用实际随机端口覆盖此值
-  /// （http://127.0.0.1:<port>）。
-  static String baseUrl = 'http://127.0.0.1:8080';
+  /// 本地 API 服务地址，由 KugouApiServer 在拿到实际随机端口后写入
+  /// （http://127.0.0.1:<port>）。**启动成功前为空串**。
+  ///
+  /// 曾默认 'http://127.0.0.1:8080'。该兜底值是有害的：服务器没起来时
+  /// （桌面缺 kugou_server.dll 最常见）所有请求会打向 8080——若本机 8080
+  /// 恰好被别的服务占用且不响应，每个请求都要烧满 15s receiveTimeout 才失败，
+  /// 表现为"延迟极高 + 资源加载不出来"。空串表示"端口未知"，
+  /// KugouApiClient 拦截器据此立即拒绝请求而不是盲发。
+  static String baseUrl = '';
+
+  /// 本地服务器端口是否已确定（即 [baseUrl] 可用）。
+  static bool get hasBaseUrl => baseUrl.isNotEmpty;
 
   // Device
   static const String registerDev = '/register/dev';
