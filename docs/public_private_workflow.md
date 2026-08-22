@@ -116,6 +116,7 @@ git remote -v
 | C | **公开库**开发了新功能，同步回私有库 | `git fetch zzyoxml` → `git cherry-pick` → 验证 | [4.3](#43-场景-c公开库新功能同步回私有库) |
 | D | 私有库开发完，**发布公开版** | `verify_public_clean` → `export_public.ps1 -PublicRemote` | [4.4](#44-场景-d发布公开版本) |
 | E | 给公开类新增一个私有能力 | 加中性钩子 → 私有层注入 → deny 追加 | [4.5](#45-场景-e给公开类新增一个私有能力加钩子全流程) |
+| F | 新增**顶层文件/目录**要随公开版发布 | 判断该不该公开 → 加进导出白名单 → 重新导出 | [4.6](#46-场景-f导出白名单维护新增文件目录时) |
 
 ---
 
@@ -295,6 +296,53 @@ void installUiHooks() {
 - 公开类里**只出现调用**，不出现任何下载/缓存实现与 import
 - 调用处用 `...?Hook?.call(...)` 或 `if (Hook != null)` 守卫，保证公开版行为不受影响
 
+### 4.6 场景 F：导出白名单维护（新增文件/目录时）
+
+> 导出的白名单在 `scripts/export_public.ps1` 的 `$whitelist` 数组（当前 17 项）。**白名单制 = 只有列出的顶层项才会被拷贝进公开树**，未列出的东西（包括意外创建的任何顶层目录/文件）一律不进公开仓库——这是隔离的**第一道闸**。
+
+**新增功能时按落点分类处理：**
+
+| 新文件/目录落在哪 | 需要改白名单吗 | 原因 |
+|------|------|------|
+| `lib/` 任意位置（含新增子目录） | ❌ 不用 | `lib` 整目录白名单拷贝，新增文件自动带上；闸门再过滤私有符号 |
+| `packages/md3_download_cache/` | ❌ 不用 | `packages/` 不在白名单，天然排除 |
+| `lib/private/` | ❌ 不用 | 虽在 `lib` 下，但导出后会被步骤 4 明确删除 |
+| 新增**顶层目录**（如 `docs/`、`tools/`、`native/`） | ✅ **要加** | 白名单制下不列不进；先判断该目录该不该进公开仓库 |
+| 新增**顶层文件**（如 `SECURITY.md`、`CONTRIBUTING.md`） | ✅ **要加** | 同上 |
+| 改动现有白名单项**内部**的文件（如 `android/`、`assets/`、`scripts/` 里的文件） | ❌ 不用 | 整目录拷贝，内部文件自动带上 |
+
+**判断标准（一句话）**：这个文件/目录**该不该出现在公开仓库？**
+- 该 → 加进 `$whitelist`
+- 不该（含私有信息、内部文档、开发工具）→ 不加，留在私有仓库
+- 拿不准 → 默认不加，宁可公开版少东西，不可多泄密
+
+**示例**：
+```powershell
+# 假设新增 docs/user-guide/ 想随公开版发布：
+$whitelist = @(
+    'lib', 'android', 'assets', 'web', 'windows', 'test',
+    'third_party', 'img', 'scripts', '.github',
+    'pubspec.yaml', 'analysis_options.yaml', 'README.md',
+    'LICENSE', 'CHANGELOG.md', 'DISCLAIMER.md',
+    'devtools_options.yaml',
+    'docs/user-guide'          # ← 新增行（可写目录或文件，路径相对项目根）
+)
+```
+
+**⚠️ 白名单目录不经过 deny 扫描**（重要，勿踩）：
+`export_public.ps1` 的否认闸门只扫描 `lib/*.dart` 与 `pubspec.yaml`。**`scripts/`、`assets/`、`android/` 等其他白名单目录的内容不会过闸门**。因此：
+- 新增的**脚本/文档/资源**若含下载/缓存私有信息（如脚本里硬编码私有 URL、文档里写内部架构），不会被闸门拦截，会直接进公开仓库
+- 规则：**白名单内的非 lib 文件，写入前先自问"这段内容能公开吗"**；涉及私有特征的，改用占位/通用描述
+- 若想让闸门也覆盖某个新目录，可把该目录加入 `verify_public_clean.ps1` / `export_public.ps1` 的扫描范围（当前仅 lib + pubspec）
+
+**修改白名单后的验证流程**：
+```powershell
+.\scripts\export_public.ps1 -NoPause          # 重新导出（闸门自动跑）
+# 抽查新增项是否如期出现 / 不该出现的没出现：
+ls .public_export\docs\user-guide              # 例：新增目录已在
+ls .public_export\AGENTS.md                    # 例：应报 No such file（已排除）
+```
+
 ---
 
 ## 5. 新增功能的落点决策流程
@@ -368,6 +416,9 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 #         播放缓存过的歌 → 断网仍可播（边听边存命中）；
 #         设置页「边听边存」分类 → 统计数字正确、清空生效
 ```
+
+### 7.7 白名单目录不经过 deny 扫描
+否认闸门只扫 `lib/*.dart` + `pubspec.yaml`；`scripts/`、`assets/`、`android/` 等白名单目录**不扫描**。新增脚本/文档/资源时，若含下载/缓存私有信息，闸门拦不住，会直接进公开仓库——写入前自问"这段能公开吗"。详见 [4.6](#46-场景-f导出白名单维护新增文件目录时)。
 
 ---
 
