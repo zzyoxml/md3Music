@@ -1,8 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
 
-import '../models/song.dart';
-
 /// 缓存索引根结构，对应 `<cacheDir>/index.json` 文件
 class CacheIndex {
   /// 版本号，固定为 1，用于后续兼容性升级
@@ -77,13 +75,13 @@ class CacheEntry {
   }
 }
 
-/// 歌曲元数据，由 Song 转换而来用于持久化
+/// 歌曲元数据，由主工程 Song 适配而来用于持久化（包内自包含的最小结构）
 class SongMetadata {
   final String id;
   final String title;
   final String artist;
   final String album;
-  /// 时长（毫秒），对应 Song.duration.inMilliseconds
+  /// 时长（毫秒）
   final int durationMs;
   final String? albumId;
   final String? artistId;
@@ -338,21 +336,8 @@ class StreamCacheRepository {
   }
 
   /// 更新或插入条目，设置 song 字段
-  Future<void> upsertSongMetadata(String hash, Song song) async {
+  Future<void> upsertSongMetadata(String hash, SongMetadata metadata) async {
     await _ensureIndexLoaded();
-    final metadata = SongMetadata(
-      id: song.id,
-      title: song.title,
-      artist: song.artist,
-      album: song.album,
-      durationMs: song.duration.inMilliseconds,
-      albumId: song.albumId,
-      artistId: song.artistId,
-      albumAudioId: song.albumAudioId,
-      climaxStart: song.climaxStart,
-      climaxEnd: song.climaxEnd,
-      artworkUri: song.artworkUri,
-    );
     final entry = _index.entries[hash];
     if (entry == null) {
       _index.entries[hash] = CacheEntry(song: metadata, audio: {});

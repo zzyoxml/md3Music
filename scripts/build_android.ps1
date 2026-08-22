@@ -179,7 +179,14 @@ if ($SkipFlutter) {
 Write-Step 'Flutter 分包打包（排除 x86）'
 Push-Location $RepoRoot
 try {
-    Invoke-Native { flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm,android-x64 }
+    # 入口自动选择：
+    #   - 私有仓库：存在 lib/private/main_private.dart → 构建完整功能版（含下载/缓存）
+    #   - 公开树（export_public.ps1 导出）：lib/private 已被排除 → 回退默认公开入口 lib/main.dart
+    $target = 'lib/main.dart'
+    if (Test-Path (Join-Path $RepoRoot 'lib\private\main_private.dart')) {
+        $target = 'lib/private/main_private.dart'
+    }
+    Invoke-Native { flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm,android-x64 -t $target }
 }
 finally { Pop-Location }
 

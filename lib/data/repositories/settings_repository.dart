@@ -9,17 +9,9 @@ class SettingsRepository {
   static const String _keyThemeMode = 'settings_theme_mode';
   static const String _keyDefaultQuality = 'settings_default_quality';
   static const String _keyCacheSize = 'settings_cache_size';
-  // 边听边存开关
-  static const String _keyStreamCacheEnabled = 'settings_stream_cache_enabled';
-  // 边听边存容量上限（单位 MB）
-  static const String _keyStreamCacheLimitMb = 'settings_stream_cache_limit_mb';
   static const String _keyAutoPlay = 'settings_auto_play';
   static const String _keyShowLyrics = 'settings_show_lyrics';
   static const String _keyAutoReceiveVip = 'settings_auto_receive_vip';
-  // 自定义下载目录：空字符串表示使用默认目录（应用私有 documents/downloads）
-  static const String _keyDownloadDir = 'settings_download_dir';
-  // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
-  static const String _keyDownloadWordLevelLyrics = 'settings_download_word_level_lyrics';
   static const String _keyUiScale = 'settings_ui_scale';
   // Pad 端网格页面列数偏好
   static const String _keyGridColumns = 'grid_columns';
@@ -82,28 +74,6 @@ class SettingsRepository {
     await prefs.setInt(_keyCacheSize, sizeMb);
   }
 
-  /// 边听边存功能是否开启，默认关闭。
-  Future<bool> getStreamCacheEnabled() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyStreamCacheEnabled) ?? false;
-  }
-
-  Future<void> setStreamCacheEnabled(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyStreamCacheEnabled, value);
-  }
-
-  /// 边听边存容量上限（单位 MB），默认 2048（即 2GB）。
-  Future<int> getStreamCacheLimitMb() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getInt(_keyStreamCacheLimitMb) ?? 2048;
-  }
-
-  Future<void> setStreamCacheLimitMb(int value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setInt(_keyStreamCacheLimitMb, value);
-  }
-
   Future<bool> getAutoPlay() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_keyAutoPlay) ?? true;
@@ -163,38 +133,6 @@ class SettingsRepository {
     lyricTimeOffsetMs.value = clamped;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyLyricTimeOffset, clamped);
-  }
-
-  /// 读取用户配置的自定义下载目录。
-  /// 返回 null/空字符串 表示使用默认目录（应用私有 documents/downloads）。
-  Future<String?> getDownloadDir() async {
-    final prefs = await SharedPreferences.getInstance();
-    final value = prefs.getString(_keyDownloadDir);
-    if (value == null || value.isEmpty) return null;
-    return value;
-  }
-
-  /// 持久化用户配置的自定义下载目录。
-  /// 传入 null 或空字符串表示恢复使用默认目录。
-  Future<void> setDownloadDir(String? path) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (path == null || path.isEmpty) {
-      await prefs.remove(_keyDownloadDir);
-    } else {
-      await prefs.setString(_keyDownloadDir, path);
-    }
-  }
-
-  /// 下载时是否内嵌字级 LRC 歌词（逐字时间戳）。
-  /// 默认 true：尝试嵌入逐字 LRC，无逐字数据时自动降级为行级 LRC。
-  Future<bool> getDownloadWordLevelLyrics() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyDownloadWordLevelLyrics) ?? true;
-  }
-
-  Future<void> setDownloadWordLevelLyrics(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_keyDownloadWordLevelLyrics, value);
   }
 
   // ===== 桌面歌词配置 =====

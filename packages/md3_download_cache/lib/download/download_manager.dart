@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 
-import '../data/models/download_task.dart';
+import 'download_task.dart';
 
 class DownloadManager {
   static final DownloadManager _instance = DownloadManager._internal();

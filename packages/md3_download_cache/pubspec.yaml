@@ -1,0 +1,22 @@
+name: md3_download_cache
+description: "MD3Music 私有功能包：下载引擎与边听边存缓存引擎（不随公开仓库发布）"
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: ^3.12.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  dio: ^5.4.0
+  path_provider: ^2.1.0
+  shared_preferences: ^2.5.0
+  audio_metadata_reader: ^1.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:

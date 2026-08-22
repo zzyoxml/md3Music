@@ -6,10 +6,8 @@ import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:dio/dio.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../data/models/song.dart';
-import '../data/repositories/settings_repository.dart';
-import '../data/repositories/stream_cache_repository.dart';
-import 'kugou_api/kugou_models.dart';
+import 'lyric_data.dart';
+import 'stream_cache_repository.dart';
 
 /// 缓存统计信息
 class CacheStats {
@@ -32,9 +30,17 @@ class CacheStats {
 ///
 /// 负责 audio / lyrics / artwork 三类文件的磁盘缓存，
 /// 内部持有 [StreamCacheRepository] 做索引持久化。
+///
+/// 包内不依赖主工程类型：歌曲用 [SongMetadata]（由主工程接线层适配），
+/// 歌词用 [LyricData]；缓存上限由 [cacheLimitMbProvider] 注入读取，
+/// 未注入时跳过按上限清理（等价于无限制）。
 class StreamCacheManager {
   StreamCacheManager._();
   static final StreamCacheManager instance = StreamCacheManager._();
+
+  /// 由主工程接线层注入：读取边听边存缓存上限（MB）。
+  /// 为 null 时跳过按上限清理（不注入则不删除任何缓存）。
+  static Future<int> Function()? cacheLimitMbProvider;
 
   /// 缓存根目录 stream_cache/
   late final Directory _cacheRoot;
@@ -151,7 +157,7 @@ class StreamCacheManager {
   /// 流程：下载到临时文件 → magic bytes 判定扩展名 → 重命名为最终文件 →
   /// 更新索引 → 按设置的上限清理。
   /// 整个方法不抛异常，避免影响播放器主流程。
-  Future<void> cacheAudio(Song song, String quality, String url) async {
+  Future<void> cacheAudio(SongMetadata song, String quality, String url) async {
     await ensureInitialized();
     final hash = song.id;
     // 同 hash 的下载串行进行，避免并发写冲突
@@ -218,14 +224,7 @@ class StreamCacheManager {
       );
 
       // 读取设置中的边听边存缓存上限（MB）并清理
-      try {
-        final limitMb = await SettingsRepository().getStreamCacheLimitMb();
-        final limitBytes = limitMb * 1024 * 1024;
-        await cleanIfExceeding(limitBytes);
-      } catch (e) {
-        // ignore: avoid_print
-        print('[StreamCacheManager] 读取缓存上限/清理失败: $e');
-      }
+      await _cleanIfOverLimit();
     } catch (e) {
       // 下载失败或取消时删除临时文件
       try {
@@ -268,7 +267,7 @@ class StreamCacheManager {
 
   /// 获取已缓存的歌词。文件不存在返回 null。
   /// 命中后更新 lyrics 的 lastAccessedAt。
-  Future<KugouLyric?> getCachedLyric(String hash) async {
+  Future<LyricData?> getCachedLyric(String hash) async {
     await ensureInitialized();
     try {
       final path = '${_lyricsDir.path}${Platform.pathSeparator}$hash.json';
@@ -277,8 +276,7 @@ class StreamCacheManager {
 
       final raw = await file.readAsString();
       final json = jsonDecode(raw) as Map<String, dynamic>;
-      // 手动映射到 KugouLyric 构造函数（使用自定义的稳定键名）
-      final lyric = KugouLyric(
+      final lyric = LyricData(
         content: json['content'] as String? ?? '',
         decodedContent: json['decodedContent'] as String?,
         decodedKrcContent: json['decodedKrcContent'] as String?,
@@ -295,7 +293,7 @@ class StreamCacheManager {
   }
 
   /// 缓存歌词到磁盘并更新索引。
-  Future<void> cacheLyric(String hash, KugouLyric lyric) async {
+  Future<void> cacheLyric(String hash, LyricData lyric) async {
     await ensureInitialized();
     try {
       // 序列化所有文本字段
@@ -323,14 +321,7 @@ class StreamCacheManager {
       );
 
       // 按边听边存上限清理
-      try {
-        final limitMb = await SettingsRepository().getStreamCacheLimitMb();
-        final limitBytes = limitMb * 1024 * 1024;
-        await cleanIfExceeding(limitBytes);
-      } catch (e) {
-        // ignore: avoid_print
-        print('[StreamCacheManager] cacheLyric 清理失败: $e');
-      }
+      await _cleanIfOverLimit();
     } catch (e) {
       // ignore: avoid_print
       print('[StreamCacheManager] cacheLyric 失败: $e');
@@ -399,14 +390,7 @@ class StreamCacheManager {
       await _saveArtworkBytes(hash, bytes);
 
       // 按边听边存上限清理
-      try {
-        final limitMb = await SettingsRepository().getStreamCacheLimitMb();
-        final limitBytes = limitMb * 1024 * 1024;
-        await cleanIfExceeding(limitBytes);
-      } catch (e) {
-        // ignore: avoid_print
-        print('[StreamCacheManager] cacheArtwork 清理失败: $e');
-      }
+      await _cleanIfOverLimit();
     } catch (e) {
       // ignore: avoid_print
       print('[StreamCacheManager] cacheArtwork 失败: $e');
@@ -568,6 +552,20 @@ class StreamCacheManager {
     }
   }
 
+  /// 读取注入的缓存上限并触发 LRU 清理；未注入时跳过。
+  Future<void> _cleanIfOverLimit() async {
+    final provider = StreamCacheManager.cacheLimitMbProvider;
+    if (provider == null) return;
+    try {
+      final limitMb = await provider();
+      final limitBytes = limitMb * 1024 * 1024;
+      await cleanIfExceeding(limitBytes);
+    } catch (e) {
+      // ignore: avoid_print
+      print('[StreamCacheManager] 读取缓存上限/清理失败: $e');
+    }
+  }
+
   /// 当总缓存大小超过 [maxBytes] 时，按 LRU 策略淘汰最久未访问的条目。
   /// [maxBytes] <= 0 表示无限制，直接返回。
   Future<void> cleanIfExceeding(int maxBytes) async {
@@ -625,7 +623,7 @@ class StreamCacheManager {
   }
 
   /// 仅更新索引中的歌曲元数据（不写文件）
-  Future<void> cacheSongMetadata(Song song) async {
+  Future<void> cacheSongMetadata(SongMetadata song) async {
     await ensureInitialized();
     try {
       await StreamCacheRepository.instance.upsertSongMetadata(song.id, song);

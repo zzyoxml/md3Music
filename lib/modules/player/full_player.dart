@@ -32,7 +32,6 @@ import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/local_favorites_provider.dart';
 import '../../providers/player_provider.dart';
-import '../../providers/downloads_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/comment_display_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
@@ -78,6 +77,10 @@ const List<Duration> _sleepTimerPresets = [
 ];
 
 class FullPlayer extends StatefulWidget {
+  /// 可选扩展：封面长按回调（默认关闭，由私有构建注入，用于下载等旁路操作）。
+  static void Function(BuildContext context, dynamic song)?
+      coverLongPressCallback;
+
   const FullPlayer({super.key});
 
   @override
@@ -2465,7 +2468,7 @@ Widget _buildTabSwitchGroup(
                           ),
                         ),
                       ),
-                      // 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
+                      // 封面 — 短按跳转到封面 tab，长按触发可选扩展（默认无）
                       Expanded(
                         child: GestureDetector(
                           behavior: HitTestBehavior.opaque,
@@ -2474,10 +2477,16 @@ Widget _buildTabSwitchGroup(
                               _tabController.animateTo(1);
                             }
                           },
-                          onLongPress: song != null && isOnline
+                          onLongPress:
+                              song != null &&
+                                  isOnline &&
+                                  FullPlayer.coverLongPressCallback != null
                               ? () {
                                   HapticFeedback.lightImpact();
-                                  _downloadSong(song);
+                                  FullPlayer.coverLongPressCallback!(
+                                    context,
+                                    song,
+                                  );
                                 }
                               : null,
                           child: Center(
@@ -2875,145 +2884,6 @@ Widget _buildTabSwitchGroup(
         : 0;
     final rawMs = position.inMilliseconds;
     return Duration(milliseconds: rawMs > offset ? rawMs - offset : 0);
-  }
-
-  // MD3E v2: 下方 ActionBar 第 3 个按钮（封面）长按触发。
-  void _downloadSong(dynamic song) async {
-    final downloadsProvider = context.read<DownloadsProvider>();
-    final isDownloaded = downloadsProvider.isDownloaded(song.id);
-    final isDownloading = downloadsProvider.isDownloading(song.id);
-
-    if (isDownloaded) {
-      showToast('已下载: ${song.displayName}');
-      return;
-    }
-
-    if (isDownloading) {
-      showToast('正在下载: ${song.displayName}');
-      return;
-    }
-
-    // 查询歌曲实际可用音质
-    final api = KugouApiClient();
-    showToast('正在查询可用音质...', long: true);
-    final available = await api.getAvailableQualities(
-      song.id,
-      albumId: song.albumId,
-      albumAudioId: song.albumAudioId,
-    );
-    if (!mounted) return;
-
-    // 弹出音质选择对话框
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('下载: ${song.displayName ?? song.title}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(song.artist ?? '', style: Theme.of(ctx).textTheme.bodyMedium),
-            const SizedBox(height: 16),
-            Text('选择音质', style: Theme.of(ctx).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            _buildDownloadQualityOption(
-              ctx,
-              '标准音质 (128kbps)',
-              '128',
-              song,
-              downloadsProvider,
-              enabled: available.contains('128'),
-            ),
-            _buildDownloadQualityOption(
-              ctx,
-              '高音质 (320kbps)',
-              'hq',
-              song,
-              downloadsProvider,
-              enabled: available.contains('hq'),
-            ),
-            _buildDownloadQualityOption(
-              ctx,
-              '无损音质 (FLAC)',
-              'flac',
-              song,
-              downloadsProvider,
-              enabled: available.contains('flac'),
-            ),
-            _buildDownloadQualityOption(
-              ctx,
-              'Hi-Res 无损',
-              'high',
-              song,
-              downloadsProvider,
-              enabled: available.contains('high'),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDownloadQualityOption(
-    BuildContext context,
-    String label,
-    String quality,
-    dynamic song,
-    DownloadsProvider provider, {
-    bool enabled = true,
-  }) {
-    return ListTile(
-      dense: true,
-      leading: Icon(
-        Icons.music_note,
-        size: 20,
-        color: enabled ? null : Theme.of(context).disabledColor,
-      ),
-      title: Text(
-        label,
-        style: TextStyle(
-          fontSize: 14,
-          color: enabled ? null : Theme.of(context).disabledColor,
-        ),
-      ),
-      trailing: enabled
-          ? null
-          : Text(
-              '需要VIP',
-              style: TextStyle(
-                fontSize: 11,
-                color: Theme.of(context).disabledColor,
-              ),
-            ),
-      onTap: enabled
-          ? () async {
-              Navigator.pop(context);
-              final displayName = song.displayName ?? song.title;
-              showToast('开始下载: $displayName');
-              final actual = await provider.downloadSong(
-                song,
-                quality: quality,
-              );
-              if (actual == 'trial_blocked') {
-                if (context.mounted) {
-                  showToast('你的账号已被kugou风控,请等待kugou解除风控后再试', long: true);
-                }
-              } else if (actual != null &&
-                  actual != quality &&
-                  context.mounted) {
-                showToast(
-                  '${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}',
-                  long: true,
-                );
-              }
-            }
-          : null,
-    );
   }
 
   void _showMoreMenu(BuildContext rootContext) {
