@@ -5,16 +5,18 @@ import '../core/utils/app_toast.dart';
 import '../data/models/song.dart';
 import '../modules/player/comments_view.dart';
 import '../modules/player/mv_player_page.dart';
-import '../providers/downloads_provider.dart';
 import '../providers/favorites_provider.dart';
 import '../providers/local_favorites_provider.dart';
 import '../providers/player_provider.dart';
-import '../services/kugou_api/kugou_api_client.dart';
-import '../services/kugou_api/kugou_models.dart';
 import 'playing_spectrum_indicator.dart';
 import 'smart_artwork_image.dart';
 
 class SongListItem extends StatelessWidget {
+  /// 可选扩展：歌曲更多菜单的额外条目（默认关闭，由私有构建注入）。
+  /// 返回的 Widget 追加在菜单底部（「下一首播放」之前）。
+  static List<Widget> Function(BuildContext context, Song song)?
+      extraMenuTilesBuilder;
+
   final Song song;
   final VoidCallback? onTap;
   final VoidCallback? onMoreTap;
@@ -41,7 +43,6 @@ class SongListItem extends StatelessWidget {
   });
 
   void _showMoreMenu(BuildContext context) {
-    final downloadsProvider = context.read<DownloadsProvider>();
     showModalBottomSheet(
       context: context,
       builder: (ctx) => SafeArea(
@@ -54,25 +55,8 @@ class SongListItem extends StatelessWidget {
               subtitle: Text(song.artist),
             ),
             const Divider(height: 1),
-            if (song.isOnline) ...[
-              ListTile(
-                leading: const Icon(Icons.download),
-                title: const Text('下载'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showDownloadDialog(context);
-                },
-              ),
-              if (downloadsProvider.isDownloaded(song.id))
-                ListTile(
-                  leading: const Icon(Icons.delete_outline),
-                  title: const Text('删除下载'),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    downloadsProvider.removeTask(song.id);
-                  },
-                ),
-            ],
+            // 可选扩展：私有构建注入的额外菜单条目（默认无）
+            ...?SongListItem.extraMenuTilesBuilder?.call(ctx, song),
             ListTile(
               leading: const Icon(Icons.playlist_add),
               title: const Text('下一首播放'),
@@ -97,98 +81,11 @@ class SongListItem extends StatelessWidget {
     );
   }
 
-  void _showDownloadDialog(BuildContext context) async {
-    final downloadsProvider = context.read<DownloadsProvider>();
-    final api = KugouApiClient();
-
-    if (!api.isLoggedIn) {
-      showToast('请先登录', long: true);
-      return;
-    }
-
-    // 查询歌曲实际可用音质
-    showToast('正在查询可用音质...', long: true);
-    final available = await api.getAvailableQualities(
-      song.id,
-      albumId: song.albumId,
-      albumAudioId: song.albumAudioId,
-    );
-    if (!context.mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text('下载: ${song.displayName}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(song.artist, style: Theme.of(ctx).textTheme.bodyMedium),
-            const SizedBox(height: 16),
-            Text('选择音质', style: Theme.of(ctx).textTheme.titleSmall),
-            const SizedBox(height: 8),
-            _buildQualityOption(ctx, '标准音质 (128kbps)', '128', downloadsProvider, enabled: available.contains('128')),
-            _buildQualityOption(ctx, '高音质 (320kbps)', 'hq', downloadsProvider, enabled: available.contains('hq')),
-            _buildQualityOption(ctx, '无损音质 (FLAC)', 'flac', downloadsProvider, enabled: available.contains('flac')),
-            _buildQualityOption(ctx, 'Hi-Res 无损', 'high', downloadsProvider, enabled: available.contains('high')),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQualityOption(
-    BuildContext context,
-    String label,
-    String quality,
-    DownloadsProvider provider, {
-    bool enabled = true,
-  }) {
-    return ListTile(
-      dense: true,
-      leading: Icon(
-        Icons.music_note,
-        size: 20,
-        color: enabled ? null : Theme.of(context).disabledColor,
-      ),
-      title: Text(
-        label,
-        style: TextStyle(
-          color: enabled ? null : Theme.of(context).disabledColor,
-        ),
-      ),
-      trailing: enabled
-          ? null
-          : Text('需要VIP', style: TextStyle(
-              fontSize: 11,
-              color: Theme.of(context).disabledColor,
-            )),
-      onTap: enabled ? () async {
-        Navigator.pop(context);
-        showToast('开始下载: ${song.displayName}');
-        final actual = await provider.downloadSong(song, quality: quality);
-        if (actual == 'trial_blocked') {
-          if (context.mounted) {
-            showToast('你的账号已被kugou风控,请等待kugou解除风控后再试', long: true);
-          }
-        } else if (actual != null && actual != quality && context.mounted) {
-          showToast('${KugouQuality.labelOf(quality)}不可用，已降级为${KugouQuality.labelOf(actual)}', long: true);
-        }
-      } : null,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final playerProvider = context.watch<PlayerProvider>();
     final favoritesProvider = context.watch<FavoritesProvider>();
     final localFavoritesProvider = context.watch<LocalFavoritesProvider>();
-    context.watch<DownloadsProvider>();
     final isCurrentSong = playerProvider.currentSong?.id == song.id;
     final isFavorited = forceFavorited
         ? true

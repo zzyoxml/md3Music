@@ -4,6 +4,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:provider/single_child_widget.dart';
 import 'package:quick_actions/quick_actions.dart';
 
 import 'core/layout/responsive_layout.dart';
@@ -45,7 +46,6 @@ import 'modules/audiobook/audiobook_page.dart';
 import 'modules/recognition/song_recognition_page.dart';
 import 'modules/scene/scene_page.dart';
 import 'modules/channel/channel_page.dart';
-import 'providers/downloads_provider.dart';
 import 'providers/dlna_provider.dart';
 import 'providers/favorites_provider.dart';
 import 'providers/kugou_provider.dart';
@@ -125,10 +125,15 @@ class MyApp extends StatelessWidget {
   final bool showOnboarding;
   final bool showUserAgreement;
 
+  /// 可选扩展：额外注册的 Provider 列表（默认无，由私有构建注入，
+  /// 用于注册私有功能 Provider）。
+  final List<SingleChildWidget>? extraProviders;
+
   const MyApp({
     super.key,
     this.showOnboarding = false,
     this.showUserAgreement = false,
+    this.extraProviders,
   });
 
   @override
@@ -143,9 +148,10 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => KugouProvider()),
         ChangeNotifierProvider(create: (_) => FavoritesProvider()),
         ChangeNotifierProvider(create: (_) => LocalFavoritesProvider()),
-        ChangeNotifierProvider(create: (_) => DownloadsProvider()),
         // 跨页面广播「收藏的歌单」变更（详情页 → 我的收藏 tab 立即刷新）
         ChangeNotifierProvider(create: (_) => PlaylistCollectionNotifier()),
+        // 可选扩展：私有构建注入的额外 Provider（默认无）
+        ...?extraProviders,
         // 主页 Tab 配置（显示/隐藏、排序）
         ChangeNotifierProvider(create: (_) => TabConfigProvider()),
         // 桌面快捷方式配置（Android 长按图标入口的显示/隐藏、排序）

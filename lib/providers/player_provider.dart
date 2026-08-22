@@ -24,7 +24,6 @@ import '../data/repositories/history_repository.dart';
 import '../data/repositories/player_state_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../main.dart';
-import '../services/stream_cache_manager.dart';
 import '../services/kugou_server.dart';
 import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 import '../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
@@ -56,6 +55,18 @@ const _legacyQualityMap = <String, String>{
 };
 
 class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
+  // —— 播放链路可选扩展点（默认关闭）——
+  // 由私有构建（lib/private）注入实现：播放前解析本地已持久化的音频/封面、
+  // 播放源开始/停止时的旁路回调。公开构建不注入，均为空操作。
+  static Future<String?> Function(String hash, String quality)?
+      resolveLocalAudioPath;
+  static Future<String?> Function(String hash)? resolveLocalArtworkPath;
+  static void Function(Song song, String quality, String url)?
+      onPlaybackSourceStarted;
+  static void Function(String hash)? onPlaybackSourceStopped;
+  static Future<String?> Function(String hash, String audioUrl)?
+      extractEmbeddedArtwork;
+
   Song? _currentSong;
   bool _isPlaying = false;
   Duration _position = Duration.zero;
@@ -69,8 +80,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   double _speed = 1.0;
   bool _isResolvingUrl = false;
   String? _resolveError;
-  // 边听边存：当前歌曲的本地缓存封面路径（缓存命中时设置，供 MediaSession 兜底）
-  String? _cachedArtworkPath;
+  // 当前歌曲的本地封面路径（由可选扩展解析后设置，供 MediaSession 断网兜底）
+  String? _localArtworkPath;
   AudioQuality _audioQuality = AudioQuality.standard;
   // 当前在线歌曲实际播放的音质标签（降级后可能与用户设置不同）。
   // 每次成功获取播放链接时由 result.quality 更新；切歌或切换音质时重置。
@@ -670,15 +681,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     }
     _resetAbnormalRetry();
 
-    // 边听边存：检查本地缓存（登录检查通过后才查缓存，避免未登录时静默播放）
-    final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
+    // 可选扩展：播放前解析本地已持久化的音频（默认关闭，由私有构建注入）
     String? cachedPath;
-    if (cacheEnabled) {
-      await StreamCacheManager.instance.ensureInitialized();
-      cachedPath = await StreamCacheManager.instance.getCachedAudioPath(
-        song.id,
-        _audioQuality.value,
-      );
+    final localAudioResolver = PlayerProvider.resolveLocalAudioPath;
+    if (localAudioResolver != null) {
+      cachedPath = await localAudioResolver(song.id, _audioQuality.value);
     }
 
     _currentSong = song;
@@ -702,9 +709,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         _currentSong = resolvedSong;
         _playlist = [resolvedSong];
         _isResolvingUrl = false;
-        // 查询本地缓存封面路径，供 MediaSession 断网兜底
-        _cachedArtworkPath =
-            await StreamCacheManager.instance.getCachedArtworkPath(song.id);
+        // 可选扩展：解析本地封面路径（供 MediaSession 断网兜底）
+        final localArtworkResolver = PlayerProvider.resolveLocalArtworkPath;
+        _localArtworkPath = localArtworkResolver != null
+            ? await localArtworkResolver(song.id)
+            : null;
         _saveState();
         notifyListeners();
 
@@ -715,7 +724,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
         return;
       }
-      _cachedArtworkPath = null;
+      _localArtworkPath = null;
 
       // 确保 Node.js 本地代理服务器已启动
       await _ensureApiServerReady();
@@ -744,24 +753,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           await _audioService.play();
         } else {}
 
-        // 边听边存：异步缓存音频（不阻塞播放）
-        if (cacheEnabled) {
-          // fire-and-forget，不 await
-          StreamCacheManager.instance.cacheAudio(
-            resolvedSong,
-            result.quality,
-            result.url,
-          );
-          // 同时缓存封面（如果 URL 存在）
-          if (song.artworkUri != null && song.artworkUri!.isNotEmpty) {
-            StreamCacheManager.instance.cacheArtwork(
-              song.id,
-              song.artworkUri!,
-            );
-          }
-          // 缓存元数据
-          StreamCacheManager.instance.cacheSongMetadata(song);
-        }
+        // 可选扩展：播放源开始后回调（默认关闭）
+        PlayerProvider.onPlaybackSourceStarted
+            ?.call(resolvedSong, result.quality, result.url);
       } else {
         _isResolvingUrl = false;
         _resolveError = '无法获取播放链接';
@@ -867,12 +861,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (songs.isEmpty) return;
     _resetAbnormalRetry();
 
-    // 边听边存：先查本地缓存（断网时仍可播放已缓存歌曲）
-    final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
+    // 可选扩展：播放前解析本地已持久化的音频（默认关闭）
     String? cachedPath;
-    if (cacheEnabled) {
-      await StreamCacheManager.instance.ensureInitialized();
-      cachedPath = await StreamCacheManager.instance.getCachedAudioPath(
+    final localAudioResolver = PlayerProvider.resolveLocalAudioPath;
+    if (localAudioResolver != null) {
+      cachedPath = await localAudioResolver(
         songs[startIndex].id,
         _audioQuality.value,
       );
@@ -902,16 +895,18 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         _currentSong = resolvedSong;
         _playlist[_currentIndex] = resolvedSong;
         _isResolvingUrl = false;
-        // 查询本地缓存封面路径，供 MediaSession 断网兜底
-        _cachedArtworkPath = await StreamCacheManager.instance
-            .getCachedArtworkPath(_currentSong!.id);
+        // 可选扩展：解析本地封面路径（供 MediaSession 断网兜底）
+        final localArtworkResolver = PlayerProvider.resolveLocalArtworkPath;
+        _localArtworkPath = localArtworkResolver != null
+            ? await localArtworkResolver(_currentSong!.id)
+            : null;
         notifyListeners();
 
         if (_audioService != null) {
           await _setUrlAndPlay(fileUri);
         }
       } else {
-        _cachedArtworkPath = null;
+        _localArtworkPath = null;
         await _ensureApiServerReady();
         final apiClient = KugouApiClient();
         final result = await apiClient.getSongUrlWithFallback(
@@ -933,22 +928,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
             await _setUrlAndPlay(result.url);
           }
 
-          // 边听边存：异步缓存音频（不阻塞播放）
-          if (cacheEnabled) {
-            StreamCacheManager.instance.cacheAudio(
-              resolvedSong,
-              result.quality,
-              result.url,
-            );
-            if (_currentSong!.artworkUri != null &&
-                _currentSong!.artworkUri!.isNotEmpty) {
-              StreamCacheManager.instance.cacheArtwork(
-                _currentSong!.id,
-                _currentSong!.artworkUri!,
-              );
-            }
-            StreamCacheManager.instance.cacheSongMetadata(_currentSong!);
-          }
+          // 可选扩展：播放源开始后回调（默认关闭）
+          PlayerProvider.onPlaybackSourceStarted
+              ?.call(resolvedSong, result.quality, result.url);
         } else {
           _isResolvingUrl = false;
           _resolveError = '无法获取播放链接';
@@ -1096,8 +1078,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 失败静默（封面缺失不阻塞播放）。
   Future<void> _extractCloudArtwork(Song song, String audioUrl) async {
     try {
-      final path = await StreamCacheManager.instance
-          .cacheEmbeddedArtwork(song.id, audioUrl);
+      final extract = PlayerProvider.extractEmbeddedArtwork;
+      final path = extract != null ? await extract(song.id, audioUrl) : null;
       if (path == null) return;
       // 回填封面路径（file://），并同步通知栏/UI
       final updated = song.copyWith(artworkUri: path);
@@ -1257,33 +1239,32 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
     // 切歌时先清除上一首的缓存封面路径，避免新歌曲通知栏/MediaSession 残留旧封面。
     // 仅在缓存命中时重新设置；未命中时保持 null，_updateNotification 会回退到 song.artworkUri。
-    _cachedArtworkPath = null;
+    _localArtworkPath = null;
 
     if (_currentSong!.isOnline) {
-      // 边听边存：检查本地缓存（无论 URL 是否已预取都先查缓存）
+      // 可选扩展：播放前解析本地已持久化的音频（默认关闭）
       final song = _currentSong!;
-      final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
-      if (cacheEnabled) {
-        await StreamCacheManager.instance.ensureInitialized();
-        final cachedPath = await StreamCacheManager.instance.getCachedAudioPath(
-          song.id,
-          _audioQuality.value,
+      final localAudioResolver = PlayerProvider.resolveLocalAudioPath;
+      String? cachedPath;
+      if (localAudioResolver != null) {
+        cachedPath = await localAudioResolver(song.id, _audioQuality.value);
+      }
+      if (cachedPath != null) {
+        // 命中本地已持久化音频，直接播放本地文件
+        _actualPlayingQuality = _audioQuality.value;
+        // 可选扩展：解析本地封面路径（供 MediaSession 断网兜底）
+        final localArtworkResolver = PlayerProvider.resolveLocalArtworkPath;
+        _localArtworkPath = localArtworkResolver != null
+            ? await localArtworkResolver(song.id)
+            : null;
+        await _setUrlAndPlay(
+          Uri.file(cachedPath).toString(),
+          seekTo: seekTo,
+          playAfter: play,
         );
-        if (cachedPath != null) {
-          // 缓存命中，直接播放本地文件
-          _actualPlayingQuality = _audioQuality.value;
-          // 查询本地缓存封面路径，供 MediaSession 断网兜底
-          _cachedArtworkPath = await StreamCacheManager.instance
-              .getCachedArtworkPath(song.id);
-          await _setUrlAndPlay(
-            Uri.file(cachedPath).toString(),
-            seekTo: seekTo,
-            playAfter: play,
-          );
-          // 异步获取高潮时间（不阻塞播放）
-          _fetchClimaxData();
-          return true;
-        }
+        // 异步获取高潮时间（不阻塞播放）
+        _fetchClimaxData();
+        return true;
       }
 
       // 缓存未命中：需要 URL 来播放
@@ -1315,25 +1296,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
             final resolvedSong = _currentSong!.copyWith(url: result.url);
             _currentSong = resolvedSong;
             _playlist[_currentIndex] = resolvedSong;
-            // 边听边存：异步缓存音频（不阻塞播放）
-            if (cacheEnabled) {
-              final songToCache = _currentSong!.copyWith(url: result.url);
-              // fire-and-forget，不 await
-              StreamCacheManager.instance.cacheAudio(
-                songToCache,
-                result.quality,
-                result.url,
-              );
-              // 同时缓存封面（如果 URL 存在）
-              if (song.artworkUri != null && song.artworkUri!.isNotEmpty) {
-                StreamCacheManager.instance.cacheArtwork(
-                  song.id,
-                  song.artworkUri!,
-                );
-              }
-              // 缓存元数据
-              StreamCacheManager.instance.cacheSongMetadata(song);
-            }
+            // 可选扩展：播放源开始后回调（默认关闭）
+            PlayerProvider.onPlaybackSourceStarted
+                ?.call(_currentSong!, result.quality, result.url);
           } else {
             _isResolvingUrl = false;
             return false;
@@ -1343,22 +1308,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           return false;
         }
       } else {
-        // URL 已存在（预取过），边听边存：异步缓存
-        if (cacheEnabled) {
-          // fire-and-forget，不 await
-          StreamCacheManager.instance.cacheAudio(
-            song,
-            _audioQuality.value,
-            song.url!,
-          );
-          if (song.artworkUri != null && song.artworkUri!.isNotEmpty) {
-            StreamCacheManager.instance.cacheArtwork(
-              song.id,
-              song.artworkUri!,
-            );
-          }
-          StreamCacheManager.instance.cacheSongMetadata(song);
-        }
+        // URL 已存在（预取过），可选扩展：播放源开始后回调（默认关闭）
+        PlayerProvider.onPlaybackSourceStarted
+            ?.call(song, _audioQuality.value, song.url!);
       }
     }
 
@@ -1457,9 +1409,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (_playlist.isEmpty) return;
     _resetAbnormalRetry();
 
-    // 取消当前歌曲的缓存下载
+    // 可选扩展：播放源停止回调（默认关闭）
     if (_currentSong != null && _currentSong!.isOnline) {
-      StreamCacheManager.instance.cancelAudioDownload(_currentSong!.id);
+      PlayerProvider.onPlaybackSourceStopped?.call(_currentSong!.id);
     }
 
     if (_loopMode == AppLoopMode.one) {
@@ -1494,7 +1446,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       final ok = await _resolveAndPlayCurrentSong(play: autoPlay);
       if (ok) {
-        // 切歌后刷新通知栏：_resolveAndPlayCurrentSong 可能更新了 _cachedArtworkPath，
+        // 切歌后刷新通知栏：_resolveAndPlayCurrentSong 可能更新了 _localArtworkPath，
         // 投屏场景下 play=false 不会触发 playingStream 回调刷新通知，
         // 需要在此显式刷新，避免 MediaSession 封面停留在上一首。
         _updateNotification();
@@ -1520,9 +1472,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (_playlist.isEmpty) return;
     _resetAbnormalRetry();
 
-    // 取消当前歌曲的缓存下载
+    // 可选扩展：播放源停止回调（默认关闭）
     if (_currentSong != null && _currentSong!.isOnline) {
-      StreamCacheManager.instance.cancelAudioDownload(_currentSong!.id);
+      PlayerProvider.onPlaybackSourceStopped?.call(_currentSong!.id);
     }
 
     final startIndex = _currentIndex;
@@ -1557,9 +1509,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (index < 0 || index >= _playlist.length) return;
     _resetAbnormalRetry();
 
-    // 取消当前歌曲的缓存下载
+    // 可选扩展：播放源停止回调（默认关闭）
     if (_currentSong != null && _currentSong!.isOnline) {
-      StreamCacheManager.instance.cancelAudioDownload(_currentSong!.id);
+      PlayerProvider.onPlaybackSourceStopped?.call(_currentSong!.id);
     }
 
     _currentIndex = index;
@@ -1584,9 +1536,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> clearPlaylist() async {
-    // 取消当前歌曲的缓存下载
+    // 可选扩展：播放源停止回调（默认关闭）
     if (_currentSong != null && _currentSong!.isOnline) {
-      StreamCacheManager.instance.cancelAudioDownload(_currentSong!.id);
+      PlayerProvider.onPlaybackSourceStopped?.call(_currentSong!.id);
     }
 
     await _audioService?.stop();
@@ -2101,10 +2053,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         isFavorited = ctx.read<FavoritesProvider>().isFavorite(song.id);
       }
     } catch (_) {}
-    // 边听边存兜底：缓存命中时 artUrl 用本地 file:// 路径，避免断网时 MediaSession 无封面
-    // 仅对在线歌曲生效，本地歌曲使用自身的 artworkUri，避免上一首在线缓存封面残留
-    final effectiveArtUrl = (song.isOnline && _cachedArtworkPath != null)
-        ? Uri.file(_cachedArtworkPath!).toString()
+    // 本地封面兜底：命中时 artUrl 用本地 file:// 路径，避免断网时 MediaSession 无封面
+    // 仅对在线歌曲生效，本地歌曲使用自身的 artworkUri，避免上一首本地封面残留
+    final effectiveArtUrl = (song.isOnline && _localArtworkPath != null)
+        ? Uri.file(_localArtworkPath!).toString()
         : song.artworkUri;
     MediaNotificationService.updateNotification(
       // 使用 displayName 剥离 .mp3 等扩展名，与 _createAudioSource 行为保持一致

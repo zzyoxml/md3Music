@@ -2,7 +2,7 @@
 
 > 本文件供 AI Agent 和开发者快速了解项目结构、模块边界、构建流程与已知陷阱。
 
-> **分支适用说明**：本仓库存在两个并行开发分支，正文 1~6 节全部内容仅描述当前分支 `rust-local-two`（Rust 架构）。
+> **分支适用说明**：本仓库存在两个并行开发分支，正文 1~6 节与第 8 节（下载/缓存隔离）全部内容仅描述当前分支 `rust-local-two`（Rust 架构）。
 > 切换到 `arch-local-first`（Node.js 架构）时，请以其自带版本的 AGENTS.md 为准；两分支内容对比与切换注意事项见[第 7 节](#7-git-分支约定)。
 
 ---
@@ -24,14 +24,20 @@ MD3Music 是一款 Android 音乐播放器，采用 **Flutter 前端 + 嵌入式
 ```
 md3Music/
 ├── lib/                          # Dart 前端（Flutter）
-│   ├── main.dart                 # 入口：权限请求 → 启动本地 API 服务器 → runApp
-│   ├── app.dart                  # MaterialApp 配置、主题、导航、Tab 布局
+│   ├── main.dart                 # 公开入口：runBootstrap() → runApp（下载/缓存无关）
+│   ├── app.dart                  # MaterialApp 配置、主题、导航、Tab 布局（MyApp.extraProviders 扩展点）
 │   ├── core/                     # 核心层：主题、布局、服务（桌面歌词、均衡器、Lyricon）
 │   ├── data/                     # 数据层：模型、仓库（settings_repository 等）
 │   ├── modules/                  # 功能模块：discover、player、search、library、login...
 │   ├── providers/                # 状态管理：PlayerProvider、KugouProvider、ThemeProvider...
 │   ├── services/                 # 服务层：kugou_server.dart（MethodChannel + dart:ffi 启动服务器）
-│   └── widgets/                  # 共享 UI 组件（歌词、播放器控件等）
+│   ├── widgets/                  # 共享 UI 组件（歌词、播放器控件等）
+│   └── private/                  # 【私有层，导出公开版本时整体排除】下载/缓存钩子注入、
+│                                 #   downloads_provider、downloads_page、私有入口 main_private.dart
+│
+├── packages/
+│   └── md3_download_cache/       # 【私有功能包，导出公开时整体排除】下载/缓存引擎（path 依赖，
+│                                 #   自包含，不依赖主工程类型：Song→SongMetadata、KugouLyric→LyricData）
 │
 ├── kugou_api_server/             # 本地 API 服务器（Rust，编译为 cdylib 打包进 APK）
 │   ├── rust/                     # Rust crate（crate 名 kugou_server）
@@ -67,7 +73,10 @@ md3Music/
 │   ├── fonts/                    # 内置字体（simhei.ttf）
 │   └── images/                   # 应用图标
 │
-└── scripts/                      # 构建脚本（部分为旧 Node 方案遗留）
+└── scripts/                      # 构建脚本
+    ├── build_android.ps1         # Rust 交叉编译 + Flutter 打包（默认私有入口）
+    ├── export_public.ps1         # 导出公开版本（过滤 + 否认清单闸门）
+    ├── verify_public_clean.ps1   # 公开树洁净度校验（lib/ 否认清单零命中）
     └── test_api.ps1              # API 测试脚本
 ```
 
@@ -81,6 +90,24 @@ md3Music/
 | `android/app/src/main/jniLibs/` | 原生库目录，`libkugou_server.so` **已提交进 Git**（从 `rust/target/*/release/` 复制），无需下载 |
 | `android/app/src/main/cpp/` + `kotlin/.../premium/UsbAudio*.kt` + `third_party/just_audio` | **USB 独占输出**：绕过 AudioFlinger，经 usbdevfs ISO URB 直写 UAC1 DAC（参考 [decent-player](https://github.com/Ma145/decent-player) 的 bit-perfect 驱动思路）；释放恢复见 4.10 |
 | `assets/nodejs-project/` | 已从 `pubspec.yaml` 移除，不再打包；旧 `server_bundle.js` 仅作参考 |
+| `lib/`（公开树） ↔ `packages/md3_download_cache/` + `lib/private/`（私有内容） | **下载/缓存隔离**：公开树 `lib/`（不含 `lib/private/`）**零下载/缓存符号**；引擎与私有层只在私有构建存在。公开类通过**中性静态钩子**扩展（见 2.1）；公开版本由 `scripts/export_public.ps1` 过滤导出（排除 `packages/`、`lib/private/`、`pubspec.lock`，剥离私有依赖，否认清单闸门），详见[第 8 节](#8-下载缓存功能隔离私有功能包--公开导出) |
+| `lib/main.dart` ↔ `lib/private/main_private.dart` | 双入口：公开入口 `lib/main.dart`（干净树）；私有入口 `-t lib/private/main_private.dart`（装配下载/缓存）。`build_android.ps1` 默认构建私有入口 |
+
+### 2.1 下载/缓存隔离：公开类中性钩子速查
+
+> 公开树不 import 任何下载/缓存符号。需要下载/缓存能力时，公开类暴露**语义中性的静态扩展点**，由 `lib/private/` 的 `installCacheHooks()` / `installUiHooks()` 在私有入口 `main_private.dart` 中注入实现。**新增功能若依赖这两块，一律在 `lib/private/` 或包内实现，不得向公开类 import 私有符号。**
+
+| 公开类（文件） | 中性扩展点 | 私有注入内容 |
+|------|------|------|
+| `PlayerProvider` | `resolveLocalAudioPath` / `resolveLocalArtworkPath` / `onPlaybackSourceStarted` / `onPlaybackSourceStopped` / `extractEmbeddedArtwork` | 播放前查本地持久化音频/封面、播放后异步缓存、停止取消下载、云盘内嵌封面提取 |
+| `KugouProvider` | `restoreLyric` / `storeLyric` | 歌词读取/存储旁路 |
+| `SmartArtworkImage` | `localArtworkReader` | 按 songId 读本地持久化封面字节 |
+| `SongListItem` | `extraMenuTilesBuilder` | 更多菜单的「下载 / 删除下载」条目 |
+| `FullPlayer` / `AmStyleFullPlayer` | `coverLongPressCallback` | 封面长按 → 下载音质选择对话框 |
+| `SettingsPage` | `extraCategories` / `extraSearchIndexEntries` | 「边听边存」「下载」两个设置分类 + 其搜索索引关键词 |
+| `UserCenterPage` | `extraActionItemsBuilder` | 快捷操作网格的「下载」入口 |
+| `PlaylistPage` / `PlayHistoryPage` | `songFilterHook` / `songFilterListenable` / `extraAppBarActionsBuilder` | 可播放（已本地持久化）筛选：公开类只剩 `List→List` 变换插槽 + 重建信号，筛选状态/按钮/查询全部在私有层 |
+| `MyApp`（app.dart） | `extraProviders` | 注册 `DownloadsProvider` |
 
 ---
 
@@ -102,8 +129,10 @@ md3Music/
            4. 无改动 → 跳过 Rust 编译，直接打包
 
 步骤 2: Flutter 构建（由脚本自动执行，或手动）
-   └── flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm,android-x64
+   └── scripts/build_android.ps1 默认构建【私有入口】（含下载/缓存）：
+           flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm,android-x64 -t lib/private/main_private.dart
        → build/app/outputs/flutter-apk/app-{abi}-release.apk
+   公开版本构建入口为 lib/main.dart（见 3.5 导出流程）。
 ```
 
 > **CI（Ubuntu GitHub Actions）**：使用 `kugou_api_server/rust/build_android.sh`（Linux shell 版，4 ABI），环境见 3.4。
@@ -141,6 +170,15 @@ cargo +stable-x86_64-pc-windows-gnu clippy      # 静态检查（勿引入新 er
 - 环境：Ubuntu + Java 17 + Flutter stable + Android SDK 36 + NDK 28
 - 注意：CI 中旧 Node 流程（下载 libnode、esbuild 打包）已冗余但不会失败；`libkugou_server.so` 已入库，Flutter 构建直接可用
 - 产物：三个 ABI 的 APK（arm64-v8a、armeabi-v7a、x86_64），自动创建 GitHub Release
+
+### 3.5 公开版本导出（一条命令，见第 8 节）
+
+```powershell
+.\scripts\verify_public_clean.ps1                          # 校验公开树 lib/ 否认清单零命中
+.\scripts\export_public.ps1                                 # 导出到 .public_export/（过滤 + 闸门）
+.\scripts\export_public.ps1 -PublicRemote <公开仓库URL>      # 导出并推送到公开仓库（-f 覆盖）
+# 公开树独立构建：cd .public_export && flutter pub get && flutter build apk --debug（入口 lib/main.dart）
+```
 
 ---
 
@@ -257,6 +295,7 @@ cargo +stable-x86_64-pc-windows-gnu build --target aarch64-linux-android --relea
 | 音频播放 | just_audio + just_audio_background | ^0.9.34 |
 | 本地存储 | sqflite + shared_preferences | 2.3.3+1 / ^2.5.0 |
 | 网络请求 | dio + http | ^5.4.0 / ^1.2.1 |
+| 下载/缓存引擎（私有） | `md3_download_cache` 本地包（dio/path_provider/shared_preferences/audio_metadata_reader） | path 依赖，见第 8 节 |
 | 主题 | dynamic_color + material_color_utilities | MD3 动态取色 |
 | 嵌入式 API 服务器 | Rust（cdylib） + tiny_http + ureq | Rust 2021 / tiny_http 0.12 / ureq 2 |
 | 加密 | rsa / aes / md-5 / sha1 / sha2 / base64（CBC + PKCS7 手动实现） | 与 JS CryptoJS 行为对齐 |
@@ -292,6 +331,11 @@ powershell -File scripts\test_api.ps1     # 测试本地 API 接口
 
 # 代码检查
 flutter analyze                           # Dart 静态分析
+
+# 公开版本导出（下载/缓存隔离，见第 8 节）
+.\scripts\verify_public_clean.ps1         # 公开树 lib/ 否认清单零命中校验
+.\scripts\export_public.ps1                # 过滤导出公开树（默认 .public_export/）
+.\scripts\export_public.ps1 -PublicRemote <URL>   # 导出并推送公开仓库
 ```
 
 ---
@@ -366,3 +410,49 @@ flutter analyze                           # Dart 静态分析
 - **分叉点**：两分支基于 `c7ec59b` 并行分叉，后端架构（Rust vs Node.js）与前端功能各自演进；后续合流需手动处理 AGENTS.md、构建脚本、jniLibs 及歌词渲染代码的差异
 - **切换分支的坑**：两分支 jniLibs 下的 `.so` 不同（`libkugou_server.so` vs `libnode.so`）；切回旧架构分支时，残留的 `libnode.so` 会以 untracked 文件形式留在工作区，可手动删除
 - **其他分支**：`main`（旧主线，无 AGENTS.md，Node.js）；`feat-*` / `fix-*`（一次性功能/修复分支）；`pr/update-md3music-content`（内容更新 PR 分支）
+
+---
+
+## 8. 下载/缓存功能隔离（私有功能包 + 公开导出）
+
+> 本仓库是**私有单一代码源**。公开版本 ≠ 另一套代码，而是由本仓库**过滤导出的干净树**。
+> 目的：向公开仓库同步新功能时，不再手工搬运「下载」「缓存」两块；公开仓库源码中完全不含这两块的任何符号。
+
+### 8.1 架构与文件职责
+
+```
+本仓库（私有单一源）
+├── packages/md3_download_cache/     # 【私有功能包】下载/缓存引擎，path 依赖，自包含
+│   ├── lib/download/                #   DownloadManager + DownloadTask + DownloadsRepository
+│   └── lib/cache/                   #   StreamCacheManager + StreamCacheRepository + LyricData(DTO)
+├── lib/private/                     # 【私有层】下载/缓存与主工程的接线
+│   ├── cache_bridge.dart            #   installCacheHooks()：播放/歌词/封面中性钩子 → 包内引擎
+│   ├── enhanced_ui.dart             #   installUiHooks()：下载/缓存 UI 钩子（菜单/长按/设置/筛选/批量下载）
+│   ├── downloads_provider.dart      #   下载编排（KugouApiClient/MetadataWriter）
+│   ├── downloads_page.dart          #   下载管理页
+│   ├── private_settings.dart        #   私有设置读写器（边听边存/下载设置，key 兼容存量）
+│   └── main_private.dart            #   私有入口：runBootstrap() + 安装钩子 + MyApp(extraProviders)
+├── lib/…                            # 公开树：不 import 任何下载/缓存符号，仅保留中性静态钩子（见 2.1）
+├── scripts/export_public.ps1        # 导出公开树：白名单拷贝 → 排除 packages/、lib/private/、pubspec.lock
+│                                    #   → 剥离 pubspec 私有依赖块 → 否认清单闸门 →（可选）推送
+└── scripts/public_deny.txt          # 否认清单（UTF-8，英文符号 + 中文特征短语），export/verify 共用
+
+公开仓库（由 export_public.ps1 导出，含 lib/main.dart 入口，无下载/缓存）
+```
+
+### 8.2 硬性规则（AI Agent 必读）
+
+1. **公开树零符号**：`lib/`（不含 `lib/private/`）与根 `pubspec.yaml` 不得出现否认清单中的任何符号。**否认清单外置于 `scripts/public_deny.txt`**（UTF-8，含英文符号与中文特征短语，如 `StreamCacheManager`、`getStreamCacheEnabled`、`getDownloadDir`、`md3_download_cache`、`边听边存`、`仅显示已缓存`）。新增私有特征时**必须同步追加到该文件**——否则闸门形同虚设（曾漏掉 settings_repository 的私有设置 API）。
+2. **新增下载/缓存代码的落点**：引擎/持久化 → `packages/md3_download_cache/`（只收 DTO/原始值，不 import 主工程类型）；编排/UI/私有设置读写 → `lib/private/`（含 `PrivateSettings`，可自由 import 主工程类型与包）；公开类需要能力时先加**中性静态钩子**（见 2.1），不要在公开类里直接写私有逻辑。
+3. **双入口**：私有构建 `-t lib/private/main_private.dart`（`build_android.ps1` 默认）；公开构建 `lib/main.dart`。两个入口共用 `runBootstrap()`（`main.dart` 中抽出的启动引导）。
+4. **包不反向依赖主工程**：Dart 禁止循环包依赖（主工程 path 依赖包，包不能 extends 主工程类）——这是钩子采用「公开类静态字段 + 私有注入」而非子类化的原因。
+5. **导出后自检**：改动涉及下载/缓存后，`scripts/verify_public_clean.ps1` 必须零命中；`export_public.ps1` 内置同一闸门，命中即拒绝导出。
+6. **包版本**：`packages/md3_download_cache/pubspec.yaml` 按 semver 递增；改动包后主工程锁 `pubspec.lock` 会更新，需一并提交。
+
+### 8.3 已知坑
+
+- **PowerShell 5.1 编码**：`Set-Content` 默认 ANSI 会破坏含中文的 UTF-8 pubspec；脚本统一用 .NET `[System.IO.File]` + `UTF8Encoding($false)` 读写；`public_deny.txt` 用 `[System.IO.File]::ReadAllLines($path, $utf8)` 读取（脚本本体保持纯 ASCII）。
+- **安全删除钩子**：本机环境拦截 `Remove-Item`/`rm -rf`（>50 文件需确认）；脚本内删除统一走 `[System.IO.Directory]::Delete` 旁路。
+- **正则贪婪**：剥离 pubspec 依赖块时锚定注释行 `^  # private feature package`，勿用裸 `.*md3_download_cache`（会从首个 `# ` 注释行开始误删中间依赖）。
+- **deny 词粒度**：勿用裸「缓存/下载」作 deny 词（会误伤公开版合法的封面/歌单/本地音乐缓存功能）；用特征级符号与短语（`边听边存`、`仅显示已缓存`、`settings_download_dir` 等）。
+- **预存测试失败**：`flutter test` 有 19 个 `kugou_provider_test.dart` 多账号测试失败，根因是测试环境 shared_preferences 插件不可用（MissingPluginException），与下载/缓存改动无关。

@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/download_task.dart';
+import 'download_task.dart';
 
 class DownloadsRepository {
   static const String _key = 'download_tasks';

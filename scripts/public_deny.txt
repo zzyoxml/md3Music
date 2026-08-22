@@ -1,0 +1,55 @@
+# 公开树否认清单（public deny-list）
+# 本文件由 scripts/export_public.ps1 与 scripts/verify_public_clean.ps1 读取，
+# 匹配公开树 lib/（不含 lib/private/）与 pubspec.yaml。任何一行命中即拒绝导出。
+# 编码：UTF-8（含中文特征短语）。新增私有特征时同步追加。
+# 注意：勿添加裸词「缓存/下载」（会误伤公开版合法的封面/歌单/本地音乐缓存功能）。
+
+# —— 下载引擎/编排 ——
+DownloadManager
+DownloadsProvider
+DownloadsPage
+downloads_provider
+downloads_page
+download_manager
+download_task
+downloads_repository
+
+# —— 边听边存缓存引擎 ——
+StreamCacheManager
+StreamCacheRepository
+stream_cache_manager
+stream_cache_repository
+CacheStats
+getCacheStats
+
+# —— 缓存方法 ——
+getCachedAudioPath
+getCachedLyric
+getCachedArtwork
+cacheAudio
+cacheArtwork
+cacheLyric
+cacheSongMetadata
+cacheEmbeddedArtwork
+
+# —— 私有设置 API（曾定义于公开 settings_repository，已迁入 lib/private）——
+getStreamCacheEnabled
+setStreamCacheEnabled
+getStreamCacheLimitMb
+setStreamCacheLimitMb
+getDownloadDir
+setDownloadDir
+getDownloadWordLevelLyrics
+setDownloadWordLevelLyrics
+settings_stream_cache_enabled
+settings_stream_cache_limit_mb
+settings_download_dir
+settings_download_word_level_lyrics
+
+# —— 私有功能包名 ——
+md3_download_cache
+
+# —— 中文特征短语（精确短语，避免误伤）——
+边听边存
+仅显示已缓存
+播放歌曲时会自动缓存

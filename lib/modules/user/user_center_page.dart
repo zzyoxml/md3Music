@@ -12,7 +12,6 @@ import '../../widgets/scroll_aware_app_bar.dart';
 import '../login/login_page.dart';
 import '../settings/settings_page.dart';
 import 'cloud_music_page.dart';
-import 'downloads_page.dart';
 import 'listen_ranking_page.dart';
 import 'play_history_page.dart';
 import 'purchased_page.dart';
@@ -20,6 +19,10 @@ import 'sign_in_calendar_page.dart';
 import 'vip_status.dart';
 
 class UserCenterPage extends StatefulWidget {
+  /// 可选扩展：用户中心快捷操作网格的额外条目（默认关闭，由私有构建注入）。
+  /// 返回的 Widget 追加在操作网格 Row 末尾。
+  static List<Widget> Function(BuildContext context, ColorScheme cs)?
+      extraActionItemsBuilder;
   const UserCenterPage({super.key});
 
   @override
@@ -854,16 +857,13 @@ class _UserCenterPageState extends State<UserCenterPage> {
                 MaterialPageRoute(builder: (_) => const CloudMusicPage()),
               );
             }),
-            _actionItem(cs, Icons.download, '下载', () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const DownloadsPage()),
-              );
-            }),
             _actionItem(cs, Icons.shopping_bag_outlined, '已购', () {
               Navigator.of(context).push(
                 MaterialPageRoute(builder: (_) => const PurchasedPage()),
               );
             }),
+            // 可选扩展：私有构建注入的额外操作项（默认无）
+            ...?UserCenterPage.extraActionItemsBuilder?.call(context, cs),
           ],
         ),
       ),

@@ -8,20 +8,33 @@ import '../../data/models/playlist.dart';
 import '../../data/models/song.dart';
 import '../../data/repositories/collected_playlist_store.dart';
 import '../../data/repositories/favorite_lists_cache.dart';
-import '../../data/repositories/stream_cache_repository.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
-import '../../providers/downloads_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../services/stream_cache_manager.dart';
 import '../../widgets/song_list_item.dart';
 import '../../widgets/playlist_comments_view.dart';
 import '../player/mini_player.dart';
 
 class PlaylistPage extends StatefulWidget {
+  /// 可选扩展：对显示列表应用变换（默认关闭，由私有构建注入，用于筛选等）。
+  /// [pageKey] 为页面标识（'playlist'），供私有状态按页隔离。
+  static List<Song> Function(String pageKey, List<Song> songs)? songFilterHook;
+  /// 可选扩展：筛选状态变更的监听信号（默认关闭，由私有构建注入，
+  /// 用于筛选按钮切换后触发本页重建）。
+  static Listenable? songFilterListenable;
+  /// 可选扩展：顶栏额外操作按钮（默认关闭，由私有构建注入）。
+  static List<Widget> Function(BuildContext context)? extraAppBarActionsBuilder;
+  /// 可选扩展：多选栏的额外操作按钮（默认关闭，由私有构建注入，用于批量下载等）。
+  static List<Widget> Function(
+    BuildContext context,
+    ColorScheme colorScheme,
+    int selectedCount,
+    List<Song> selectedSongs,
+  )? extraMultiSelectActions;
+
   final Playlist playlist;
   // 「我收藏」里的歌单：本身已是已收藏状态，不显示红心收藏按钮。
   final bool isInMyFavorites;
@@ -84,10 +97,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
   final Set<String> _selectedSongIds = {};
   bool _isDeleting = false;
 
-  // 已缓存筛选（与历史记录页一致）
-  bool _showOnlyPlayable = false;
-  Set<String> _playableIds = {};
-
   /// 删除歌曲用的 listid（仅自己创建的歌单有效）
   String? get _deleteListid => widget.playlist.listCreateListid;
 
@@ -118,8 +127,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
         await _loadCachedSongs();
       }
       _fetchSongs();
-      // 等歌曲列表加载完后检测"已缓存"状态
-      Future.delayed(const Duration(milliseconds: 500), _checkPlayableSongs);
     });
   }
 
@@ -170,17 +177,13 @@ class _PlaylistPageState extends State<PlaylistPage> {
   String? _lastSearchQuery;
   _SortBy? _lastSortBy;
   bool? _lastSortAscending;
-  bool? _lastShowOnlyPlayable;
-  int? _lastPlayableIdsHash;
 
   /// 获取当前显示的歌曲列表（带缓存）
   List<Song> get _displaySongs {
     if (_cachedDisplaySongs != null &&
         _lastSearchQuery == _searchQuery &&
         _lastSortBy == _sortBy &&
-        _lastSortAscending == _sortAscending &&
-        _lastShowOnlyPlayable == _showOnlyPlayable &&
-        _lastPlayableIdsHash == _playableIds.length) {
+        _lastSortAscending == _sortAscending) {
       return _cachedDisplaySongs!;
     }
     _rebuildDisplaySongs();
@@ -189,10 +192,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   void _rebuildDisplaySongs() {
     List<Song> list;
-    // 先按"已缓存"过滤（在搜索/排序之前；空集表示还没检测完）
-    if (_showOnlyPlayable) {
-      list = _songs.where((s) => _playableIds.contains(s.id)).toList();
-    } else if (_searchQuery.isEmpty) {
+    if (_searchQuery.isEmpty) {
       list = List.of(_songs);
     } else {
       final q = _searchQuery.toLowerCase();
@@ -201,6 +201,11 @@ class _PlaylistPageState extends State<PlaylistPage> {
             s.artist.toLowerCase().contains(q) ||
             (s.album?.toLowerCase().contains(q) ?? false);
       }).toList();
+    }
+    // 可选扩展：私有构建注入的列表变换（如按本地持久化筛选）
+    final filter = PlaylistPage.songFilterHook;
+    if (filter != null) {
+      list = filter('playlist', list);
     }
     list.sort((a, b) {
       int cmp;
@@ -221,41 +226,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
     _lastSearchQuery = _searchQuery;
     _lastSortBy = _sortBy;
     _lastSortAscending = _sortAscending;
-    _lastShowOnlyPlayable = _showOnlyPlayable;
-    _lastPlayableIdsHash = _playableIds.length;
-  }
-
-  /// 切换"仅显示已缓存"
-  void _togglePlayableFilter() {
-    setState(() {
-      _showOnlyPlayable = !_showOnlyPlayable;
-      _invalidateDisplaySongs();
-    });
-  }
-
-  /// 检测 _songs 里哪些歌曲已经被流缓存（边听边存），
-  /// 结果存在 _playableIds。完成后 invalidate display cache 触发重 build。
-  Future<void> _checkPlayableSongs() async {
-    if (_songs.isEmpty) return;
-    try {
-      await StreamCacheManager.instance.ensureInitialized();
-    } catch (_) {}
-
-    final ids = <String>{};
-    for (final song in _songs) {
-      try {
-        final entry = StreamCacheRepository.instance.getEntry(song.id);
-        if (entry != null && entry.audio.isNotEmpty) {
-          ids.add(song.id);
-        }
-      } catch (_) {}
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _playableIds = ids;
-      _invalidateDisplaySongs();
-    });
   }
 
   /// 使显示列表缓存失效
@@ -309,189 +279,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
           ..addAll(_displaySongs.map((s) => s.id));
       }
     });
-  }
-
-  // ==================== 批量下载 ====================
-
-  void _showBatchDownloadDialog() {
-    final api = KugouApiClient();
-    if (!api.isLoggedIn) {
-      showToast('请先登录', long: true);
-      return;
-    }
-
-    final selectedSongs =
-        _songs.where((s) => _selectedSongIds.contains(s.id)).toList();
-    if (selectedSongs.isEmpty) return;
-
-    final qualityOptions = [
-      ('标准音质 (128kbps)', '128'),
-      ('高音质 (320kbps)', 'hq'),
-      ('无损音质 (FLAC)', 'flac'),
-      ('Hi-Res 无损', 'high'),
-    ];
-
-    showDialog(
-      context: context,
-      builder: (ctx) => SimpleDialog(
-        title: Column(
-          children: [
-            const Text('批量下载'),
-            Text(
-              '已选 ${selectedSongs.length} 首歌曲',
-              style: Theme.of(ctx).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '部分歌曲不支持所选音质时将自动降级',
-              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ],
-        ),
-        children: qualityOptions.map((opt) {
-          final (label, quality) = opt;
-          return SimpleDialogOption(
-            onPressed: () {
-              Navigator.pop(ctx);
-              _startBatchDownload(selectedSongs, quality);
-            },
-            child: Row(
-              children: [
-                Icon(Icons.music_note,
-                    size: 20, color: Theme.of(ctx).colorScheme.primary),
-                const SizedBox(width: 12),
-                Text(label),
-              ],
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-
-  void _startBatchDownload(List<Song> songs, String quality) async {
-    _exitMultiSelectMode();
-    if (!mounted) return;
-
-    final downloadsProvider = context.read<DownloadsProvider>();
-    final total = songs.length;
-    final progress = ValueNotifier<int>(0);
-    final currentTitle = ValueNotifier<String?>(null);
-    final downgraded = ValueNotifier<int>(0);
-    bool dialogActive = true;
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AnimatedBuilder(
-        animation: Listenable.merge([progress, currentTitle, downgraded]),
-        builder: (ctx, _) => AlertDialog(
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              M3ELinearProgressIndicator(
-                value: total > 0 ? progress.value / total : 0,
-              ),
-              const SizedBox(height: 16),
-              Text('正在处理 ${progress.value} / $total'),
-              if (currentTitle.value != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  currentTitle.value!,
-                  style: Theme.of(ctx).textTheme.bodySmall,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-              if (downgraded.value > 0) ...[
-                const SizedBox(height: 4),
-                Text(
-                  '已降级 ${downgraded.value} 首',
-                  style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                      ),
-                ),
-              ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                dialogActive = false;
-                Navigator.pop(ctx);
-              },
-              child: const Text('后台下载'),
-            ),
-          ],
-        ),
-      ),
-    ).then((_) => dialogActive = false);
-
-    final result = await downloadsProvider.downloadMultipleSongs(
-      songs,
-      quality: quality,
-      onProgress: (c, t, title, d) {
-        if (!dialogActive) return;
-        progress.value = c;
-        currentTitle.value = title;
-        downgraded.value = d;
-      },
-    );
-
-    if (dialogActive && mounted) {
-      Navigator.pop(context);
-    }
-
-    if (dialogActive && mounted) {
-      _showBatchDownloadResult(result);
-    }
-
-    progress.dispose();
-    currentTitle.dispose();
-    downgraded.dispose();
-  }
-
-  void _showBatchDownloadResult(Map<String, int> result) {
-    final success = result['success'] ?? 0;
-    final failed = result['failed'] ?? 0;
-    final skipped = result['skipped'] ?? 0;
-    final downgraded = result['downgraded'] ?? 0;
-    final blocked = result['blocked'] ?? 0;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('批量下载完成'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('已加入下载: $success 首'),
-            if (failed > 0)
-              Text('失败: $failed 首',
-                  style: TextStyle(color: Theme.of(ctx).colorScheme.error)),
-            if (skipped > 0) Text('跳过（已下载）: $skipped 首'),
-            if (downgraded > 0) Text('音质自动降级: $downgraded 首'),
-            if (blocked > 0)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  '风控拦截: $blocked 首\n你的账号已被kugou风控,请等待kugou解除风控后再试',
-                  style: TextStyle(color: Theme.of(ctx).colorScheme.error),
-                ),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('确定'),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _deleteSelectedSongs() async {
@@ -1128,7 +915,11 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final textTheme = Theme.of(context).textTheme;
     final displayPlaylist = widget.playlist.copyWith(songs: _songs);
 
-    return PopScope(
+    // 可选扩展：筛选/变换状态变更时重建本页（默认监听空信号，无额外开销）
+    return ListenableBuilder(
+      listenable: PlaylistPage.songFilterListenable ??
+          const AlwaysStoppedAnimation<Object?>(null),
+      builder: (context, _) => PopScope(
       canPop: !_isMultiSelectMode,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _isMultiSelectMode) _exitMultiSelectMode();
@@ -1163,21 +954,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         surfaceTintColor: Colors.transparent,
                         scrolledUnderElevation: 0,
                         actions: [
-                          if (_songs.isNotEmpty)
-                            IconButton(
-                              icon: Icon(
-                                _showOnlyPlayable
-                                    ? Icons.filter_alt
-                                    : Icons.filter_alt_outlined,
-                                color: _showOnlyPlayable
-                                    ? Theme.of(context).colorScheme.primary
-                                    : null,
-                              ),
-                              tooltip: _showOnlyPlayable
-                                  ? '显示全部'
-                                  : '仅显示已缓存',
-                              onPressed: _togglePlayableFilter,
-                            ),
+                          // 可选扩展：私有构建注入的额外操作按钮（默认无）
+                          ...?PlaylistPage.extraAppBarActionsBuilder?.call(
+                            context,
+                          ),
                           if (_songs.isNotEmpty)
                             IconButton(
                               icon: Icon(
@@ -1640,40 +1420,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         SliverToBoxAdapter(
                           child: _buildEmptySongsHint(colorScheme, textTheme),
                         ),
-                      // 开启"仅显示已缓存"但无匹配歌曲时
-                      if (!_isMultiSelectMode &&
-                          _showOnlyPlayable &&
-                          _songs.isNotEmpty &&
-                          _displaySongs.isEmpty)
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.all(32),
-                            child: Column(
-                              children: [
-                                Icon(
-                                  Icons.cloud_off_outlined,
-                                  size: 48,
-                                  color: colorScheme.onSurfaceVariant
-                                      .withValues(alpha: 0.5),
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  '没有已缓存的歌曲',
-                                  style: textTheme.titleMedium?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  '播放歌曲时会自动缓存',
-                                  style: textTheme.bodySmall?.copyWith(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
                     ],
                   ),
                 ),
@@ -1682,6 +1428,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
             ],
             ),
       ),
+    ),
     );
   }
 
@@ -1811,13 +1558,14 @@ class _PlaylistPageState extends State<PlaylistPage> {
                   onPressed: _toggleSelectAll,
                   tooltip: allSelected ? '取消全选' : '全选',
                 ),
-                IconButton(
-                  icon: Icon(
-                    Icons.download_outlined,
-                    color: selectedCount > 0 ? colorScheme.primary : null,
-                  ),
-                  onPressed: selectedCount > 0 ? _showBatchDownloadDialog : null,
-                  tooltip: '下载',
+                // 可选扩展：私有构建注入的额外操作按钮（默认无）
+                ...?PlaylistPage.extraMultiSelectActions?.call(
+                  context,
+                  colorScheme,
+                  selectedCount,
+                  _songs
+                      .where((s) => _selectedSongIds.contains(s.id))
+                      .toList(),
                 ),
                 if (widget.isUserCreated)
                   IconButton(

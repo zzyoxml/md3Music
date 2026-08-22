@@ -10,7 +10,6 @@ import '../data/models/playlist.dart';
 import '../data/models/song.dart';
 import '../data/repositories/settings_repository.dart';
 import '../core/services/listening_grade_service.dart';
-import '../services/stream_cache_manager.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import '../services/kugou_api/kugou_models.dart';
 
@@ -63,6 +62,12 @@ enum SwitchAccountResult {
 }
 
 class KugouProvider extends ChangeNotifier {
+  // —— 歌词持久化可选扩展点（默认关闭）——
+  // 由私有构建（lib/private）注入实现：歌词的读取/存储旁路。
+  // 公开构建不注入，均为空操作。
+  static Future<KugouLyric?> Function(String hash)? restoreLyric;
+  static void Function(String hash, KugouLyric lyric)? storeLyric;
+
   final KugouApiClient _apiClient = KugouApiClient();
 
   KugouProvider() {
@@ -649,15 +654,12 @@ class KugouProvider extends ChangeNotifier {
     // 共享空 hash 导致竞态检查失效（旧请求覆盖新请求结果）
     final trackKey = hash.isEmpty ? 'local_${songName ?? ''}' : hash;
 
-    // 边听边存：检查歌词本地缓存
-    final cacheEnabled = await SettingsRepository().getStreamCacheEnabled();
-    if (cacheEnabled) {
-      await StreamCacheManager.instance.ensureInitialized();
-      final cachedLyric = await StreamCacheManager.instance.getCachedLyric(
-        hash,
-      );
+    // 可选扩展：歌词持久化恢复（默认关闭，由私有构建注入）
+    final restore = KugouProvider.restoreLyric;
+    if (restore != null) {
+      final cachedLyric = await restore(hash);
       if (cachedLyric != null) {
-        // 缓存命中，直接返回
+        // 本地持久化命中，直接返回
         _lyric = cachedLyric;
         _lyricSongId = trackKey; // 更新歌词歌曲 ID（用于竞态控制）
         _error = null;
@@ -690,10 +692,8 @@ class KugouProvider extends ChangeNotifier {
       }
       if (result != null) {
         _lyric = result;
-        // 边听边存：异步缓存歌词（fire-and-forget，不阻塞歌词显示）
-        if (cacheEnabled) {
-          StreamCacheManager.instance.cacheLyric(hash, result);
-        }
+        // 可选扩展：歌词持久化存储（默认关闭）
+        KugouProvider.storeLyric?.call(hash, result);
       } else {
         _error = '获取歌词失败';
       }

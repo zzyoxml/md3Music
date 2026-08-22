@@ -519,6 +519,13 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.13.0"
+  md3_download_cache:
+    dependency: "direct main"
+    description:
+      path: "packages/md3_download_cache"
+      relative: true
+    source: path
+    version: "0.1.0"
   meta:
     dependency: transitive
     description:

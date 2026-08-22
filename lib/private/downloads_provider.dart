@@ -4,20 +4,18 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:md3_download_cache/md3_download_cache.dart';
 
-import '../data/models/download_task.dart';
 import '../data/models/song.dart';
-import '../data/repositories/downloads_repository.dart';
-import '../data/repositories/settings_repository.dart';
-import '../services/download_manager.dart';
 import '../services/kugou_api/kugou_api_client.dart';
 import '../services/metadata_writer.dart';
 import '../widgets/apple_lyrics/parsers/krc_parser.dart';
+import 'private_settings.dart';
 
-/// 下载服务 Provider。
+/// 下载服务 Provider（私有：仅私有构建使用，导出公开版本时整体排除）。
 ///
 /// 协调 [DownloadManager]（DIO 下载）+ [DownloadsRepository]（任务持久化）+
-/// [SettingsRepository]（下载目录配置）+ [MetadataWriter]（嵌入元数据）。
+/// [PrivateSettings]（下载目录配置）+ [MetadataWriter]（嵌入元数据）。
 ///
 /// 主要职责：
 /// 1. 接收 UI/Service 的下载请求，按用户配置的下载目录写入文件
@@ -29,7 +27,7 @@ import '../widgets/apple_lyrics/parsers/krc_parser.dart';
 class DownloadsProvider extends ChangeNotifier {
   final DownloadsRepository _repository = DownloadsRepository();
   final DownloadManager _manager = DownloadManager();
-  final SettingsRepository _settingsRepository = SettingsRepository();
+  final PrivateSettings _settingsRepository = PrivateSettings();
   final KugouApiClient _api = KugouApiClient();
 
   List<DownloadTask> _tasks = [];
@@ -368,7 +366,7 @@ class DownloadsProvider extends ChangeNotifier {
         );
 
         // 读取用户设置：是否嵌入字级 LRC
-        final wantWordLevel = await SettingsRepository().getDownloadWordLevelLyrics();
+        final wantWordLevel = await PrivateSettings().getDownloadWordLevelLyrics();
         final lrcText = lyric?.displayLrcLyric ?? lyric?.content;
         final krcText = lyric?.displayKrcLyric;
 

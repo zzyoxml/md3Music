@@ -4,13 +4,20 @@ import 'package:provider/provider.dart';
 
 import '../../data/models/song.dart';
 import '../../data/repositories/history_repository.dart';
-import '../../data/repositories/stream_cache_repository.dart';
 import '../../providers/player_provider.dart';
-import '../../services/stream_cache_manager.dart';
 import '../../widgets/song_list_item.dart';
 import '../player/mini_player.dart';
 
 class PlayHistoryPage extends StatefulWidget {
+  /// 可选扩展：对显示列表应用变换（默认关闭，由私有构建注入，用于筛选等）。
+  /// [pageKey] 为页面标识（'history'），供私有状态按页隔离。
+  static List<Song> Function(String pageKey, List<Song> songs)? songFilterHook;
+  /// 可选扩展：筛选状态变更的监听信号（默认关闭，由私有构建注入，
+  /// 用于筛选按钮切换后触发本页重建）。
+  static Listenable? songFilterListenable;
+  /// 可选扩展：顶栏额外操作按钮（默认关闭，由私有构建注入）。
+  static List<Widget> Function(BuildContext context)? extraAppBarActionsBuilder;
+
   const PlayHistoryPage({super.key});
 
   @override
@@ -20,9 +27,6 @@ class PlayHistoryPage extends StatefulWidget {
 class _PlayHistoryPageState extends State<PlayHistoryPage> {
   List<Song> _songs = [];
   bool _isLoading = true;
-  bool _showOnlyPlayable = false;
-  bool _checkingPlayable = false;
-  Set<String> _playableIds = {};
 
   @override
   void initState() {
@@ -31,8 +35,9 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
   }
 
   List<Song> get _displaySongs {
-    if (!_showOnlyPlayable) return _songs;
-    return _songs.where((s) => _playableIds.contains(s.id)).toList();
+    final filter = PlayHistoryPage.songFilterHook;
+    if (filter == null) return _songs;
+    return filter('history', _songs);
   }
 
   Future<void> _loadHistory() async {
@@ -41,36 +46,6 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
     setState(() {
       _songs = history;
       _isLoading = false;
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkPlayableSongs();
-    });
-  }
-
-  Future<void> _checkPlayableSongs() async {
-    if (_songs.isEmpty) return;
-    setState(() => _checkingPlayable = true);
-
-    try {
-      await StreamCacheManager.instance.ensureInitialized();
-    } catch (_) {}
-
-    final ids = <String>{};
-
-    for (final song in _songs) {
-      // 仅保留边听边存已自动缓存的歌曲
-      try {
-        final entry = StreamCacheRepository.instance.getEntry(song.id);
-        if (entry != null && entry.audio.isNotEmpty) {
-          ids.add(song.id);
-        }
-      } catch (_) {}
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _playableIds = ids;
-      _checkingPlayable = false;
     });
   }
 
@@ -98,31 +73,20 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
     }
   }
 
-  void _toggleFilter() {
-    setState(() {
-      _showOnlyPlayable = !_showOnlyPlayable;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final displaySongs = _displaySongs;
-    return Scaffold(
+    // 可选扩展：筛选/变换状态变更时重建本页（默认监听空信号，无额外开销）
+    return ListenableBuilder(
+      listenable: PlayHistoryPage.songFilterListenable ??
+          const AlwaysStoppedAnimation<Object?>(null),
+      builder: (context, _) => Scaffold(
       appBar: AppBar(
         title: const Text('播放历史'),
         actions: [
-          if (_songs.isNotEmpty && !_checkingPlayable)
-            IconButton(
-              icon: Icon(
-                _showOnlyPlayable
-                    ? Icons.filter_alt
-                    : Icons.filter_alt_outlined,
-                color: _showOnlyPlayable ? cs.primary : null,
-              ),
-              tooltip: _showOnlyPlayable ? '显示全部' : '仅显示已缓存',
-              onPressed: _toggleFilter,
-            ),
+          // 可选扩展：私有构建注入的额外操作按钮（默认无）
+          ...?PlayHistoryPage.extraAppBarActionsBuilder?.call(context),
           if (_songs.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.delete_outline),
@@ -135,8 +99,6 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
           ? const Center(child: M3ELoadingIndicator())
           : _songs.isEmpty
           ? _buildEmpty()
-          : _showOnlyPlayable && displaySongs.isEmpty && !_checkingPlayable
-          ? _buildNoPlayable()
           : Column(
               children: [
                 _buildHeader(displaySongs),
@@ -160,6 +122,7 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
                 const MiniPlayer(),
               ],
             ),
+    ),
     );
   }
 
@@ -186,36 +149,6 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
     );
   }
 
-  Widget _buildNoPlayable() {
-    final cs = Theme.of(context).colorScheme;
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.cloud_off,
-            size: 64,
-            color: cs.onSurfaceVariant.withValues(alpha: 0.4),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            '没有已缓存的歌曲',
-            style: Theme.of(
-              context,
-            ).textTheme.bodyLarge?.copyWith(color: cs.onSurfaceVariant),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '播放歌曲时会自动缓存',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: cs.onSurfaceVariant.withValues(alpha: 0.7),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildHeader(List<Song> displaySongs) {
     final cs = Theme.of(context).colorScheme;
     return Padding(
@@ -223,25 +156,13 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
       child: Row(
         children: [
           Text(
-            _showOnlyPlayable
-                ? '已缓存 ${displaySongs.length}/${_songs.length} 首'
-                : '共 ${_songs.length} 首',
+            '共 ${_songs.length} 首',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
           ),
           const Spacer(),
-          if (_checkingPlayable)
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: M3ECircularProgressIndicator(
-                size: 16,
-                strokeWidth: 2,
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-          if (!_checkingPlayable && displaySongs.isNotEmpty)
+          if (displaySongs.isNotEmpty)
             TextButton.icon(
               onPressed: () {
                 context.read<PlayerProvider>().playOnlinePlaylist(

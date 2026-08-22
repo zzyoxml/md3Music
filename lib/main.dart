@@ -40,6 +40,33 @@ String? pendingShortcutType;
 final ValueNotifier<String?> shortcutTabRequest = ValueNotifier<String?>(null);
 
 Future<void> main() async {
+  final (needsOnboarding, needsUserAgreement) = await runBootstrap();
+
+  runApp(
+    MyApp(
+      showOnboarding: needsOnboarding,
+      showUserAgreement: needsUserAgreement,
+    ),
+  );
+
+  // P0: 权限请求推迟到首帧渲染后执行，避免冷启动期间的系统权限弹窗
+  // 阻塞首屏绘制（部分设备上 permission_handler 可能耗时/弹窗）。
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    // 权限请求包裹 try/catch：在部分设备/早期阶段 permission_handler 可能抛
+    // "Unable to detect current Android Activity"，不能让它中断流程。
+    try {
+      requestPermissions();
+    } catch (e) {
+      print('Request permissions error (ignored): $e');
+    }
+  });
+}
+
+/// 启动引导：并行初始化无依赖服务、恢复偏好、预取 SharedPreferences。
+/// 返回 `(needsOnboarding, needsUserAgreement)`。
+/// 公开入口（main）与私有入口（lib/private/main_private）复用同一流程，
+/// 私有入口在此基础上安装扩展钩子后 runApp。
+Future<(bool, bool)> runBootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('zh_CN');
 
@@ -113,24 +140,7 @@ Future<void> main() async {
   // 检测是否需要展示用户协议（首次启动）
   final needsUserAgreement = !(await isUserAgreementAccepted());
 
-  runApp(
-    MyApp(
-      showOnboarding: needsOnboarding,
-      showUserAgreement: needsUserAgreement,
-    ),
-  );
-
-  // P0: 权限请求推迟到首帧渲染后执行，避免冷启动期间的系统权限弹窗
-  // 阻塞首屏绘制（部分设备上 permission_handler 可能耗时/弹窗）。
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    // 权限请求包裹 try/catch：在部分设备/早期阶段 permission_handler 可能抛
-    // "Unable to detect current Android Activity"，不能让它中断流程。
-    try {
-      _requestPermissions();
-    } catch (e) {
-      print('Request permissions error (ignored): $e');
-    }
-  });
+  return (needsOnboarding, needsUserAgreement);
 }
 
 /// 恢复蓝牙歌词开关 + 实时歌词推送协议（Lyricon/SuperLyric/LyricInfo 三选一 + 关闭）。
@@ -204,7 +214,9 @@ void handleShortcut(String shortcutType) {
   shortcutTabRequest.value = tabId;
 }
 
-Future<void> _requestPermissions() async {
+/// 请求运行时权限（通知 / 媒体 / 管理外部存储 / 忽略电池优化）。
+/// 公开入口与私有入口共用；私有入口的下载功能依赖其中的存储权限。
+Future<void> requestPermissions() async {
   // Web 平台不支持 permission_handler，跳过所有权限请求
   if (kIsWeb) return;
   // 桌面端无 Android 专属权限，跳过（permission_handler 桌面语义不同）

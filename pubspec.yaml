@@ -48,6 +48,9 @@ dependencies:
   # 原生 Toast 提示（替代 SnackBar 通知）；10.0.0 起 compileSdk 满足项目 36 要求
   fluttertoast: ^10.0.0
   m3e_core: ^0.1.6
+  # private feature package (download/cache engines); stripped on public export
+  md3_download_cache:
+    path: packages/md3_download_cache
 
 dev_dependencies:
   flutter_test:

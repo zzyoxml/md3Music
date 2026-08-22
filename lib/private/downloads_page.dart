@@ -2,13 +2,14 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
+import 'package:md3_download_cache/md3_download_cache.dart';
 
-import '../../data/models/download_task.dart';
-import '../../data/models/song.dart';
-import '../../providers/downloads_provider.dart';
-import '../../providers/player_provider.dart';
-import '../player/mini_player.dart';
+import '../data/models/song.dart';
+import '../modules/player/mini_player.dart';
+import '../providers/player_provider.dart';
+import 'downloads_provider.dart';
 
+/// 下载管理页（私有：仅私有构建使用，导出公开版本时整体排除）。
 class DownloadsPage extends StatefulWidget {
   const DownloadsPage({super.key});
 

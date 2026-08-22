@@ -17,7 +17,6 @@ import '../../core/utils/app_toast.dart';
 import '../../core/services/audio_service_io.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/equalizer_service.dart';
-import '../../core/services/folder_picker_service.dart';
 import '../../core/services/lyricon_provider_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/services/media_store_service.dart';
@@ -34,7 +33,6 @@ import '../../providers/shortcut_config_provider.dart';
 import '../../providers/tab_config_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/kugou_server.dart';
-import '../../services/stream_cache_manager.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/seed_color_picker.dart';
@@ -50,6 +48,16 @@ const String kBuildAppVersion = String.fromEnvironment(
 );
 
 class SettingsPage extends StatefulWidget {
+  /// 可选扩展：设置页分类列表的额外分类（默认关闭，由私有构建注入，
+  /// 用于补充私有功能设置项）。
+  static List<(String, IconData, Widget Function(ColorScheme))>?
+      extraCategories;
+
+  /// 可选扩展：设置搜索索引的额外条目（默认关闭，由私有构建注入，
+  /// 与 [extraCategories] 配套，保证私有分类可被搜索命中）。
+  static List<({String label, String category, String aliases})>?
+      extraSearchIndexEntries;
+
   const SettingsPage({super.key});
 
   @override
@@ -98,10 +106,6 @@ class _SettingsPageState extends State<SettingsPage>
   // 锁屏歌词独立字号/粗细（默认跟随 AM 歌词偏好）
   double _lockScreenLyricFontSize = 22;
   int _lockScreenLyricFontWeight = 400;
-  // 自定义下载目录：null/空 表示使用默认目录
-  String? _downloadDir;
-  // 下载时内嵌字级 LRC 歌词（逐字），关闭则嵌入行级 LRC
-  bool _downloadWordLevelLyrics = true;
   double _uiScale = 1.0;
   // 暂停淡入淡出开关
   bool _pauseFadeEnabled = false;
@@ -272,8 +276,6 @@ class _SettingsPageState extends State<SettingsPage>
     final backgroundBlur = context.read<ThemeProvider>().backgroundBlur;
     final backgroundOpacity = context.read<ThemeProvider>().backgroundOpacity;
     final useBackgroundMonet = context.read<ThemeProvider>().useBackgroundMonet;
-    // 读取自定义下载目录
-    final downloadDir = await _settingsRepository.getDownloadDir();
     // 从 ThemeProvider 同步 UI 缩放
     final uiScale = context.read<ThemeProvider>().uiScale;
     // 读取蓝牙歌词开关
@@ -287,8 +289,6 @@ class _SettingsPageState extends State<SettingsPage>
         .getLockScreenLyricFontSize();
     final lockScreenLyricFontWeight = await _settingsRepository
         .getLockScreenLyricFontWeight();
-    final downloadWordLevelLyrics = await _settingsRepository
-        .getDownloadWordLevelLyrics();
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
     final keepScreenOn = await _settingsRepository.getKeepScreenOn();
     final spectrumEnabled = await _settingsRepository.getSpectrumEnabled();
@@ -329,8 +329,6 @@ class _SettingsPageState extends State<SettingsPage>
       _useDuetLayout = LyricPreferences.instance.useDuetLayout;
       _lyricEcoMode = LyricPreferences.instance.ecoMode;
       _lyricDynamicColor = LyricPreferences.instance.useDynamicLyricColor;
-      _downloadDir = downloadDir;
-      _downloadWordLevelLyrics = downloadWordLevelLyrics;
       _uiScale = uiScale;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
       _lockScreenLyricEnabled = lockScreenLyricEnabled;
@@ -482,11 +480,11 @@ class _SettingsPageState extends State<SettingsPage>
           Icons.bolt_outlined,
           _buildDesktopShortcutSection,
         ),
-        ('边听边存', Icons.download_outlined, _buildStreamCacheSection),
-        ('下载', Icons.file_download_outlined, _buildDownloadSection),
         ('在线音乐', Icons.cloud_outlined, _buildOnlineMusicSection),
         ('缓存与数据', Icons.storage_outlined, _buildCacheSection),
         ('关于', Icons.info_outline, _buildAboutSection),
+        // 可选扩展：私有构建注入的额外分类（默认无）
+        ...?SettingsPage.extraCategories,
       ];
 
   /// 二级页面内容：根据 _activeSection 匹配分类构建器
@@ -569,13 +567,6 @@ class _SettingsPageState extends State<SettingsPage>
     (label: '桌面快捷方式', category: '桌面快捷方式', aliases: '快捷方式 快捷 长按'),
     // USB 独占
     (label: 'USB 独占输出', category: 'USB 独占', aliases: 'usb dac 独占 音频'),
-    // 边听边存
-    (label: '启用边听边存', category: '边听边存', aliases: '边听边存 缓存 流量'),
-    (label: '缓存上限', category: '边听边存', aliases: '缓存 上限 大小'),
-    (label: '清理缓存', category: '边听边存', aliases: '缓存 清理'),
-    // 下载
-    (label: '下载目录', category: '下载', aliases: '下载 目录 路径'),
-    (label: '下载内嵌逐字歌词', category: '下载', aliases: '逐字歌词 歌词 内嵌'),
     // 在线音乐
     (label: '本地数据接口', category: '在线音乐', aliases: '接口 本地服务器 api 在线音乐'),
     // 缓存与数据
@@ -596,7 +587,12 @@ class _SettingsPageState extends State<SettingsPage>
   ) {
     final q = query.trim().toLowerCase();
     if (q.isEmpty) return const [];
-    return _searchIndex
+    // 合并私有构建注入的额外索引条目（默认无）
+    final entries = [
+      ..._searchIndex,
+      ...?SettingsPage.extraSearchIndexEntries,
+    ];
+    return entries
         .where((e) => '${e.label} ${e.aliases}'.toLowerCase().contains(q))
         .toList();
   }
@@ -2237,248 +2233,6 @@ class _SettingsPageState extends State<SettingsPage>
       showDragHandle: true,
       builder: (ctx) => const _DesktopShortcutPanel(),
     );
-  }
-
-  /// 边听边存 section：开关、容量上限、缓存可视化、清理按钮
-  Widget _buildStreamCacheSection(ColorScheme colorScheme) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 1. 启用开关
-        FutureBuilder<bool>(
-          future: SettingsRepository().getStreamCacheEnabled(),
-          builder: (context, snapshot) {
-            final enabled = snapshot.data ?? true;
-            return SwitchListTile(
-              title: const Text('启用边听边存'),
-              subtitle: const Text('播放时自动缓存音频、歌词和封面，减少流量消耗'),
-              value: enabled,
-              onChanged: (v) async {
-                HapticFeedback.lightImpact();
-                await SettingsRepository().setStreamCacheEnabled(v);
-                setState(() {}); // 刷新整个页面
-              },
-            );
-          },
-        ),
-        // 2. 缓存上限选择
-        FutureBuilder<int>(
-          future: SettingsRepository().getStreamCacheLimitMb(),
-          builder: (context, snapshot) {
-            final limitMb = snapshot.data ?? 2048;
-            final label = limitMb == 0 ? '无限制' : _formatLimit(limitMb);
-            return ListTile(
-              leading: const Icon(Icons.storage),
-              title: const Text('缓存上限'),
-              subtitle: Text(label),
-              onTap: () => _showCacheLimitDialog(limitMb),
-            );
-          },
-        ),
-        // 3. 缓存可视化
-        _buildCacheStatsWidget(colorScheme),
-        // 4. 清理缓存按钮
-        ListTile(
-          leading: const Icon(Icons.delete_outline),
-          title: const Text('清理缓存'),
-          onTap: () => _showClearCacheConfirmDialog(),
-        ),
-      ],
-    );
-  }
-
-  /// 格式化缓存上限：MB → GB 显示（1024 MB = 1 GB）
-  String _formatLimit(int mb) {
-    if (mb >= 1024) {
-      return '${(mb / 1024).toStringAsFixed(mb % 1024 == 0 ? 0 : 1)} GB';
-    }
-    return '$mb MB';
-  }
-
-  /// 缓存上限选择对话框：1GB / 2GB / 4GB / 8GB / 无限制
-  void _showCacheLimitDialog(int currentMb) {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return SimpleDialog(
-          title: const Text('缓存上限'),
-          children: [
-            _buildLimitOption(1024, currentMb, '1 GB'),
-            _buildLimitOption(2048, currentMb, '2 GB'),
-            _buildLimitOption(4096, currentMb, '4 GB'),
-            _buildLimitOption(8192, currentMb, '8 GB'),
-            _buildLimitOption(0, currentMb, '无限制'),
-          ],
-        );
-      },
-    );
-  }
-
-  /// 单个上限选项：选中项左侧显示勾号
-  Widget _buildLimitOption(int value, int currentMb, String label) {
-    return SimpleDialogOption(
-      onPressed: () async {
-        await SettingsRepository().setStreamCacheLimitMb(value);
-        if (context.mounted) Navigator.pop(context);
-        setState(() {});
-      },
-      child: Row(
-        children: [
-          if (value == currentMb)
-            Icon(Icons.check, color: Theme.of(context).colorScheme.primary)
-          else
-            const SizedBox(width: 24),
-          const SizedBox(width: 8),
-          Text(label),
-        ],
-      ),
-    );
-  }
-
-  /// 缓存可视化组件：进度条 + 各分类占用明细
-  /// 嵌套 FutureBuilder 同时获取缓存统计与上限
-  Widget _buildCacheStatsWidget(ColorScheme colorScheme) {
-    return FutureBuilder<CacheStats>(
-      future: StreamCacheManager.instance.getCacheStats(),
-      builder: (context, snapshot) {
-        final stats = snapshot.data;
-        final totalBytes = stats?.totalBytes ?? 0;
-        final audioBytes = stats?.audioBytes ?? 0;
-        final lyricsBytes = stats?.lyricsBytes ?? 0;
-        final artworkBytes = stats?.artworkBytes ?? 0;
-        final songCount = stats?.songCount ?? 0;
-
-        // 再获取上限计算进度
-        return FutureBuilder<int>(
-          future: SettingsRepository().getStreamCacheLimitMb(),
-          builder: (context, limitSnapshot) {
-            final limitMb = limitSnapshot.data ?? 2048;
-            final limitBytes = limitMb * 1024 * 1024;
-            final progress = limitBytes > 0
-                ? (totalBytes / limitBytes).clamp(0.0, 1.0)
-                : 0.0;
-
-            return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '已使用 ${_formatBytes(totalBytes)} / '
-                    '${limitMb == 0 ? "无限制" : _formatBytes(limitBytes)}',
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  M3ELinearProgressIndicator(
-                    value: progress,
-                    backgroundColor: colorScheme.surfaceContainerHighest,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    '音频 ${_formatBytes(audioBytes)} · '
-                    '歌词 ${_formatBytes(lyricsBytes)} · '
-                    '封面 ${_formatBytes(artworkBytes)} · '
-                    '$songCount 首',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  /// 文件大小格式化：B / KB / MB / GB
-  String _formatBytes(int bytes) {
-    if (bytes >= 1024 * 1024 * 1024) {
-      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(2)} GB';
-    } else if (bytes >= 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    } else if (bytes >= 1024) {
-      return '${(bytes / 1024).toStringAsFixed(0)} KB';
-    }
-    return '$bytes B';
-  }
-
-  /// 清理边听边存缓存确认对话框
-  void _showClearCacheConfirmDialog() {
-    showDialog(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('清理缓存'),
-          content: const Text('确定要清理所有边听边存的缓存吗？此操作不可撤销。'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('取消'),
-            ),
-            TextButton(
-              onPressed: () async {
-                await StreamCacheManager.instance.clearCache();
-                if (context.mounted) Navigator.pop(context);
-                setState(() {}); // 刷新显示
-              },
-              child: const Text('确定'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  /// 下载 section：自定义下载目录
-  ///
-  /// 使用 Android 原生 SAF 文件夹选择器。
-  Widget _buildDownloadSection(ColorScheme colorScheme) {
-    return Column(
-      children: [
-        ListTile(
-          leading: const Icon(Icons.folder_outlined),
-          title: const Text('下载目录'),
-          subtitle: Text(
-            _downloadDir?.isNotEmpty == true
-                ? _downloadDir!
-                : '默认（Android/data/包名）',
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          trailing: const Icon(Icons.chevron_right),
-          onTap: () => _showDownloadDirDialog(),
-        ),
-        SwitchListTile(
-          secondary: const Icon(Icons.lyrics),
-          title: const Text('下载内嵌逐字歌词'),
-          subtitle: const Text('开启后嵌入字级 LRC 歌词，关闭则嵌入行级 LRC。无逐字数据时自动降级为行级'),
-          value: _downloadWordLevelLyrics,
-          onChanged: (value) async {
-            HapticFeedback.lightImpact();
-            setState(() => _downloadWordLevelLyrics = value);
-            await _settingsRepository.setDownloadWordLevelLyrics(value);
-          },
-        ),
-      ],
-    );
-  }
-
-  /// 打开 Android 原生文件夹选择器。
-  ///
-  /// 使用 SAF (Storage Access Framework) 打开系统目录选择界面，
-  /// 用户选择的目录路径会直接保存用于下载。
-  Future<void> _showDownloadDirDialog() async {
-    final path = await FolderPickerService.pickFolder();
-    if (path == null) return; // 用户取消
-
-    setState(() {
-      _downloadDir = path;
-    });
-    await _settingsRepository.setDownloadDir(_downloadDir);
-    if (!mounted) return;
-    showToast('下载目录已设置为：$path', long: true);
   }
 
   Widget _buildOnlineMusicSection(ColorScheme colorScheme) {
