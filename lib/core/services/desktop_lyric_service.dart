@@ -668,7 +668,12 @@ class DesktopLyricService {
         await _kugou!.getLyric('', songName: searchName, fmt: 'lrc');
       } else {
         // 在线歌曲用 song.id 作为 hash
-        await _kugou!.getLyric(song.id, songName: song.title, fmt: 'lrc');
+        // 搜索词与播放器页面 full_player 保持一致（歌名+歌手），
+        // 确保桌面歌词与播放器页面命中同一版本歌词。
+        final searchName = song.artist != '未知艺术家'
+            ? '${song.title} ${song.artist}'
+            : song.title;
+        await _kugou!.getLyric(song.id, songName: searchName, fmt: 'lrc');
       }
     } catch (_) {
       _pushLyric('歌词加载失败', '', -1);

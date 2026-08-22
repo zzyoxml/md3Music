@@ -133,7 +133,7 @@ class LyriconProviderService {
   /// - preferTranslation=true（默认）：保留 translation，丢弃 roma
   /// - preferTranslation=false：保留 roma，丢弃 translation
   /// 单独存在 translation 或 roma 时不受影响，原样透传。
-  Future<void> setSong(Song? song, List<LyricLine> lines) async {
+  Future<void> setSong(Song? song, List<LyricLine> lines, {int? positionMs}) async {
     // 缓存本次参数，供 repushLastSong 重新推送（用户切换 preferTranslation 后触发）
     _lastSong = song;
     _lastLines = lines;
@@ -212,6 +212,9 @@ class LyriconProviderService {
       'name': song.displayName,
       'artist': song.artist,
       'duration': song.duration.inMilliseconds,
+      // 切歌起点（毫秒）：Kotlin 端 setSong 后据此建立 Auto PlaybackState 基点，
+      // 否则新歌可能从 0 或上一曲位置开始走时
+      if (positionMs != null) 'startPositionMs': positionMs,
       'lyrics': lyricMaps,
     };
     try {
@@ -242,9 +245,11 @@ class LyriconProviderService {
     bool isPlaying = false,
   }) async {
     if (!enabled) return;
-    await setSong(song, lines);
+    await setSong(song, lines, positionMs: positionMs);
     try {
-      await _channel.invokeMethod('setPosition', {'positionMs': positionMs});
+      // 先推 setPlaybackState 让 Kotlin 端 lyriconIsPlaying 更新为当前曲播放态，
+      // 再推 setPosition（其内部用缓存 isPlaying 组装 Auto PlaybackState 基点），
+      // 避免切歌后 setPosition 沿用上一曲播放态导致新歌停在原地不推进。
       await _channel.invokeMethod(
         'setPlaybackState',
         {
@@ -255,6 +260,7 @@ class LyriconProviderService {
           'speed': 1.0,
         },
       );
+      await _channel.invokeMethod('setPosition', {'positionMs': positionMs});
     } catch (_) {}
   }
 

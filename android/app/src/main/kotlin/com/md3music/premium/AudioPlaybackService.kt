@@ -325,6 +325,14 @@ class AudioPlaybackService : Service() {
                             try {
                                 val song = buildLyriconSong(arg)
                                 provider?.player?.setSong(song)
+                                // 切歌后立即喂一个 Auto PlaybackState 基点（新歌 position 0 + 当前播放态）。
+                                // 若只 setSong 不推 PlaybackState，中心服务无法确定播放进度与状态，
+                                // 歌词会不渲染、回退显示"作者-歌名"。
+                                val startPos = (arg["startPositionMs"] as? Number)
+                                    ?.toLong() ?: 0L
+                                provider?.player?.setPlaybackState(
+                                    buildLyriconPlaybackState(startPos, lyriconIsPlaying)
+                                )
                                 result.success(true)
                             } catch (e: Exception) {
                                 result.error("BUILD_SONG_FAILED", e.message, null)
