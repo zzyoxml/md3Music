@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/services/audio_service_io.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 
@@ -698,5 +699,39 @@ class SettingsRepository {
   Future<void> setGridColumns(int count) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyGridColumns, count);
+  }
+
+  // ===== 音频焦点 =====
+  static const String _keyIgnoreAudioFocus = 'settings_ignore_audio_focus';
+  static const String _keyAudioFocusInterruptionMode =
+      'settings_audio_focus_interruption_mode';
+
+  /// 是否完全忽略音频焦点（不响应来电 / 导航 / 拔耳机等中断），默认关闭。
+  Future<bool> getIgnoreAudioFocus() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyIgnoreAudioFocus) ?? false;
+  }
+
+  Future<void> setIgnoreAudioFocus(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyIgnoreAudioFocus, value);
+  }
+
+  /// 短暂失去音频焦点时的处理策略，默认「暂停后自动恢复」。
+  Future<AudioFocusInterruptionMode> getAudioFocusInterruptionMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    final index = prefs.getInt(_keyAudioFocusInterruptionMode);
+    if (index != null &&
+        index >= 0 &&
+        index < AudioFocusInterruptionMode.values.length) {
+      return AudioFocusInterruptionMode.values[index];
+    }
+    return AudioFocusInterruptionMode.pauseAndResume;
+  }
+
+  Future<void> setAudioFocusInterruptionMode(
+      AudioFocusInterruptionMode mode) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyAudioFocusInterruptionMode, mode.index);
   }
 }

@@ -230,6 +230,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _audioService = audioServiceModule;
       _audioInitialized = true;
       await _audioService.init();
+      // 应用持久化的音频焦点配置（忽略开关 + 中断处理策略）
+      final repo = SettingsRepository();
+      _audioService.setIgnoreAudioFocus(await repo.getIgnoreAudioFocus());
+      _audioService.setInterruptionMode(
+          await repo.getAudioFocusInterruptionMode());
       _initStreams();
       await _loadDefaultQuality();
       // 恢复持久化的应用内音量（重启后保留）
