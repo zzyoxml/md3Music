@@ -3,6 +3,18 @@ import 'dart:async';
 import 'package:just_audio/just_audio.dart';
 import 'package:audio_session/audio_session.dart';
 
+/// 短暂失去音频焦点（如来电、语音助手等临时中断）时的处理策略。
+enum AudioFocusInterruptionMode {
+  /// 保持当前音量与播放状态：不暂停、不降音量、不做任何响应。
+  keepPlaying,
+
+  /// 暂停播放，重新获得焦点后自动恢复（仅恢复被中断打断的播放，不覆盖用户主动暂停）。
+  pauseAndResume,
+
+  /// 临时降低音量（降到 [AudioService] 的 duck 音量），重新获得焦点后恢复原音量。
+  duckAndRestore,
+}
+
 /// 音频焦点 / 音频会话管理。
 ///
 /// 关键设计：
@@ -19,6 +31,10 @@ class AudioService {
   AudioService._internal();
 
   final AudioPlayer _player = AudioPlayer(
+    // 关闭 just_audio 内置的中断处理（handleInterruptions=false）：
+    // 所有音频焦点策略统一由本服务按 AudioFocusInterruptionMode 处理，
+    // 避免两套逻辑叠加导致重复暂停/恢复。
+    handleInterruptions: false,
     // Media3 (just_audio 0.10.x) 下缓冲区默认值已较合理，
     // 这里适度收紧：maxBuffer 从 60s 降到 30s（减少内存占用），
     // rebuffer 从 10s 降到 3s（缩短欠载后恢复等待，用户体验更流畅）。
@@ -73,12 +89,25 @@ class AudioService {
   /// 用该标志防止重复进入 [play]，避免恢复瞬间的状态抖动。
   bool _resumeInProgress = false;
 
-  /// 是否响应 duck 压低音量（导航 / 游戏等会短暂压低背景音乐的场景）。
-  /// 默认关闭：荣耀平板 V8 Pro 在频繁 duck/unduck 时音量忽高忽低，
-  /// 开启后 duck 会把音量压到 [_duckVolume]，结束恢复 [1.0]。
-  bool _duckEnabled = false;
+  /// 是否完全忽略音频焦点：开启后不响应任何中断事件
+  /// （来电 / 导航 / 拔耳机等），保持音量与播放状态不变。
+  bool _ignoreAudioFocus = false;
+  bool get ignoreAudioFocus => _ignoreAudioFocus;
+  void setIgnoreAudioFocus(bool value) => _ignoreAudioFocus = value;
+
+  /// 短暂失去音频焦点时的处理策略（默认：暂停后自动恢复）。
+  AudioFocusInterruptionMode _interruptionMode =
+      AudioFocusInterruptionMode.pauseAndResume;
+  AudioFocusInterruptionMode get interruptionMode => _interruptionMode;
+  void setInterruptionMode(AudioFocusInterruptionMode mode) =>
+      _interruptionMode = mode;
+
+  /// duck 降音量前的原音量，用于中断结束后还原，
+  /// 避免无条件弹回 1.0 覆盖用户手动设定的音量。
+  double _volumeBeforeDuck = 1.0;
+
+  /// duck 模式下降音量的目标值（原音量的比例 0.5）。
   final double _duckVolume = 0.5;
-  void setDuckEnabled(bool value) => _duckEnabled = value;
 
   /// 各事件流的订阅句柄，dispose 时统一取消，避免单例长期持有泄漏。
   StreamSubscription<PlayerState>? _resumeSub;
@@ -108,41 +137,64 @@ class AudioService {
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration.music());
       _interruptionSub = session.interruptionEventStream.listen((event) {
+        // 完全忽略模式：对所有中断事件不做任何响应（保持音量、保持播放）
+        if (_ignoreAudioFocus) return;
         if (event.begin) {
           switch (event.type) {
             case AudioInterruptionType.duck:
-              if (_duckEnabled && _player.playing) {
-                // 仅在显式开启 duck 时压低音量；默认忽略以
-                // 避免荣耀平板 V8 Pro 频繁 duck/unduck 音量波动。
+              // 仅「降低音量后自动恢复」模式响应 duck，其余模式保持音量
+              // （避免荣耀平板 V8 Pro 频繁 duck/unduck 音量波动）。
+              if (_interruptionMode ==
+                      AudioFocusInterruptionMode.duckAndRestore &&
+                  _player.playing) {
+                _volumeBeforeDuck = _player.volume;
                 // ignore: discarded_futures
                 _player.setVolume(_duckVolume);
               }
               break;
             case AudioInterruptionType.pause:
             case AudioInterruptionType.unknown:
-              if (_player.playing) {
-                _pausedByInterruption = true;
-                pause();
+              switch (_interruptionMode) {
+                case AudioFocusInterruptionMode.keepPlaying:
+                  break; // 保持播放、保持音量
+                case AudioFocusInterruptionMode.pauseAndResume:
+                  if (_player.playing) {
+                    _pausedByInterruption = true;
+                    pause();
+                  }
+                  break;
+                case AudioFocusInterruptionMode.duckAndRestore:
+                  // 暂停型中断也改为降音量处理：播放不中断，仅压低音量
+                  if (_player.playing) {
+                    _volumeBeforeDuck = _player.volume;
+                    // ignore: discarded_futures
+                    _player.setVolume(_duckVolume);
+                  }
+                  break;
               }
               break;
           }
         } else {
           switch (event.type) {
             case AudioInterruptionType.duck:
-              if (_duckEnabled) {
+              if (_interruptionMode ==
+                  AudioFocusInterruptionMode.duckAndRestore) {
                 // ignore: discarded_futures
-                _player.setVolume(1.0);
+                _player.setVolume(_volumeBeforeDuck);
               }
               break;
             case AudioInterruptionType.pause:
-              // 焦点恢复：仅在是被动暂停时尝试恢复（不覆盖用户主动暂停）
-              tryResumeAfterFocusLoss();
-              break;
             case AudioInterruptionType.unknown:
-              // 修复：unknown 型中断（部分游戏引擎 / 游戏内通话上报）结束时
-              // 也尝试恢复播放，否则音乐被动暂停后无法自动恢复。
-              // ignore: discarded_futures
-              tryResumeAfterFocusLoss();
+              if (_interruptionMode ==
+                  AudioFocusInterruptionMode.pauseAndResume) {
+                // 焦点恢复：仅在是被动暂停时尝试恢复（不覆盖用户主动暂停）
+                tryResumeAfterFocusLoss();
+              } else if (_interruptionMode ==
+                  AudioFocusInterruptionMode.duckAndRestore) {
+                // 恢复中断前的原音量
+                // ignore: discarded_futures
+                _player.setVolume(_volumeBeforeDuck);
+              }
               break;
           }
         }
@@ -150,6 +202,7 @@ class AudioService {
       // 拔耳机 / 蓝牙断开：通常伴随系统焦点变更，但 just_audio 也会收到
       // becomingNoisyEvent。统一标记为「中断暂停」以便外层恢复逻辑复用。
       _noisySub = session.becomingNoisyEventStream.listen((_) {
+        if (_ignoreAudioFocus) return; // 忽略模式下拔耳机也不暂停
         if (_player.playing) {
           _pausedByInterruption = true;
           pause();

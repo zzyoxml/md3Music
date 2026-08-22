@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/services/background_image_loader.dart';
 import '../../core/services/custom_font_loader.dart';
 import '../../core/utils/app_toast.dart';
+import '../../core/services/audio_service_io.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/equalizer_service.dart';
 import '../../core/services/folder_picker_service.dart';
@@ -110,6 +111,11 @@ class _SettingsPageState extends State<SettingsPage>
   bool _miniPlayerSwipeSwitch = true;
   // 收藏歌单按「最近点击」排序（默认开启）
   bool _sortCollectedByLatestClick = true;
+  // 完全忽略音频焦点（不响应来电 / 导航 / 拔耳机等中断），默认关闭
+  bool _ignoreAudioFocus = false;
+  // 短暂失去音频焦点时的处理策略（默认：暂停后自动恢复）
+  AudioFocusInterruptionMode _audioFocusMode =
+      AudioFocusInterruptionMode.pauseAndResume;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
   // 播放详情页底栏切分开关（默认关闭，保持单条长 pill）
@@ -297,6 +303,9 @@ class _SettingsPageState extends State<SettingsPage>
         .getMiniPlayerSwipeSwitchEnabled();
     final sortCollectedByLatestClick = await _settingsRepository
         .getSortCollectedByLatestClick();
+    final ignoreAudioFocus = await _settingsRepository.getIgnoreAudioFocus();
+    final audioFocusMode = await _settingsRepository
+        .getAudioFocusInterruptionMode();
 
     setState(() {
       _defaultQuality = quality;
@@ -339,6 +348,8 @@ class _SettingsPageState extends State<SettingsPage>
       _spectrumDynamicColor = spectrumDynamicColor;
       _miniPlayerSwipeSwitch = miniPlayerSwipeSwitch;
       _sortCollectedByLatestClick = sortCollectedByLatestClick;
+      _ignoreAudioFocus = ignoreAudioFocus;
+      _audioFocusMode = audioFocusMode;
     });
     // 同步到全局开关，让已挂载的 MiniPlayer 实例实时响应
     miniPlayerSwipeSwitchEnabled.value = miniPlayerSwipeSwitch;
@@ -547,6 +558,8 @@ class _SettingsPageState extends State<SettingsPage>
     (label: '自动领取 VIP', category: '播放', aliases: 'vip 会员 自动领取'),
     (label: '暂停淡入淡出', category: '播放', aliases: '淡入淡出 渐变 音量'),
     (label: '播放时保持屏幕常亮', category: '播放', aliases: '屏幕常亮 常亮 息屏'),
+    (label: '忽略音频焦点', category: '播放', aliases: '音频焦点 焦点 中断 忽略'),
+    (label: '失去焦点处理', category: '播放', aliases: '音频焦点 焦点 中断 暂停 恢复 降低音量 duck 来电'),
     (label: '播放 MV 时自动画中画', category: '播放', aliases: '画中画 pip 悬浮'),
     (label: 'MiniPlayer 滑动切歌', category: '播放', aliases: 'miniplaer 迷你播放条 滑动切歌 切歌'),
     (label: '收藏歌单按最近点击排序', category: '播放', aliases: '收藏 歌单 排序 最近点击 顺序'),
@@ -2110,6 +2123,67 @@ class _SettingsPageState extends State<SettingsPage>
             });
             _settingsRepository.setSortCollectedByLatestClick(value);
           },
+        ),
+        // ── 音频焦点 ──
+        const Divider(),
+        SwitchListTile(
+          secondary: Icon(Icons.phonelink_off, color: colorScheme.primary),
+          title: const Text('忽略音频焦点'),
+          subtitle: const Text('来电、导航、拔耳机等系统中断时也不暂停、不降音量，持续播放'),
+          value: _ignoreAudioFocus,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            setState(() {
+              _ignoreAudioFocus = value;
+            });
+            _settingsRepository.setIgnoreAudioFocus(value);
+            AudioService().setIgnoreAudioFocus(value);
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '失去音频焦点时',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '关闭「忽略音频焦点」后生效',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 8),
+              M3EToggleButtonGroup(
+                actions: const [
+                  M3EToggleButtonGroupAction(label: Text('保持音量')),
+                  M3EToggleButtonGroupAction(label: Text('暂停后恢复')),
+                  M3EToggleButtonGroupAction(label: Text('降低音量后恢复')),
+                ],
+                selectedIndex: _audioFocusMode.index,
+                onSelectedIndexChanged: (index) {
+                  if (index == null) return;
+                  final mode = AudioFocusInterruptionMode.values[index];
+                  setState(() {
+                    _audioFocusMode = mode;
+                  });
+                  _settingsRepository.setAudioFocusInterruptionMode(mode);
+                  AudioService().setInterruptionMode(mode);
+                },
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '备注：部分系统（如 MIUI）的导航播报、语音助手会直接在系统层压低媒体音量，'
+                '不经过音频焦点回调，此类场景上述选项可能无效',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
+          ),
         ),
       ],
     );
