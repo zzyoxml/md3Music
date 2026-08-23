@@ -143,7 +143,7 @@ class AudioPlaybackService : Service() {
         @Volatile
         private var lyriconRetryScheduled = false
 
-        // C 方案探针：缓存最近一次 isPlaying，供 setPosition 组装 Auto PlaybackState
+        // 缓存最近一次 isPlaying，供 setPosition 组装 Auto PlaybackState
         @Volatile
         private var lyriconIsPlaying = false
 
@@ -261,7 +261,7 @@ class AudioPlaybackService : Service() {
         }
 
         /**
-         * C 方案探针：组装带时间戳的 framework PlaybackState，走 SDK 的 Auto 同步路径。
+         * 组装带时间戳的 framework PlaybackState，走 SDK 的 Auto 同步路径。
          * PlaybackState.Builder 会自动把构造时刻的 SystemClock.elapsedRealtime() 记为
          * lastPositionUpdateTime，SDK 的 Auto 模式据此按时间差插值推进播放时间轴，
          * 从而在两次更新之间平滑走时（消除 200ms 播步）。
@@ -351,7 +351,7 @@ class AudioPlaybackService : Service() {
                     "setPosition" -> {
                         val pos = call.argument<Number>("positionMs")?.toLong() ?: 0L
                         try {
-                            // C 方案探针：不再调 setPosition（会切成 Manually 同步），
+                            // 不再调 setPosition（会切成 Manually 同步），
                             // 改喂带时间戳的 Auto PlaybackState，SDK 在两次更新间插值平滑
                             provider?.player?.setPlaybackState(
                                 buildLyriconPlaybackState(pos, lyriconIsPlaying)
@@ -369,7 +369,7 @@ class AudioPlaybackService : Service() {
                         val isPlaying = state == PlaybackStateCompat.STATE_PLAYING
                         lyriconIsPlaying = isPlaying
                         try {
-                            // C 方案探针：统一走 Auto PlaybackState，附带 position+speed 时间戳
+                            // 统一走 Auto PlaybackState，附带 position+speed 时间戳
                             provider?.player?.setPlaybackState(
                                 buildLyriconPlaybackState(pos, isPlaying)
                             )

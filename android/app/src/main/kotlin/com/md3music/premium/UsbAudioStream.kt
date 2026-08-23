@@ -7,7 +7,7 @@ import android.util.Log
  *
  * 移植自 decent-player libs/decent-usb-audio-driver 的 UsbAudioStream.kt。
  * 通过 Linux usbdevfs 等时传输把 PCM 直写 USB Audio Class 2.0 DAC，绕过 Android 音频栈。
- * JNI 符号见 android/app/src/main/cpp/usb-audio-output.cpp（类名 com/md3music/premium/UsbAudioStream）。
+ * JNI 符号见 android/app/src/main/cpp/usb-audio-output.cpp（类名 com/md3music/md3music/UsbAudioStream）。
  */
 class UsbAudioStream(
         fd: Int,

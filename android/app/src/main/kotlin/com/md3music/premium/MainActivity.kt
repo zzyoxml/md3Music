@@ -30,6 +30,7 @@ class MainActivity : FlutterActivity() {
     private val RECOGNITION_CHANNEL = "com.md3music.premium/floating_recognition"
     private val PIP_CHANNEL = "com.md3music.premium/pip"
     private val MIUIX_DISCOVER_CHANNEL = "com.md3music.premium/miuix_discover"
+    private val TASK_CHANNEL = "com.md3music.premium/task"
     private var pendingDesktopLyricAction: String? = null
     private var folderPickerResult: MethodChannel.Result? = null
     private var fontPickerResult: MethodChannel.Result? = null
@@ -92,6 +93,14 @@ class MainActivity : FlutterActivity() {
         // 归为「跟随应用内设置」而锁在 60Hz。Flutter 引擎从不调用
         // Surface.setFrameRate()，系统无法得知 App 需要高刷，须在此显式声明。
         applyOptimalRefreshRate()
+        // 退出缩小动画时露出系统桌面：FlutterView 背景透明，
+        // 配合 NormalTheme 的透明 windowBackground，页面缩小后透出桌面（微信同款）。
+        try {
+            findViewById<io.flutter.embedding.android.FlutterView>(FLUTTER_VIEW_ID)
+                ?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        } catch (_: Exception) {
+            // 个别 ROM 可能不支持，忽略即可
+        }
     }
 
     override fun onResume() {
@@ -165,9 +174,6 @@ class MainActivity : FlutterActivity() {
         if (customPluginsEngine !== flutterEngine) {
             customPluginsEngine = flutterEngine
 
-            // 注册 MetadataWriterPlugin：处理下载完成后嵌入元数据（标题/艺术家/专辑/封面/歌词）
-            MetadataWriterPlugin().register(flutterEngine)
-
             // 注册均衡器插件：Android 原生 Equalizer，绑定 just_audio 的 audio session ID
             EqualizerPlugin().register(flutterEngine)
 
@@ -176,6 +182,9 @@ class MainActivity : FlutterActivity() {
 
             // 注册 USB 独占输出插件：MethodChannel + 动态拔插广播 + AudioSink 拦截桥接
             UsbAudioPlugin(this).register(flutterEngine)
+
+            // 注册 MetadataWriterPlugin：处理下载完成后嵌入元数据（标题/艺术家/专辑/封面/歌词）
+            MetadataWriterPlugin().register(flutterEngine)
 
             // 注册 Miuix 发现页测试通道：Dart 设置页点击后打开原生 Compose + miuix 页面，
             // 并携带本地 Rust API 服务器当前端口（原生页据此直连取数）。
@@ -272,6 +281,9 @@ class MainActivity : FlutterActivity() {
                         action = FloatingLyricService.ACTION_SET_CONFIG
                         call.argument<Double>(FloatingLyricService.EXTRA_FONT_SIZE)?.let {
                             putExtra(FloatingLyricService.EXTRA_FONT_SIZE, it.toFloat())
+                        }
+                        call.argument<Double>(FloatingLyricService.EXTRA_DISPLAY_SCALE)?.let {
+                            putExtra(FloatingLyricService.EXTRA_DISPLAY_SCALE, it.toFloat())
                         }
                         call.argument<Boolean>(FloatingLyricService.EXTRA_DOUBLE_LINE)?.let {
                             putExtra(FloatingLyricService.EXTRA_DOUBLE_LINE, it)
@@ -696,6 +708,23 @@ class MainActivity : FlutterActivity() {
                     } else {
                         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     }
+                    result.success(true)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
+        // 注册任务控制 MethodChannel：Dart 双击返回 → 回到桌面挂后台
+        // 用 moveTaskToBack(等同按 Home)，不销毁 Activity、不杀进程，
+        // 播放器与本地 Rust 服务器都保持运行，重新打开瞬时恢复。
+        val taskChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            TASK_CHANNEL
+        )
+        taskChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "moveToBack" -> {
+                    moveTaskToBack(true)
                     result.success(true)
                 }
                 else -> result.notImplemented()

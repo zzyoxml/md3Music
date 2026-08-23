@@ -28,6 +28,7 @@ const modules = {
   'comment_music': require('./module/comment_music.js'),
   'comment_music_classify': require('./module/comment_music_classify.js'),
   'comment_music_hotword': require('./module/comment_music_hotword.js'),
+  'comment_music_topliked': require('./module/comment_music_topliked.js'),
   'comment_playlist': require('./module/comment_playlist.js'),
   'everyday_friend': require('./module/everyday_friend.js'),
   'everyday_history': require('./module/everyday_history.js'),

@@ -29,6 +29,7 @@ const moduleMap = {
   'comment_music': './module/comment_music.js',
   'comment_music_classify': './module/comment_music_classify.js',
   'comment_music_hotword': './module/comment_music_hotword.js',
+  'comment_music_topliked': './module/comment_music_topliked.js',
   'comment_playlist': './module/comment_playlist.js',
   'everyday_friend': './module/everyday_friend.js',
   'everyday_history': './module/everyday_history.js',

@@ -49,6 +49,10 @@ class FloatingLyricService : Service() {
 
     // config
     private var fontSizeSp = 18f
+    // 「显示大小」档位（Dart 侧 ThemeProvider.displayScale）。
+    // 与 fontSizeSp 分开存：± 按钮与回传 Dart 的配置始终用未缩放的基准字号，
+    // 只在 setTextSize 时乘上本系数，避免往返放大 / 撞上 12~32sp 的钳制区间。
+    private var displayScale = 1f
     private var doubleLine = false
     private var opacity = 80
     private var gradientStart = 0xFF00E5FF.toInt()
@@ -82,6 +86,7 @@ class FloatingLyricService : Service() {
         const val EXTRA_POSITION = "position"
         const val EXTRA_DURATION = "duration"
         const val EXTRA_FONT_SIZE = "fontSize"
+        const val EXTRA_DISPLAY_SCALE = "displayScale"
         const val EXTRA_DOUBLE_LINE = "doubleLine"
         const val EXTRA_OPACITY = "opacity"
         const val EXTRA_LOCKED = "locked"
@@ -123,6 +128,7 @@ class FloatingLyricService : Service() {
             }
             ACTION_SET_CONFIG -> {
                 intent.getFloatExtra(EXTRA_FONT_SIZE, fontSizeSp).let { fontSizeSp = it }
+                intent.getFloatExtra(EXTRA_DISPLAY_SCALE, displayScale).let { displayScale = it }
                 intent.getBooleanExtra(EXTRA_DOUBLE_LINE, doubleLine).let { doubleLine = it }
                 intent.getIntExtra(EXTRA_OPACITY, opacity).let { opacity = it }
                 intent.getBooleanExtra(EXTRA_LOCKED, locked).let {
@@ -191,9 +197,12 @@ class FloatingLyricService : Service() {
         }
     }
 
+    // 实际下发给 TextView 的字号：基准字号 × 「显示大小」档位。
+    private fun scaledFontSizeSp(): Float = fontSizeSp * displayScale
+
     private fun applyConfig() {
-        lyricText1?.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
-        lyricText2?.setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
+        lyricText1?.setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledFontSizeSp())
+        lyricText2?.setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledFontSizeSp())
         lyricText2?.visibility = if (doubleLine) View.VISIBLE else View.GONE
 
         lyricText1?.setGradient(gradientStart, gradientEnd)
@@ -316,14 +325,14 @@ class FloatingLyricService : Service() {
         val col = collapsedPanel as LinearLayout
 
         lyricText1 = GradientTextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledFontSizeSp())
             gravity = Gravity.CENTER
             maxLines = 1
             typeface = Typeface.DEFAULT_BOLD
             setPadding(dp(8), dp(6), dp(8), dp(4))
         }
         lyricText2 = GradientTextView(this).apply {
-            setTextSize(TypedValue.COMPLEX_UNIT_SP, fontSizeSp)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledFontSizeSp())
             gravity = Gravity.CENTER
             maxLines = 1
             setPadding(dp(8), dp(2), dp(8), dp(6))
