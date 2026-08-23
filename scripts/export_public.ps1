@@ -172,6 +172,15 @@ try {
         Remove-ItemBypass $winCi
         Write-Ok '已排除 .github/workflows/build-windows.yml（私有版 Windows CI）'
     }
+    # Android 编译时临时产物：导出树内跑过构建验证后残留的 Gradle 缓存/构建输出/
+    # Kotlin 缓存/本地 SDK 路径文件，均不进公开树（local.properties 含本地路径会泄漏）
+    foreach ($tmp in @('build', '.gradle', '.kotlin', 'local.properties')) {
+        $tmpPath = Join-Path (Join-Path $OutDir 'android') $tmp
+        if (Test-Path $tmpPath) {
+            Remove-ItemBypass $tmpPath
+            Write-Ok "已排除 android/$tmp（编译时临时产物）"
+        }
+    }
     # 防御：清理导出树内所有嵌套的 .public_export 目录
     # （历史版本曾因相对路径 + 工作目录漂移把旧导出树复制进 scripts/，此清理杜绝复发）
     $nested = Get-ChildItem $OutDir -Recurse -Directory -Filter '.public_export' -ErrorAction SilentlyContinue
