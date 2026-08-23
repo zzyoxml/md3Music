@@ -132,12 +132,13 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
       bottomNavigationBar: widget.hideNavigation
           ? null
           : NavigationBar(
-              // 公开版偏好：仅图标（alwaysHide）时高度减半紧凑显示；一旦显示文字
-              // 用默认高度容纳 icon + label，避免 label 被裁剪。
+              // 仅图标（alwaysHide）时高度减半紧凑显示（44）；
+              // 显示文字（始终显示/仅当前页）时用 64 紧凑高度，
+              // 比默认 80 更矮但仍能容纳 icon + label。
               height:
                   labelBehavior == NavigationDestinationLabelBehavior.alwaysHide
                   ? 44
-                  : null,
+                  : 64,
               selectedIndex: widget.selectedIndex,
               onDestinationSelected: widget.onDestinationSelected,
               destinations: widget.destinations,
