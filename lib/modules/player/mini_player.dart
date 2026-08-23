@@ -370,7 +370,7 @@ class _MiniPlayerState extends State<MiniPlayer>
             ),
             Padding(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
               child: Row(
                 children: [
                   // —— 滑动区：封面 + 歌曲信息，跟随手指平移 + 切歌过渡 ——
@@ -422,7 +422,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 12),
+                                const SizedBox(width: 8),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
@@ -460,6 +460,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                   ),
                   // —— 固定区：右侧按钮不参与滑动 ——
                   IconButton(
+                    visualDensity: VisualDensity.compact,
                     icon: Icon(
                       playerProvider.isPlaying
                           ? Icons.pause
@@ -474,6 +475,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                     },
                   ),
                   IconButton(
+                    visualDensity: VisualDensity.compact,
                     tooltip: DesktopLyricService.instance.enabled
                         ? '关闭桌面歌词'
                         : '开启桌面歌词',
@@ -517,6 +519,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                     },
                   ),
                   IconButton(
+                    visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.skip_next),
                     onPressed: () {
                       playerProvider.next();

@@ -179,16 +179,23 @@ class _PlaylistPageState extends State<PlaylistPage> {
   _SortBy? _lastSortBy;
   bool? _lastSortAscending;
 
-  /// 获取当前显示的歌曲列表（带缓存）
+  /// 获取当前显示的歌曲列表（带缓存；可选扩展筛选在缓存之上每次应用，
+  /// 保证筛选开关切换即时生效——筛选状态不参与缓存 key）。
   List<Song> get _displaySongs {
     if (_cachedDisplaySongs != null &&
         _lastSearchQuery == _searchQuery &&
         _lastSortBy == _sortBy &&
         _lastSortAscending == _sortAscending) {
-      return _cachedDisplaySongs!;
+      return _applyDisplayFilter(_cachedDisplaySongs!);
     }
     _rebuildDisplaySongs();
-    return _cachedDisplaySongs!;
+    return _applyDisplayFilter(_cachedDisplaySongs!);
+  }
+
+  /// 应用可选扩展注入的列表变换（如按本地持久化筛选；每次调用重新执行）。
+  List<Song> _applyDisplayFilter(List<Song> list) {
+    final filter = PlaylistPage.songFilterHook;
+    return filter == null ? list : filter('playlist', list);
   }
 
   void _rebuildDisplaySongs() {
@@ -202,11 +209,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
             s.artist.toLowerCase().contains(q) ||
             (s.album?.toLowerCase().contains(q) ?? false);
       }).toList();
-    }
-    // 可选扩展：私有构建注入的列表变换（如按本地持久化筛选）
-    final filter = PlaylistPage.songFilterHook;
-    if (filter != null) {
-      list = filter('playlist', list);
     }
     list.sort((a, b) {
       int cmp;
