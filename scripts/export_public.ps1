@@ -187,6 +187,23 @@ try {
         Remove-ItemBypass $d.FullName
         Write-Ok "已排除 $($d.FullName.Substring($OutDir.Length + 1))（fork Gradle 缓存）"
     }
+    # 下载元数据写入插件：Dart 端 metadata_writer 已隔离进 lib/private，
+    # 原生端（Kotlin 插件 + MainActivity 注册）导出时一并移除
+    $metaPlugin = Join-Path (Join-Path $OutDir 'android') 'app\src\main\kotlin\com\md3music\md3music\MetadataWriterPlugin.kt'
+    if (Test-Path $metaPlugin) {
+        Remove-ItemBypass $metaPlugin
+        Write-Ok '已排除 MetadataWriterPlugin.kt（下载元数据写入插件）'
+    }
+    $mainAct = Join-Path (Join-Path $OutDir 'android') 'app\src\main\kotlin\com\md3music\md3music\MainActivity.kt'
+    if (Test-Path $mainAct) {
+        $maContent = [System.IO.File]::ReadAllText($mainAct, $utf8NoBom)
+        $maPattern = '(?m)^\s*// 注册 MetadataWriterPlugin.*\r?\n\s*MetadataWriterPlugin\(\)\.register\(flutterEngine\)\r?\n'
+        if ([System.Text.RegularExpressions.Regex]::IsMatch($maContent, $maPattern)) {
+            $maContent = [System.Text.RegularExpressions.Regex]::Replace($maContent, $maPattern, '')
+            [System.IO.File]::WriteAllText($mainAct, $maContent, $utf8NoBom)
+            Write-Ok '已剥离 MainActivity 中 MetadataWriterPlugin 注册'
+        }
+    }
     # 防御：清理导出树内所有嵌套的 .public_export 目录
     # （历史版本曾因相对路径 + 工作目录漂移把旧导出树复制进 scripts/，此清理杜绝复发）
     $nested = Get-ChildItem $OutDir -Recurse -Directory -Filter '.public_export' -ErrorAction SilentlyContinue
