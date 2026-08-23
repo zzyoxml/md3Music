@@ -1364,12 +1364,6 @@ String? _resolveArtworkUri(dynamic v) {
   return s.replaceAll('{size}', '400');
 }
 
-String? _extractFirst(dynamic v) {
-  if (v == null) return null;
-  if (v is List && v.isNotEmpty) return v.first?.toString();
-  return v.toString();
-}
-
 List<KugouPlaylistBrief> _parsePlList(dynamic v) {
   if (v == null) return [];
   if (v is List) {

@@ -217,7 +217,7 @@ class ThemeProvider extends ChangeNotifier {
       final scored = Score.score(
         colorsToPopulation,
         desired: candidateTones.length,
-        fallbackColorARGB: AppTheme.defaultSeedColor.value,
+        fallbackColorARGB: AppTheme.defaultSeedColor.toARGB32(),
       );
       if (scored.isEmpty) {
         // 评分失败降级到原 get(40) 行为
@@ -364,7 +364,7 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     if (color != null) {
-      await prefs.setInt(_manualSeedKey, color.value);
+      await prefs.setInt(_manualSeedKey, color.toARGB32());
     } else {
       await prefs.remove(_manualSeedKey);
     }

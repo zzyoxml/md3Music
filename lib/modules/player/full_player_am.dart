@@ -900,15 +900,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
-  Widget _artworkPlaceholder(double iconSize) {
-    return Container(
-      color: Colors.white12,
-      child: Center(
-        child: Icon(Icons.music_note, size: iconSize, color: Colors.white54),
-      ),
-    );
-  }
-
   /// 模糊背景淡入淡出（无 alpha 渐变；渐变移到 AppleLyricsView 歌词界面边界）
   Widget _buildCrossfadeBlurredBackground(
     String? artworkUrl, {

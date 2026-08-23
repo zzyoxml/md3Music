@@ -8,15 +8,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/layout/page_title_alignment.dart';
 import '../../core/utils/app_toast.dart';
-import '../../data/repositories/collected_playlist_store.dart';
 import '../../data/repositories/favorite_lists_cache.dart';
 import '../../data/repositories/settings_repository.dart';
-import '../../providers/favorites_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/scroll_aware_app_bar.dart';
-import '../album/album_detail_page.dart';
 import '../artist/artist_detail_page.dart';
 import '../playlist/playlist_page.dart';
 import 'widgets/offline_banner.dart';
@@ -1491,7 +1487,7 @@ class _GroupSectionState extends State<_GroupSection>
         ClipRect(
           child: SizeTransition(
             sizeFactor: _sizeAnimation,
-            axisAlignment: -1.0,
+            alignment: Alignment.topCenter,
             child: Column(
               children: widget.playlists.map((playlist) {
                 return widget.onBuildTile(playlist);

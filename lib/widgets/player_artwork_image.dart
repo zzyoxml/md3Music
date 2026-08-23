@@ -5,8 +5,6 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../core/services/local_artwork_cache.dart';
-import '../core/utils/audio_scanner.dart';
-import 'local_artwork_image.dart';
 
 /// 播放器专用封面图组件，支持所有 artworkUri 类型。
 ///

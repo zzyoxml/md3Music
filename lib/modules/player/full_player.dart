@@ -1066,19 +1066,6 @@ class _FullPlayerState extends State<FullPlayer>
     );
   }
 
-  Widget _artworkPlaceholder(ColorScheme colorScheme, double iconSize) {
-    return Container(
-      color: colorScheme.surfaceContainerHighest,
-      child: Center(
-        child: Icon(
-          Icons.music_note,
-          size: iconSize,
-          color: colorScheme.onSurfaceVariant,
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Builder(builder: _buildPlayer);

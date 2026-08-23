@@ -141,7 +141,6 @@ class EqualizerService extends ChangeNotifier {
       _minLevel = result['minLevel'] as int? ?? 0;
       _maxLevel = result['maxLevel'] as int? ?? 0;
       _centerFreqs = (result['centerFreqs'] as List?)?.cast<int>() ?? [];
-      final nativeLevels = (result['bandLevels'] as List?)?.cast<int>() ?? [];
       _bandLevels = List.filled(_bandCount, 0);
 
       // 获取系统预设

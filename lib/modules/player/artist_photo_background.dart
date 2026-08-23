@@ -7,7 +7,6 @@ import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 
 import '../../providers/theme_provider.dart';
-import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_endpoints.dart';
 
 /// MD3 风格播放页背景：歌手写真轮播。

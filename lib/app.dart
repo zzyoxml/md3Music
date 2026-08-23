@@ -1583,8 +1583,6 @@ class _MainLayoutState extends State<_MainLayout>
       return;
     }
     _exitPressed = true;
-    // ignore: avoid_print
-    print('再按一次返回桌面');
     _showDoubleBackToast();
     _exitResetTimer?.cancel();
     _exitResetTimer = Timer(
