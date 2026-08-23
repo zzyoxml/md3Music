@@ -74,7 +74,7 @@ class KugouApiClient {
 
   late final Dio _dio;
 
-  /// 暴露 Dio 实例供外部使用（如 DownloadsProvider 下载封面图）。
+  /// 暴露 Dio 实例供外部使用（如封面资源下载）。
   Dio get dio => _dio;
 
   String? _token;

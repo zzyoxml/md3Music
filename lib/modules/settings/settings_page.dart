@@ -2203,7 +2203,7 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 边听边存/下载 section 未移植（公开库不包含下载与流缓存功能）。
+  /// 本地持久化音频管理 section 未包含在公开版本中。
 
   Widget _buildOnlineMusicSection(ColorScheme colorScheme) {
     return Column(

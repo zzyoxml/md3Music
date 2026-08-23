@@ -1085,7 +1085,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   /// 云盘封面内嵌在音频文件中（API 不返回封面 URL），播放后异步提取。
   ///
-  /// 公开库未移植边听边存/封面缓存子系统，此方法为空实现（保持调用方兼容）。
+  /// 本地持久化封面提取扩展点：公开版本无实现（保持调用方兼容）。
   Future<void> _extractCloudArtwork(Song song, String audioUrl) async {
     try {
       final extract = PlayerProvider.extractEmbeddedArtwork;
