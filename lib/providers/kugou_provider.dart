@@ -845,6 +845,23 @@ class KugouProvider extends ChangeNotifier {
     _endLoading();
   }
 
+  /// 私人 FM 无限续播：拉取更多歌曲（不替换当前队列）。
+  Future<List<KugouSongDetail>?> fetchMorePersonalFm({
+    required String mode,
+    required int songPoolId,
+    String? hash,
+    String? songId,
+  }) {
+    return _apiClient.getPersonalFm(
+      mode: mode,
+      songPoolId: songPoolId,
+      hash: hash,
+      songId: songId,
+      action: 'play',
+      noCache: true,
+    );
+  }
+
   Future<void> getPersonalFm({
     String? mode,
     int? songPoolId,

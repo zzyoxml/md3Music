@@ -347,6 +347,41 @@ class AppTheme {
     );
   }
 
+  /// 给 [base] 的所有文字层级统一附加 [shadows]
+  /// （TextTheme.apply 不支持 shadows，只能逐级 copyWith）。
+  static TextTheme applyTextShadows(TextTheme base, List<Shadow> shadows) {
+    TextStyle? withShadows(TextStyle? style) => style?.copyWith(shadows: shadows);
+    return base.copyWith(
+      displayLarge: withShadows(base.displayLarge),
+      displayMedium: withShadows(base.displayMedium),
+      displaySmall: withShadows(base.displaySmall),
+      headlineLarge: withShadows(base.headlineLarge),
+      headlineMedium: withShadows(base.headlineMedium),
+      headlineSmall: withShadows(base.headlineSmall),
+      titleLarge: withShadows(base.titleLarge),
+      titleMedium: withShadows(base.titleMedium),
+      titleSmall: withShadows(base.titleSmall),
+      bodyLarge: withShadows(base.bodyLarge),
+      bodyMedium: withShadows(base.bodyMedium),
+      bodySmall: withShadows(base.bodySmall),
+      labelLarge: withShadows(base.labelLarge),
+      labelMedium: withShadows(base.labelMedium),
+      labelSmall: withShadows(base.labelSmall),
+    );
+  }
+
+  /// 去掉 [base] 各文字层级上的阴影。
+  ///
+  /// 文字背景是实色时壁纸被完全盖住，阴影没有可读性收益，只会让文字发虚，
+  /// 所以实色表面上的文字一律不带阴影（见 `NoTextShadow`）。
+  /// 全局没开阴影时是无操作（空阴影列表与无阴影渲染一致）。
+  static TextTheme stripTextShadows(TextTheme base) =>
+      applyTextShadows(base, const <Shadow>[]);
+
+  /// 单个 [TextStyle] 版的 [stripTextShadows]。
+  static TextStyle? withoutTextShadow(TextStyle? style) =>
+      style?.copyWith(shadows: const <Shadow>[]);
+
   static TextStyle _buildTextStyle(
     Color color,
     double size,

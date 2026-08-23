@@ -2170,6 +2170,7 @@ class KugouApiClient {
     String? hash,
     String? songId,
     String? action,
+    bool noCache = false,
   }) async {
     final params = <String, dynamic>{};
     if (mode != null) params['mode'] = mode;
@@ -2178,7 +2179,11 @@ class KugouApiClient {
     if (songId != null) params['songid'] = songId;
     if (action != null) params['action'] = action;
 
-    final json = await _get(KugouEndpoints.personalFm, queryParameters: params);
+    final json = await _get(
+      KugouEndpoints.personalFm,
+      queryParameters: params,
+      noCache: noCache,
+    );
     if (json == null) return null;
     try {
       final data = json['data'] as Map<String, dynamic>? ?? json;
