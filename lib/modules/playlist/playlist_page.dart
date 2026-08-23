@@ -12,6 +12,7 @@ import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/song_list_item.dart';
@@ -280,6 +281,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
       }
     });
   }
+
+  // ==================== 批量下载（未移植：公开库不包含下载功能） ====================
 
   Future<void> _deleteSelectedSongs() async {
     if (_selectedSongIds.isEmpty) return;
@@ -914,6 +917,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final displayPlaylist = widget.playlist.copyWith(songs: _songs);
+    final useBackgroundImage =
+        context.watch<ThemeProvider>().useBackgroundImage;
 
     // 可选扩展：筛选/变换状态变更时重建本页（默认监听空信号，无额外开销）
     return ListenableBuilder(
@@ -944,13 +949,15 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         expandedHeight: 280,
                         pinned: true,
                         // pinned 后顶栏背景色：滚动到 expandedHeight - kToolbarHeight
-                        // 之后从透明渐变到 surface
-                        backgroundColor: Color.lerp(
-                          Colors.transparent,
-                          colorScheme.surface,
-                          (_scrollOffset - (280 - kToolbarHeight))
-                              .clamp(0.0, 60.0) / 60,
-                        )!,
+                        // 之后从透明渐变到 surface；开启壁纸时完全透明透出壁纸
+                        backgroundColor: useBackgroundImage
+                            ? Colors.transparent
+                            : Color.lerp(
+                                Colors.transparent,
+                                colorScheme.surface,
+                                (_scrollOffset - (280 - kToolbarHeight))
+                                    .clamp(0.0, 60.0) / 60,
+                              )!,
                         surfaceTintColor: Colors.transparent,
                         scrolledUnderElevation: 0,
                         actions: [
@@ -977,7 +984,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
                               onPressed: _scrollToPlayingSong,
                               tooltip: '定位正在播放',
                             ),
-                          if (_songs.isNotEmpty)
+                          // 专辑详情（isAlbum）不展示相似歌单
+                          if (_songs.isNotEmpty && !widget.isAlbum)
                             IconButton(
                               icon: const Icon(Icons.auto_awesome),
                               onPressed: () =>
@@ -1075,12 +1083,21 @@ class _PlaylistPageState extends State<PlaylistPage> {
                               gradient: LinearGradient(
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
-                                colors: [
-                                  colorScheme.primaryContainer,
-                                  // 底部渐变到透明：启用全局背景图（页面背景透明）时，
-                                  // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
-                                  colorScheme.surface.withValues(alpha: 0),
-                                ],
+                                colors: useBackgroundImage
+                                    ? [
+                                        // 开启壁纸时整个展开区完全透明，壁纸透出
+                                        colorScheme.primaryContainer
+                                            .withValues(alpha: 0),
+                                        colorScheme.surface
+                                            .withValues(alpha: 0),
+                                      ]
+                                    : [
+                                        colorScheme.primaryContainer,
+                                        // 底部渐变到透明：启用全局背景图（页面背景透明）时，
+                                        // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
+                                        colorScheme.surface
+                                            .withValues(alpha: 0),
+                                      ],
                               ),
                             ),
                             child: SafeArea(
@@ -1429,7 +1446,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
             ),
       ),
     ),
-    );
+  );
   }
 
   /// 离线时无缓存歌曲的空状态：仅展示歌单元数据，不显示错误页面。

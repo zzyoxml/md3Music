@@ -6,6 +6,8 @@ import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/layout/page_title_alignment.dart';
+import '../../core/utils/app_toast.dart';
 import '../../data/repositories/collected_playlist_store.dart';
 import '../../data/repositories/favorite_lists_cache.dart';
 import '../../data/repositories/settings_repository.dart';
@@ -72,6 +74,9 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   // 管理模式（批量选择）
   bool _isManaging = false;
+  // _managingTab 记录当前批量管理的是哪个 tab（0=歌单, 1=专辑），
+  // AppBar 删除按钮按此分发到对应的批量删除逻辑。
+  int _managingTab = 0;
   final Set<int> _selectedIndices = {};
 
   /// 顶栏渐变 ScrollController：与 ScrollAwareAppBar 共享
@@ -81,6 +86,7 @@ class _FavoritesPageState extends State<FavoritesPage>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
+    _tabController.addListener(_onTabChanged);
     // 立即探测一次网络 + 每 30 秒兜底探测（dio 拦截器会同步更新
     // KugouApiClient.networkReachable，banner 自动跟随）。
     unawaited(_probeNetwork());
@@ -119,6 +125,7 @@ class _FavoritesPageState extends State<FavoritesPage>
     context.read<PlaylistCollectionNotifier>().removeListener(
       _onCollectionChanged,
     );
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -161,6 +168,8 @@ class _FavoritesPageState extends State<FavoritesPage>
     if (!mounted) return;
     _loadPlaylists(forceNoCache: true);
     _loadAlbums(noCache: true);
+    // 歌单/专辑/歌手收藏变更都走这个 notifier，歌手列表也要一并刷新
+    _loadArtists(noCache: true);
   }
 
   /// 加载歌单访问排序记录
@@ -199,7 +208,13 @@ class _FavoritesPageState extends State<FavoritesPage>
   }
 
   Future<void> _loadAllData() async {
-    await Future.wait([_loadPlaylists(), _loadAlbums(), _loadArtists()]);
+    // 全部走 noCache：绕过本地代理 apicache，收藏/取消收藏后
+    // 进入页面即可看到最新数据（否则需手动下拉或重启 App 才生效）
+    await Future.wait([
+      _loadPlaylists(forceNoCache: true),
+      _loadAlbums(noCache: true),
+      _loadArtists(noCache: true),
+    ]);
   }
 
   String? get _currentUserId => KugouApiClient().userid;
@@ -455,13 +470,13 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
   }
 
-  Future<void> _loadArtists() async {
+  Future<void> _loadArtists({bool noCache = false}) async {
     if (!mounted) return;
     setState(() => _isLoadingArtists = true);
 
     try {
       final api = KugouApiClient();
-      final result = await api.getUserFollow();
+      final result = await api.getUserFollow(noCache: noCache);
       if (!mounted) return;
 
       if (result == null) {
@@ -545,9 +560,10 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
   }
 
-  void _enterManageMode() {
+  void _enterManageMode(int tab) {
     setState(() {
       _isManaging = true;
+      _managingTab = tab;
       _selectedIndices.clear();
     });
   }
@@ -555,8 +571,16 @@ class _FavoritesPageState extends State<FavoritesPage>
   void _exitManageMode() {
     setState(() {
       _isManaging = false;
+      _managingTab = 0;
       _selectedIndices.clear();
     });
+  }
+
+  /// tab 切换完成后自动退出批量管理模式（避免歌单/专辑选中错位）
+  void _onTabChanged() {
+    if (!_tabController.indexIsChanging && _isManaging) {
+      _exitManageMode();
+    }
   }
 
   Future<void> _deleteSelectedPlaylists() async {
@@ -586,19 +610,112 @@ class _FavoritesPageState extends State<FavoritesPage>
     if (confirm != true) return;
 
     final api = KugouApiClient();
+    var okCount = 0;
+    var failCount = 0;
     for (final index in _selectedIndices) {
+      if (index < 0 || index >= _playlists.length) {
+        failCount++;
+        continue;
+      }
       final playlist = _playlists[index];
       final listId = playlist.listId;
-      if (listId.isNotEmpty) {
-        // 自己创建的歌单 type=1（真正删除），收藏的歌单 type=0（取消收藏），
-        // 与 /playlist/del 的 type 语义（playlist_del.js: 1=删除自己歌单, 0=取消收藏）一致
-        final type = _isCreated(playlist) ? 1 : 0;
-        await api.deletePlaylist(listId, type: type);
+      if (listId.isEmpty) {
+        failCount++;
+        continue;
+      }
+      // type 语义（与 JS playlist_del.js 及歌单详情页/专辑页一致）：
+      //   type=1 删除自己创建的歌单，type=0 取消收藏别人的歌单。
+      // 检查删除结果：status==1 或 error_code==0 视为成功，失败不再静默。
+      final type = _isCreated(playlist) ? 1 : 0;
+      final r = await api.deletePlaylist(listId, type: type);
+      debugPrint(
+        '[DeletePlaylist] listid=$listId type=$type result=$r',
+      );
+      if (r?['status'] == 1 || r?['error_code'] == 0) {
+        okCount++;
+      } else {
+        failCount++;
       }
     }
 
     _exitManageMode();
     _loadPlaylists(forceNoCache: true);
+
+    // 删除结果用 toast 提示。
+    if (mounted) {
+      final msg = failCount == 0
+          ? '成功删除 $okCount 个歌单'
+          : okCount > 0
+              ? '成功删除 $okCount 个，$failCount 个失败'
+              : '删除失败，请稍后重试';
+      showToast(msg, long: true);
+    }
+  }
+
+  Future<void> _deleteSelectedAlbums() async {
+    if (_selectedIndices.isEmpty) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除选中的 ${_selectedIndices.length} 个专辑吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final api = KugouApiClient();
+    var okCount = 0;
+    var failCount = 0;
+    for (final index in _selectedIndices) {
+      if (index < 0 || index >= _albums.length) {
+        failCount++;
+        continue;
+      }
+      final album = _albums[index];
+      final listId = album.listId;
+      if (listId.isEmpty) {
+        failCount++;
+        continue;
+      }
+      // 专辑都是「收藏别人的」，取消收藏固定用 type=0（与专辑详情页一致）。
+      final r = await api.deletePlaylist(listId, type: 0);
+      debugPrint(
+        '[DeleteAlbum] listid=$listId type=0 result=$r',
+      );
+      if (r?['status'] == 1 || r?['error_code'] == 0) {
+        okCount++;
+      } else {
+        failCount++;
+      }
+    }
+
+    _exitManageMode();
+    _loadAlbums(noCache: true);
+
+    // 删除结果用 toast 提示。
+    if (mounted) {
+      final msg = failCount == 0
+          ? '成功删除 $okCount 个专辑'
+          : okCount > 0
+              ? '成功删除 $okCount 个，$failCount 个失败'
+              : '删除失败，请稍后重试';
+      showToast(msg, long: true);
+    }
   }
 
   // ==================== UI构建 ====================
@@ -615,8 +732,8 @@ class _FavoritesPageState extends State<FavoritesPage>
       },
       child: Scaffold(
         appBar: AppBar(
-          // 标题左对齐（全局 appBarTheme.centerTitle=true，这里单独覆盖）
-          centerTitle: false,
+          // 统一对齐规则：作为底部导航栏一级页面时左对齐，被 push 成二级页面时居中
+          centerTitle: centerPageTitle(context, tabId: 'favorites'),
           title: Text(
             '我的收藏',
             style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
@@ -627,7 +744,9 @@ class _FavoritesPageState extends State<FavoritesPage>
             if (_isManaging)
               IconButton(
                 icon: const Icon(Icons.delete),
-                onPressed: _deleteSelectedPlaylists,
+                onPressed: _managingTab == 1
+                    ? _deleteSelectedAlbums
+                    : _deleteSelectedPlaylists,
               ),
           ],
           bottom: TabBar(
@@ -685,7 +804,7 @@ class _FavoritesPageState extends State<FavoritesPage>
     await Future.wait([
       _loadPlaylists(forceNoCache: true),
       _loadAlbums(noCache: true),
-      _loadArtists(),
+      _loadArtists(noCache: true),
     ]);
   }
 
@@ -747,7 +866,11 @@ class _FavoritesPageState extends State<FavoritesPage>
         },
         child: ListView(
           controller: _scrollController,
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          // 底部叠加系统手势条（小横条）高度，避免末项被压住
+          padding: EdgeInsets.only(
+            top: 8,
+            bottom: 8 + MediaQuery.paddingOf(context).bottom,
+          ),
           children: [
             // 分组标题常驻（即使暂无自建歌单），保证右侧「+」新建入口始终可达
             _GroupSection(
@@ -836,7 +959,7 @@ class _FavoritesPageState extends State<FavoritesPage>
         onLongPress: _isManaging
             ? null
             : () {
-                _enterManageMode();
+                _enterManageMode(0);
                 setState(() => _selectedIndices.add(index));
               },
         child: Container(
@@ -962,47 +1085,81 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
 
     return M3EPullToRefreshIndicator(
-      onRefresh: () => _loadAlbums(),
+      onRefresh: () => _loadAlbums(noCache: true),
       child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: EdgeInsets.only(
+          top: 8,
+          bottom: 8 + MediaQuery.paddingOf(context).bottom,
+        ),
         itemCount: _albums.length,
         itemBuilder: (context, index) {
           final album = _albums[index];
-          return _buildAlbumTile(album);
+          return _buildAlbumTile(album, index);
         },
       ),
     );
   }
 
-  Widget _buildAlbumTile(KugouPlaylistBrief album) {
+  Widget _buildAlbumTile(KugouPlaylistBrief album, int index) {
     final colorScheme = Theme.of(context).colorScheme;
     // 优先使用搜索到的原始数字 album ID
     final originalId = _albumOriginalIds[album.id] ?? album.numericId;
+    final isSelected = _selectedIndices.contains(index);
     debugPrint(
       '[AlbumTile] ${album.name}: originalId=$originalId (from map: ${_albumOriginalIds[album.id]}, numericId: ${album.numericId})',
     );
 
     return InkWell(
-      onTap: () {
-        debugPrint(
-          '[AlbumTile] tapping ${album.name} -> albumGlobalCollectionId=$originalId',
-        );
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => PlaylistPage(
-              playlist: album.toPlaylist(),
-              isInMyFavorites: true,
-              isAlbum: true,
-              albumGlobalCollectionId: originalId,
-            ),
-          ),
-        );
-      },
+      onTap: _isManaging
+          ? () {
+              setState(() {
+                if (isSelected) {
+                  _selectedIndices.remove(index);
+                } else {
+                  _selectedIndices.add(index);
+                }
+              });
+            }
+          : () {
+              debugPrint(
+                '[AlbumTile] tapping ${album.name} -> albumGlobalCollectionId=$originalId',
+              );
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => PlaylistPage(
+                    playlist: album.toPlaylist(),
+                    isInMyFavorites: true,
+                    isAlbum: true,
+                    albumGlobalCollectionId: originalId,
+                  ),
+                ),
+              );
+            },
+      onLongPress: _isManaging
+          ? null
+          : () {
+              _enterManageMode(1);
+              setState(() => _selectedIndices.add(index));
+            },
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        color: isSelected
+            ? colorScheme.primaryContainer.withValues(alpha: 0.3)
+            : null,
         child: Row(
           children: [
+            if (_isManaging)
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Icon(
+                  isSelected ? Icons.check_circle : Icons.circle_outlined,
+                  color: isSelected
+                      ? colorScheme.primary
+                      : colorScheme.onSurfaceVariant,
+                  size: 22,
+                ),
+              ),
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: SizedBox(
@@ -1107,9 +1264,12 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
 
     return M3EPullToRefreshIndicator(
-      onRefresh: () => _loadArtists(),
+      onRefresh: () => _loadArtists(noCache: true),
       child: ListView.builder(
-        padding: const EdgeInsets.symmetric(vertical: 8),
+        padding: EdgeInsets.only(
+          top: 8,
+          bottom: 8 + MediaQuery.paddingOf(context).bottom,
+        ),
         itemCount: _artists.length,
         itemBuilder: (context, index) {
           final artist = _artists[index];

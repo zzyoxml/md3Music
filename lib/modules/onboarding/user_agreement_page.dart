@@ -1,6 +1,8 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:md3music/providers/theme_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// 用户协议页（首次启动展示）。
@@ -205,62 +207,73 @@ class _UserAgreementPageState extends State<UserAgreementPage> {
               ),
               // 底部勾选 + 下一步（review 模式不展示）
               if (!widget.isReview)
-                Container(
-                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
-                  decoration: BoxDecoration(
-                    color: colorScheme.surface,
-                    border: Border(
-                      top: BorderSide(
-                        color: colorScheme.outlineVariant,
-                        width: 0.5,
-                      ),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      InkWell(
-                        onTap: () => setState(() => _agreed = !_agreed),
-                        borderRadius: BorderRadius.circular(8),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 8,
-                          ),
-                          child: Row(
-                            children: [
-                              SizedBox(
-                                width: 24,
-                                height: 24,
-                                child: Checkbox(
-                                  value: _agreed,
-                                  onChanged: (v) =>
-                                      setState(() => _agreed = v ?? false),
-                                  materialTapTargetSize:
-                                      MaterialTapTargetSize.shrinkWrap,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                '我已阅读并同意 用户协议',
-                                style: Theme.of(context).textTheme.bodyMedium,
-                              ),
-                            ],
+                Builder(
+                  builder: (context) {
+                    // 壁纸开启时透明，与正文区透明度一致（公开版偏好 8.6）
+                    final useBackgroundImage =
+                        context.watch<ThemeProvider>().useBackgroundImage;
+                    return Container(
+                      padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+                      decoration: BoxDecoration(
+                        color: useBackgroundImage
+                            ? colorScheme.surface.withValues(alpha: 0.2)
+                            : colorScheme.surface,
+                        border: Border(
+                          top: BorderSide(
+                            color: colorScheme.outlineVariant,
+                            width: 0.5,
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton(
-                          onPressed: _agreed ? _onAgree : null,
-                          style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
+                      child: Column(
+                        children: [
+                          InkWell(
+                            onTap: () => setState(() => _agreed = !_agreed),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 8,
+                              ),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 24,
+                                    height: 24,
+                                    child: Checkbox(
+                                      value: _agreed,
+                                      onChanged: (v) =>
+                                          setState(() => _agreed = v ?? false),
+                                      materialTapTargetSize:
+                                          MaterialTapTargetSize.shrinkWrap,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '我已阅读并同意 用户协议',
+                                    style:
+                                        Theme.of(context).textTheme.bodyMedium,
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
-                          child: const Text('下一步'),
-                        ),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              onPressed: _agreed ? _onAgree : null,
+                              style: FilledButton.styleFrom(
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                              ),
+                              child: const Text('下一步'),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
             ],
           ),

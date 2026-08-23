@@ -74,7 +74,7 @@ class KugouApiClient {
 
   late final Dio _dio;
 
-  /// 暴露 Dio 实例供外部使用（复用同一 Cookie/UA 配置）。
+  /// 暴露 Dio 实例供外部使用（如 DownloadsProvider 下载封面图）。
   Dio get dio => _dio;
 
   String? _token;
@@ -172,21 +172,6 @@ class KugouApiClient {
       try {
         await serverReady.timeout(const Duration(seconds: 8));
       } catch (_) {}
-    }
-
-    // 端口未知（本地服务器从未启动成功）时立即失败，不要盲发请求。
-    // 判据用 baseUrl 而不是 _serverStartFailed：_applyPort 在 TCP 就绪探测
-    // 之前就写入了 baseUrl，所以"探测超时但端口有效"（慢设备）仍应放行；
-    // 只有连端口都没拿到（dlopen 失败等）才是真的无处可发。
-    if (!KugouEndpoints.hasBaseUrl) {
-      handler.reject(
-        DioException.connectionError(
-          requestOptions: options,
-          reason: '本地 API 服务器未启动，端口未知',
-        ),
-        true,
-      );
-      return;
     }
 
     // 登录等全部请求统一走本地 API 服务器（Rust），不再依赖第三方云端
@@ -1382,63 +1367,55 @@ class KugouApiClient {
   }) async {
     String? lyricId;
     String? lyricAccesskey;
+
     Map<String, dynamic>? searchResult;
 
-    // 从 /search/lyric 响应的 candidates 中取第一个候选，解析 lyricId/accesskey。
-    void resolveCandidate(Map<String, dynamic>? result) {
-      if (result == null) return;
-      final candidates = result['candidates'];
-      if (candidates is List && candidates.isNotEmpty) {
-        final first = candidates.first as Map<String, dynamic>;
-        lyricId = first['id']?.toString();
-        lyricAccesskey = first['accesskey']?.toString();
-      }
-    }
-
-    // 1) 有 hash 时先精确搜索（在线歌曲通常直接命中官方歌词）
+    // 本地歌曲 hash 为空时，跳过 hash 搜索，直接用关键词搜索
     if (hash.isNotEmpty) {
-      final byHash = await _get(
+      searchResult = await _get(
         KugouEndpoints.searchLyric,
         queryParameters: {'hash': hash.toLowerCase()},
       );
-      if (byHash != null && _hasCandidates(byHash)) {
-        searchResult = byHash;
-        resolveCandidate(searchResult);
-      }
     }
 
-    // 2) hash 搜索未命中且是失效 hash → 歌曲搜索找回正确 hash 再 hash 搜索。
-    // 优先走此路径是因为 keyword 歌词搜索可能命中无翻译版本，而用正确 hash
-    // 搜索通常命中官方完整版（含翻译），与官方 App 行为一致。
-    if (lyricId == null &&
-        hash.isNotEmpty &&
+    if (searchResult != null &&
+        !_hasCandidates(searchResult) &&
         songName != null &&
         songName.isNotEmpty) {
-      final recovered = await _recoverLyricIdBySongSearch(songName);
-      if (recovered != null) {
-        lyricId = recovered.$1;
-        lyricAccesskey = recovered.$2;
+      // 关键词搜索：hash 为空时不传 hash 参数，避免 API 干扰
+      final params = <String, dynamic>{'keywords': songName};
+      if (hash.isNotEmpty) {
+        params['hash'] = hash.toLowerCase();
       }
-    }
-
-    // 3) 仍无结果（本地歌曲 hash 为空等）→ 关键词歌词搜索兜底。
-    // 只传 keywords，不携带原 hash：hash 在歌词库匹配失败时，酷狗会优先按
-    // 无效 hash 过滤导致关键词搜索同样返回空（部分歌曲歌词空白）。
-    if (lyricId == null && songName != null && songName.isNotEmpty) {
+      searchResult = await _get(
+        KugouEndpoints.searchLyric,
+        queryParameters: params,
+      );
+    } else if (searchResult == null &&
+        hash.isEmpty &&
+        songName != null &&
+        songName.isNotEmpty) {
+      // hash 为空且第一次搜索被跳过时，用关键词搜索
       searchResult = await _get(
         KugouEndpoints.searchLyric,
         queryParameters: {'keywords': songName},
       );
-      resolveCandidate(searchResult);
+    }
+
+    if (searchResult != null) {
+      try {
+        final candidates = searchResult['candidates'];
+        if (candidates is List && candidates.isNotEmpty) {
+          final first = candidates.first as Map<String, dynamic>;
+          lyricId = first['id']?.toString();
+          lyricAccesskey = first['accesskey']?.toString();
+        }
+      } catch (e) {}
     }
 
     if (lyricId == null) {
       return null;
     }
-
-    // 闭包内赋值使类型仍为 String?，此处已确认非空，断言收窄
-    final String resolvedLyricId = lyricId!;
-    final String? resolvedAccesskey = lyricAccesskey;
 
     // 默认 fmt='lrc' 触发并发双请求（LRC + KRC）；显式传 fmt='krc' 走单请求路径（向后兼容）
     final bool dualRequest = (fmt == 'lrc');
@@ -1446,8 +1423,8 @@ class KugouApiClient {
     if (dualRequest) {
       // 并发双请求：Future.wait 同时发起，每个请求独立 try/catch 防止单点失败
       final results = await Future.wait([
-        _fetchLyricContent(resolvedLyricId, resolvedAccesskey, 'lrc', decode),
-        _fetchLyricContent(resolvedLyricId, resolvedAccesskey, 'krc', decode),
+        _fetchLyricContent(lyricId, lyricAccesskey, 'lrc', decode),
+        _fetchLyricContent(lyricId, lyricAccesskey, 'krc', decode),
       ]);
       final lrcJson = results[0];
       final krcJson = results[1];
@@ -1455,8 +1432,7 @@ class KugouApiClient {
     }
 
     // 单请求路径（显式 fmt=krc 等非 lrc 场景）
-    final json =
-        await _fetchLyricContent(resolvedLyricId, resolvedAccesskey, fmt, decode);
+    final json = await _fetchLyricContent(lyricId, lyricAccesskey, fmt, decode);
     if (json == null) return null;
     try {
       return KugouLyric.fromJson(json);
@@ -1487,38 +1463,6 @@ class KugouApiClient {
       // 单点失败不影响另一个并发请求
       return null;
     }
-  }
-
-  /// hash 找回：hash 搜索 + 关键词搜索都失败时，用歌曲搜索接口找回正确的
-  /// 酷狗 hash，再用该 hash 查一次歌词。解决歌曲条目 hash 失效导致歌词空白。
-  ///
-  /// 返回 `(lyricId, lyricAccesskey?)`；找不到返回 null。
-  Future<(String, String?)?> _recoverLyricIdBySongSearch(String songName) async {
-    try {
-      final searchResult = await search(songName, pagesize: 5);
-      if (searchResult == null || searchResult.songs.isEmpty) {
-        return null;
-      }
-      // 取第一首歌的 FileHash 作为正确 hash
-      final correctHash = searchResult.songs.first.hash;
-      if (correctHash.isEmpty) return null;
-      final lyricSearch = await _get(
-        KugouEndpoints.searchLyric,
-        queryParameters: {'hash': correctHash.toLowerCase()},
-      );
-      if (lyricSearch == null) return null;
-      final candidates = lyricSearch['candidates'];
-      if (candidates is List && candidates.isNotEmpty) {
-        final first = candidates.first as Map<String, dynamic>;
-        final id = first['id']?.toString();
-        if (id != null && id.isNotEmpty) {
-          return (id, first['accesskey']?.toString());
-        }
-      }
-    } catch (_) {
-      return null;
-    }
-    return null;
   }
 
   /// 合并 LRC 与 KRC 两个响应，构造同时携带两种明文的 KugouLyric。
@@ -1710,6 +1654,36 @@ class KugouApiClient {
     }
   }
 
+  /// 获取歌曲评论「最热」列表（按点赞数全局降序）。
+  ///
+  /// [childrenId] 为评论区 id，取 [KugouCommentList.childrenId]（/comment/music
+  /// 响应顶层的 childrenid）或评论项的 [KugouComment.specialId]。上游不接受用
+  /// mixsongid 代替，缺少它会返回「参数错误」。
+  ///
+  /// 与 [getComments]（cmtlist，加权混排、与点赞数无关）是两个不同的列表，
+  /// 但不返回歌手评论/精彩评论，那两个列表仍需 [getComments]。
+  Future<KugouCommentList?> getToplikedComments(
+    String childrenId, {
+    int page = 1,
+    int pagesize = 30,
+  }) async {
+    if (childrenId.isEmpty) return null;
+    final json = await _get(
+      KugouEndpoints.commentMusicTopliked,
+      queryParameters: {
+        'childrenid': childrenId,
+        'page': page,
+        'pagesize': pagesize,
+      },
+    );
+    if (json == null) return null;
+    try {
+      return KugouCommentList.fromJson(json);
+    } catch (e) {
+      return null;
+    }
+  }
+
   Future<KugouCommentList?> getCommentsByClassify(
     String hash, {
     String? classify,
@@ -1753,19 +1727,20 @@ class KugouApiClient {
     }
   }
 
-  /// 获取楼层评论（楼中楼回复）
+  /// 获取楼层评论（楼中楼回复），按时间倒序返回（新的在前）。
   ///
   /// [specialId] 歌曲对应的 special_id（从评论数据中获取）
   /// [tid] 评论 ID
   /// [mixSongId] 歌曲 ID
-  /// [code] 评论 code（部分接口返回）
+  /// [code] 评论 code（部分接口返回），同时决定走歌曲还是歌单/专辑的楼层接口
+  /// [pagesize] 上游硬上限为 50，传更大的值会被静默截断成 50
   Future<KugouCommentList?> getFloorComments({
     required String specialId,
     required String tid,
     String? mixSongId,
     String? code,
     int page = 1,
-    int pagesize = 30,
+    int pagesize = 50,
   }) async {
     if (specialId.isEmpty || tid.isEmpty) return null;
     final params = <String, dynamic>{
@@ -2164,6 +2139,10 @@ class KugouApiClient {
 
   // ==================== Personal FM ====================
 
+  /// [noCache] 供「同一游标要下一批」的续播场景使用：本地服务端的 apicache 按
+  /// URL 缓存，而 [_onRequest] 只在 noCache 时才加 bypass 头和 t= 戳（登录态在
+  /// L183 设的那份 bypass 头会被 L207-209 的 else 分支删掉），否则同参数请求
+  /// 会被原样回放，续播拿到的永远是同一批歌。
   Future<List<KugouSongDetail>?> getPersonalFm({
     String? mode,
     int? songPoolId,
@@ -2724,7 +2703,9 @@ class KugouApiClient {
   }
 
   Future<KugouUserVipDetail?> getUserVipDetail() async {
-    final json = await _get(KugouEndpoints.userVipDetail);
+    // noCache=true：VIP 到期时间等是账号隔离且需实时展示的数据，
+    // 避免 Rust apicache 命中上一账号（切换账号后不更新）的旧缓存。
+    final json = await _get(KugouEndpoints.userVipDetail, noCache: true);
     if (json == null) return null;
     try {
       return KugouUserVipDetail.fromJson(json);
@@ -2770,8 +2751,8 @@ class KugouApiClient {
     );
   }
 
-  Future<Map<String, dynamic>?> getUserFollow() async {
-    return await _get(KugouEndpoints.userFollow);
+  Future<Map<String, dynamic>?> getUserFollow({bool noCache = false}) async {
+    return await _get(KugouEndpoints.userFollow, noCache: noCache);
   }
 
   Future<Map<String, dynamic>?> getUserFollowMessage(
