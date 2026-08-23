@@ -157,6 +157,15 @@ try {
         Remove-ItemBypass $lockFile
         Write-Ok '已排除 pubspec.lock（公开侧重新生成，避免私有包记录）'
     }
+    # 导出工具链自身不进公开树（导出脚本 / 闸门脚本 / 否认清单均为私有侧工具；
+    # build_android.ps1 等构建脚本保留，公开树构建仍可复用）
+    foreach ($tool in @('export_public.ps1', 'verify_public_clean.ps1', 'public_deny.txt')) {
+        $toolPath = Join-Path (Join-Path $OutDir 'scripts') $tool
+        if (Test-Path $toolPath) {
+            Remove-ItemBypass $toolPath
+            Write-Ok "已排除 scripts/$tool（导出工具链，不进公开树）"
+        }
+    }
     # 防御：清理导出树内所有嵌套的 .public_export 目录
     # （历史版本曾因相对路径 + 工作目录漂移把旧导出树复制进 scripts/，此清理杜绝复发）
     $nested = Get-ChildItem $OutDir -Recurse -Directory -Filter '.public_export' -ErrorAction SilentlyContinue

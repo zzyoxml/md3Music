@@ -311,6 +311,8 @@ void installUiHooks() {
 | 新增**顶层文件**（如 `SECURITY.md`、`CONTRIBUTING.md`） | ✅ **要加** | 同上 |
 | 改动现有白名单项**内部**的文件（如 `android/`、`assets/`、`scripts/` 里的文件） | ❌ 不用 | 整目录拷贝，内部文件自动带上 |
 
+> ⚠️ **`scripts/` 目录例外**：`export_public.ps1`、`verify_public_clean.ps1`、`public_deny.txt` 三个**导出工具链文件**属于私有侧工具，导出时会被步骤 4 明确删除，**不进公开仓库**（避免导出脚本自复制、否认清单外泄）。`build_android.ps1` / `build_windows.ps1` 等构建脚本保留在公开树（构建复用）。新增导出相关脚本时，同样应加入该排除清单。
+
 **判断标准（一句话）**：这个文件/目录**该不该出现在公开仓库？**
 - 该 → 加进 `$whitelist`
 - 不该（含私有信息、内部文档、开发工具）→ 不加，留在私有仓库
