@@ -181,6 +181,12 @@ try {
             Write-Ok "已排除 android/$tmp（编译时临时产物）"
         }
     }
+    # third_party/just_audio fork 的 Gradle 缓存（fork 构建产生，不进公开树）
+    $forkGradle = Get-ChildItem (Join-Path $OutDir 'third_party\just_audio') -Recurse -Directory -Filter '.gradle' -ErrorAction SilentlyContinue
+    foreach ($d in $forkGradle) {
+        Remove-ItemBypass $d.FullName
+        Write-Ok "已排除 $($d.FullName.Substring($OutDir.Length + 1))（fork Gradle 缓存）"
+    }
     # 防御：清理导出树内所有嵌套的 .public_export 目录
     # （历史版本曾因相对路径 + 工作目录漂移把旧导出树复制进 scripts/，此清理杜绝复发）
     $nested = Get-ChildItem $OutDir -Recurse -Directory -Filter '.public_export' -ErrorAction SilentlyContinue
