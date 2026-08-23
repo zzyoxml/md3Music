@@ -570,13 +570,19 @@ List<Widget> _buildUserCenterExtraActions(BuildContext context, ColorScheme cs) 
             width: 48,
             height: 48,
             decoration: BoxDecoration(
+              // 与用户中心标准操作项一致：圆形底 + 48×48
+              shape: BoxShape.circle,
               color: cs.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(16),
             ),
             child: Icon(Icons.download, color: cs.onSurfaceVariant),
           ),
           const SizedBox(height: 6),
-          Text('下载', style: Theme.of(context).textTheme.labelSmall),
+          Text(
+            '下载',
+            style: Theme.of(
+              context,
+            ).textTheme.labelMedium?.copyWith(color: cs.onSurfaceVariant),
+          ),
         ],
       ),
     ),
