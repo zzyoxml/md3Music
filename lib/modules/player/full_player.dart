@@ -92,6 +92,12 @@ class _FullPlayerState extends State<FullPlayer>
   bool _isLoadingLyrics = false;
   String? _lastSongId;
 
+  // 高亮球拖动切换：拖动时上方页面跟随、球放大，松手吸附 & 回缩
+  bool _tabDragActive = false;
+  double _tabDragBtnW = 0;
+  double _tabDragDx = 0;
+  int _dragStartIndex = 0;
+
   // 封面淡入淡出动画
   late final AnimationController _artworkFadeController;
 
@@ -2361,23 +2367,36 @@ class _FullPlayerState extends State<FullPlayer>
                       final anim = (_tabController.animation?.value ??
                               _tabController.index.toDouble())
                           .clamp(0.0, 3.0);
-                      return Stack(
-                        children: [
-                          Positioned(
-                            left: anim * btnW + (btnW - capsuleSize) / 2,
-                            top: (48 - capsuleSize) / 2,
-                            width: capsuleSize,
-                            height: capsuleSize,
-                            child: IgnorePointer(
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  // 高亮球用主题深色（莫奈 primary），选中 icon 在其上改浅色
-                                  color: colorScheme.primary,
+                      _tabDragBtnW = btnW; // 供拖动逻辑换算 offset
+                      return GestureDetector(
+                        behavior: HitTestBehavior.opaque,
+                        onHorizontalDragStart: _onTabDragStart,
+                        onHorizontalDragUpdate: _onTabDragUpdate,
+                        onHorizontalDragEnd: (_) => _onTabDragEnd(),
+                        onHorizontalDragCancel: _onTabDragEnd,
+                        child: Stack(
+                          children: [
+                            Positioned(
+                              left: anim * btnW + (btnW - capsuleSize) / 2,
+                              top: (48 - capsuleSize) / 2,
+                              width: capsuleSize,
+                              height: capsuleSize,
+                              child: IgnorePointer(
+                                child: AnimatedScale(
+                                  // 拖动时放大，松手回缩
+                                  scale: _tabDragActive ? 1.3 : 1.0,
+                                  duration: const Duration(milliseconds: 150),
+                                  curve: Curves.easeOut,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      // 高亮球用主题深色（莫奈 primary），选中 icon 在其上改浅色
+                                      color: colorScheme.primary,
+                                    ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
                           Row(
                             children: [
                               // 播放列表 — 切换到播放列表 tab（index 0，最左侧）
@@ -2524,9 +2543,10 @@ class _FullPlayerState extends State<FullPlayer>
                             ],
                           ),
                         ],
-                      );
-                    },
-                  );
+                      ),
+                    );
+                  },
+                );
                 },
               ),
             ),
@@ -2566,6 +2586,42 @@ class _FullPlayerState extends State<FullPlayer>
         ),
       ),
     );
+  }
+
+  /// 高亮球拖动开始：记录起始 tab，进入放大态
+  void _onTabDragStart(DragStartDetails d) {
+    setState(() {
+      _tabDragActive = true;
+      _tabDragDx = 0;
+      _dragStartIndex = _tabController.index;
+    });
+  }
+
+  /// 高亮球拖动中：跟手拖动，支持一次跨多个 tab。
+  /// 手指右移 → 目标下标增加；目标越过整格就切换 index，余量写 offset，
+  /// 让上方 TabBarView 页面与高亮球实时跟随。
+  void _onTabDragUpdate(DragUpdateDetails d) {
+    _tabDragDx += d.delta.dx;
+    final len = _tabController.length;
+    final target = (_dragStartIndex + _tabDragDx / _tabDragBtnW)
+        .clamp(0.0, len - 1.0);
+    final int newIndex = target.floor().clamp(0, len - 1);
+    final double off = (target - newIndex).clamp(-1.0, 1.0);
+    _tabController.index = newIndex;
+    _tabController.offset = off;
+  }
+
+  /// 高亮球拖动结束：吸附到最近 tab，球回缩
+  void _onTabDragEnd() {
+    final current = _tabController.index + _tabController.offset;
+    final nearest = current.round().clamp(0, _tabController.length - 1);
+    setState(() => _tabDragActive = false);
+    if (nearest != _tabController.index) {
+      _tabController.animateTo(nearest);
+    } else {
+      // 吸附回原 tab：清掉 offset 余量，避免高亮球卡在两图标之间
+      _tabController.offset = 0;
+    }
   }
 
   // MD3E v2: 音量调节改为右上角长按音质徽章呼出。

@@ -93,6 +93,11 @@ class AmStyleFullPlayer extends StatefulWidget {
 class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
+  // 高亮球拖动切换：拖动时上方页面跟随、球放大，松手吸附 & 回缩
+  bool _tabDragActive = false;
+  double _tabDragBtnW = 0;
+  double _tabDragDx = 0;
+  int _dragStartIndex = 0;
   // Apple Music 风格歌词：已解析的 LyricLine 列表，由 LyricParserChain.parse 产出
   List<LyricLine> _parsedLyrics = const [];
   bool _isLoadingLyrics = false;
@@ -1453,6 +1458,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                         ? const Center(
                             child: M3ELoadingIndicator(color: Colors.white),
                           )
+                        // 取词失败/酷狗无词（_parsedLyrics 为空）：给出"暂无歌词"提示，避免空白
+                        // 样式与评论区"暂无评论"空状态一致：同字重（titleMedium w500）与同亮度（白 70%）
+                        : _parsedLyrics.isEmpty
+                        ? _buildAmEmptyLyrics(context)
                         // P0: 用 ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
                         // 与 playerProvider（播放/暂停切换等低频通知）。
                         // 修复：暂停后 positionStream 只发相同值 → ValueNotifier 不通知 →
@@ -2641,7 +2650,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     final switchWidth = constraints.maxWidth;
                     final btnW = switchWidth / 4;
                     const capsuleSize = 34.0;
-                    return Stack(
+                    _tabDragBtnW = btnW; // 供拖动逻辑换算 offset
+                    return GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onHorizontalDragStart: _onTabDragStart,
+                      onHorizontalDragUpdate: _onTabDragUpdate,
+                      onHorizontalDragEnd: (_) => _onTabDragEnd(),
+                      onHorizontalDragCancel: _onTabDragEnd,
+                      child: Stack(
                       children: [
                         AnimatedBuilder(
                           // 必须监听 animation 动画对象本身，而不是 TabController：
@@ -2660,11 +2676,17 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               width: capsuleSize,
                               height: capsuleSize,
                               child: IgnorePointer(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.white.withValues(
-                                      alpha: 0.25,
+                                child: AnimatedScale(
+                                  // 拖动时放大，松手回缩
+                                  scale: _tabDragActive ? 1.3 : 1.0,
+                                  duration: const Duration(milliseconds: 150),
+                                  curve: Curves.easeOut,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.white.withValues(
+                                        alpha: 0.25,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -2799,7 +2821,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           ],
                         ),
                       ],
-                    );
+                    ),
+                  );
                   },
                 ),
               ),
@@ -2874,6 +2897,62 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 高亮球拖动开始：记录起始 tab，进入放大态
+  void _onTabDragStart(DragStartDetails d) {
+    setState(() {
+      _tabDragActive = true;
+      _tabDragDx = 0;
+      _dragStartIndex = _tabController.index;
+    });
+  }
+
+  /// 高亮球拖动中：跟手拖动，支持一次跨多个 tab。
+  /// 手指右移 → 目标下标增加；目标越过整格就切换 index，余量写 offset，
+  /// 让上方 TabBarView 页面与高亮球实时跟随。
+  void _onTabDragUpdate(DragUpdateDetails d) {
+    _tabDragDx += d.delta.dx;
+    final len = _tabController.length;
+    final target = (_dragStartIndex + _tabDragDx / _tabDragBtnW)
+        .clamp(0.0, len - 1.0);
+    final int newIndex = target.floor().clamp(0, len - 1);
+    final double off = (target - newIndex).clamp(-1.0, 1.0);
+    _tabController.index = newIndex;
+    _tabController.offset = off;
+  }
+
+  /// 高亮球拖动结束：吸附到最近 tab，球回缩
+  void _onTabDragEnd() {
+    final current = _tabController.index + _tabController.offset;
+    final nearest = current.round().clamp(0, _tabController.length - 1);
+    setState(() => _tabDragActive = false);
+    if (nearest != _tabController.index) {
+      _tabController.animateTo(nearest);
+    } else {
+      // 吸附回原 tab：清掉 offset 余量，避免高亮球卡在两图标之间
+      _tabController.offset = 0;
+    }
+  }
+
+  /// 歌词为空时的「暂无歌词」空状态（AM 深色背景，白 70% 图标 + 文字）。
+  Widget _buildAmEmptyLyrics(BuildContext context) {
+    final emptyColor = Colors.white70; // 与评论区深色背景的 secondaryTextColor 一致
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.lyrics_outlined, size: 48, color: emptyColor),
+          const SizedBox(height: 12),
+          Text(
+            '暂无歌词',
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(color: emptyColor),
+          ),
+        ],
       ),
     );
   }
