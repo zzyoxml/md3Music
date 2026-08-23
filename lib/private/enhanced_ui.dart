@@ -34,14 +34,16 @@ void installUiHooks() {
   UserCenterPage.extraActionItemsBuilder = _buildUserCenterExtraActions;
   PlaylistPage.extraMultiSelectActions = _buildMultiSelectExtraActions;
   // 可播放（已本地持久化）筛选：歌单页 / 历史页共用一个按页隔离的实现
+  // 注意：按钮不能 const 构造——const 实例首次 build 后永不重建，
+  // enabled 状态与图标样式将不再随 _filterRevision 刷新（无法取消筛选 + 样式不更新）
   PlaylistPage.songFilterHook = _applyPlayableFilter;
   PlaylistPage.songFilterListenable = _filterRevision;
   PlaylistPage.extraAppBarActionsBuilder =
-      (context) => const [_PlayableFilterButton('playlist')];
+      (context) => [_PlayableFilterButton('playlist')];
   PlayHistoryPage.songFilterHook = _applyPlayableFilter;
   PlayHistoryPage.songFilterListenable = _filterRevision;
   PlayHistoryPage.extraAppBarActionsBuilder =
-      (context) => const [_PlayableFilterButton('history')];
+      (context) => [_PlayableFilterButton('history')];
 }
 
 // ==================== 可播放（已本地持久化）筛选 ====================
@@ -84,6 +86,7 @@ class _PlayableFilterButton extends StatelessWidget {
       tooltip: enabled ? '显示全部' : '仅显示已缓存',
       onPressed: () {
         _playableFilterEnabled[pageKey] = !enabled;
+        debugPrint('[PlayableFilter] $pageKey 点击: 旧值=$enabled 新值=${!enabled}');
         _filterRevision.value++;
       },
     );
