@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import '../providers/device_provider.dart';
+import '../core/layout/responsive_layout.dart';
 import '../providers/grid_columns_provider.dart';
 
 /// 封装捏合手势调整列数的可复用网格组件。
@@ -94,7 +94,7 @@ class _PinchableGridViewState extends State<PinchableGridView> {
 
   @override
   Widget build(BuildContext context) {
-    final isPad = context.read<DeviceProvider>().isPad;
+    final isPad = isPadLayout(context);
     // Pad 模式取 provider 列数（watch 以便列数变化时重建），非 Pad 固定 2
     final columns = isPad
         ? context.watch<GridColumnsProvider>().gridColumns

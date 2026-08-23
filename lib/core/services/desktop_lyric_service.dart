@@ -10,6 +10,8 @@ import '../../main.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../providers/theme_provider.dart';
+import '../../core/layout/ui_density.dart';
 import '../../core/utils/audio_scanner.dart';
 import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
@@ -31,6 +33,9 @@ class DesktopLyricService {
 
   PlayerProvider? _player;
   KugouProvider? _kugou;
+  // 「显示大小」：悬浮窗是原生 overlay、不在 Flutter 树里，DisplayScaleScope
+  // 够不到它，所以把档位随配置下发给原生，由它乘在歌词字号上。
+  ThemeProvider? _theme;
   final SettingsRepository _settings = SettingsRepository();
 
   bool _enabled = false;
@@ -425,12 +430,33 @@ class DesktopLyricService {
     }
   }
 
+  // 上一次下发给原生的「显示大小」档位，用于过滤 ThemeProvider 的其他通知
+  // （主题色、背景图等每次变更都会 notify，不必重推悬浮窗配置）。
+  double _lastDisplayScale = kDefaultDisplayScale;
+
+  /// 「显示大小」变更 → 重新下发配置，让已显示的悬浮窗歌词立即跟随。
+  void _onThemeChanged() {
+    final scale = _theme?.displayScale ?? kDefaultDisplayScale;
+    if (scale == _lastDisplayScale) return;
+    _lastDisplayScale = scale;
+    if (!_enabled) return;
+    // ignore: discarded_futures
+    _pushConfig();
+  }
+
   void _bindProvidersFromContext() {
     final ctx = appNavigatorKey.currentContext;
     if (ctx == null) return;
     try {
       _player = ctx.read<PlayerProvider>();
       _kugou = ctx.read<KugouProvider>();
+      final theme = ctx.read<ThemeProvider>();
+      if (theme != _theme) {
+        _theme?.removeListener(_onThemeChanged);
+        _theme = theme;
+        _lastDisplayScale = theme.displayScale;
+        theme.addListener(_onThemeChanged);
+      }
     } catch (_) {}
   }
 
@@ -448,6 +474,7 @@ class DesktopLyricService {
     try {
       await _channel.invokeMethod('setDesktopLyricConfig', {
         'fontSize': _fontSize,
+        'displayScale': _theme?.displayScale ?? kDefaultDisplayScale,
         'doubleLine': _doubleLine,
         'opacity': _opacity,
         'locked': _locked,
@@ -458,9 +485,9 @@ class DesktopLyricService {
     } catch (_) {}
   }
 
-  static const _channel = MethodChannel('com.md3music.premium/floating_lyric');
+  static const _channel = MethodChannel('com.md3music.md3music/floating_lyric');
   static const _superLyricChannel =
-      MethodChannel('com.md3music.premium/super_lyric');
+      MethodChannel('com.md3music.md3music/super_lyric');
 
   void _syncCurrentFromPlayer() {
     if (_player == null) return;
@@ -667,8 +694,7 @@ class DesktopLyricService {
             : song.title;
         await _kugou!.getLyric('', songName: searchName, fmt: 'lrc');
       } else {
-        // 在线歌曲用 song.id 作为 hash
-        // 搜索词与播放器页面 full_player 保持一致（歌名+歌手），
+        // 在线歌曲用 song.id 作为 hash；搜索词与播放器页面 full_player 保持一致（歌名+歌手），
         // 确保桌面歌词与播放器页面命中同一版本歌词。
         final searchName = song.artist != '未知艺术家'
             ? '${song.title} ${song.artist}'

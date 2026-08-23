@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
@@ -8,12 +9,15 @@ import 'package:provider/single_child_widget.dart';
 import 'package:quick_actions/quick_actions.dart';
 
 import 'core/layout/responsive_layout.dart';
+import 'core/layout/ui_density.dart';
 import 'core/services/lyricon_provider_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/motion_constants.dart';
 import 'core/utils/artwork_color_extractor.dart';
+import 'core/utils/app_toast.dart';
 import 'core/widgets/app_background.dart';
 import 'data/models/playlist.dart';
+import 'services/kugou_api/kugou_api_client.dart';
 import 'main.dart'
     show
         appNavigatorKey,
@@ -60,7 +64,6 @@ import 'providers/shortcut_config_provider.dart';
 import 'providers/tab_config_provider.dart';
 import 'providers/theme_provider.dart';
 import 'providers/comment_display_provider.dart';
-import 'services/kugou_api/kugou_api_client.dart';
 import 'services/kugou_server.dart';
 import 'widgets/dlna_casting_overlay.dart';
 
@@ -150,8 +153,6 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => LocalFavoritesProvider()),
         // 跨页面广播「收藏的歌单」变更（详情页 → 我的收藏 tab 立即刷新）
         ChangeNotifierProvider(create: (_) => PlaylistCollectionNotifier()),
-        // 可选扩展：私有构建注入的额外 Provider（默认无）
-        ...?extraProviders,
         // 主页 Tab 配置（显示/隐藏、排序）
         ChangeNotifierProvider(create: (_) => TabConfigProvider()),
         // 桌面快捷方式配置（Android 长按图标入口的显示/隐藏、排序）
@@ -160,6 +161,8 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => DlnaProvider()),
         // 评论显示设置（字号等）
         ChangeNotifierProvider(create: (_) => CommentDisplayProvider()),
+        // 可选扩展：私有构建注入的额外 Provider（默认无）
+        ...?extraProviders,
       ],
       child: _AppView(
         showOnboarding: showOnboarding,
@@ -226,10 +229,6 @@ class _AppViewState extends State<_AppView> {
   /// 根据 ShortcutConfigProvider 当前配置，整体替换 Android 桌面快捷方式列表。
   /// type 统一为 `action_open_<tabId>`，由 main.dart handleShortcut 路由到对应页。
   void _applyDesktopShortcuts() {
-    // quick_actions 只有 Android/iOS 实现，Windows 上没有注册插件，
-    // setShortcutItems 会抛 MissingPluginException（initState 与配置变更各抛一次）。
-    // main.dart 的 quickActions.initialize 已按 Platform.isAndroid 守卫，这里同步。
-    if (!Platform.isAndroid) return;
     final config = context.read<ShortcutConfigProvider>();
     const quickActions = QuickActions();
     quickActions.setShortcutItems([
@@ -338,11 +337,11 @@ class _AppViewState extends State<_AppView> {
       themeMode: themeProvider.themeMode,
       // 根据主题设置系统导航栏颜色
       builder: (context, child) {
-        final scale = context.watch<ThemeProvider>().uiScale;
-        return MediaQuery(
-          data: MediaQuery.of(
-            context,
-          ).copyWith(textScaler: TextScaler.linear(scale)),
+        // 全局「显示大小」：整个 App 唯一的缩放点，页面侧一律直接写 dp。
+        // 包在最外层，所以背景层、Navigator（全部路由）、Overlay（对话框 /
+        // 底部弹层 / 菜单）、DLNA 与拖拽覆盖层都在作用域内。
+        return DisplayScaleScope(
+          scale: context.watch<ThemeProvider>().displayScale,
           child: _SystemUiUpdater(
             child: Stack(
               children: [
@@ -425,28 +424,75 @@ class _AppViewState extends State<_AppView> {
   ///
   /// 卡片（CardTheme）等保持不透明，保证内容可读性；导航栏/抽屉/底部弹层
   /// 保留高透明度背景以维持层级感。
+  ///
+  /// 「文字阴影」开关开启时，同时给全局 textTheme / AppBar 标题附加阴影
+  /// （见 [AppTheme.textShadowsFor]）；因为整个方法在未启用背景图时提前返回，
+  /// 阴影天然只在背景图模式下生效。
+  ///
+  /// 背景是实色的组件（对话框 / 菜单 / SnackBar / Tooltip）反过来要显式钉住
+  /// 不带阴影的文字样式：它们默认从 textTheme 兜底取样式，否则会连阴影一起
+  /// 继承过去，而壁纸根本透不到它们后面。页面自绘的实色容器用
+  /// `NoTextShadow` 包一层。
   ThemeData _applyBackgroundOverrides(
     ThemeData base,
     ThemeProvider themeProvider,
   ) {
     if (!themeProvider.useBackgroundImage) return base;
     final cs = base.colorScheme;
-    return base.copyWith(
+    final withTransparentSurfaces = base.copyWith(
       scaffoldBackgroundColor: Colors.transparent,
       appBarTheme: base.appBarTheme.copyWith(
         backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
       ),
+      // 公开版偏好：背景模式下底部导航栏/侧栏用很低透明度 surface，
+      // 让核心的模糊背景图清晰透出（用户要求更透明）。
       navigationBarTheme: base.navigationBarTheme.copyWith(
-        backgroundColor: cs.surface.withValues(alpha: 0.82),
+        backgroundColor: cs.surface.withValues(alpha: 0.2),
       ),
       navigationRailTheme: base.navigationRailTheme.copyWith(
-        backgroundColor: cs.surface.withValues(alpha: 0.82),
+        backgroundColor: cs.surface.withValues(alpha: 0.2),
       ),
       drawerTheme: base.drawerTheme.copyWith(
         backgroundColor: cs.surface.withValues(alpha: 0.96),
       ),
       bottomSheetTheme: base.bottomSheetTheme.copyWith(
         backgroundColor: cs.surfaceContainerLow.withValues(alpha: 0.97),
+      ),
+    );
+    if (!themeProvider.useTextShadowEffective) return withTransparentSurfaces;
+
+    final shadows = AppTheme.textShadowsFor(
+      base.brightness,
+      blurRadius: themeProvider.textShadowBlur,
+    );
+    return withTransparentSurfaces.copyWith(
+      appBarTheme: withTransparentSurfaces.appBarTheme.copyWith(
+        titleTextStyle:
+            withTransparentSurfaces.appBarTheme.titleTextStyle?.copyWith(
+          shadows: shadows,
+        ),
+      ),
+      textTheme: AppTheme.applyTextShadows(base.textTheme, shadows),
+      primaryTextTheme: AppTheme.applyTextShadows(base.primaryTextTheme, shadows),
+      // 实色表面：把 Flutter 的 M3 默认值（都从 textTheme 兜底取）在这里钉死，
+      // 取的是 base 里还没加阴影的那份文字层级。
+      dialogTheme: base.dialogTheme.copyWith(
+        titleTextStyle:
+            base.dialogTheme.titleTextStyle ?? base.textTheme.headlineSmall,
+        contentTextStyle:
+            base.dialogTheme.contentTextStyle ?? base.textTheme.bodyMedium,
+      ),
+      popupMenuTheme: base.popupMenuTheme.copyWith(
+        textStyle: base.popupMenuTheme.textStyle ?? base.textTheme.labelLarge,
+      ),
+      snackBarTheme: base.snackBarTheme.copyWith(
+        contentTextStyle: base.snackBarTheme.contentTextStyle ??
+            base.textTheme.bodyMedium?.copyWith(color: cs.onInverseSurface),
+      ),
+      tooltipTheme: base.tooltipTheme.copyWith(
+        textStyle: base.tooltipTheme.textStyle ??
+            base.textTheme.bodySmall?.copyWith(color: cs.onInverseSurface),
       ),
     );
   }
@@ -496,19 +542,25 @@ class _SystemUiUpdaterState extends State<_SystemUiUpdater>
     // 用「实际生效」标志：用户请求沉浸但切到其他 tab/竖屏时仍需恢复系统栏样式。
     if (kCoverFlowImmersiveActive.value) return;
     final brightness = Theme.of(context).brightness;
-    final surfaceColor = Theme.of(context).colorScheme.surface;
     final isDark = brightness == Brightness.dark;
 
-    // 主界面使用非沉浸模式：状态栏和导航栏正常显示，不延伸到系统栏后面。
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.manual,
-      overlays: SystemUiOverlay.values,
-    );
+    // 主界面使用 edgeToEdge：状态栏与底部导航条（小横条）完全透明并悬浮在
+    // 内容之上，App 内容延伸到系统栏后面。底部留白由各自组件消费系统 inset：
+    // NavigationBar 内部自带 SafeArea(top:false)，MiniPlayer 用
+    // SafeArea(bottom:true)（无底栏时生效，Scaffold 有 bottomNavigationBar
+    // 时会先移除 body 的 bottom padding，两者不会重复留白）。
+    //
+    // 不再用 SystemUiMode.manual + systemNavigationBarColor：targetSdk 35 起
+    // Android 15+ 强制 edge-to-edge 并忽略该颜色，manual 只会造成新旧系统
+    // 表现不一致。
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     SystemChrome.setSystemUIOverlayStyle(
       SystemUiOverlayStyle(
-        statusBarColor: surfaceColor,
+        statusBarColor: Colors.transparent,
         statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
-        systemNavigationBarColor: surfaceColor,
+        systemNavigationBarColor: Colors.transparent,
+        systemNavigationBarDividerColor: Colors.transparent,
+        systemNavigationBarContrastEnforced: false,
         systemNavigationBarIconBrightness: isDark
             ? Brightness.light
             : Brightness.dark,
@@ -527,7 +579,8 @@ class _MainLayout extends StatefulWidget {
   State<_MainLayout> createState() => _MainLayoutState();
 }
 
-class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
+class _MainLayoutState extends State<_MainLayout>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
   int _selectedIndex = 0;
   int _previousSelectedIndex = 0;
 
@@ -536,6 +589,19 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
 
   /// 词幕连接失败弹窗展示中标记，防止连发 connect_failed 时重复弹窗。
   bool _lyriconFailDialogShown = false;
+
+  /// 二次返回退出：首次返回后置位，3 秒内再次返回触发真正退出。
+  bool _exitPressed = false;
+  Timer? _exitResetTimer;
+
+  /// 退出中标记：置位后整页缩小动画并屏蔽交互，动画结束后回桌面。
+  bool _isExiting = false;
+
+  /// 微信风格退出动画：缩放 + 向右下角位移 + 渐隐（400ms）。
+  late final AnimationController _exitController;
+  late final Animation<double> _exitScale;
+  late final Animation<double> _exitOpacity;
+  late final Animation<Offset> _exitOffset;
 
   /// 根据 tab id 构建对应页面 Widget。
   Widget _buildPageForTab(String tabId) {
@@ -773,103 +839,120 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationRailDestination(
           icon: const Icon(Icons.grid_view_outlined),
           selectedIcon: const Icon(Icons.grid_view),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'discover':
         return NavigationRailDestination(
           icon: const Icon(Icons.explore_outlined),
           selectedIcon: const Icon(Icons.explore),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'coverflow':
         return NavigationRailDestination(
           icon: const Icon(Icons.album_outlined),
           selectedIcon: const Icon(Icons.album),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'library':
         return NavigationRailDestination(
           icon: const Icon(Icons.library_music_outlined),
           selectedIcon: const Icon(Icons.library_music),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'favorites':
         return NavigationRailDestination(
           icon: const Icon(Icons.favorite_outline),
           selectedIcon: const Icon(Icons.favorite),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'fm':
         return NavigationRailDestination(
           icon: const Icon(Icons.radio_outlined),
           selectedIcon: const Icon(Icons.radio),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'search':
         return NavigationRailDestination(
           icon: const Icon(Icons.search_outlined),
           selectedIcon: const Icon(Icons.search),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'charts':
         return NavigationRailDestination(
           icon: const Icon(Icons.leaderboard_outlined),
           selectedIcon: const Icon(Icons.leaderboard),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'ip':
         return NavigationRailDestination(
           icon: const Icon(Icons.edit_note_outlined),
           selectedIcon: const Icon(Icons.edit_note),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'recognition':
         return NavigationRailDestination(
           icon: const Icon(Icons.mic_none_outlined),
           selectedIcon: const Icon(Icons.mic),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'audiobook':
         return NavigationRailDestination(
           icon: const Icon(Icons.auto_stories_outlined),
           selectedIcon: const Icon(Icons.auto_stories),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'scene':
         return NavigationRailDestination(
           icon: const Icon(Icons.landscape_outlined),
           selectedIcon: const Icon(Icons.landscape),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'channel':
         return NavigationRailDestination(
           icon: const Icon(Icons.dynamic_feed_outlined),
           selectedIcon: const Icon(Icons.dynamic_feed),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'brush':
         return NavigationRailDestination(
           icon: const Icon(Icons.swipe_outlined),
           selectedIcon: const Icon(Icons.swipe),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'settings':
         return NavigationRailDestination(
           icon: const Icon(Icons.settings_outlined),
           selectedIcon: const Icon(Icons.settings),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'user':
         return NavigationRailDestination(
           icon: const Icon(Icons.person_outlined),
           selectedIcon: const Icon(Icons.person),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       default:
         return NavigationRailDestination(
           icon: const Icon(Icons.circle_outlined),
           selectedIcon: const Icon(Icons.circle),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
     }
   }
@@ -880,103 +963,120 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         return NavigationDrawerDestination(
           icon: const Icon(Icons.grid_view_outlined),
           selectedIcon: const Icon(Icons.grid_view),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'discover':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.explore_outlined),
           selectedIcon: const Icon(Icons.explore),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'coverflow':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.album_outlined),
           selectedIcon: const Icon(Icons.album),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'library':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.library_music_outlined),
           selectedIcon: const Icon(Icons.library_music),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'favorites':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.favorite_outline),
           selectedIcon: const Icon(Icons.favorite),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'fm':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.radio_outlined),
           selectedIcon: const Icon(Icons.radio),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'search':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.search_outlined),
           selectedIcon: const Icon(Icons.search),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'charts':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.leaderboard_outlined),
           selectedIcon: const Icon(Icons.leaderboard),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'ip':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.edit_note_outlined),
           selectedIcon: const Icon(Icons.edit_note),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'recognition':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.mic_none_outlined),
           selectedIcon: const Icon(Icons.mic),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'audiobook':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.auto_stories_outlined),
           selectedIcon: const Icon(Icons.auto_stories),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'scene':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.landscape_outlined),
           selectedIcon: const Icon(Icons.landscape),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'channel':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.dynamic_feed_outlined),
           selectedIcon: const Icon(Icons.dynamic_feed),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'brush':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.swipe_outlined),
           selectedIcon: const Icon(Icons.swipe),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'settings':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.settings_outlined),
           selectedIcon: const Icon(Icons.settings),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       case 'user':
         return NavigationDrawerDestination(
           icon: const Icon(Icons.person_outlined),
           selectedIcon: const Icon(Icons.person),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
       default:
         return NavigationDrawerDestination(
           icon: const Icon(Icons.circle_outlined),
           selectedIcon: const Icon(Icons.circle),
-          label: Text(tab.label),
+          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
+          label: const Text(''),
         );
     }
   }
@@ -984,6 +1084,21 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    // 微信风格退出动画：缩放 1.0→0.1（图标大小）、位移 0→右下角 70%、渐隐 1.0→0.0
+    _exitController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 400),
+    );
+    _exitScale = Tween<double>(begin: 1.0, end: 0.1).animate(
+      CurvedAnimation(parent: _exitController, curve: Curves.easeInOutCubic),
+    );
+    _exitOpacity = Tween<double>(begin: 1.0, end: 0.0).animate(
+      CurvedAnimation(parent: _exitController, curve: Curves.easeIn),
+    );
+    _exitOffset = Tween<Offset>(begin: Offset.zero, end: const Offset(0.7, 0.7))
+        .animate(
+      CurvedAnimation(parent: _exitController, curve: Curves.easeInOutCubic),
+    );
     // 未登录时尝试播放联网歌曲,弹出登录提示
     context.read<PlayerProvider>().onLoginRequired = _showLoginRequiredDialog;
     // 监听应用生命周期：detached（进程被系统销毁前的最后窗口）时尝试关停本地 API 服务器
@@ -1005,11 +1120,13 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _exitResetTimer?.cancel();
+    _exitController.dispose();
     LyriconProviderService.instance.removeListener(_onLyriconStateChanged);
     kCoverFlowImmersive.removeListener(_onCoverFlowImmersiveChanged);
     shortcutTabRequest.removeListener(_handleShortcutTabRequest);
     WidgetsBinding.instance.removeObserver(this);
-    // 若 App 销毁时仍处于封面流沉浸，恢复系统栏
+    // 若 App 销毁时仍处于封面流沉浸，恢复系统栏（edgeToEdge，与主界面一致）
     if (_immersiveSynced) {
       _immersiveSynced = false;
       kCoverFlowImmersiveActive.value = false;
@@ -1017,6 +1134,7 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         SystemUiMode.manual,
         overlays: SystemUiOverlay.values,
       );
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     }
     super.dispose();
   }
@@ -1137,9 +1255,17 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     }
     // 设置页不挂 MiniPlayer，其余二级路由页统一挂载
     if (tabId == 'settings') return page;
+    // removeBottom：底部小横条的 inset 已由下方 MiniPlayer 的 SafeArea 消费，
+    // 若不去掉，page 内的滚动视图会按原 inset 再留一份，MiniPlayer 上方多出空白
     return Column(
       children: [
-        Expanded(child: page),
+        Expanded(
+          child: MediaQuery.removePadding(
+            context: context,
+            removeBottom: true,
+            child: page,
+          ),
+        ),
         const MiniPlayer(),
       ],
     );
@@ -1266,7 +1392,8 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     // 一级页面返回拦截：
     // 1) PopScope 拦截系统返回手势 / 物理返回键，canPop=false → 触发 onPopInvoked
     // 2) 封面流沉浸中：返回键先恢复 tab 栏（退出沉浸），不弹退出确认
-    // 3) 否则弹“退出 App”确认对话框
+    // 3) 否则双击返回回到手机桌面：首次返回 Toast 提示，3 秒内再按一次
+    //    走 moveTaskToBack 挂后台（不杀进程、不停播放器、不停本地 Rust 服务器）
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
@@ -1280,31 +1407,58 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
         if (immersive) {
           kCoverFlowImmersive.value = false;
         } else {
-          _showExitConfirmDialog();
+          _onBackPressedForExit();
         }
       },
-      child: ResponsiveScaffold(
-        destinations: destinations,
-        railDestinations: railDestinations,
-        drawerDestinations: drawerDestinations,
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) {
-          // 守卫：FullPlayer 在栈顶时（展开进度 > 0.5），忽略 tab 切换，
-          // 避免与 FullPlayer 动画叠加导致状态混乱。
-          if (isFullPlayerOnTop) {
-            return;
-          }
-          setState(() {
-            _previousSelectedIndex = _selectedIndex;
-            _selectedIndex = index;
-          });
-        },
-        hideNavigation: immersive,
-        body: _buildBody(context, visibleTabs, immersive),
-        compactBody: _buildBody(context, visibleTabs, immersive),
-        mediumBody: _buildBody(context, visibleTabs, immersive),
-        expandedBody: _buildBody(context, visibleTabs, immersive),
-      ),
+      child: AbsorbPointer(
+        absorbing: _isExiting,
+        child: AnimatedBuilder(
+          animation: _exitController,
+          builder: (context, child) {
+            final size = MediaQuery.sizeOf(context);
+            final offset = _exitOffset.value;
+            // 微信风格：以左上角为锚点缩小到图标大小（0.1），
+            // 同时向右下角位移（宽高各 70%）并渐隐；
+            // 背景保持透明，缩小后露出系统桌面（FlutterView + windowBackground 透明）
+            return Transform.translate(
+              offset: Offset(
+                size.width * 0.7 * offset.dx,
+                size.height * 0.7 * offset.dy,
+              ),
+              child: Transform.scale(
+                scale: _exitScale.value,
+                alignment: Alignment.topLeft,
+                child: Opacity(
+                  opacity: _exitOpacity.value,
+                  child: child,
+                ),
+              ),
+            );
+          },
+          child: ResponsiveScaffold(
+              destinations: destinations,
+              railDestinations: railDestinations,
+              drawerDestinations: drawerDestinations,
+              selectedIndex: _selectedIndex,
+              onDestinationSelected: (index) {
+                // 守卫：FullPlayer 在栈顶时（展开进度 > 0.5），忽略 tab 切换，
+                // 避免与 FullPlayer 动画叠加导致状态混乱。
+                if (isFullPlayerOnTop) {
+                  return;
+                }
+                setState(() {
+                  _previousSelectedIndex = _selectedIndex;
+                  _selectedIndex = index;
+                });
+              },
+              hideNavigation: immersive,
+              body: _buildBody(context, visibleTabs, immersive),
+              compactBody: _buildBody(context, visibleTabs, immersive),
+              mediumBody: _buildBody(context, visibleTabs, immersive),
+              expandedBody: _buildBody(context, visibleTabs, immersive),
+            ),
+          ),
+        ),
     );
   }
 
@@ -1320,10 +1474,14 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
       if (immersive) {
         SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
       } else {
+        // 退出沉浸回到主界面的 edgeToEdge（与 _SystemUiUpdater 一致），
+        // 先 manual 显式 show 一次：部分设备从 immersiveSticky 直接切
+        // edgeToEdge 时系统栏不会自动重新显示。
         SystemChrome.setEnabledSystemUIMode(
           SystemUiMode.manual,
           overlays: SystemUiOverlay.values,
         );
+        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       }
     });
   }
@@ -1415,168 +1573,48 @@ class _MainLayoutState extends State<_MainLayout> with WidgetsBindingObserver {
     );
   }
 
-  /// 显示"退出 App"确认对话框。
-  ///
-  /// 点击退出按钮会触发：
-  /// 1) `PlayerProvider.pause()` — 停 just_audio + 同步通知栏
-  /// 2) `KugouApiServer.stop()` — 释放本地 API 服务器端口，停止服务器
-  /// 3) `SystemNavigator.pop()` — 通知系统 finish 当前 Activity，
-  ///    系统会随之销毁进程（等同 kill app）
-  void _showExitConfirmDialog() {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('退出 App'),
-        content: const Text('确定要退出 md3Music 吗？\n将停止播放并释放本地 API 服务器 服务器。'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              // 关闭对话框（避免 SystemNavigator.pop 后 context 失效）
-              Navigator.of(ctx).pop();
-              // 1) 暂停播放（just_audio 内部会停音频 + 通知栏可同步清空）
-              // ignore: discarded_futures
-              context.read<PlayerProvider>().pause();
-              // 2) 关停 API 服务器（释放端口）
-              // 必须等待完成，否则端口未释放，下次冷启动会冲突导致闪退
-              try {
-                await KugouApiServer.stop();
-                // nativeStopNode() 在独立线程执行，MethodChannel 返回只代表调用已发出，
-                // 需要给 native 线程一点时间完成 服务器线程退出
-                await Future.delayed(const Duration(milliseconds: 300));
-              } catch (_) {}
-              // 3) 杀进程：exit(0) 立即终止整个进程（含服务器线程），
-              //    确保端口一定被释放。SystemNavigator.pop() 只 finish Activity，
-              //    进程可能残留，导致下次启动时端口冲突/服务器未启动。
-              // ignore: avoid_print
-              print('Exiting app...');
-              exit(0);
-            },
-            child: const Text('退出'),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// 底部 NavigationBar 的 tab 图标 + 自定义 M3E Expressive 胶囊 indicator。
-///
-/// **设计思路**（对齐 MD3E MotionScheme.expressive()）：
-/// - 关掉 Flutter 原生 NavigationIndicator 的硬切横向拉伸
-///   （见 navigation_bar.dart 第 845-849 行，用 easeInOutCubicEmphasized 单轴缩放）
-/// - 自己在图标背后画一个 secondaryContainer 色的圆角胶囊
-/// - 胶囊出现/消失用 **带过冲的曲线**（easeOutBack，过冲约 10%），
-///   对应 MD3E `defaultSpatialSpec` 的"轻微过冲"原则
-/// - 胶囊做 **单轴 X 拉伸**（0.4 → 1.0），对齐 Flutter 原生 NavigationIndicator 的形变方式
-/// - 图标在胶囊弹起过程中完成 outlined → filled 切换，被弹跳掩盖
-///
-/// **文字行为**：由 `NavigationBarThemeData.labelBehavior = alwaysHide` 控制，
-/// 底栏只显示图标 + 胶囊指示器；`NavigationDestination.label` 仅用于无障碍朗读。
-///
-/// 不使用 NavigationDestination.selectedIcon（Flutter 原生内部是硬切）。
-class _AnimatedTabIcon extends StatefulWidget {
-  final bool selected;
-  final IconData outlinedIcon;
-  final IconData filledIcon;
-
-  const _AnimatedTabIcon({
-    required this.selected,
-    required this.outlinedIcon,
-    required this.filledIcon,
-  });
-
-  @override
-  State<_AnimatedTabIcon> createState() => _AnimatedTabIconState();
-}
-
-class _AnimatedTabIconState extends State<_AnimatedTabIcon>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-  // 胶囊的弹簧进度（0 = 隐藏，1 = 完全展开）
-  // 用 easeOutBack 曲线产生轻微过冲，对齐 MD3E Expressive 风格
-  late final Animation<double> _progress;
-
-  // MD3E 胶囊尺寸（对齐 Flutter 原生 _kIndicatorWidth/Height）
-  static const double _indicatorWidth = 64.0;
-  static const double _indicatorHeight = 32.0;
-  static const double _indicatorRadius = 16.0;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: M3ExpressiveMotion.defaultDuration,
-      vsync: this,
-    );
-    // 初始状态：选中则胶囊已展开
-    _controller.value = widget.selected ? 1.0 : 0.0;
-    _progress = Tween<double>(begin: 0.0, end: 1.0)
-        .animate(CurveTween(curve: Curves.easeOutBack).animate(_controller));
-  }
-
-  @override
-  void didUpdateWidget(_AnimatedTabIcon oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.selected != widget.selected) {
-      if (widget.selected) {
-        _controller.forward(from: 0);
-      } else {
-        _controller.reverse(from: 1);
-      }
+  /// 二次返回退出：首次返回显示提示，3 秒内再次返回触发真正退出（不弹窗）。
+  void _onBackPressedForExit() {
+    if (_isExiting) return;
+    if (_exitPressed) {
+      _exitResetTimer?.cancel();
+      _exitPressed = false;
+      _doExit();
+      return;
     }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-    return AnimatedBuilder(
-      animation: _progress,
-      builder: (context, child) {
-        // easeOutBack 在 [0,1] 内会有过冲（峰值约 1.1），clamp 到 [0, 1.1]
-        final t = _progress.value;
-        final tClamped = t.clamp(0.0, 1.1);
-        // 胶囊单轴 X 拉伸：从 0.4 → 1.0，带过冲
-        // 对齐 Flutter 原生 NavigationIndicator 的单轴形变方式
-        final scaleX = Tween<double>(begin: 0.4, end: 1.0).transform(tClamped);
-        return Stack(
-          alignment: Alignment.center,
-          children: [
-            // 底层：自定义 expressive 胶囊 indicator（单轴拉伸 + 过冲）
-            Transform(
-              alignment: Alignment.center,
-              transform: Matrix4.diagonal3Values(scaleX, 1.0, 1.0),
-              child: Opacity(
-                opacity: t.clamp(0.0, 1.0),
-                child: Container(
-                  width: _indicatorWidth,
-                  height: _indicatorHeight,
-                  decoration: BoxDecoration(
-                    color: colorScheme.secondaryContainer,
-                    borderRadius:
-                        BorderRadius.circular(_indicatorRadius),
-                  ),
-                ),
-              ),
-            ),
-            // 上层：图标（选中用 filled，未选中用 outlined）
-            Icon(
-              widget.selected ? widget.filledIcon : widget.outlinedIcon,
-            ),
-          ],
-        );
+    _exitPressed = true;
+    // ignore: avoid_print
+    print('再按一次返回桌面');
+    _showDoubleBackToast();
+    _exitResetTimer?.cancel();
+    _exitResetTimer = Timer(
+      const Duration(seconds: 3),
+      () {
+        _exitPressed = false;
+        _exitResetTimer = null;
       },
     );
   }
+
+  /// 显示「再按一次返回桌面」提示（系统原生 Toast，非 SnackBar/弹窗）。
+  void _showDoubleBackToast() {
+    showToast('再按一次返回桌面');
+  }
+
+  /// 双击返回后回到手机桌面（仅挂后台）：
+  /// 不杀进程、不停播放器、不停本地 Rust 服务器，重新打开瞬时恢复。
+  /// 优先走原生 [method 'moveToBack']（等同按 Home），
+  /// 异常时兜底 [SystemNavigator.pop]（回桌面但保留后台进程与服务器）。
+  Future<void> _doExit() async {
+    if (_isExiting) return;
+    try {
+      const MethodChannel('com.md3music.premium/task')
+          .invokeMethod('moveToBack');
+    } catch (_) {
+      SystemNavigator.pop();
+    }
+  }
+
 }
 
 /// 本地 API 服务器未启动提示条（所有 tab 顶部）。
@@ -1621,5 +1659,41 @@ class _LocalServerDownBanner extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// 底部 NavigationBar 的 tab 图标 + 自定义 M3E Expressive 胶囊 indicator。
+///
+/// **设计思路**（对齐 MD3E MotionScheme.expressive()）：
+/// - 关掉 Flutter 原生 NavigationIndicator 的硬切横向拉伸
+///   （见 navigation_bar.dart 第 845-849 行，用 easeInOutCubicEmphasized 单轴缩放）
+/// - 自己在图标背后画一个 secondaryContainer 色的圆角胶囊
+/// - 胶囊出现/消失用 **带过冲的曲线**（easeOutBack，过冲约 10%），
+///   对应 MD3E `defaultSpatialSpec` 的"轻微过冲"原则
+/// - 胶囊做 **单轴 X 拉伸**（0.4 → 1.0），对齐 Flutter 原生 NavigationIndicator 的形变方式
+/// - 图标在胶囊弹起过程中完成 outlined → filled 切换，被弹跳掩盖
+///
+/// **文字行为**：由 `NavigationBarThemeData.labelBehavior` 控制，跟随用户在
+/// 设置页「底部导航栏文字」的三档选择（始终显示 / 仅当前页 / 始终不显示，
+/// 默认不显示）；`NavigationDestination.label` 传真实标题，既用于显示也用于
+/// 无障碍朗读。
+///
+/// 不使用 NavigationDestination.selectedIcon（Flutter 原生内部是硬切）。
+class _AnimatedTabIcon extends StatelessWidget {
+  final bool selected;
+  final IconData outlinedIcon;
+  final IconData filledIcon;
+
+  const _AnimatedTabIcon({
+    required this.selected,
+    required this.outlinedIcon,
+    required this.filledIcon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // 公开版偏好：底部导航栏图标不做浮动/胶囊动画，直接静态切换，
+    // 简洁、不跳动。
+    return Icon(selected ? filledIcon : outlinedIcon);
   }
 }

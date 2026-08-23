@@ -347,6 +347,46 @@ class AppTheme {
     );
   }
 
+  /// 文字阴影磅数（阴影模糊半径）的默认值与可调范围：设置页滑块与
+  /// [textShadowsFor] 共用，0 表示不模糊（只剩 1dp 偏移的硬阴影）。
+  static const double defaultTextShadowBlur = 4.0;
+  static const double minTextShadowBlur = 0.0;
+  static const double maxTextShadowBlur = 50.0;
+
+  /// 文字阴影：仅在启用自定义背景图片时使用（见 `_applyBackgroundOverrides`）。
+  ///
+  /// 取与文字色相反的柔和光晕，保证文字在模糊壁纸上仍有足够对比度：
+  /// - 浅色主题（深色文字）→ 白色光晕
+  /// - 深色主题（浅色文字）→ 黑色投影
+  ///
+  /// [blurRadius] 是用户在设置里调的「阴影磅数」，范围见
+  /// [minTextShadowBlur] / [maxTextShadowBlur]。
+  ///
+  /// 高斯模糊会把同一份「墨水」摊到越来越大的面积上：只加大 blurRadius 的话，
+  /// 单层阴影的峰值不透明度反而随磅数下降，10 磅往上肉眼几乎看不出变化。
+  /// 所以磅数越高就同步补偿浓度：不透明度 0.6 → 0.95，并叠加同一层阴影
+  /// （n 层叠上去的覆盖率是 1-(1-a)^n），让整个滑块行程都有可见差别。
+  /// 默认磅数及以下仍是原来的单层 0.6，观感与绘制开销都不变。
+  static List<Shadow> textShadowsFor(
+    Brightness brightness, {
+    double blurRadius = defaultTextShadowBlur,
+  }) {
+    final isLight = brightness == Brightness.light;
+    final blur = blurRadius.clamp(minTextShadowBlur, maxTextShadowBlur);
+    final t =
+        ((blur - defaultTextShadowBlur) /
+                (maxTextShadowBlur - defaultTextShadowBlur))
+            .clamp(0.0, 1.0);
+    final shadow = Shadow(
+      color: (isLight ? Colors.white : Colors.black).withValues(
+        alpha: 0.6 + 0.35 * t,
+      ),
+      blurRadius: blur,
+      offset: const Offset(0, 1),
+    );
+    return List<Shadow>.filled(1 + (3 * t).round(), shadow);
+  }
+
   /// 给 [base] 的所有文字层级统一附加 [shadows]
   /// （TextTheme.apply 不支持 shadows，只能逐级 copyWith）。
   static TextTheme applyTextShadows(TextTheme base, List<Shadow> shadows) {
