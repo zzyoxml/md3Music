@@ -84,4 +84,5 @@ third_party/just_audio/android/.gradle/
 third_party/just_audio/example/android/.gradle
 
 # 公开版本导出产物（由 scripts/export_public.ps1 生成，不入库）
-.public_export/
+.public_export/# 临时调试/测试产物（不入库）
+tmp/
