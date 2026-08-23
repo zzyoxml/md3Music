@@ -1,7 +1,7 @@
 package com.ryanheise.just_audio;
 
 /**
- * USB 音频流抽象：由应用侧（com.md3music.premium.UsbAudioAdapter）实现，
+ * USB 音频流抽象：由应用侧（com.md3music.md3music.UsbAudioAdapter）实现，
  * 包装实际的 UsbAudioStream（JNI → usbdevfs 直写 DAC）。
  *
  * 定义在 just_audio fork 内是为了让 UsbAudioSinkController（同为 fork 内代码）

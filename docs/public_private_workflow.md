@@ -312,6 +312,8 @@ void installUiHooks() {
 | 改动现有白名单项**内部**的文件（如 `android/`、`assets/`、`scripts/` 里的文件） | ❌ 不用 | 整目录拷贝，内部文件自动带上 |
 
 > ⚠️ **`scripts/` 目录例外**：`export_public.ps1`、`verify_public_clean.ps1`、`public_deny.txt` 三个**导出工具链文件**属于私有侧工具，导出时会被步骤 4 明确删除，**不进公开仓库**（避免导出脚本自复制、否认清单外泄）。`build_android.ps1` / `build_windows.ps1` 等构建脚本保留在公开树（构建复用）。新增导出相关脚本时，同样应加入该排除清单。
+>
+> ⚠️ **其他私有功能排除**：`windows/` 目录（私有版 Windows 桌面功能，公开版 Android-only）不在白名单；pubspec 的 `just_audio_windows`/`video_player_win` 依赖与 README 的「边边存」条目、`.github/workflows/build-windows.yml` 在导出时被剥离/删除；`CHANGELOG.md` 不在白名单（私有版 CHANGELOG 含私有功能记录且版本滞后，公开仓库自行维护自己的 CHANGELOG）。**新增私有功能时，同步检查这三处：依赖剥离、文档宣传清理、CI 排除。**
 
 **判断标准（一句话）**：这个文件/目录**该不该出现在公开仓库？**
 - 该 → 加进 `$whitelist`

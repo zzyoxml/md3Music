@@ -129,10 +129,10 @@ try {
     # ---------- 3. 白名单拷贝 ----------
     Write-Step '白名单拷贝公开文件'
     $whitelist = @(
-        'lib', 'android', 'assets', 'web', 'windows', 'test',
+        'lib', 'android', 'assets', 'web', 'test',
         'third_party', 'img', 'scripts', '.github',
         'pubspec.yaml', 'analysis_options.yaml', 'README.md',
-        'LICENSE', 'CHANGELOG.md', 'DISCLAIMER.md',
+        'LICENSE', 'DISCLAIMER.md',
         'devtools_options.yaml'
     )
     $copied = 0
@@ -166,6 +166,12 @@ try {
             Write-Ok "已排除 scripts/$tool（导出工具链，不进公开树）"
         }
     }
+    # Windows 构建链为私有版功能（公开版 Android-only）：排除 windows 专用 CI
+    $winCi = Join-Path (Join-Path $OutDir '.github') 'workflows\build-windows.yml'
+    if (Test-Path $winCi) {
+        Remove-ItemBypass $winCi
+        Write-Ok '已排除 .github/workflows/build-windows.yml（私有版 Windows CI）'
+    }
     # 防御：清理导出树内所有嵌套的 .public_export 目录
     # （历史版本曾因相对路径 + 工作目录漂移把旧导出树复制进 scripts/，此清理杜绝复发）
     $nested = Get-ChildItem $OutDir -Recurse -Directory -Filter '.public_export' -ErrorAction SilentlyContinue
@@ -185,6 +191,24 @@ try {
         Write-Ok '已剥离 md3_download_cache 依赖块'
     } else {
         Write-Warn 'pubspec.yaml 未匹配到私有依赖注释块，跳过（请人工确认私有依赖已剥离）'
+    }
+    # Windows 桌面实现依赖为私有版功能（公开版 Android-only，无 windows/ 目录）
+    $winPattern = '(?m)^  # Windows 桌面实现.*?\r?\n(?:  just_audio_windows:.*\r?\n|  video_player_win:.*\r?\n)+'
+    if ([System.Text.RegularExpressions.Regex]::IsMatch($content, $winPattern)) {
+        $content = [System.Text.RegularExpressions.Regex]::Replace($content, $winPattern, '')
+        [System.IO.File]::WriteAllText($pubspec, $content, $utf8NoBom)
+        Write-Ok '已剥离 just_audio_windows / video_player_win（私有版 Windows 依赖）'
+    } else {
+        Write-Warn 'pubspec.yaml 未匹配到 Windows 依赖注释块，跳过（请人工确认已剥离）'
+    }
+    # README 功能宣传：删除公开版不具备的「边听边存」条目（私有功能，不宣传）
+    $readme = Join-Path $OutDir 'README.md'
+    $readmeContent = [System.IO.File]::ReadAllText($readme, $utf8NoBom)
+    $readmePattern = '(?m)^- \*\*边听边存\*\*.*\r?\n'
+    if ([System.Text.RegularExpressions.Regex]::IsMatch($readmeContent, $readmePattern)) {
+        $readmeContent = [System.Text.RegularExpressions.Regex]::Replace($readmeContent, $readmePattern, '')
+        [System.IO.File]::WriteAllText($readme, $readmeContent, $utf8NoBom)
+        Write-Ok '已删除 README 中「边听边存」条目（公开版无此功能）'
     }
 
     # ---------- 6. 否认清单闸门 ----------
