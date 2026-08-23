@@ -2857,8 +2857,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     );
                   },
                   onLongPress: () {
-                    // 仅当歌曲同时有翻译和罗马音时才切换模式
-                    if (!_hasTranslation || !_hasRoma) return;
+                    // 仅当歌曲同时有翻译和罗马音时才切换模式；
+                    // 数据缺失时明确提示，避免"长按无反应"的坏体验
+                    if (!_hasTranslation || !_hasRoma) {
+                      showToast(_hasRoma ? '当前歌曲暂无翻译' : '当前歌曲暂无罗马音');
+                      return;
+                    }
                     final next =
                         LyricPreferences.instance.displayMode ==
                             LyricDisplayMode.translation
