@@ -2,7 +2,7 @@ import 'package:flutter/services.dart';
 
 class MediaNotificationService {
   static const MethodChannel _channel = MethodChannel(
-    'com.md3music.premium/floating_lyric',
+    'com.md3music.md3music/floating_lyric',
   );
 
   static void Function()? onPrevious;

@@ -120,9 +120,9 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="com.md3music.premium.ACTION_UPDATE_WIDGET" />
-                <action android:name="com.md3music.premium.ACTION_WIDGET_PLAY_PAUSE" />
-                <action android:name="com.md3music.premium.ACTION_WIDGET_NEXT" />
+                <action android:name="com.md3music.md3music.ACTION_UPDATE_WIDGET" />
+                <action android:name="com.md3music.md3music.ACTION_WIDGET_PLAY_PAUSE" />
+                <action android:name="com.md3music.md3music.ACTION_WIDGET_NEXT" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"

@@ -19,7 +19,7 @@ class SpectrumService {
   SpectrumService._();
   static final SpectrumService instance = SpectrumService._();
 
-  static const String _channelName = 'com.md3music.premium/spectrum';
+  static const String _channelName = 'com.md3music.md3music/spectrum';
 
   final MethodChannel _channel = const MethodChannel(_channelName);
 

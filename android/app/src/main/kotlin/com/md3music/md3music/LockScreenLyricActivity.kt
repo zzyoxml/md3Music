@@ -1,4 +1,4 @@
-package com.md3music.premium
+package com.md3music.md3music
 
 import android.app.Activity
 import android.content.BroadcastReceiver

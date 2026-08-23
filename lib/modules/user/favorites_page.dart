@@ -68,9 +68,9 @@ class _FavoritesPageState extends State<FavoritesPage>
   Map<String, int> _playlistAccessOrder = {};
   static const _accessOrderKey = 'playlist_access_order';
 
-  // 是否按「最近点击」排序（设置页可开关，默认开启）
+  // 是否按「最近点击」排序（设置页可开关，默认关闭）
   final SettingsRepository _settingsRepository = SettingsRepository();
-  bool _sortByLatestClick = true;
+  bool _sortByLatestClick = false;
 
   // 管理模式（批量选择）
   bool _isManaging = false;

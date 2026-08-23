@@ -28,7 +28,7 @@ class CustomFontLoader {
   static const String customFontFamily = 'UserCustomFont';
   static int _loadCounter = 0;
 
-  static const String _channel = 'com.md3music.premium/font_picker';
+  static const String _channel = 'com.md3music.md3music/font_picker';
 
   /// 从持久化的字符串名还原 [FontSource]，无效时回退到 [FontSource.system]
   static FontSource fromName(String? name) {

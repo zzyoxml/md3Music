@@ -8,7 +8,7 @@ import '../../data/models/song.dart';
 import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 
 /// Lyricon 设备桥接服务：作为 Dart 与 Kotlin（MainActivity MethodChannel
-/// `com.md3music.premium/lyricon`）之间的中间层，负责向 Lyricon 实时歌词
+/// `com.md3music.md3music/lyricon`）之间的中间层，负责向 Lyricon 实时歌词
 /// 提供方推送歌曲信息、播放进度、播放状态以及用户偏好（翻译 / 罗马音），
 /// 并接收 Kotlin 侧反向回调的连接状态变更，通知 UI 刷新。
 ///
@@ -36,7 +36,7 @@ class LyriconProviderService {
       LyriconProviderService._();
   LyriconProviderService._();
 
-  static const _channel = MethodChannel('com.md3music.premium/lyricon');
+  static const _channel = MethodChannel('com.md3music.md3music/lyricon');
 
   LyriconConnectionState _state = LyriconConnectionState.disabled;
   LyriconConnectionState get state => _state;

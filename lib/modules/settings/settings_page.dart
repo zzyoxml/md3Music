@@ -117,8 +117,8 @@ class _SettingsPageState extends State<SettingsPage>
   bool _ignoreAudioFocus = true;
   // MiniPlayer 滑动切歌开关（默认开启）
   bool _miniPlayerSwipeSwitch = true;
-  // 收藏歌单按「最近点击」排序（默认开启）
-  bool _sortCollectedByLatestClick = true;
+  // 收藏歌单按「最近点击」排序（默认关闭）
+  bool _sortCollectedByLatestClick = false;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
   // 自定义背景图片（全局界面背景）；默认开启，未选择图片时回落到内置默认壁纸

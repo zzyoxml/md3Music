@@ -10,7 +10,7 @@ class WakelockService {
   WakelockService._();
   static final instance = WakelockService._();
 
-  static const _channel = MethodChannel('com.md3music.premium/wakelock');
+  static const _channel = MethodChannel('com.md3music.md3music/wakelock');
 
   bool _settingEnabled = false; // 设置开关
   bool _songPlaying = false; // 歌曲正在播放

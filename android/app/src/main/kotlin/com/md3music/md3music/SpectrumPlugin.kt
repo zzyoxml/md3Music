@@ -1,4 +1,4 @@
-package com.md3music.premium
+package com.md3music.md3music
 
 import android.media.audiofx.Visualizer
 import android.os.Handler
@@ -13,7 +13,7 @@ import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicReference
 
 /**
- * 频谱可视化插件：通过 MethodChannel "com.md3music.premium/spectrum" 暴露音频频谱数据。
+ * 频谱可视化插件：通过 MethodChannel "com.md3music.md3music/spectrum" 暴露音频频谱数据。
  *
  * **数据源（按优先级仲裁）**：
  * 1. **AudioSink PCM 截取（首选）**：从 fork 的 just_audio 拦截解码后的原始 PCM，
@@ -31,7 +31,7 @@ class SpectrumPlugin {
 
     companion object {
         private const val TAG = "SpectrumPlugin"
-        private const val CHANNEL_NAME = "com.md3music.premium/spectrum"
+        private const val CHANNEL_NAME = "com.md3music.md3music/spectrum"
         private const val CAPTURE_RATE = 20_000
         private const val BAND_COUNT = 40
         private const val INIT_TIMEOUT_MS = 4000L

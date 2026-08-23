@@ -22,7 +22,7 @@ class EqualizerService extends ChangeNotifier {
 
   EqualizerService._();
 
-  static const _channel = MethodChannel('com.md3music.premium/equalizer');
+  static const _channel = MethodChannel('com.md3music.md3music/equalizer');
 
   // 频率区域边界（Hz），用于将设备频段映射到预设的 5 个区域
   static const _zoneBoundaries = [250.0, 500.0, 2000.0, 6000.0];

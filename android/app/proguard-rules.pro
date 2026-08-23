@@ -17,10 +17,10 @@
 -keep class com.hchen.superlyricapi.* {*;}
 
 # ├── USB 独占输出（JNI 外部方法 + fork 桥接接口，R8 必须保留方法名） ──
--keepclasseswithmembernames class com.md3music.premium.UsbAudioStream {
+-keepclasseswithmembernames class com.md3music.md3music.UsbAudioStream {
     native <methods>;
 }
--keep class com.md3music.premium.UsbAudioAdapter { *; }
+-keep class com.md3music.md3music.UsbAudioAdapter { *; }
 -keep class com.ryanheise.just_audio.UsbAudioSinkController { *; }
 -keep class com.ryanheise.just_audio.UsbAudioSink { *; }
 

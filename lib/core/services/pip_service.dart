@@ -10,7 +10,7 @@ class PipService {
   PipService._();
   static final instance = PipService._();
 
-  static const _channel = MethodChannel('com.md3music.premium/pip');
+  static const _channel = MethodChannel('com.md3music.md3music/pip');
 
   /// 当前是否处于画中画模式（由原生 onPictureInPictureModeChanged 回调）。
   final ValueNotifier<bool> isPipMode = ValueNotifier(false);

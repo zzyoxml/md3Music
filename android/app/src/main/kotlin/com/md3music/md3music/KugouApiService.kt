@@ -1,4 +1,4 @@
-package com.md3music.premium
+package com.md3music.md3music
 
 import android.content.Context
 import android.util.Log
@@ -17,7 +17,7 @@ import io.flutter.plugin.common.MethodChannel
 class KugouApiService(private val context: Context, flutterEngine: FlutterEngine) {
     companion object {
         private const val TAG = "KugouApiService"
-        private const val CHANNEL = "com.md3music.premium/kugou_api"
+        private const val CHANNEL = "com.md3music.md3music/kugou_api"
 
         // 延迟加载 + 捕获异常，避免 JNI 符号不匹配时类加载直接崩溃
         private var libLoaded = false
