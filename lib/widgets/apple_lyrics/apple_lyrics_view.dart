@@ -498,6 +498,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final currentFontWeight = LyricLayout.fontWeight.value;
     final currentShowTranslation = LyricPreferences.instance.showTranslation;
     final currentDisplayMode = LyricPreferences.instance.displayMode;
+    if (currentDisplayMode != _cachedDisplayMode) {
+      debugPrint(
+        '[RomaToggle] AppleLyricsView displayMode 变化: $_cachedDisplayMode -> $currentDisplayMode',
+      );
+    }
     if (fontSize == _cachedFontSize &&
         viewportWidth == _cachedViewportWidth &&
         _cleanedLines.length == _cachedLinesLength &&

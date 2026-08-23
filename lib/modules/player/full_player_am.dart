@@ -786,6 +786,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           _hasTranslation =
               translationText != null && translationText.isNotEmpty;
           _hasRoma = romaText != null && romaText.isNotEmpty;
+          debugPrint(
+            '[RomaToggle] 歌词加载: translationText=${translationText == null ? 'null' : (translationText!.isEmpty ? '空串' : 'len=${translationText!.length}')} romaText=${romaText == null ? 'null' : (romaText!.isEmpty ? '空串' : 'len=${romaText!.length}')} → hasTranslation=$_hasTranslation hasRoma=$_hasRoma',
+          );
           _parsedLyrics = LyricParserChain.parse(
             lyricText,
             translationText: translationText,
@@ -2857,18 +2860,35 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     );
                   },
                   onLongPress: () {
-                    // 仅当歌曲同时有翻译和罗马音时才切换模式；
-                    // 数据缺失时明确提示，避免"长按无反应"的坏体验
-                    if (!_hasTranslation || !_hasRoma) {
-                      showToast(_hasRoma ? '当前歌曲暂无翻译' : '当前歌曲暂无罗马音');
-                      return;
-                    }
+                    // 长按在「翻译」与「罗马音」显示模式间切换。
+                    // 判定按目标模式的数据可用性：粤语/纯音译歌常只有罗马音
+                    // 无翻译（旧逻辑要求两者同时存在，导致有罗马音也切不了）。
                     final next =
                         LyricPreferences.instance.displayMode ==
                             LyricDisplayMode.translation
                         ? LyricDisplayMode.roma
                         : LyricDisplayMode.translation;
+                    debugPrint(
+                      '[RomaToggle] onLongPress: hasTranslation=$_hasTranslation hasRoma=$_hasRoma showTranslation=${LyricPreferences.instance.showTranslation} displayMode=${LyricPreferences.instance.displayMode} next=$next',
+                    );
+                    if (next == LyricDisplayMode.roma && !_hasRoma) {
+                      debugPrint('[RomaToggle] 无罗马音数据，返回');
+                      showToast('当前歌曲暂无罗马音');
+                      return;
+                    }
+                    if (next == LyricDisplayMode.translation && !_hasTranslation) {
+                      debugPrint('[RomaToggle] 无翻译数据，返回');
+                      showToast('当前歌曲暂无翻译');
+                      return;
+                    }
+                    // 副行渲染受 showTranslation 开关控制：短按关副行后长按
+                    // 切模式仍不显示。切模式时强制打开副行，保证生效。
+                    if (!LyricPreferences.instance.showTranslation) {
+                      debugPrint('[RomaToggle] 强制打开副行开关 showTranslation');
+                      LyricPreferences.instance.setShowTranslation(true);
+                    }
                     LyricPreferences.instance.setDisplayMode(next);
+                    debugPrint('[RomaToggle] 切换完成: displayMode=$next');
                     showToast(
                       next == LyricDisplayMode.roma ? '已切换到罗马音' : '已切换到翻译',
                     );
