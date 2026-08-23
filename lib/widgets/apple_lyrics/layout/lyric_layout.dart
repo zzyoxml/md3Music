@@ -145,13 +145,18 @@ class LyricLayout {
               (rowCount - 1) * mainLineHeight * wrapLineHeightFactor;
     }
 
-    // 翻译副行高度：副行字号 × 行高 + 0.3em 主副行间隙
-    if (showTranslation &&
-        line.translation != null &&
-        line.translation!.isNotEmpty) {
-      final transFontSize = translationFontSize(fontSize);
-      mainHeight += transFontSize * translationLineHeight +
-          transFontSize * 0.3; // 0.3em 间隙，与 renderer 中绘制位置一致
+    // 副行高度：按 displayMode 预留翻译或罗马音（与 renderer 绘制逻辑对齐——
+    // 只音译无翻译的歌（粤语等）罗马音同样预留空间，否则副行会与下一行重叠）
+    if (showTranslation) {
+      final auxText =
+          LyricPreferences.instance.displayMode == LyricDisplayMode.roma
+          ? line.roma
+          : line.translation;
+      if (auxText != null && auxText.isNotEmpty) {
+        final transFontSize = translationFontSize(fontSize);
+        mainHeight += transFontSize * translationLineHeight +
+            transFontSize * 0.3; // 0.3em 间隙，与 renderer 中绘制位置一致
+      }
     }
     return mainHeight;
   }
