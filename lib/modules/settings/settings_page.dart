@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/layout/page_title_alignment.dart';
 import '../../core/layout/ui_density.dart';
+import '../../core/services/audio_service_io.dart';
 import '../../core/services/background_image_loader.dart';
 import '../../core/widgets/app_background.dart' show kDefaultWallpaperAsset;
 import '../../core/services/custom_font_loader.dart';
@@ -116,6 +117,9 @@ class _SettingsPageState extends State<SettingsPage>
   bool _keepScreenOn = false;
   // 忽略音频焦点开关（默认开启：允许与其他应用同时播放音频）
   bool _ignoreAudioFocus = true;
+  // 音频焦点中断策略（默认：暂停后自动恢复）
+  AudioFocusInterruptionMode _audioFocusInterruptionMode =
+      AudioFocusInterruptionMode.pauseAndResume;
   // MiniPlayer 滑动切歌开关（默认开启）
   bool _miniPlayerSwipeSwitch = true;
   // 收藏歌单按「最近点击」排序（默认关闭）
@@ -296,6 +300,8 @@ class _SettingsPageState extends State<SettingsPage>
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
     final keepScreenOn = await _settingsRepository.getKeepScreenOn();
     final ignoreAudioFocus = await _settingsRepository.getIgnoreAudioFocus();
+    final audioFocusInterruptionMode = await _settingsRepository
+        .getAudioFocusInterruptionMode();
     final spectrumEnabled = await _settingsRepository.getSpectrumEnabled();
     final spectrumBandCount = await _settingsRepository.getSpectrumBandCount();
     final spectrumStyle = await _settingsRepository.getSpectrumStyle();
@@ -340,6 +346,7 @@ class _SettingsPageState extends State<SettingsPage>
       _pauseFadeEnabled = pauseFadeEnabled;
       _keepScreenOn = keepScreenOn;
       _ignoreAudioFocus = ignoreAudioFocus;
+      _audioFocusInterruptionMode = audioFocusInterruptionMode;
       _spectrumEnabled = spectrumEnabled;
       _spectrumBandCount = spectrumBandCount;
       _spectrumStyle = spectrumStyle;
@@ -353,6 +360,14 @@ class _SettingsPageState extends State<SettingsPage>
     });
     // 同步到全局开关，让已挂载的 MiniPlayer 实例实时响应
     miniPlayerSwipeSwitchEnabled.value = miniPlayerSwipeSwitch;
+  }
+
+  void _onAudioFocusModeChanged(AudioFocusInterruptionMode mode) {
+    HapticFeedback.lightImpact();
+    setState(() {
+      _audioFocusInterruptionMode = mode;
+    });
+    context.read<PlayerProvider>().setAudioFocusInterruptionMode(mode);
   }
 
   Future<void> _loadVersion() async {
@@ -2010,6 +2025,46 @@ class _SettingsPageState extends State<SettingsPage>
             });
             context.read<PlayerProvider>().setIgnoreAudioFocus(value);
           },
+        ),
+        const Divider(height: 24),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Row(
+            children: [
+              Icon(Icons.headphones, size: 20, color: colorScheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '失去音频焦点时',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+              ),
+            ],
+          ),
+        ),
+        RadioListTile<AudioFocusInterruptionMode>(
+          dense: true,
+          title: const Text('保持播放与音量'),
+          subtitle: const Text('如来电、导航等中断时不做任何响应'),
+          value: AudioFocusInterruptionMode.keepPlaying,
+          groupValue: _audioFocusInterruptionMode,
+          onChanged: (v) => _onAudioFocusModeChanged(v!),
+        ),
+        RadioListTile<AudioFocusInterruptionMode>(
+          dense: true,
+          title: const Text('暂停后自动恢复'),
+          subtitle: const Text('来电等中断时暂停，结束后自动继续播放'),
+          value: AudioFocusInterruptionMode.pauseAndResume,
+          groupValue: _audioFocusInterruptionMode,
+          onChanged: (v) => _onAudioFocusModeChanged(v!),
+        ),
+        RadioListTile<AudioFocusInterruptionMode>(
+          dense: true,
+          title: const Text('降低音量后自动恢复'),
+          subtitle: const Text('中断时降低音量不暂停，结束后恢复原音量'),
+          value: AudioFocusInterruptionMode.duckAndRestore,
+          groupValue: _audioFocusInterruptionMode,
+          onChanged: (v) => _onAudioFocusModeChanged(v!),
         ),
         // MV 画中画：按 Home 自动进入（手动按钮始终可用）
         FutureBuilder<bool>(
