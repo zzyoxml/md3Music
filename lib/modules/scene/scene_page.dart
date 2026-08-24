@@ -74,6 +74,7 @@ class _ScenePageState extends State<ScenePage> {
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: '场景音乐',
+        opaque: true,
         scrollController: _scrollController,
       ),
       body: _isLoading

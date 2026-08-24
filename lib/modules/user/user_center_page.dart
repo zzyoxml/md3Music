@@ -61,6 +61,8 @@ class _UserCenterPageState extends State<UserCenterPage> {
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: '我的',
+        // 有壁纸时顶栏完全透明（与发现页一致），无壁纸时恒不透明 surface
+        opaque: true,
         tabId: 'user',
         scrollController: _scrollController,
         actions: [

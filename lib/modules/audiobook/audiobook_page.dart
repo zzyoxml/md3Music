@@ -79,6 +79,8 @@ class _AudiobookPageState extends State<AudiobookPage> {
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: '听书',
+        // 有壁纸时顶栏完全透明（与发现页一致），无壁纸时恒不透明 surface
+        opaque: true,
         scrollController: _scrollController,
       ),
       body: _isLoading

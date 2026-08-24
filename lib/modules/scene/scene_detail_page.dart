@@ -129,6 +129,7 @@ class _SceneDetailPageState extends State<SceneDetailPage> {
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: widget.scene.name,
+        opaque: true,
         scrollController: _scrollController,
       ),
       bottomNavigationBar: const MiniPlayer(),

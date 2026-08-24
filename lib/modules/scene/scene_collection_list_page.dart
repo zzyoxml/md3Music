@@ -128,6 +128,7 @@ class _SceneCollectionListPageState extends State<SceneCollectionListPage> {
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: widget.title ?? '场景歌单',
+        opaque: true,
         scrollController: _scrollController,
       ),
       bottomNavigationBar: const MiniPlayer(),

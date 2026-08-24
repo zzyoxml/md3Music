@@ -1,3 +1,4 @@
+import 'dart:ui' as ui;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +8,8 @@ import 'package:m3e_core/m3e_core.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../../providers/kugou_provider.dart';
+import '../../core/widgets/app_background.dart';
+import '../../providers/theme_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/cloud_song_mapper.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
@@ -143,6 +146,8 @@ class _SearchPageState extends State<SearchPage>
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final useBackgroundImage =
+        context.watch<ThemeProvider>().useBackgroundImage;
 
     return Scaffold(
       body: Column(
@@ -154,8 +159,70 @@ class _SearchPageState extends State<SearchPage>
                   SliverAppBar(
                     floating: true,
                     pinned: true,
-                    // 不透明背景，避免滚动时透出下方搜索结果列表
-                    backgroundColor: colorScheme.surface,
+                    // 有壁纸时顶栏全透明，flexibleSpace 独立加载同一张背景图
+                    // （topCenter 对齐与页面主体背景视觉连续）；列表滚到顶栏下时
+                    // 被这张背景图盖住（不透底下 UI）；无壁纸时不透明 surface
+                    backgroundColor: useBackgroundImage
+                        ? Colors.transparent
+                        : colorScheme.surface,
+                    flexibleSpace: useBackgroundImage
+                        ? ClipRect(
+                            child: Builder(builder: (context) {
+                              // 与页面主体共用同一背景图解码结果（同 cacheWidth →
+                              // ImageCache 同 key），避免各自解码
+                              final size = MediaQuery.sizeOf(context);
+                              final cacheWidth = (size.width *
+                                          MediaQuery.devicePixelRatioOf(context))
+                                      .round()
+                                      .clamp(540, 1440);
+                              final tp = context.watch<ThemeProvider>();
+                              // 顶栏区域用全屏尺寸 + 全屏 cover 渲染背景图，再
+                              // topCenter 裁剪显示顶部：缩放比例与主体背景完全一致，
+                              // 否则窄区域内单独 cover 会放大错位
+                              return OverflowBox(
+                                alignment: Alignment.topCenter,
+                                minWidth: size.width,
+                                maxWidth: size.width,
+                                minHeight: size.height,
+                                maxHeight: size.height,
+                                child: SizedBox(
+                                  width: size.width,
+                                  height: size.height,
+                                  // 与 AppBackground 同层结构：surface 打底 +
+                                  // 模糊（backgroundBlur）+ 透明度（backgroundOpacity），
+                                  // 顶栏背景跟随主体模糊/透明度改动
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      ColoredBox(
+                                        color: Theme.of(
+                                          context,
+                                        ).colorScheme.surface,
+                                      ),
+                                      Opacity(
+                                        opacity: tp.backgroundOpacity,
+                                        child: ImageFiltered(
+                                          imageFilter: ui.ImageFilter.blur(
+                                            sigmaX: tp.backgroundBlur,
+                                            sigmaY: tp.backgroundBlur,
+                                          ),
+                                          child: Image(
+                                            image: backgroundImageProvider(
+                                              tp,
+                                              cacheWidth: cacheWidth,
+                                            ),
+                                            fit: BoxFit.cover,
+                                            gaplessPlayback: true,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            }),
+                          )
+                        : null,
                     surfaceTintColor: Colors.transparent,
                     title: SizedBox(
                       height: 40,

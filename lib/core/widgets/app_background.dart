@@ -9,6 +9,25 @@ import '../../providers/theme_provider.dart';
 /// 内置保底壁纸：用户未选择自定义背景图（或清除后）时作为默认背景。
 const String kDefaultWallpaperAsset = 'assets/images/default_wallpaper.jpg';
 
+/// 当前背景图的共享 ImageProvider：AppBackground 主体与页面顶栏（如搜索页
+/// SliverAppBar flexibleSpace）通过同一方法 + 相同 cacheWidth 得到相同 key，
+/// ImageCache 命中同一解码结果，避免同一张图各自解码。
+/// 路径无效（未选/已删除）时回落内置默认壁纸。
+ImageProvider backgroundImageProvider(
+  ThemeProvider tp, {
+  required int cacheWidth,
+}) {
+  final path = tp.backgroundImagePath;
+  final file = (path != null && path.isNotEmpty) ? File(path) : null;
+  if (file != null && file.existsSync()) {
+    return ResizeImage(FileImage(file), width: cacheWidth);
+  }
+  return ResizeImage(
+    const AssetImage(kDefaultWallpaperAsset),
+    width: cacheWidth,
+  );
+}
+
 /// 页面背景组件：模糊背景图 + 透明度调节（主题背景色打底）。
 ///
 /// 作为页面内容的底层（页面 Scaffold 背景透明时透出），并**随页面一起位移/
@@ -31,30 +50,14 @@ class AppBackground extends StatelessWidget {
     final screenWidth = MediaQuery.sizeOf(context).width *
         MediaQuery.devicePixelRatioOf(context);
     final cacheWidth = screenWidth.round().clamp(540, 1440);
-    // 图片源：优先用户选择的文件，无效（未选/已删除）时回落到内置默认壁纸。
-    Widget image;
-    final path = tp.backgroundImagePath;
-    final file = (path != null && path.isNotEmpty) ? File(path) : null;
-    if (file != null && file.existsSync()) {
-      image = Image.file(
-        file,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-        cacheWidth: cacheWidth,
-        // provider 变化时保持旧帧直到新图解码完成，避免空白闪烁
-        gaplessPlayback: true,
-      );
-    } else {
-      image = Image.asset(
-        kDefaultWallpaperAsset,
-        fit: BoxFit.cover,
-        width: double.infinity,
-        height: double.infinity,
-        cacheWidth: cacheWidth,
-        gaplessPlayback: true,
-      );
-    }
+    // 图片源：与页面顶栏共享同一解码结果（backgroundImageProvider）
+    final image = Image(
+      image: backgroundImageProvider(tp, cacheWidth: cacheWidth),
+      fit: BoxFit.cover,
+      width: double.infinity,
+      height: double.infinity,
+      gaplessPlayback: true,
+    );
     return RepaintBoundary(
       child: Stack(
         fit: StackFit.expand,

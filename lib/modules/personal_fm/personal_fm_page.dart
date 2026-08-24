@@ -316,6 +316,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: '私人 FM',
+        opaque: true,
         tabId: 'fm',
         scrollController: _scrollController,
       ),

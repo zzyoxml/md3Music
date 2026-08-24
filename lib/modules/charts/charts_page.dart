@@ -46,6 +46,8 @@ class _ChartsPageState extends State<ChartsPage> {
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: '排行榜',
+        // 有壁纸时顶栏完全透明（与发现页一致），无壁纸时恒不透明 surface
+        opaque: true,
         scrollController: _scrollController,
         actions: [
           IconButton(
