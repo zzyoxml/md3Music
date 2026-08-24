@@ -109,8 +109,15 @@ class _FmRefill {
     required this.mode,
     required this.songPoolId,
     required List<KugouSongDetail> songs,
+    bool adoptQueue = false,
   }) : _owned = songs.map((s) => s.hash).toSet(),
        _cursor = songs.last {
+    // 接管一条已经在放、但槽位空了的队列（见 [_PersonalFmSectionState._armRefill]）：
+    // 队列里可能有换档前灌进去、已经不在 personalFmSongs 里的歌，不一并认下来的话
+    // 第一次通知就会被判成「别人的队列」而立刻退场。
+    if (adoptQueue) {
+      _owned.addAll(player.playlist.map((s) => s.id));
+    }
     player.addListener(_onPlayerChanged);
   }
 
@@ -132,6 +139,11 @@ class _FmRefill {
 
   /// 上一次提前补货时的播放下标，避免停在同一首上反复请求。
   int _lastPrefetchIndex = -1;
+
+  /// [onQueueEnd] 的重试全部用尽后置位：那一刻队列已经放到底、播放器 pause 在
+  /// 最后一首上，再没有谁会调 [PlayerProvider.next]。之后任何一次补货成功都要
+  /// 自己补推一把 next()，否则这条队列永远不会再往前走。
+  bool _stalledAtQueueEnd = false;
 
   bool _retired = false;
 
@@ -179,7 +191,16 @@ class _FmRefill {
     // 失败不能烧掉这个下标：还停在同一首上时得允许再试一次，否则一次网络
     // 抖动就让这条队列再也不补货。
     append().then((ok) {
-      if (!ok && _lastPrefetchIndex == index) _lastPrefetchIndex = -1;
+      if (!ok) {
+        if (_lastPrefetchIndex == index) _lastPrefetchIndex = -1;
+        return;
+      }
+      // 停摆过就得自己推一把：那一刻播放器已经 pause 在最后一首上，接上新歌
+      // 也没有谁会调 next()。
+      if (_stalledAtQueueEnd && !_retired && _ownsQueue) {
+        _stalledAtQueueEnd = false;
+        player.next();
+      }
     });
   }
 
@@ -197,10 +218,18 @@ class _FmRefill {
         if (_retired || !_ownsQueue) return;
       }
       if (await append()) {
+        _stalledAtQueueEnd = false;
         await player.next();
         return;
       }
     }
+    // 重试用尽后不能就这么算了：播放器这时停在最后一首（[PlayerProvider.next]
+    // 到末尾就 pause），而提前补货那条路还被烧掉的下标挡着——两条路一起断，这
+    // 条队列就永久不补货了，用户在发现页怎么点都恢复不过来。放开下标并记下停摆
+    // 状态：下一次播放器通知（暂停事件本身就是一次，回前台点播放又是一次）能
+    // 重新试，补上了由 [_onPlayerChanged] 推 next()。
+    _stalledAtQueueEnd = true;
+    _lastPrefetchIndex = -1;
   }
 
   /// 向电台列表和播放队列各接一批新歌，返回是否真的接上了。
@@ -216,6 +245,7 @@ class _FmRefill {
 
   Future<bool> _append() async {
     if (_retired || !_ownsQueue) return false;
+    final lengthBefore = player.playlist.length;
     try {
       // 带游标要不到新歌就退回不带游标再要一次。这一步必须显式写出来：
       // getPersonalFm 从不抛异常（_get 吞掉一切返回 null），靠 catch 兜是死代码。
@@ -230,8 +260,11 @@ class _FmRefill {
       return true;
     } catch (_) {
       // 抛出来只会变成没人接的异步异常，还会中断 [onQueueEnd] 的重试循环
-      // （播放器 await 这个回调，且不 catch）。降级成「这次没补上」。
-      return false;
+      // （播放器 await 这个回调，且不 catch）。降级成「队列到底有没有变长」：
+      // [PlayerProvider.appendPlaylist] 先把歌塞进 _playlist，再去动
+      // audio_service 队列，后半段抛异常时队列其实已经能继续放了，这时报失败会
+      // 让 [onQueueEnd] 白白放弃一条补满了的队列。
+      return player.playlist.length > lengthBefore;
     }
   }
 
@@ -350,17 +383,37 @@ class _PersonalFmSectionState extends State<PersonalFmSection> {
     if (!kugou.personalFmSongs.any((s) => s.hash == song.hash)) return;
 
     kugou.moveToFirst(song);
-    // 谁起播的队列谁负责补货。续播器不引用本 State，切走发现页把区块 dispose 掉
-    // 也不影响它续播；上一个续播器会在下一次播放器通知里自己退场（见 [_FmRefill]）。
+    final refill = _armRefill(kugou, player);
+    await player.playOnlinePlaylist(kugou.personalFmAsSongs, 0);
+    // 起播后立刻先接一批（与完整 FM 页一致）。不这么做的话队列就只有起播那一批，
+    // 一路放到底才第一次补货，把「补货失败」和「队列见底」压进同一个窗口：那一次
+    // 要是没成，播放器当场停在最后一首。
+    refill?.append();
+  }
+
+  /// 新建续播器占住 `onPlaylistEnd`，返回它（歌单为空时返回 null）。
+  ///
+  /// 谁起播的队列谁负责补货。续播器不引用本 State，切走发现页把区块 dispose 掉
+  /// 也不影响它续播；上一个续播器会在下一次播放器通知里自己退场（见 [_FmRefill]）。
+  ///
+  /// [adoptQueue] 供「槽位空了但队列还在放」的自愈路径用，见 [_handlePlayPersonalFm]。
+  _FmRefill? _armRefill(
+    KugouProvider kugou,
+    PlayerProvider player, {
+    bool adoptQueue = false,
+  }) {
+    final songs = kugou.personalFmSongs;
+    if (songs.isEmpty) return null;
     final refill = _FmRefill(
       kugou: kugou,
       player: player,
       mode: _station.mode,
       songPoolId: _station.songPoolId,
-      songs: kugou.personalFmSongs,
+      songs: songs,
+      adoptQueue: adoptQueue,
     );
     player.onPlaylistEnd = refill.onQueueEnd;
-    await player.playOnlinePlaylist(kugou.personalFmAsSongs, 0);
+    return refill;
   }
 
   /// 不 await 起播：[PlayerProvider.playOnlinePlaylist] 在第一个 await 之前就
@@ -408,6 +461,13 @@ class _PersonalFmSectionState extends State<PersonalFmSection> {
         playingId != null &&
         kugou.personalFmSongs.any((s) => s.hash == playingId);
     if (isOnThisStation) {
+      // 槽位空着说明这条队列已经没有续播器了（区块重建过、或上一个续播器退场
+      // 了）。直接 resume 出来的是一条永远不会补货的队列——放完最后一首就走
+      // [PlayerProvider] 的「回到第一首」兜底，用户在这张卡上再怎么点也恢复不
+      // 过来。先把续播器补挂回去。
+      if (player.onPlaylistEnd == null) {
+        _armRefill(kugou, player, adoptQueue: true);
+      }
       await _togglePlay();
     } else {
       if (track == null) return;

@@ -80,6 +80,10 @@ class _FakePlayer extends PlayerProvider {
   /// 每次 appendPlaylist 接进来的歌 id。
   final List<List<String>> appended = [];
 
+  /// 让 appendPlaylist 在歌已经进队列之后抛异常，模拟真实实现里
+  /// audio_service 队列同步失败那一段（player_provider L1548-1571）。
+  bool throwAfterAppend = false;
+
   @override
   Song? get currentSong => _song;
 
@@ -119,6 +123,9 @@ class _FakePlayer extends PlayerProvider {
     appended.add(songs.map((s) => s.id).toList());
     _queue = [..._queue, ...songs];
     notifyListeners();
+    // 真实实现先把歌塞进 _playlist，再去动 audio_service 队列：后半段抛异常时
+    // 队列其实已经能继续放了。
+    if (throwAfterAppend) throw StateError('audio_service 队列同步失败');
   }
 
   @override
@@ -283,6 +290,8 @@ void main() {
     await tester.tap(find.byIcon(Icons.play_arrow));
     await tester.pump();
     expect(player.onPlaylistEnd, isNotNull);
+    // 起播那次预补要的是本电台自己的队列，不算「给别人要歌」。
+    final fetchesAtStart = kugou.fetchCursors.length;
 
     // 用户从别处起播了别的歌，回调还挂着。
     player.simulate(
@@ -302,8 +311,34 @@ void main() {
       isNull,
       reason: '占着槽位会把普通歌单的「播完回到第一首」兜底一起遮蔽掉',
     );
-    expect(kugou.fetchCursors, isEmpty, reason: '不该给别人的队列要新歌');
+    expect(
+      kugou.fetchCursors.length,
+      fetchesAtStart,
+      reason: '不该给别人的队列要新歌',
+    );
     expect(player.nextCalls, 0, reason: '不是本电台的队列，不该推它切歌');
+
+    await drainProviderStartup(tester);
+  });
+
+  testWidgets('起播就先接一批：不把补货压到队列见底那一刻', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final kugou = _FakeKugou(_songs);
+    final player = _FakePlayer();
+    kugou.fetchQueue.add(const [
+      KugouSongDetail(hash: 'h4', songName: 'song 4'),
+    ]);
+    await pumpSection(tester, kugou: kugou, player: player);
+
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await tester.pump();
+
+    expect(kugou.fetchCursors, ['h3'], reason: '用起播那一批的最后一首当游标');
+    expect(player.appended, [
+      ['h4'],
+    ], reason: '起播后立刻接一批，别等这一批放到底');
+    expect(player.playlist.length, 5);
+    expect(player.nextCalls, 0, reason: '预补不该动播放位置');
 
     await drainProviderStartup(tester);
   });
@@ -314,8 +349,10 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final kugou = _FakeKugou(_songs);
     final player = _FakePlayer();
-    kugou.fetchQueue.add(const [
-      KugouSongDetail(hash: 'h4', songName: 'song 4'),
+    // 第一批是起播时的预补，第二批才是队列播完那一次。
+    kugou.fetchQueue.addAll([
+      const [KugouSongDetail(hash: 'h4', songName: 'song 4')],
+      const [KugouSongDetail(hash: 'h5', songName: 'song 5')],
     ]);
     await pumpSection(tester, kugou: kugou, player: player);
 
@@ -330,9 +367,10 @@ void main() {
     await onQueueEnd!();
     await tester.pump();
 
-    expect(kugou.fetchCursors, ['h3'], reason: '用列表最后一首当游标');
+    expect(kugou.fetchCursors, ['h3', 'h4'], reason: '游标跟着上一批的最后一首走');
     expect(player.appended, [
       ['h4'],
+      ['h5'],
     ], reason: '区块没了也要往队列上接');
     expect(player.nextCalls, 1, reason: '接完要推一把 next，否则播放器停在原地');
 
@@ -343,11 +381,12 @@ void main() {
     SharedPreferences.setMockInitialValues({});
     final kugou = _FakeKugou(_songs);
     final player = _FakePlayer();
-    // 第一轮带游标和退一步都空，第二轮带游标要到了。
+    // 起播预补先要走一批，之后第一轮带游标和退一步都空，第二轮带游标要到了。
     kugou.fetchQueue.addAll([
-      null,
-      null,
       const [KugouSongDetail(hash: 'h4', songName: 'song 4')],
+      null,
+      null,
+      const [KugouSongDetail(hash: 'h5', songName: 'song 5')],
     ]);
     await pumpSection(tester, kugou: kugou, player: player);
 
@@ -361,7 +400,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 700));
     await pending;
 
-    expect(kugou.fetchCursors, ['h3', null, 'h3']);
+    expect(kugou.fetchCursors, ['h3', 'h4', null, 'h4']);
     expect(player.nextCalls, 1, reason: '重试补上了就该续播');
 
     await drainProviderStartup(tester);
@@ -375,12 +414,15 @@ void main() {
 
     await tester.tap(find.byIcon(Icons.play_arrow));
     await tester.pump();
-    expect(kugou.fetchCursors, isEmpty, reason: '剩 4 首没到阈值，先不该补货');
+    // 起播预补要不到歌，队列仍是原来 4 首。
+    expect(kugou.fetchCursors, ['h3', null], reason: '带游标要不到就退一步再要');
+    expect(player.appended, isEmpty);
+    kugou.fetchCursors.clear();
 
-    // 播到剩 3 首，命中阈值；这一次接口给不出歌。
+    // 播到剩 3 首，命中阈值；这一次接口还是给不出歌。
     player.simulate(song: _songs[1].toSong(), playing: true, index: 1);
     await tester.pump();
-    expect(kugou.fetchCursors, ['h3', null], reason: '带游标要不到就退一步再要');
+    expect(kugou.fetchCursors, ['h3', null]);
     expect(player.appended, isEmpty);
 
     // 仍停在同一首上：下一次通知该再试，而不是被烧掉的下标挡住。
@@ -393,6 +435,95 @@ void main() {
     expect(player.appended, [
       ['h4'],
     ], reason: '一次失败不该把这个下标永久烧掉');
+
+    await drainProviderStartup(tester);
+  });
+
+  // 主症状：切后台期间队列放到底，补货撞上网络抖动。三次重试用尽后如果就此收手，
+  // 播放器停在最后一首（next 到末尾就 pause），提前补货那条路又被烧掉的下标挡着，
+  // 这条队列就永久不补货了——回前台怎么点都恢复不过来。
+  testWidgets('队列末尾重试全用尽后：后续通知仍能补货，并自己推一把续播', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final kugou = _FakeKugou(_songs);
+    final player = _FakePlayer();
+    await pumpSection(tester, kugou: kugou, player: player);
+
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await tester.pump();
+    // 播到队列最后一首，起播预补和提前补货都没要到歌。
+    player.simulate(song: _songs[3].toSong(), playing: true, index: 3);
+    await tester.pump();
+
+    final pending = player.onPlaylistEnd!();
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump(const Duration(milliseconds: 1300));
+    await pending;
+    expect(player.nextCalls, 0, reason: '三轮都没补上，这时确实推不动');
+    expect(player.appended, isEmpty);
+
+    // 网络恢复。播放器 pause 在最后一首会发一次通知，这一次必须能重新要歌。
+    kugou.fetchQueue.add(const [
+      KugouSongDetail(hash: 'h4', songName: 'song 4'),
+    ]);
+    player.simulate(song: _songs[3].toSong(), playing: false, index: 3);
+    await tester.pump();
+
+    expect(player.appended, [
+      ['h4'],
+    ], reason: '重试用尽不该让这条队列永久停摆');
+    expect(player.nextCalls, 1, reason: '停摆过就没人推 next 了，得自己推');
+
+    await drainProviderStartup(tester);
+  });
+
+  // appendPlaylist 先把歌塞进 _playlist 再动 audio_service 队列，后半段抛异常时
+  // 队列其实已经能继续放了。这时报「没补上」会让 onQueueEnd 白白放弃一条补满的队列。
+  testWidgets('接歌后半段抛异常但队列已变长：算补上了，照常续播', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final kugou = _FakeKugou(_songs);
+    final player = _FakePlayer();
+    kugou.fetchQueue.addAll([
+      const [KugouSongDetail(hash: 'h4', songName: 'song 4')],
+      const [KugouSongDetail(hash: 'h5', songName: 'song 5')],
+    ]);
+    await pumpSection(tester, kugou: kugou, player: player);
+
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await tester.pump();
+
+    player.throwAfterAppend = true;
+    await player.onPlaylistEnd!();
+    await tester.pump();
+
+    expect(player.playlist.map((s) => s.id), contains('h5'), reason: '歌已经进队列了');
+    expect(player.nextCalls, 1, reason: '队列变长了就该续播，不该当成补货失败');
+
+    await drainProviderStartup(tester);
+  });
+
+  testWidgets('槽位空了但队列还在放：点播放补挂续播器，不重放当前这首', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final kugou = _FakeKugou(_songs);
+    final player = _FakePlayer();
+    await pumpSection(tester, kugou: kugou, player: player);
+
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await tester.pump();
+    // 模拟续播器已经退场（区块重建过等），槽位空着但队列还是本电台的。
+    player.onPlaylistEnd = null;
+    player.simulate(song: _songs[1].toSong(), playing: false, index: 1);
+    await tester.pump();
+
+    await tester.tap(find.byIcon(Icons.play_arrow));
+    await tester.pump();
+
+    expect(
+      player.onPlaylistEnd,
+      isNotNull,
+      reason: '槽位空着的队列放完就走「回到第一首」兜底，不再是电台',
+    );
+    expect(player.resumeCalls, 1, reason: '仍是 resume');
+    expect(player.playPlaylistCalls, 1, reason: '不该把这首从头重放');
 
     await drainProviderStartup(tester);
   });
