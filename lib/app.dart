@@ -446,12 +446,15 @@ class _AppViewState extends State<_AppView> {
         surfaceTintColor: Colors.transparent,
       ),
       // 公开版偏好：背景模式下底部导航栏/侧栏用很低透明度 surface，
-      // 让核心的模糊背景图清晰透出（用户要求更透明）。
+      // 让核心的模糊背景图清晰透出（用户要求更透明）；
+      // 同时隐藏选中指示器（胶囊/药丸），避免实色胶囊在壁纸上突兀。
       navigationBarTheme: base.navigationBarTheme.copyWith(
         backgroundColor: cs.surface.withValues(alpha: 0.2),
+        indicatorColor: Colors.transparent,
       ),
       navigationRailTheme: base.navigationRailTheme.copyWith(
         backgroundColor: cs.surface.withValues(alpha: 0.2),
+        indicatorColor: Colors.transparent,
       ),
       drawerTheme: base.drawerTheme.copyWith(
         backgroundColor: cs.surface.withValues(alpha: 0.96),
@@ -834,125 +837,112 @@ class _MainLayoutState extends State<_MainLayout>
   }
 
   NavigationRailDestination _buildRailDestination(TabItem tab) {
+    // 横屏侧栏文字跟随设置页「底部导航栏文字」三档：由
+    // CompactNavigationRail 按 labelBehavior 决定是否渲染。这里始终传真实标题
+    //（与底部 NavigationBar 一致；仅图标模式下文字被隐藏，label 仍用于无障碍朗读）。
+    final label = Text(tab.label);
     switch (tab.id) {
       case 'launchpad':
         return NavigationRailDestination(
           icon: const Icon(Icons.grid_view_outlined),
           selectedIcon: const Icon(Icons.grid_view),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'discover':
         return NavigationRailDestination(
           icon: const Icon(Icons.explore_outlined),
           selectedIcon: const Icon(Icons.explore),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'coverflow':
         return NavigationRailDestination(
           icon: const Icon(Icons.album_outlined),
           selectedIcon: const Icon(Icons.album),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'library':
         return NavigationRailDestination(
           icon: const Icon(Icons.library_music_outlined),
           selectedIcon: const Icon(Icons.library_music),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'favorites':
         return NavigationRailDestination(
           icon: const Icon(Icons.favorite_outline),
           selectedIcon: const Icon(Icons.favorite),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'fm':
         return NavigationRailDestination(
           icon: const Icon(Icons.radio_outlined),
           selectedIcon: const Icon(Icons.radio),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'search':
         return NavigationRailDestination(
           icon: const Icon(Icons.search_outlined),
           selectedIcon: const Icon(Icons.search),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'charts':
         return NavigationRailDestination(
           icon: const Icon(Icons.leaderboard_outlined),
           selectedIcon: const Icon(Icons.leaderboard),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'ip':
         return NavigationRailDestination(
           icon: const Icon(Icons.edit_note_outlined),
           selectedIcon: const Icon(Icons.edit_note),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'recognition':
         return NavigationRailDestination(
           icon: const Icon(Icons.mic_none_outlined),
           selectedIcon: const Icon(Icons.mic),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'audiobook':
         return NavigationRailDestination(
           icon: const Icon(Icons.auto_stories_outlined),
           selectedIcon: const Icon(Icons.auto_stories),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'scene':
         return NavigationRailDestination(
           icon: const Icon(Icons.landscape_outlined),
           selectedIcon: const Icon(Icons.landscape),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'channel':
         return NavigationRailDestination(
           icon: const Icon(Icons.dynamic_feed_outlined),
           selectedIcon: const Icon(Icons.dynamic_feed),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'brush':
         return NavigationRailDestination(
           icon: const Icon(Icons.swipe_outlined),
           selectedIcon: const Icon(Icons.swipe),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'settings':
         return NavigationRailDestination(
           icon: const Icon(Icons.settings_outlined),
           selectedIcon: const Icon(Icons.settings),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       case 'user':
         return NavigationRailDestination(
           icon: const Icon(Icons.person_outlined),
           selectedIcon: const Icon(Icons.person),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
       default:
         return NavigationRailDestination(
           icon: const Icon(Icons.circle_outlined),
           selectedIcon: const Icon(Icons.circle),
-          // 公开版偏好：侧栏（NavigationRail）也不显示文字，仅图标
-          label: const Text(''),
+          label: label,
         );
     }
   }

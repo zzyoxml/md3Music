@@ -226,8 +226,9 @@ class AppTheme {
       navigationBarTheme: NavigationBarThemeData(
         height: 80,
         backgroundColor: colorScheme.surface,
-        // 关掉 Flutter 原生 NavigationIndicator：改由 _AnimatedTabIcon 自己画
-        // 带 M3E Expressive 风格的弹簧胶囊（单轴 X 拉伸 + 过冲）
+        // 关闭原生 NavigationIndicator：胶囊由 responsive_layout 的
+        // _CapsuleBounce 自定义绘制（外观与原一致），以支持点击后胶囊
+        // 水平超出回弹动画；背景图模式下 _CapsuleBounce 隐藏胶囊。
         indicatorColor: Colors.transparent,
         surfaceTintColor: colorScheme.surfaceTint,
         elevation: 0,
@@ -261,7 +262,8 @@ class AppTheme {
       ),
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: colorScheme.surface,
-        indicatorColor: colorScheme.secondaryContainer,
+        // 关闭原生 indicator：胶囊由 _CapsuleBounce 自定义绘制（同 navigationBar）
+        indicatorColor: Colors.transparent,
         elevation: 0,
         minWidth: 80,
         minExtendedWidth: 256,
