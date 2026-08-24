@@ -140,6 +140,7 @@ class _SceneVideoListPageState extends State<SceneVideoListPage> {
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: widget.title ?? '场景视频',
+        opaque: true,
         scrollController: _scrollController,
       ),
       bottomNavigationBar: const MiniPlayer(),

@@ -9,6 +9,7 @@ import '../../core/theme/motion_constants.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../widgets/smart_artwork_image.dart';
 import 'full_player_route.dart';
 
@@ -277,6 +278,8 @@ class _MiniPlayerState extends State<MiniPlayer>
 
     final colorScheme = Theme.of(context).colorScheme;
     final duration = playerProvider.duration ?? Duration.zero;
+    // 公开版偏好：启用自定义背景时，MiniPlayer 用半透明背景透出背景图
+    final useBackgroundImage = context.watch<ThemeProvider>().useBackgroundImage;
 
     return ValueListenableBuilder<double>(
       valueListenable: playerExpansion,
@@ -323,8 +326,8 @@ class _MiniPlayerState extends State<MiniPlayer>
                 final progress = duration.inMilliseconds > 0
                     ? position.inMilliseconds / duration.inMilliseconds
                     : 0.0;
-                return _buildContent(
-                    context, playerProvider, currentSong, colorScheme, progress);
+                return _buildContent(context, playerProvider, currentSong,
+                    colorScheme, progress, useBackgroundImage);
               },
             ),
           ),
@@ -339,14 +342,18 @@ class _MiniPlayerState extends State<MiniPlayer>
     dynamic currentSong,
     ColorScheme colorScheme,
     double progress,
+    bool useBackgroundImage,
   ) {
     return Container(
       // Container 在外提供整体背景色：
-      // 使用 surfaceContainerHigh 比 NavigationBar 的 surface 更深，
+      // 默认使用 surfaceContainerHigh 比 NavigationBar 的 surface 更深，
       // 形成明确的层级关系（mini player 浮于内容之上，NavigationBar 之下）
+      // 启用自定义背景时改用半透明 surface，透出底层背景图。
       // 颜色会自然填充 SafeArea 在底部留出的系统手势条区域
       decoration: BoxDecoration(
-        color: colorScheme.surfaceContainerHigh,
+        color: useBackgroundImage
+            ? colorScheme.surface.withValues(alpha: 0.2)
+            : colorScheme.surfaceContainerHigh,
       ),
       child: SafeArea(
         // 仅吸收底部系统手势条/Home Indicator 高度
@@ -363,7 +370,7 @@ class _MiniPlayerState extends State<MiniPlayer>
             ),
             Padding(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
               child: Row(
                 children: [
                   // —— 滑动区：封面 + 歌曲信息，跟随手指平移 + 切歌过渡 ——
@@ -415,7 +422,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                                     ),
                                   ),
                                 ),
-                                const SizedBox(width: 12),
+                                const SizedBox(width: 8),
                                 Expanded(
                                   child: Column(
                                     crossAxisAlignment:
@@ -453,6 +460,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                   ),
                   // —— 固定区：右侧按钮不参与滑动 ——
                   IconButton(
+                    visualDensity: VisualDensity.compact,
                     icon: Icon(
                       playerProvider.isPlaying
                           ? Icons.pause
@@ -467,6 +475,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                     },
                   ),
                   IconButton(
+                    visualDensity: VisualDensity.compact,
                     tooltip: DesktopLyricService.instance.enabled
                         ? '关闭桌面歌词'
                         : '开启桌面歌词',
@@ -510,6 +519,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                     },
                   ),
                   IconButton(
+                    visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.skip_next),
                     onPressed: () {
                       playerProvider.next();

@@ -64,7 +64,6 @@ void main() {
       for (int x = 0; x < 400; x++) {
         final o = (y * 400 + x) * 4;
         final r8 = data.getUint8(o);
-        final g8 = data.getUint8(o + 1);
         final b8 = data.getUint8(o + 2);
         // 文字是白色(255,255,255)，背景是绿色(0,255,0)；统计"偏白"像素亮度
         if (r8 > 200 && b8 > 200) {

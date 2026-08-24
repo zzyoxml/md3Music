@@ -468,7 +468,7 @@ class _BandSlider extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: disabled ? colorScheme.onSurfaceVariant.withOpacity(0.4) : dbColor,
+                color: disabled ? colorScheme.onSurfaceVariant.withValues(alpha: 0.4) : dbColor,
                 fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
@@ -505,7 +505,7 @@ class _BandSlider extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 10,
                   color: disabled
-                      ? colorScheme.onSurfaceVariant.withOpacity(0.4)
+                      ? colorScheme.onSurfaceVariant.withValues(alpha: 0.4)
                       : colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w500,
                 ),
@@ -544,7 +544,7 @@ class _FrequencyResponsePainter extends CustomPainter {
     if (bandLevels.isEmpty || maxLevel == minLevel) return;
 
     final paint = Paint()
-      ..color = enabled ? primaryColor : primaryColor.withOpacity(0.3)
+      ..color = enabled ? primaryColor : primaryColor.withValues(alpha: 0.3)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 3.0
       ..strokeCap = StrokeCap.round
@@ -553,7 +553,7 @@ class _FrequencyResponsePainter extends CustomPainter {
     // 0 dB 基准线
     final zeroY = size.height / 2;
     final dashPaint = Paint()
-      ..color = outlineColor.withOpacity(0.4)
+      ..color = outlineColor.withValues(alpha: 0.4)
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1;
 
@@ -593,8 +593,8 @@ class _FrequencyResponsePainter extends CustomPainter {
       begin: Alignment.topCenter,
       end: Alignment.bottomCenter,
       colors: [
-        primaryColor.withOpacity(enabled ? 0.15 : 0.05),
-        primaryColor.withOpacity(0),
+        primaryColor.withValues(alpha: enabled ? 0.15 : 0.05),
+        primaryColor.withValues(alpha: 0),
       ],
     );
 
@@ -611,7 +611,7 @@ class _FrequencyResponsePainter extends CustomPainter {
 
     // 绘制频段点
     final pointPaint = Paint()
-      ..color = enabled ? primaryColor : primaryColor.withOpacity(0.3)
+      ..color = enabled ? primaryColor : primaryColor.withValues(alpha: 0.3)
       ..style = PaintingStyle.fill;
 
     for (final point in points) {

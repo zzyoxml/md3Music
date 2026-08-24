@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:material_color_utilities/material_color_utilities.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../core/layout/ui_density.dart';
 import '../core/services/custom_font_loader.dart';
 import '../core/theme/app_theme.dart';
 
@@ -13,11 +14,12 @@ class ThemeProvider extends ChangeNotifier {
   static const String _amStylePlayerKey = 'use_am_style_player';
   static const String _manualSeedKey = 'manual_seed_color';
   static const String _oledBlackKey = 'use_oled_black';
-  static const String _uiScaleKey = 'ui_scale';
+  // 「显示大小」档位（安卓系统同名设置的语义，见 core/layout/ui_density.dart）
+  static const String _displayScaleKey = 'ui_display_scale';
+  // 已废弃的逐元素缩放键，加载时清理（见 _loadDisplayScale）
+  static const String _legacyUiScaleKey = 'ui_scale';
   // 底部导航栏文字显示行为：始终显示 / 仅当前页 / 始终不显示
   static const String _navLabelBehaviorKey = 'nav_label_behavior';
-  // 播放详情页底栏切分：按按钮作用拆成「切换页面」+「功能性」两条 pill
-  static const String _splitActionBarKey = 'split_player_action_bar';
   static const String _fontSourceKey = 'font_source';
   static const String _customFontPathKey = 'custom_font_path';
   static const String _artistPhotoBgKey = 'use_artist_photo_background';
@@ -31,6 +33,9 @@ class ThemeProvider extends ChangeNotifier {
   static const String _bgOpacityKey = 'background_opacity';
   // 按背景图莫奈取色开关（默认开启）
   static const String _bgMonetKey = 'use_background_monet';
+  // 文字阴影开关（默认开启，仅在启用自定义背景图片时生效）
+  static const String _textShadowKey = 'use_text_shadow';
+  static const String _textShadowBlurKey = 'text_shadow_blur';
 
   ThemeMode _themeMode = ThemeMode.system;
   bool _useDynamicColor = false;
@@ -42,12 +47,10 @@ class ThemeProvider extends ChangeNotifier {
   bool _useAmStylePlayer = false;
   Color? _manualSeedColor;
   bool _useOledBlack = false;
-  double _uiScale = 1.0;
+  double _displayScale = kDefaultDisplayScale;
   // 底部导航栏文字显示行为（默认始终不显示）
   NavigationDestinationLabelBehavior _navLabelBehavior =
       NavigationDestinationLabelBehavior.alwaysHide;
-  // 播放详情页底栏切分（默认关闭，保持单条长 pill）
-  bool _splitActionBar = false;
   // 字体来源（system / bundled / custom）
   FontSource _fontSource = FontSource.system;
   // 用户选择的字体文件路径（原生端拷贝到 filesDir 后的真实路径）
@@ -59,13 +62,18 @@ class ThemeProvider extends ChangeNotifier {
   double _artistPhotoOpacity = 0.55;
   // AM 风格播放器歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
-  // 自定义背景图片（全局界面背景）
-  bool _useBackgroundImage = false;
+  // 自定义背景图片（全局界面背景）；默认开启，未选择图片时回落到内置默认壁纸
+  bool _useBackgroundImage = true;
   String? _backgroundImagePath;
-  double _backgroundBlur = 12.0;
-  double _backgroundOpacity = 0.7;
+  double _backgroundBlur = 20.0;
+  double _backgroundOpacity = 0.4;
   // 按背景图莫奈取色（默认开启；关闭后背景图仍显示但不参与主题色）
   bool _useBackgroundMonet = true;
+  // 文字阴影（默认关闭）：给全局文字加轮廓阴影，改善背景图上的可读性。
+  // 仅在 _useBackgroundImage 为 true 时生效（见 [useTextShadowEffective]）。
+  bool _useTextShadow = false;
+  // 文字阴影磅数（阴影模糊半径，用户可调）
+  double _textShadowBlur = AppTheme.defaultTextShadowBlur;
   // 从背景图片提取的主色（运行时，作为莫奈取色种子）
   Color? _backgroundSeedColor;
 
@@ -77,9 +85,8 @@ class ThemeProvider extends ChangeNotifier {
   bool get useAmStylePlayer => _useAmStylePlayer;
   Color? get manualSeedColor => _manualSeedColor;
   bool get useOledBlack => _useOledBlack;
-  double get uiScale => _uiScale;
+  double get displayScale => _displayScale;
   NavigationDestinationLabelBehavior get navLabelBehavior => _navLabelBehavior;
-  bool get splitActionBar => _splitActionBar;
   FontSource get fontSource => _fontSource;
   String? get customFontPath => _customFontPath;
   bool get useArtistPhotoBackground => _useArtistPhotoBackground;
@@ -91,7 +98,13 @@ class ThemeProvider extends ChangeNotifier {
   double get backgroundBlur => _backgroundBlur;
   double get backgroundOpacity => _backgroundOpacity;
   bool get useBackgroundMonet => _useBackgroundMonet;
+  bool get useTextShadow => _useTextShadow;
+  double get textShadowBlur => _textShadowBlur;
   Color? get backgroundSeedColor => _backgroundSeedColor;
+
+  /// 文字阴影是否实际生效：开关本身开启 **且** 已启用自定义背景图片。
+  /// 未启用背景图时纯色主题自带足够对比度，阴影只会让文字发虚，故不生效。
+  bool get useTextShadowEffective => _useBackgroundImage && _useTextShadow;
 
   /// 当前生效的种子色优先级：
   /// 1. 启用封面动态取色且提取成功 → 歌曲封面主色（可叠加系统主题色，封面优先）
@@ -138,9 +151,8 @@ class ThemeProvider extends ChangeNotifier {
     _loadAmStylePlayer();
     _loadManualSeedColor();
     _loadOledBlack();
-    _loadUiScale();
+    _loadDisplayScale();
     _loadNavLabelBehavior();
-    _loadSplitActionBar();
     _loadFontSource();
     _loadArtistPhotoBackground();
     _loadLyricDoubleTapToJump();
@@ -205,7 +217,7 @@ class ThemeProvider extends ChangeNotifier {
       final scored = Score.score(
         colorsToPopulation,
         desired: candidateTones.length,
-        fallbackColorARGB: AppTheme.defaultSeedColor.value,
+        fallbackColorARGB: AppTheme.defaultSeedColor.toARGB32(),
       );
       if (scored.isEmpty) {
         // 评分失败降级到原 get(40) 行为
@@ -352,7 +364,7 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     if (color != null) {
-      await prefs.setInt(_manualSeedKey, color.value);
+      await prefs.setInt(_manualSeedKey, color.toARGB32());
     } else {
       await prefs.remove(_manualSeedKey);
     }
@@ -375,21 +387,26 @@ class ThemeProvider extends ChangeNotifier {
     await prefs.setBool(_oledBlackKey, enabled);
   }
 
-  /// 加载 UI 缩放倍率持久化值，默认 1.0。
-  Future<void> _loadUiScale() async {
+  /// 加载「显示大小」档位，默认 [kDefaultDisplayScale]（设备真实 dp）。
+  ///
+  /// 顺带清掉旧键 `ui_scale`：那是已删除的逐元素缩放实现留下的，值域 0.5~5.0，
+  /// 沿用会让存了 3.0 的用户拿到 131dp 宽的视口。不做值迁移，一律从 1.00 起。
+  Future<void> _loadDisplayScale() async {
     final prefs = await SharedPreferences.getInstance();
-    _uiScale = prefs.getDouble(_uiScaleKey) ?? 1.0;
+    _displayScale = (prefs.getDouble(_displayScaleKey) ?? kDefaultDisplayScale)
+        .clamp(kMinDisplayScale, kMaxDisplayScale);
     notifyListeners();
+    await prefs.remove(_legacyUiScaleKey);
   }
 
-  /// 设置 UI 缩放倍率（0.5 ~ 2.0）。
-  Future<void> setUiScale(double scale) async {
-    final clamped = scale.clamp(0.5, 2.0);
-    if (_uiScale == clamped) return;
-    _uiScale = clamped;
+  /// 设置「显示大小」档位（[kMinDisplayScale] ~ [kMaxDisplayScale]）。
+  Future<void> setDisplayScale(double scale) async {
+    final clamped = scale.clamp(kMinDisplayScale, kMaxDisplayScale);
+    if (_displayScale == clamped) return;
+    _displayScale = clamped;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_uiScaleKey, clamped);
+    await prefs.setDouble(_displayScaleKey, clamped);
   }
 
   /// 加载底部导航栏文字显示行为的持久化值，默认始终不显示。
@@ -411,25 +428,6 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_navLabelBehaviorKey, value.index);
-  }
-
-  /// 加载「播放详情页底栏切分」开关持久化值，默认关闭。
-  Future<void> _loadSplitActionBar() async {
-    final prefs = await SharedPreferences.getInstance();
-    _splitActionBar = prefs.getBool(_splitActionBarKey) ?? false;
-    notifyListeners();
-  }
-
-  /// 切换「播放详情页底栏切分」开关（MD3 / AM 风格播放页均生效）。
-  /// - 开启：底栏拆成「切换页面」+「功能性」两条 pill，全屏从长按播放列表
-  ///   拆出为功能组内的独立按钮
-  /// - 关闭：保持单条长 pill，全屏仍靠长按播放列表进入
-  Future<void> setSplitActionBar(bool enabled) async {
-    if (_splitActionBar == enabled) return;
-    _splitActionBar = enabled;
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_splitActionBarKey, enabled);
   }
 
   void toggleTheme() {
@@ -516,15 +514,18 @@ class ThemeProvider extends ChangeNotifier {
 
   // ============== 自定义背景图片 ==============
 
-  /// 加载背景图片相关持久化值（开关 / 路径 / 模糊 / 透明度 / 莫奈取色），
-  /// 默认关闭 / 莫奈取色默认开启。
+  /// 加载背景图片相关持久化值（开关 / 路径 / 模糊 / 透明度 / 莫奈取色 / 文字阴影），
+  /// 默认开启（无用户图片时用内置默认壁纸）/ 莫奈取色默认开启 / 文字阴影默认开启。
   Future<void> _loadBackgroundImage() async {
     final prefs = await SharedPreferences.getInstance();
-    _useBackgroundImage = prefs.getBool(_bgImageEnabledKey) ?? false;
+    _useBackgroundImage = prefs.getBool(_bgImageEnabledKey) ?? true;
     _backgroundImagePath = prefs.getString(_bgImagePathKey);
-    _backgroundBlur = prefs.getDouble(_bgBlurKey) ?? 12.0;
-    _backgroundOpacity = prefs.getDouble(_bgOpacityKey) ?? 0.7;
+    _backgroundBlur = prefs.getDouble(_bgBlurKey) ?? 20.0;
+    _backgroundOpacity = prefs.getDouble(_bgOpacityKey) ?? 0.4;
     _useBackgroundMonet = prefs.getBool(_bgMonetKey) ?? true;
+    _useTextShadow = prefs.getBool(_textShadowKey) ?? false;
+    _textShadowBlur =
+        prefs.getDouble(_textShadowBlurKey) ?? AppTheme.defaultTextShadowBlur;
     notifyListeners();
   }
 
@@ -545,6 +546,34 @@ class ThemeProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_bgMonetKey, enabled);
+  }
+
+  /// 切换「文字阴影」开关（默认开启）。
+  ///
+  /// 开关值独立持久化，但只在启用自定义背景图片时才实际影响渲染
+  /// （见 [useTextShadowEffective]）：关闭背景图时设置项保留用户选择，
+  /// 重新开启背景图后沿用。
+  Future<void> setUseTextShadow(bool enabled) async {
+    if (_useTextShadow == enabled) return;
+    _useTextShadow = enabled;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_textShadowKey, enabled);
+  }
+
+  /// 设置文字阴影磅数（阴影模糊半径，见 [AppTheme.textShadowsFor]）。
+  ///
+  /// 与开关一样只在启用背景图 + 阴影时影响渲染，值本身独立持久化。
+  Future<void> setTextShadowBlur(double blur) async {
+    final clamped = blur.clamp(
+      AppTheme.minTextShadowBlur,
+      AppTheme.maxTextShadowBlur,
+    );
+    if (_textShadowBlur == clamped) return;
+    _textShadowBlur = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_textShadowBlurKey, clamped);
   }
 
   /// 设置背景图片路径（原生端拷贝到 filesDir 后的真实路径）。

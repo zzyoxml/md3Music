@@ -7,6 +7,7 @@ import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../player/full_player_route.dart';
+import '../../widgets/scroll_aware_app_bar.dart';
 
 /// 封面流页横屏沉浸开关（用户请求语义）：
 /// - 长按封面流页面切换（横屏有效）；
@@ -57,7 +58,9 @@ class _CoverFlowPageState extends State<CoverFlowPage> {
         MediaQuery.orientationOf(context) == Orientation.landscape;
     return Scaffold(
       // 横屏沉浸模式：隐藏顶栏
-      appBar: isLandscape ? null : AppBar(title: const Text('封面流')),
+      appBar: isLandscape
+          ? null
+          : ScrollAwareAppBar(title: '封面流', opaque: true),
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           final songs = kugou.recommendSongs;

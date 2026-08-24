@@ -37,9 +37,6 @@ class WordRenderer {
   /// 当前行缩放，0.97（inactive）~1.0（active）。默认 inactive。
   double _scale = LyricLayout.inactiveScale;
 
-  /// 模糊淡入淡出系数：1.0=正常模糊，0.0=无模糊。
-  double _blurFade = 1.0;
-
   /// 当前绑定的 LyricLine。用于检测 line 切换并重置 alpha map。
   LyricLine? _boundLine;
 
@@ -259,7 +256,6 @@ class WordRenderer {
   void setLineState({required bool isActive, required double scale, double blurFade = 1.0, bool blurActive = true, int? activeColorValue}) {
     _isActive = isActive;
     _scale = scale;
-    _blurFade = blurActive ? blurFade : 0.0;
     _activeColorValue = activeColorValue;
   }
 

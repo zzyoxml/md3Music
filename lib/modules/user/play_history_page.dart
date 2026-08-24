@@ -28,16 +28,16 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
   List<Song> _songs = [];
   bool _isLoading = true;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadHistory();
-  }
-
   List<Song> get _displaySongs {
     final filter = PlayHistoryPage.songFilterHook;
     if (filter == null) return _songs;
     return filter('history', _songs);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadHistory();
   }
 
   Future<void> _loadHistory() async {
@@ -75,13 +75,14 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final displaySongs = _displaySongs;
     // 可选扩展：筛选/变换状态变更时重建本页（默认监听空信号，无额外开销）
     return ListenableBuilder(
       listenable: PlayHistoryPage.songFilterListenable ??
           const AlwaysStoppedAnimation<Object?>(null),
-      builder: (context, _) => Scaffold(
+      builder: (context, _) {
+        // 在 builder 内计算：筛选状态变化时重新过滤（build 外计算会被闭包捕获旧值）
+        final displaySongs = _displaySongs;
+        return Scaffold(
       appBar: AppBar(
         title: const Text('播放历史'),
         actions: [
@@ -122,7 +123,8 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
                 const MiniPlayer(),
               ],
             ),
-    ),
+        );
+      },
     );
   }
 
@@ -156,7 +158,7 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
       child: Row(
         children: [
           Text(
-            '共 ${_songs.length} 首',
+            '共 ${displaySongs.length} 首',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: cs.onSurfaceVariant),

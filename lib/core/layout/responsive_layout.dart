@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../providers/device_provider.dart';
 
 enum ScreenType { compact, medium, expanded }
 
+/// 断点值 600dp。[getScreenType] 量的是**可用宽度**（横屏手机也会越过它），
+/// [isPadLayout] 量的是**最短边**（只有真正的大屏设备才越过）。
 const double _compactBreakpoint = 600;
 const double _mediumBreakpoint = 900;
 
@@ -13,6 +18,23 @@ ScreenType getScreenType(double width) {
 
 ScreenType getScreenTypeFromContext(BuildContext context) {
   return getScreenType(MediaQuery.sizeOf(context).width);
+}
+
+/// 当前是否使用 Pad（大屏）布局：分栏播放器、网格列数偏好、居中大弹窗等。
+///
+/// [DeviceType.auto] 按**有效视口**最短边判定，而不是设备物理 dp：
+/// 「显示大小」（[DisplayScaleScope]）调大后可用逻辑区随之变小，原生同样会跌出
+/// sw600dp 资源桶、切回手机布局。两边一致才不会出现"Pad 分栏挤在手机大小的
+/// 视口里"。用户在设置里手动选了手机/平板时直接服从该选择。
+bool isPadLayout(BuildContext context) {
+  switch (context.read<DeviceProvider>().deviceType) {
+    case DeviceType.auto:
+      return MediaQuery.sizeOf(context).shortestSide >= _compactBreakpoint;
+    case DeviceType.phone:
+      return false;
+    case DeviceType.pad:
+      return true;
+  }
 }
 
 class ResponsiveLayout extends StatelessWidget {
@@ -99,6 +121,9 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
   }
 
   Widget _buildCompactLayout() {
+    // labelBehavior 由主题设置控制（NavigationBarThemeData.labelBehavior，
+    // 跟随设置页「底部导航栏文字」三档切换）。
+    final labelBehavior = Theme.of(context).navigationBarTheme.labelBehavior;
     return Scaffold(
       key: _scaffoldKey,
       appBar: widget.appBar,
@@ -107,7 +132,13 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
       bottomNavigationBar: widget.hideNavigation
           ? null
           : NavigationBar(
-              height: 56,
+              // 仅图标（alwaysHide）时高度减半紧凑显示（44）；
+              // 显示文字（始终显示/仅当前页）时用 64 紧凑高度，
+              // 比默认 80 更矮但仍能容纳 icon + label。
+              height:
+                  labelBehavior == NavigationDestinationLabelBehavior.alwaysHide
+                  ? 44
+                  : 64,
               selectedIndex: widget.selectedIndex,
               onDestinationSelected: widget.onDestinationSelected,
               destinations: widget.destinations,
@@ -127,28 +158,11 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
           Visibility(
             visible: !widget.hideNavigation,
             maintainState: true,
-            // NavigationRail 高度必须等于视口（有界高度）：它内部含 flex 子项，
-            // 若放在 SingleChildScrollView 这样的垂直滚动容器里会得到「无界高度」
-            // 约束，导致 performLayout 抛 「non-zero flex + unbounded height」异常
-            // → 整帧崩溃白屏（桌面宽屏必踩）。所以固定 High 为视口高度，
-            // NavigationRail 内部自带滚动，无需外部 ScrollView 包裹。
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                return ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: constraints.maxHeight,
-                    maxHeight: constraints.maxHeight,
-                  ),
-                  child: NavigationRail(
-                    selectedIndex: widget.selectedIndex,
-                    onDestinationSelected: widget.onDestinationSelected,
-                    destinations: widget.railDestinations,
-                    leading: widget.floatingActionButton,
-                    groupAlignment: 0.0,
-                    labelType: NavigationRailLabelType.all,
-                  ),
-                );
-              },
+            child: CompactNavigationRail(
+              selectedIndex: widget.selectedIndex,
+              onDestinationSelected: widget.onDestinationSelected,
+              destinations: widget.railDestinations,
+              leading: widget.floatingActionButton,
             ),
           ),
           Visibility(
@@ -162,6 +176,135 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
           ),
           Expanded(child: widget.mediumBody ?? widget.body),
         ],
+      ),
+    );
+  }
+}
+
+/// 紧凑侧边导航栏：仅图标（24dp），图标间距 6dp（M3 NavigationRail 内置
+/// 12dp 的一半），图标组整体垂直居中，tab 过多时可滚动。
+///
+/// 不直接用 NavigationRail 的原因：
+/// - 其 destination 间距（12dp）是私有常量，公开 API 无法调小；
+/// - 外包 SingleChildScrollView 会导致内部 Flexible+Align 收到无界高度，
+///   groupAlignment 垂直居中失效（图标堆在顶部、下方大片空白）。
+///
+/// 背景与指示器颜色读取 NavigationRailTheme（背景图模式下由
+/// app.dart 覆写为半透明 surface 透出壁纸）。
+class CompactNavigationRail extends StatelessWidget {
+  const CompactNavigationRail({
+    super.key,
+    required this.selectedIndex,
+    required this.onDestinationSelected,
+    required this.destinations,
+    this.leading,
+  });
+
+  final int selectedIndex;
+  final ValueChanged<int> onDestinationSelected;
+  final List<NavigationRailDestination> destinations;
+  final Widget? leading;
+
+  @override
+  Widget build(BuildContext context) {
+    final railTheme = NavigationRailTheme.of(context);
+    final colorScheme = Theme.of(context).colorScheme;
+
+    return Material(
+      color: railTheme.backgroundColor ?? colorScheme.surface,
+      // 左侧安全区（横屏刘海/挖孔），与原 NavigationRail 的 SafeArea 行为一致
+      child: SafeArea(
+        left: true,
+        top: false,
+        right: false,
+        bottom: false,
+        child: SizedBox(
+          // 仅容纳 24dp 图标 + 28dp 指示器胶囊（AGENTS.md §8.6）
+          width: 34,
+          child: Column(
+            children: [
+              if (leading != null) ...[leading!, const SizedBox(height: 8)],
+              Expanded(
+                // Center + SingleChildScrollView（内容小→收缩居中；内容多→撑满滚动）
+                child: Center(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (int i = 0; i < destinations.length; i++)
+                          _CompactRailDestination(
+                            selected: selectedIndex == i,
+                            icon:
+                                selectedIndex == i
+                                ? destinations[i].selectedIcon
+                                : destinations[i].icon,
+                            indicatorColor:
+                                railTheme.indicatorColor ??
+                                colorScheme.secondaryContainer,
+                            selectedIconColor:
+                                railTheme.selectedIconTheme?.color ??
+                                colorScheme.onSecondaryContainer,
+                            unselectedIconColor:
+                                railTheme.unselectedIconTheme?.color ??
+                                colorScheme.onSurfaceVariant,
+                            onTap: () => onDestinationSelected(i),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CompactRailDestination extends StatelessWidget {
+  const _CompactRailDestination({
+    required this.selected,
+    required this.icon,
+    required this.indicatorColor,
+    required this.selectedIconColor,
+    required this.unselectedIconColor,
+    required this.onTap,
+  });
+
+  final bool selected;
+  final Widget icon;
+  final Color indicatorColor;
+  final Color selectedIconColor;
+  final Color unselectedIconColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(17),
+      child: Padding(
+        // 上下各 3 → 相邻图标间距 6dp（M3 默认 12dp 的一半）
+        padding: EdgeInsets.symmetric(vertical: 3),
+        child: Container(
+          width: 28,
+          height: 28,
+          alignment: Alignment.center,
+          decoration: selected
+              ? ShapeDecoration(
+                  color: indicatorColor,
+                  shape: const StadiumBorder(),
+                )
+              : null,
+          child: IconTheme.merge(
+            data: IconThemeData(
+              size: 24,
+              color: selected ? selectedIconColor : unselectedIconColor,
+            ),
+            child: icon,
+          ),
+        ),
       ),
     );
   }

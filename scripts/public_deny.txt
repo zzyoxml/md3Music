@@ -49,6 +49,10 @@ settings_download_word_level_lyrics
 # —— 私有功能包名 ——
 md3_download_cache
 
+# —— 私有文件/类（lib/services 曾漏放 metadata_writer.dart，已迁入 lib/private/）——
+metadata_writer
+MetadataWriter
+
 # —— 中文特征短语（精确短语，避免误伤）——
 边听边存
 仅显示已缓存

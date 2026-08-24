@@ -8,6 +8,7 @@ import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../player/mv_player_page.dart';
 import 'brush_vertical_page.dart';
+import '../../widgets/scroll_aware_app_bar.dart';
 
 /// 「刷刷」页：展示 /brush 返回的推荐 feed 卡片列表。
 ///
@@ -338,8 +339,10 @@ class _BrushPageState extends State<BrushPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('刷刷'),
+      appBar: ScrollAwareAppBar(
+        title: '刷刷',
+        opaque: true,
+        scrollController: _scrollController,
         actions: [
           IconButton(
             onPressed: _openVertical,

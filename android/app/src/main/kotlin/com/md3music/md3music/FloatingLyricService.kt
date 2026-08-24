@@ -1,0 +1,914 @@
+package com.md3music.md3music
+
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
+import android.content.Intent
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.PixelFormat
+import android.graphics.RectF
+import android.graphics.Shader
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
+import android.os.Build
+import android.os.IBinder
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowManager
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.SeekBar
+import android.widget.TextView
+import androidx.core.app.NotificationCompat
+
+class FloatingLyricService : Service() {
+    private var windowManager: WindowManager? = null
+    private var rootView: LinearLayout? = null
+    private var collapsedPanel: View? = null
+    private var expandedPanel: View? = null
+    private var lyricText1: GradientTextView? = null
+    private var lyricText2: GradientTextView? = null
+    private var params: WindowManager.LayoutParams? = null
+
+    // touch/drag — vertical only
+    private var initialY = 0
+    private var initialTouchY = 0f
+    private var isDragging = false
+    private var dragStartTime = 0L
+    private var expanded = false
+    private var locked = false
+
+    // config
+    private var fontSizeSp = 18f
+    // 「显示大小」档位（Dart 侧 ThemeProvider.displayScale）。
+    // 与 fontSizeSp 分开存：± 按钮与回传 Dart 的配置始终用未缩放的基准字号，
+    // 只在 setTextSize 时乘上本系数，避免往返放大 / 撞上 12~32sp 的钳制区间。
+    private var displayScale = 1f
+    private var doubleLine = false
+    private var opacity = 80
+    private var gradientStart = 0xFF00E5FF.toInt()
+    private var gradientEnd = 0xFFFF00FF.toInt()
+    private var unplayedColor = 0xFF666666.toInt()
+    private var isPlayingFlag = false
+
+    // views
+    private var lockButton: ImageView? = null
+    private var playPauseButton: ImageView? = null
+    private var progressBar: LyricProgressBar? = null
+    private var settingsPanel: View? = null
+    private var colorPanel: View? = null
+    private var colorMode = 0
+
+    companion object {
+        const val CHANNEL_ID = "floating_lyric_channel"
+        const val NOTIFICATION_ID = 1001
+        const val ACTION_UPDATE_LYRIC = "com.md3music.md3music.UPDATE_LYRIC"
+        const val ACTION_UPDATE_TITLE = "com.md3music.md3music.UPDATE_TITLE"
+        const val ACTION_UPDATE_PROGRESS = "com.md3music.md3music.UPDATE_PROGRESS"
+        const val ACTION_SET_CONFIG = "com.md3music.md3music.SET_CONFIG"
+        const val ACTION_SET_PLAYING = "com.md3music.md3music.SET_PLAYING"
+        const val ACTION_STOP = "com.md3music.md3music.STOP_LYRIC"
+        const val ACTION_TOGGLE_LOCK = "com.md3music.md3music.TOGGLE_LOCK"
+        const val EXTRA_LYRIC = "lyric"
+        const val EXTRA_NEXT_LYRIC = "nextLyric"
+        // 当前行已唱字数（KRC 逐字）。-1 表示无逐字（LRC/纯文本），原生侧整行渐变色
+        const val EXTRA_SUNG_CHAR_COUNT = "sungCharCount"
+        const val EXTRA_TITLE = "title"
+        const val EXTRA_POSITION = "position"
+        const val EXTRA_DURATION = "duration"
+        const val EXTRA_FONT_SIZE = "fontSize"
+        const val EXTRA_DISPLAY_SCALE = "displayScale"
+        const val EXTRA_DOUBLE_LINE = "doubleLine"
+        const val EXTRA_OPACITY = "opacity"
+        const val EXTRA_LOCKED = "locked"
+        const val EXTRA_GRADIENT_START = "gradientStart"
+        const val EXTRA_GRADIENT_END = "gradientEnd"
+        const val EXTRA_UNPLAYED_COLOR = "unplayedColor"
+        const val EXTRA_IS_PLAYING = "isPlaying"
+
+        val PRESETS = listOf(
+            0xFF00E5FF.toInt() to 0xFFFF00FF.toInt(),
+            0xFFFF4081.toInt() to 0xFFFFC400.toInt(),
+            0xFF00E676.toInt() to 0xFF00B0FF.toInt(),
+            0xFFFFFFFF.toInt() to 0xFFFFFFFF.toInt()
+        )
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        createNotificationChannel()
+        startForeground(NOTIFICATION_ID, createNotification())
+        createFloatingView()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_UPDATE_LYRIC -> {
+                val lyric = intent.getStringExtra(EXTRA_LYRIC) ?: ""
+                val next = intent.getStringExtra(EXTRA_NEXT_LYRIC)
+                val sungCount = intent.getIntExtra(EXTRA_SUNG_CHAR_COUNT, -1)
+                updateLyric(lyric, next, sungCount)
+            }
+            ACTION_UPDATE_TITLE -> {}
+            ACTION_UPDATE_PROGRESS -> {
+                val pos = intent.getLongExtra(EXTRA_POSITION, 0L)
+                val dur = intent.getLongExtra(EXTRA_DURATION, 0L)
+                progressBar?.updateProgress(pos, dur)
+            }
+            ACTION_SET_CONFIG -> {
+                intent.getFloatExtra(EXTRA_FONT_SIZE, fontSizeSp).let { fontSizeSp = it }
+                intent.getFloatExtra(EXTRA_DISPLAY_SCALE, displayScale).let { displayScale = it }
+                intent.getBooleanExtra(EXTRA_DOUBLE_LINE, doubleLine).let { doubleLine = it }
+                intent.getIntExtra(EXTRA_OPACITY, opacity).let { opacity = it }
+                intent.getBooleanExtra(EXTRA_LOCKED, locked).let {
+                    if (it != locked) {
+                        locked = it
+                        applyLockState()
+                    }
+                }
+                intent.getIntExtra(EXTRA_GRADIENT_START, gradientStart).let { gradientStart = it }
+                intent.getIntExtra(EXTRA_GRADIENT_END, gradientEnd).let { gradientEnd = it }
+                intent.getIntExtra(EXTRA_UNPLAYED_COLOR, unplayedColor).let { unplayedColor = it }
+                applyConfig()
+            }
+            ACTION_SET_PLAYING -> {
+                isPlayingFlag = intent.getBooleanExtra(EXTRA_IS_PLAYING, isPlayingFlag)
+                playPauseButton?.setImageResource(
+                    if (isPlayingFlag) android.R.drawable.ic_media_pause
+                    else android.R.drawable.ic_media_play
+                )
+            }
+            ACTION_STOP -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_TOGGLE_LOCK -> {
+                setLocked(!locked)
+            }
+        }
+        return START_STICKY
+    }
+
+    private fun setLocked(value: Boolean) {
+        if (locked == value) return
+        locked = value
+        lockButton?.setImageResource(
+            if (locked) android.R.drawable.ic_lock_lock
+            else android.R.drawable.ic_lock_idle_lock
+        )
+        applyLockState()
+        sendConfigUpdate()
+        updateNotification()
+    }
+
+    /// Apply lock state: toggle click-through
+    private fun applyLockState() {
+        val wm = windowManager ?: return
+        val p = params ?: return
+        val root = rootView ?: return
+
+        if (locked) {
+            // Collapse expanded panel when locking
+            expanded = false
+            expandedPanel?.visibility = View.GONE
+
+            // Add FLAG_NOT_TOUCHABLE for click-through
+            p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            try {
+                wm.updateViewLayout(root, p)
+            } catch (_: Exception) {}
+        } else {
+            // Remove FLAG_NOT_TOUCHABLE
+            p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            try {
+                wm.updateViewLayout(root, p)
+            } catch (_: Exception) {}
+        }
+    }
+
+    // 实际下发给 TextView 的字号：基准字号 × 「显示大小」档位。
+    private fun scaledFontSizeSp(): Float = fontSizeSp * displayScale
+
+    private fun applyConfig() {
+        lyricText1?.setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledFontSizeSp())
+        lyricText2?.setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledFontSizeSp())
+        lyricText2?.visibility = if (doubleLine) View.VISIBLE else View.GONE
+
+        lyricText1?.setGradient(gradientStart, gradientEnd)
+        lyricText2?.setGradient(gradientStart, gradientEnd)
+        // 同步未唱色给文本视图（KRC 逐字二分色模式下未唱部分用此色）
+        lyricText1?.setUnplayedColor(unplayedColor)
+        lyricText2?.setUnplayedColor(unplayedColor)
+
+        // Background opacity
+        val bgAlpha = (opacity * 255 / 100).coerceIn(0, 255)
+        val bgColor = (bgAlpha shl 24) or 0x000000
+        (rootView?.background as? GradientDrawable)?.apply {
+            setColor(bgColor)
+        }
+
+        // Contrast optimization: pass opacity to text views for shadow adjustment
+        lyricText1?.setOpacityForContrast(opacity)
+        lyricText2?.setOpacityForContrast(opacity)
+
+        progressBar?.setGradient(gradientStart, gradientEnd, unplayedColor)
+        updateLyric(lyricText1?.text?.toString() ?: "", lyricText2?.text?.toString(), -1)
+    }
+
+    /// 更新悬浮窗歌词文本 + 逐字进度。
+    ///
+    /// - [sungCharCount] >= 0：KRC 逐字模式，[lyricText1] 用 clipRect 二分色
+    ///   （已唱部分渐变色 + 未唱部分灰色）
+    /// - [sungCharCount] == -1：LRC/纯文本，[lyricText1] 整行渐变色（保持原行为）
+    /// - [lyricText2]（下一行预览）始终整行渐变色，不参与逐字
+    private fun updateLyric(lyric: String, nextLyric: String?, sungCharCount: Int = -1) {
+        val safeLyric = lyric.ifEmpty { "歌词加载中..." }
+        lyricText1?.text = safeLyric
+        lyricText1?.setSungCharCount(sungCharCount)
+        if (doubleLine) {
+            lyricText2?.text = nextLyric ?: ""
+            lyricText2?.visibility = if (nextLyric.isNullOrEmpty()) View.INVISIBLE else View.VISIBLE
+        } else {
+            lyricText2?.visibility = View.GONE
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                CHANNEL_ID,
+                "桌面歌词",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "桌面歌词悬浮窗"
+                setShowBadge(false)
+            }
+            val manager = getSystemService(NotificationManager::class.java)
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun createNotification(): Notification {
+        val stopIntent = Intent(this, FloatingLyricService::class.java).apply {
+            action = ACTION_STOP
+        }
+        val stopPendingIntent = PendingIntent.getService(
+            this, 0, stopIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val lockIntent = Intent(this, FloatingLyricService::class.java).apply {
+            action = ACTION_TOGGLE_LOCK
+        }
+        val lockPendingIntent = PendingIntent.getService(
+            this, 1, lockIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val lockIcon = if (locked) android.R.drawable.ic_lock_lock
+                       else android.R.drawable.ic_lock_idle_lock
+        val lockText = if (locked) "解锁歌词" else "锁定歌词"
+
+        return NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("MD3Music 桌面歌词")
+            .setContentText(if (locked) "已锁定 · 点击穿透" else "已开启 · 可拖动")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setOngoing(true)
+            .addAction(lockIcon, lockText, lockPendingIntent)
+            .addAction(android.R.drawable.ic_media_pause, "关闭", stopPendingIntent)
+            .build()
+    }
+
+    /// Update notification when lock state changes
+    private fun updateNotification() {
+        val nm = getSystemService(NotificationManager::class.java)
+        nm?.notify(NOTIFICATION_ID, createNotification())
+    }
+
+    private fun dp(v: Int): Int =
+        (v * resources.displayMetrics.density).toInt()
+
+    private fun sp(v: Float): Float =
+        v * resources.displayMetrics.scaledDensity
+
+    private fun createFloatingView() {
+        windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+
+        rootView = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            background = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat()
+                setColor(0xCC000000.toInt())
+            }
+            setPadding(dp(20), dp(12), dp(20), dp(12))
+            gravity = Gravity.CENTER_HORIZONTAL
+            setOnClickListener { toggleExpanded() }
+        }
+        val root = rootView as LinearLayout
+
+        // ===== collapsed panel: lyric only =====
+        collapsedPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+        }
+        val col = collapsedPanel as LinearLayout
+
+        lyricText1 = GradientTextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledFontSizeSp())
+            gravity = Gravity.CENTER
+            maxLines = 1
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(8), dp(6), dp(8), dp(4))
+        }
+        lyricText2 = GradientTextView(this).apply {
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, scaledFontSizeSp())
+            gravity = Gravity.CENTER
+            maxLines = 1
+            setPadding(dp(8), dp(2), dp(8), dp(6))
+            visibility = View.GONE
+        }
+        col.addView(lyricText1)
+        col.addView(lyricText2)
+        root.addView(col)
+
+        // ===== expanded panel =====
+        expandedPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            visibility = View.GONE
+        }
+        val exp = expandedPanel as LinearLayout
+
+        val buttonRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        val iconSize = dp(20)
+        val iconPad = dp(10)
+        lockButton = makeIconButton(android.R.drawable.ic_lock_idle_lock) { setLocked(!locked) }
+        val prevButton = makeIconButton(android.R.drawable.ic_media_previous) { sendAction("previous") }
+        playPauseButton = makeIconButton(android.R.drawable.ic_media_play) { sendAction("play") }
+        val nextButton = makeIconButton(android.R.drawable.ic_media_next) { sendAction("next") }
+        val settingsButton = makeIconButton(android.R.drawable.ic_menu_preferences) { toggleSettingsPanel() }
+
+        listOf(lockButton, prevButton, playPauseButton, nextButton, settingsButton).forEach {
+            val lp = LinearLayout.LayoutParams(iconSize + iconPad * 2, iconSize + iconPad * 2)
+            lp.setMargins(dp(6), 0, dp(6), 0)
+            buttonRow.addView(it, lp)
+        }
+        exp.addView(buttonRow)
+
+        progressBar = LyricProgressBar(this).apply {
+            setGradient(gradientStart, gradientEnd, unplayedColor)
+        }
+        val pbLp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(4))
+        pbLp.setMargins(dp(12), 0, dp(12), dp(8))
+        progressBar?.layoutParams = pbLp
+        exp.addView(progressBar)
+
+        settingsPanel = createSettingsPanel()
+        exp.addView(settingsPanel)
+
+        root.addView(expandedPanel)
+
+        setupTouchListener(root)
+
+        val layoutType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        } else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+
+        params = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            layoutType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            // Centered horizontally, vertical position adjustable
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            x = 0  // Always centered: X locked to 0
+            y = dp(80)
+        }
+
+        windowManager?.addView(rootView, params)
+    }
+
+    private fun toggleExpanded() {
+        if (isDragging) return
+        if (locked) return  // Can't expand when locked
+        expanded = !expanded
+        expandedPanel?.visibility = if (expanded) View.VISIBLE else View.GONE
+    }
+
+    private fun toggleSettingsPanel() {
+        settingsPanel?.visibility = if (settingsPanel?.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+    }
+
+    private fun createSettingsPanel(): View {
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            visibility = View.GONE
+        }
+
+        val modeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+        }
+        val presetBtn = makeTextButton("预设配色") { switchColorMode(0) }
+        val customBtn = makeTextButton("自调颜色") { switchColorMode(1) }
+        modeRow.addView(presetBtn)
+        modeRow.addView(customBtn)
+        root.addView(modeRow)
+
+        val presetRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(8), 0, dp(8))
+        }
+        PRESETS.forEach { (start, end) ->
+            val v = View(this).apply {
+                val size = dp(32)
+                layoutParams = LinearLayout.LayoutParams(size, size).apply {
+                    setMargins(dp(6), 0, dp(6), 0)
+                }
+                background = GradientDrawable().apply {
+                    cornerRadius = dp(6).toFloat()
+                    setColor(start)
+                    val g = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(start, end))
+                    g.cornerRadius = dp(6).toFloat()
+                    background = g
+                }
+                setOnClickListener {
+                    gradientStart = start
+                    gradientEnd = end
+                    sendConfigUpdate()
+                    applyConfig()
+                }
+            }
+            presetRow.addView(v)
+        }
+        root.addView(presetRow)
+
+        colorPanel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8), 0, dp(8))
+            visibility = View.GONE
+        }
+        val cp = colorPanel as LinearLayout
+
+        val sungRow = makeColorSeekRow("已唱") { color ->
+            gradientStart = color
+            gradientEnd = color
+            sendConfigUpdate()
+            applyConfig()
+        }
+        val unsungRow = makeColorSeekRow("未唱") { color ->
+            unplayedColor = color
+            sendConfigUpdate()
+            applyConfig()
+        }
+        cp.addView(sungRow)
+        cp.addView(unsungRow)
+        root.addView(cp)
+
+        // Opacity slider
+        val opacityRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        val opacityLabel = TextView(this).apply {
+            text = "透明度"
+            setTextColor(0xFFCCCCCC.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            layoutParams = LinearLayout.LayoutParams(dp(50), ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        val opacitySeek = SeekBar(this).apply {
+            max = 100
+            progress = opacity
+            progressDrawable = GradientDrawable().apply {
+                setColor(0xFF888888.toInt())
+                cornerRadius = dp(2).toFloat()
+            }
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        opacity = progress
+                        sendConfigUpdate()
+                        applyConfig()
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        opacityRow.addView(opacityLabel)
+        opacityRow.addView(opacitySeek)
+        root.addView(opacityRow)
+
+        // Font size + double line
+        val bottomRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, dp(6), 0, 0)
+        }
+        bottomRow.addView(makeTextButton("A-") {
+            fontSizeSp = (fontSizeSp - 2f).coerceAtLeast(12f)
+            sendConfigUpdate()
+            applyConfig()
+        })
+        bottomRow.addView(makeTextButton("A+") {
+            fontSizeSp = (fontSizeSp + 2f).coerceAtMost(32f)
+            sendConfigUpdate()
+            applyConfig()
+        })
+        val doubleBtn = makeTextButton(if (doubleLine) "单行" else "双行") {
+            doubleLine = !doubleLine
+            (it as TextView).text = if (doubleLine) "单行" else "双行"
+            sendConfigUpdate()
+            applyConfig()
+        }
+        bottomRow.addView(doubleBtn)
+        root.addView(bottomRow)
+
+        return root
+    }
+
+    private fun switchColorMode(mode: Int) {
+        colorMode = mode
+        colorPanel?.visibility = if (mode == 1) View.VISIBLE else View.GONE
+    }
+
+    private fun makeColorSeekRow(label: String, onColor: (Int) -> Unit): LinearLayout {
+        val row = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+        }
+        val tv = TextView(this).apply {
+            text = label
+            setTextColor(0xFFCCCCCC.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            layoutParams = LinearLayout.LayoutParams(dp(50), ViewGroup.LayoutParams.WRAP_CONTENT)
+        }
+        val seek = SeekBar(this).apply {
+            max = 360
+            progress = 180
+            val rainbow = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, intArrayOf(
+                Color.RED, Color.YELLOW, Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED
+            ))
+            rainbow.cornerRadius = dp(2).toFloat()
+            progressDrawable = rainbow
+            layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    if (fromUser) {
+                        val hsv = floatArrayOf(progress.toFloat(), 1f, 1f)
+                        onColor(Color.HSVToColor(hsv))
+                    }
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            })
+        }
+        row.addView(tv)
+        row.addView(seek)
+        return row
+    }
+
+    private fun makeTextButton(text: String, onClick: (View) -> Unit): TextView {
+        return TextView(this).apply {
+            this.text = text
+            setTextColor(0xFFFFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
+            gravity = Gravity.CENTER
+            setPadding(dp(14), dp(8), dp(14), dp(8))
+            val gd = GradientDrawable().apply {
+                cornerRadius = dp(16).toFloat()
+                setColor(0x33FFFFFF)
+                setStroke(1, android.content.res.ColorStateList.valueOf(0x55FFFFFF))
+            }
+            background = gd
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(dp(6), 0, dp(6), 0)
+            layoutParams = lp
+            setOnClickListener { onClick(this) }
+        }
+    }
+
+    private fun makeIconButton(resId: Int, onClick: () -> Unit): ImageView {
+        return ImageView(this).apply {
+            setImageResource(resId)
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            setColorFilter(0xFFFFFFFF.toInt())
+            setOnClickListener { onClick() }
+        }
+    }
+
+    private fun sendAction(action: String) {
+        val engine = io.flutter.embedding.engine.FlutterEngineCache.getInstance().get("md3music_engine")
+        if (engine != null) {
+            io.flutter.plugin.common.MethodChannel(
+                engine.dartExecutor.binaryMessenger,
+                "com.md3music.md3music/floating_lyric"
+            ).invokeMethod("desktopLyricAction", action)
+        } else {
+            MainActivity.sendDesktopLyricAction(action)
+        }
+    }
+
+    private fun sendConfigUpdate() {
+        val engine = io.flutter.embedding.engine.FlutterEngineCache.getInstance().get("md3music_engine")
+        val args = hashMapOf(
+            "fontSize" to fontSizeSp,
+            "doubleLine" to doubleLine,
+            "opacity" to opacity,
+            "locked" to locked,
+            "gradientStart" to gradientStart,
+            "gradientEnd" to gradientEnd,
+            "unplayedColor" to unplayedColor
+        )
+        if (engine != null) {
+            io.flutter.plugin.common.MethodChannel(
+                engine.dartExecutor.binaryMessenger,
+                "com.md3music.md3music/floating_lyric"
+            ).invokeMethod("desktopLyricConfigChanged", args)
+        }
+    }
+
+    /// Touch listener: vertical-only drag (X locked at center)
+    private fun setupTouchListener(view: View) {
+        view.setOnTouchListener { _, event ->
+            if (locked) return@setOnTouchListener false
+
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    initialY = params?.y ?: 0
+                    initialTouchY = event.rawY
+                    isDragging = false
+                    dragStartTime = System.currentTimeMillis()
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dy = event.rawY - initialTouchY
+                    if (Math.abs(dy) > 10) {
+                        isDragging = true
+                    }
+                    if (isDragging) {
+                        // Only move vertically — X stays at 0 (centered)
+                        params?.y = initialY + dy.toInt()
+                        windowManager?.updateViewLayout(rootView, params)
+                    }
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    if (!isDragging && System.currentTimeMillis() - dragStartTime < 300) {
+                        view.performClick()
+                    }
+                    isDragging = false
+                    true
+                }
+                else -> false
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        rootView?.let {
+            try {
+                windowManager?.removeView(it)
+            } catch (_: Exception) {}
+        }
+    }
+}
+
+/// Gradient text view with contrast optimization for low opacity
+///
+/// 逐字二分色支持（KRC）：
+/// - [sungCharCount] >= 0：当前行有 KRC 字级时间戳，onDraw 中先画整行灰色（未唱色），
+///   再 clipRect 已唱宽度画渐变色，实现"已唱渐变 / 未唱灰"的二分色效果
+/// - [sungCharCount] == -1：LRC/纯文本，整行渐变色（保持原行为）
+class GradientTextView(context: Context) : TextView(context) {
+    private var startColor = 0xFF00E5FF.toInt()
+    private var endColor = 0xFFFF00FF.toInt()
+    private var bgOpacity = 80
+    // 未唱色（灰色），用于逐字二分色模式下绘制未唱部分
+    private var unplayedColor = 0xFF666666.toInt()
+    // 当前行已唱字数；-1 表示无逐字（整行渐变色）
+    private var sungCharCount = -1
+
+    // P0: 缓存 LinearGradient shader，避免 onDraw 每帧新建对象引发 GC 卡顿。
+    // shader 只与颜色和宽度相关，仅在它们变化时重建
+    private var gradientShader: LinearGradient? = null
+    private var shaderWidth = 0f
+    private var shaderStartColor = 0
+    private var shaderEndColor = 0
+
+    init {
+        setTextColor(Color.WHITE)
+    }
+
+    fun setGradient(start: Int, end: Int) {
+        if (startColor != start || endColor != end) {
+            startColor = start
+            endColor = end
+            // 使 shader 缓存失效，下次 onDraw 重建
+            gradientShader = null
+            invalidate()
+        }
+    }
+
+    fun setUnplayedColor(color: Int) {
+        unplayedColor = color
+        invalidate()
+    }
+
+    fun setOpacityForContrast(opacity: Int) {
+        bgOpacity = opacity
+        invalidate()
+    }
+
+    /// 获取（按需重建）整行渐变 shader。宽度未变化时复用上一帧实例
+    private fun ensureGradientShader(): LinearGradient? {
+        if (width <= 0) return null
+        if (gradientShader == null ||
+            shaderWidth != width.toFloat() ||
+            shaderStartColor != startColor ||
+            shaderEndColor != endColor
+        ) {
+            shaderWidth = width.toFloat()
+            shaderStartColor = startColor
+            shaderEndColor = endColor
+            gradientShader = LinearGradient(
+                0f, 0f, shaderWidth, 0f,
+                startColor, endColor, Shader.TileMode.CLAMP
+            )
+        }
+        return gradientShader
+    }
+
+    /// 设置已唱字数（KRC 逐字模式）。
+    /// - count >= 0：启用逐字二分色
+    /// - count == -1：禁用逐字，整行渐变色
+    fun setSungCharCount(count: Int) {
+        if (sungCharCount != count) {
+            sungCharCount = count
+            invalidate()
+        }
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        val width = measuredWidth.toFloat()
+
+        // Contrast optimization: add dark shadow/stroke when background opacity is low
+        // This ensures text remains readable even on light backgrounds
+        val shadowEnabled: Boolean
+        val shadowRadius: Float
+        val shadowColor: Int
+
+        if (bgOpacity < 30) {
+            // Very transparent background — strong shadow for readability
+            shadowEnabled = true
+            shadowRadius = 4f * resources.displayMetrics.density
+            shadowColor = 0xCC000000.toInt()
+        } else if (bgOpacity < 60) {
+            // Semi-transparent — moderate shadow
+            shadowEnabled = true
+            shadowRadius = 2.5f * resources.displayMetrics.density
+            shadowColor = 0x99000000.toInt()
+        } else {
+            // Opaque enough — subtle shadow for depth
+            shadowEnabled = true
+            shadowRadius = 1.5f * resources.displayMetrics.density
+            shadowColor = 0x66000000.toInt()
+        }
+
+        if (shadowEnabled) {
+            paint.setShadowLayer(shadowRadius, 0f, 1f * resources.displayMetrics.density, shadowColor)
+        } else {
+            paint.clearShadowLayer()
+        }
+
+        val text = text?.toString() ?: ""
+        val enableKrcMode = sungCharCount >= 0 && text.isNotEmpty()
+
+        if (enableKrcMode) {
+            // KRC 逐字二分色：先画整行灰色（未唱色），再 clipRect 已唱宽度画渐变色
+            // 1. 计算已唱像素宽度（用 paint 测量前 sungCharCount 个字符）
+            val safeCount = sungCharCount.coerceIn(0, text.length)
+            val sungWidth = if (safeCount > 0) {
+                paint.measureText(text, 0, safeCount)
+            } else 0f
+
+            // 2. 先画整行灰色（未唱色）
+            //    注意：TextView.onDraw 会用 currentTextColor 覆盖 paint.color，
+            //    所以必须用 setTextColor 切换，不能直接设 paint.color
+            val savedTextColor = currentTextColor
+            setTextColor(unplayedColor)
+            paint.shader = null
+            super.onDraw(canvas)
+
+            // 3. clipRect 已唱宽度，画渐变色覆盖已唱部分
+            //    shader 优先于 color，渐变色会盖住灰色
+            if (sungWidth > 0 && width > 0) {
+                canvas.save()
+                canvas.clipRect(0f, 0f, sungWidth, height.toFloat())
+                // P0: 复用缓存的 shader，避免每帧新建 LinearGradient
+                paint.shader = ensureGradientShader()
+                // 已唱部分不要 shadow（避免双重 shadow），清掉再画
+                paint.clearShadowLayer()
+                super.onDraw(canvas)
+                canvas.restore()
+            }
+
+            // 恢复 textColor（下次 onDraw 用）
+            setTextColor(savedTextColor)
+        } else {
+            // LRC/纯文本：整行渐变色（原行为）
+            if (width > 0) {
+                // P0: 复用缓存的 shader，避免每帧新建 LinearGradient
+                paint.shader = ensureGradientShader()
+            }
+            super.onDraw(canvas)
+        }
+
+        // Reset shadow after draw to avoid affecting other draws
+        paint.clearShadowLayer()
+    }
+}
+
+/// Progress bar: gradient played + unplayed color
+class LyricProgressBar(context: Context) : View(context) {
+    private var position = 0L
+    private var duration = 0L
+    private var gradientStart = 0xFF00E5FF.toInt()
+    private var gradientEnd = 0xFFFF00FF.toInt()
+    private var unplayedColor = 0xFF666666.toInt()
+    private val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val playedPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val unplayedPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val barHeight = 6f
+
+    fun updateProgress(pos: Long, dur: Long) {
+        position = pos
+        duration = dur
+        invalidate()
+    }
+
+    fun setGradient(start: Int, end: Int, unplayed: Int) {
+        gradientStart = start
+        gradientEnd = end
+        unplayedColor = unplayed
+        invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (w <= 0 || h <= 0) return
+        val cy = h / 2f
+        val radius = barHeight / 2f
+        val rect = RectF(0f, cy - radius, w, cy + radius)
+
+        bgPaint.color = unplayedColor
+        canvas.drawRoundRect(rect, radius, radius, bgPaint)
+
+        if (duration <= 0) return
+        val ratio = (position.toFloat() / duration.toFloat()).coerceIn(0f, 1f)
+        val playedWidth = w * ratio
+        if (playedWidth > 0) {
+            playedPaint.shader = LinearGradient(
+                0f, 0f, playedWidth, 0f,
+                gradientStart, gradientEnd, Shader.TileMode.CLAMP
+            )
+            val playedRect = RectF(0f, cy - radius, playedWidth, cy + radius)
+            canvas.drawRoundRect(playedRect, radius, radius, playedPaint)
+        }
+    }
+
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val w = MeasureSpec.getSize(widthMeasureSpec)
+        val h = (resources.displayMetrics.density * 6).toInt()
+        setMeasuredDimension(w, h)
+    }
+}

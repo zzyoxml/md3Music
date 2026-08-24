@@ -3,7 +3,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// 设备类型选择模式。
 ///
-/// - [auto]：根据屏幕最短边自动检测（>= 600dp → Pad）
+/// - [auto]：按有效视口最短边自动判定（见 `core/layout/responsive_layout.dart`
+///   的 `isPadLayout`，>= 600dp → Pad）
 /// - [phone]：强制手机模式
 /// - [pad]：强制 Pad 模式
 enum DeviceType { auto, phone, pad }
@@ -15,22 +16,10 @@ class DeviceProvider extends ChangeNotifier {
 
   DeviceType get deviceType => _deviceType;
 
-  /// 实际生效的是否为 Pad 设备。
-  ///
-  /// [auto] 模式下根据屏幕最短边自动判断，
-  /// [phone]/[pad] 模式下直接返回对应值。
-  bool get isPad {
-    switch (_deviceType) {
-      case DeviceType.auto:
-        return _autoDetect();
-      case DeviceType.phone:
-        return false;
-      case DeviceType.pad:
-        return true;
-    }
-  }
-
   /// 自动检测：物理屏幕最短边 >= 600dp → Pad。
+  ///
+  /// 只用于设置页展示"自动检测到的设备类型"。**布局判定不要用它** ——
+  /// 布局要跟随「显示大小」后的有效视口，走 `isPadLayout(context)`。
   bool _autoDetect() {
     final view = WidgetsBinding.instance.platformDispatcher.views.first;
     final size = view.physicalSize / view.devicePixelRatio;

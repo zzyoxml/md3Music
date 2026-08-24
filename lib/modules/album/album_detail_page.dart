@@ -9,6 +9,7 @@ import '../../data/models/song.dart';
 import '../../data/repositories/collected_playlist_store.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/playlist_comments_view.dart';
@@ -420,6 +421,8 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final useBackgroundImage =
+        context.watch<ThemeProvider>().useBackgroundImage;
     // 字段级 fallback：API 返回的 albumDetail 优先，但其 artworkUri 为 null 时
     // 保留传入的 widget.album.artworkUri（即 song.artworkUri），避免丢失初始封面
     final apiAlbum = _albumDetail?.toAlbum();
@@ -444,12 +447,17 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                           SliverAppBar(
                             expandedHeight: 280,
                             pinned: true,
+                            // pinned 后顶栏背景色：从透明渐变；开启壁纸时渐变到半透明
+                            // 背景图模式：顶栏恒透明（上划列表不压暗壁纸）；
+                            // 非背景图：上划渐变到 surface（遮住列表不穿透）
                             backgroundColor: Color.lerp(
-                              Colors.transparent,
-                              colorScheme.surface,
-                              (_scrollOffset - (280 - kToolbarHeight))
-                                  .clamp(0.0, 60.0) / 60,
-                            )!,
+                          Colors.transparent,
+                          useBackgroundImage
+                              ? colorScheme.surface.withValues(alpha: 0.75)
+                              : colorScheme.surface,
+                          (_scrollOffset - (280 - kToolbarHeight))
+                              .clamp(0.0, 60.0) / 60,
+                        )!,
                             surfaceTintColor: Colors.transparent,
                             scrolledUnderElevation: 0,
                             actions: [
@@ -544,7 +552,12 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                     begin: Alignment.topCenter,
                                     end: Alignment.bottomCenter,
                                     colors: [
-                                      colorScheme.primaryContainer,
+                                      // 开启壁纸时主题色渐变半透明叠加在壁纸上，
+                                      // 渐变可见且壁纸透出；未开启时实色渐变
+                                      useBackgroundImage
+                                          ? colorScheme.primaryContainer
+                                              .withValues(alpha: 0.35)
+                                          : colorScheme.primaryContainer,
                                       // 底部渐变到透明：启用全局背景图（页面背景透明）时，
                                       // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
                                       colorScheme.surface.withValues(alpha: 0),

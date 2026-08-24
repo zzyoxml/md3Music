@@ -55,8 +55,6 @@ const _legacyQualityMap = <String, String>{
 };
 
 class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
-  // —— 播放链路可选扩展点（默认关闭）——
-  // 由私有构建（lib/private）注入实现：播放前解析本地已持久化的音频/封面、
   // 播放源开始/停止时的旁路回调。公开构建不注入，均为空操作。
   static Future<String?> Function(String hash, String quality)?
       resolveLocalAudioPath;
@@ -80,8 +78,6 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   double _speed = 1.0;
   bool _isResolvingUrl = false;
   String? _resolveError;
-  // 当前歌曲的本地封面路径（由可选扩展解析后设置，供 MediaSession 断网兜底）
-  String? _localArtworkPath;
   AudioQuality _audioQuality = AudioQuality.standard;
   // 当前在线歌曲实际播放的音质标签（降级后可能与用户设置不同）。
   // 每次成功获取播放链接时由 result.quality 更新；切歌或切换音质时重置。
@@ -241,13 +237,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _audioService = audioServiceModule;
       _audioInitialized = true;
       await _audioService.init();
-      // 应用持久化的音频焦点配置（忽略开关 + 中断处理策略）
-      final repo = SettingsRepository();
-      _audioService.setIgnoreAudioFocus(await repo.getIgnoreAudioFocus());
-      _audioService.setInterruptionMode(
-          await repo.getAudioFocusInterruptionMode());
       _initStreams();
       await _loadDefaultQuality();
+      await _syncIgnoreAudioFocus();
       // 恢复持久化的应用内音量（重启后保留）
       await _restoreVolume();
       // 恢复上次播放状态
@@ -288,6 +280,25 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       );
       notifyListeners();
     } catch (e) {}
+  }
+
+  /// 把「忽略音频焦点」设置同步到 AudioService，使播放器中断处理即时生效。
+  Future<void> _syncIgnoreAudioFocus() async {
+    try {
+      final ignore = await SettingsRepository().getIgnoreAudioFocus();
+      // ignore: avoid_dynamic_calls
+      _audioService?.ignoreAudioFocus = ignore;
+    } catch (_) {}
+  }
+
+  /// 设置「忽略音频焦点」开关：持久化 + 即时同步到播放器中断处理。
+  /// 通过 AudioService 的重激活让系统立即按新开关评估中断派发，无需重启。
+  Future<void> setIgnoreAudioFocus(bool value) async {
+    try {
+      await SettingsRepository().setIgnoreAudioFocus(value);
+      // ignore: avoid_dynamic_calls
+      await _audioService?.setIgnoreAudioFocus(value);
+    } catch (_) {}
   }
 
   Future<dynamic> _loadAudioService() async {
@@ -709,11 +720,6 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         _currentSong = resolvedSong;
         _playlist = [resolvedSong];
         _isResolvingUrl = false;
-        // 可选扩展：解析本地封面路径（供 MediaSession 断网兜底）
-        final localArtworkResolver = PlayerProvider.resolveLocalArtworkPath;
-        _localArtworkPath = localArtworkResolver != null
-            ? await localArtworkResolver(song.id)
-            : null;
         _saveState();
         notifyListeners();
 
@@ -724,9 +730,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
         return;
       }
-      _localArtworkPath = null;
 
-      // 确保 Node.js 本地代理服务器已启动
+      // 确保本地 API 服务器已启动
       await _ensureApiServerReady();
 
       final apiClient = KugouApiClient();
@@ -895,18 +900,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         _currentSong = resolvedSong;
         _playlist[_currentIndex] = resolvedSong;
         _isResolvingUrl = false;
-        // 可选扩展：解析本地封面路径（供 MediaSession 断网兜底）
-        final localArtworkResolver = PlayerProvider.resolveLocalArtworkPath;
-        _localArtworkPath = localArtworkResolver != null
-            ? await localArtworkResolver(_currentSong!.id)
-            : null;
         notifyListeners();
 
         if (_audioService != null) {
           await _setUrlAndPlay(fileUri);
         }
       } else {
-        _localArtworkPath = null;
         await _ensureApiServerReady();
         final apiClient = KugouApiClient();
         final result = await apiClient.getSongUrlWithFallback(
@@ -1072,10 +1071,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   /// 云盘封面内嵌在音频文件中（API 不返回封面 URL），播放后异步提取。
   ///
-  /// 从音频 URL 下载头部字节解析内嵌封面，缓存为本地图片并回填
-  /// [_currentSong] / [_playlist] 的 artworkUri（file:// 形式），
-  /// 使 App 端播放页能显示与 DLNA 一致的封面。
-  /// 失败静默（封面缺失不阻塞播放）。
+  /// 本地持久化封面提取扩展点：公开版本无实现（保持调用方兼容）。
   Future<void> _extractCloudArtwork(Song song, String audioUrl) async {
     try {
       final extract = PlayerProvider.extractEmbeddedArtwork;
@@ -1232,14 +1228,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         LyriconProviderService.instance.seekTo(position.inMilliseconds);
       } catch (_) {}
     }
+    // seek 后立即同步通知/小组件进度（频率天然低），并重置节流时间戳，
+    // 使新位置立即反映到媒体通知进度条。
+    _lastNotificationUpdate = null;
+    _updateNotification();
   }
 
   Future<bool> _resolveAndPlayCurrentSong({Duration? seekTo, bool play = true}) async {
     if (_currentSong == null) return false;
-
-    // 切歌时先清除上一首的缓存封面路径，避免新歌曲通知栏/MediaSession 残留旧封面。
-    // 仅在缓存命中时重新设置；未命中时保持 null，_updateNotification 会回退到 song.artworkUri。
-    _localArtworkPath = null;
 
     if (_currentSong!.isOnline) {
       // 可选扩展：播放前解析本地已持久化的音频（默认关闭）
@@ -1252,11 +1248,6 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       if (cachedPath != null) {
         // 命中本地已持久化音频，直接播放本地文件
         _actualPlayingQuality = _audioQuality.value;
-        // 可选扩展：解析本地封面路径（供 MediaSession 断网兜底）
-        final localArtworkResolver = PlayerProvider.resolveLocalArtworkPath;
-        _localArtworkPath = localArtworkResolver != null
-            ? await localArtworkResolver(song.id)
-            : null;
         await _setUrlAndPlay(
           Uri.file(cachedPath).toString(),
           seekTo: seekTo,
@@ -1446,8 +1437,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       final ok = await _resolveAndPlayCurrentSong(play: autoPlay);
       if (ok) {
-        // 切歌后刷新通知栏：_resolveAndPlayCurrentSong 可能更新了 _localArtworkPath，
-        // 投屏场景下 play=false 不会触发 playingStream 回调刷新通知，
+        // 切歌后刷新通知栏：投屏场景下 play=false 不会触发 playingStream 回调刷新通知，
         // 需要在此显式刷新，避免 MediaSession 封面停留在上一首。
         _updateNotification();
         notifyListeners();
@@ -1998,8 +1988,13 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     // playingStream(false) 触发过最终状态通知，之后无需再更新。
     if (!_isPlaying) return;
     final now = DateTime.now();
+    // P0: 播放中通知刷新降到 30s 一次（原 1s/次）。
+    // 原因：PlaybackStateCompat 传入 STATE_PLAYING + position 后，系统会基于
+    // elapsed 时间自动推进通知进度条，无需每秒上报。原每秒 enqueue 重建通知
+    // 会触发 SystemUI 高频刷新媒体卡片（魅族等 ROM 实测极度卡顿）。
+    // 30s 一次仅作基线校正；切歌/暂停/seek 时由对应事件单独触发更新。
     if (_lastNotificationUpdate != null &&
-        now.difference(_lastNotificationUpdate!).inSeconds < 1) {
+        now.difference(_lastNotificationUpdate!).inSeconds < 30) {
       return;
     }
     _lastNotificationUpdate = now;
@@ -2053,11 +2048,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         isFavorited = ctx.read<FavoritesProvider>().isFavorite(song.id);
       }
     } catch (_) {}
-    // 本地封面兜底：命中时 artUrl 用本地 file:// 路径，避免断网时 MediaSession 无封面
-    // 仅对在线歌曲生效，本地歌曲使用自身的 artworkUri，避免上一首本地封面残留
-    final effectiveArtUrl = (song.isOnline && _localArtworkPath != null)
-        ? Uri.file(_localArtworkPath!).toString()
-        : song.artworkUri;
+    final effectiveArtUrl = song.artworkUri;
     MediaNotificationService.updateNotification(
       // 使用 displayName 剥离 .mp3 等扩展名，与 _createAudioSource 行为保持一致
       title: song.displayName,
@@ -2272,10 +2263,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           if (ctx != null) {
             try {
               final kugou = ctx.read<KugouProvider>();
-              // 本地歌曲传空 hash + "歌名 艺术家" 关键词搜索
-              final lyricHash = song.isOnline ? song.id : '';
-              // 与播放器页面 full_player 的搜索词保持一致（歌名+歌手），
+              // 本地歌曲传空 hash + "歌名 艺术家" 关键词搜索；搜索词与播放器页面 full_player 保持一致，
               // 确保 Lyricon 推送与播放器页面命中同一版本歌词。
+              final lyricHash = song.isOnline ? song.id : '';
               final searchName = song.artist != '未知艺术家'
                   ? '${song.title} ${song.artist}'
                   : song.title;

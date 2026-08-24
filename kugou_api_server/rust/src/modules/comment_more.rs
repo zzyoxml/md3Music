@@ -1,5 +1,6 @@
-//! comment 扩展系列：album / count / floor / music_classify / music_hotword / playlist
-//! 对应 JS module/{comment_album,comment_count,comment_floor,comment_music_classify,comment_music_hotword,comment_playlist}.js
+//! comment 扩展系列：album / count / floor / music_classify / music_hotword /
+//! music_topliked / playlist
+//! 对应 JS module/{comment_album,comment_count,comment_floor,comment_music_classify,comment_music_hotword,comment_music_topliked,comment_playlist}.js
 
 use crate::modules::{forward, q_num, q_str, Ctx};
 use crate::request::ModuleResponse;
@@ -55,6 +56,10 @@ fn q_has(q: &Value, key: &str) -> bool {
 }
 
 /// comment_floor.js → /comment/floor（楼层评论）。
+///
+/// 走 replylist（按时间倒序）而非 hot_replylist（按点赞降序）：楼中楼是对话，
+/// 需要时间顺序；且 hot_replylist 分页不可靠，同一 id 会在多个非相邻页重复
+/// 出现并漏掉部分回复，返回的 id 集合还随 pagesize 变化。
 pub fn handle_floor(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
     let resource_type = {
         let a = q_str(q, "resource_type", "");
@@ -101,9 +106,9 @@ pub fn handle_floor(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleRespon
     }
 
     let url = if use_service_endpoint {
-        "/m.comment.service/v1/hot_replylist"
+        "/m.comment.service/v1/replylist"
     } else {
-        "/mcomment/v1/hot_replylist"
+        "/mcomment/v1/replylist"
     };
     forward(
         q, ctx, "POST", url, None,
@@ -143,6 +148,34 @@ pub fn handle_music_hotword(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, Modu
     });
     forward(
         q, ctx, "POST", "/mcomment/v1/get_hot_word", None,
+        Some(params_map), None, "android", &[], false, false,
+    )
+}
+
+/// comment_music_topliked.js → /comment/music/topliked（歌曲评论-最热）。
+///
+/// 上游 /mcomment/r/v1/rank/topliked 是「最热」标签页背后的接口，返回全局按点赞数
+/// 降序的评论排名；/comment/music（cmtlist）返回的是加权混排，与点赞数无关。
+/// 必传 childrenid（评论区 id，即 cmtlist 响应顶层的 childrenid / 评论项的
+/// special_child_id），上游不接受用 mixsongid 代替。
+pub fn handle_music_topliked(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
+    let childrenid = if q_has(q, "childrenid") {
+        q.get("childrenid").cloned().unwrap_or(Value::Null)
+    } else if q_has(q, "special_id") {
+        q.get("special_id").cloned().unwrap_or(Value::Null)
+    } else {
+        q.get("id").cloned().unwrap_or(Value::Null)
+    };
+    let params_map = json!({
+        "childrenid": childrenid,
+        "need_show_image": 1,
+        "p": q_num(q, "page", 1),
+        "pagesize": q_num(q, "pagesize", 30),
+        "extdata": "0",
+        "code": SONG_CODE,
+    });
+    forward(
+        q, ctx, "POST", "/mcomment/r/v1/rank/topliked", None,
         Some(params_map), None, "android", &[], false, false,
     )
 }

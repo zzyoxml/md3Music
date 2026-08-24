@@ -942,6 +942,27 @@ class KugouProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 拉一批用于续播的私人 FM 歌曲，只把结果交给调用方。
+  ///
+  /// 与 [getPersonalFm] 的区别是它**不替换** [personalFmSongs]：续播是往队列尾巴
+  /// 上接，整体替换会把正在播的那首挤出列表，之后就再也认不出那条队列是电台的。
+  /// 走 noCache 是必须的，理由见 [KugouApiClient.getPersonalFm]。
+  Future<List<KugouSongDetail>?> fetchMorePersonalFm({
+    required String mode,
+    required int songPoolId,
+    String? hash,
+    String? songId,
+  }) {
+    return _apiClient.getPersonalFm(
+      mode: mode,
+      songPoolId: songPoolId,
+      hash: hash,
+      songId: songId,
+      action: 'play',
+      noCache: true,
+    );
+  }
+
   Future<void> getPlaylist({
     String? categoryId,
     int page = 1,
@@ -1209,6 +1230,11 @@ class KugouProvider extends ChangeNotifier {
         return SwitchAccountResult.tokenExpired;
       }
       await _fetchUserInfo();
+      // 会员到期时间与签到日历按账号隔离：切换后必须立即重载新账号的数据，
+      // 否则「我的」页面会员卡片仍显示上一账号的信息（且 _vipInfo 已被清空）。
+      await getVipDetail();
+      await getGradeInfo();
+      await _loadLocalSignedDays();
     }
 
     print('✅ [Account] 已切换到账号: $userid');

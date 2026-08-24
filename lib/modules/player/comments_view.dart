@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../data/models/song.dart';
 import '../../providers/comment_display_provider.dart';
 import '../../providers/kugou_provider.dart';
+import '../../services/kugou_api/comment_thread.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 
@@ -93,7 +94,9 @@ class _FloorState {
 ///
 /// **功能**：
 /// - 歌手评论/歌手评论置顶展示，带徽章标识
-/// - 楼层评论（楼中楼），点击"查看N条回复"展开
+/// - 歌曲评论按热度（点赞数）降序排列
+/// - 楼层评论（楼中楼），点击"查看N条回复"展开；回复按时间倒序（新的在前），
+///   对回复的回复按层级嵌套缩进
 /// - 长评论展开/收起（超过 120 字或 3 行）
 /// - 点赞数格式化（10000+ → "1w"）
 /// - 滚动到底部自动加载下一页
@@ -120,6 +123,10 @@ class CommentsView extends StatefulWidget {
 }
 
 class _CommentsViewState extends State<CommentsView> {
+  /// 楼层评论每页条数。上游硬上限 50，取满可减少翻页次数，
+  /// 让楼中楼的父子关系更早在同一批数据里凑齐。
+  static const int _floorPageSize = 50;
+
   final ScrollController _scrollController = ScrollController();
   List<KugouComment> _comments = [];
   List<KugouComment> _hotComments = [];
@@ -128,6 +135,14 @@ class _CommentsViewState extends State<CommentsView> {
   String? _error;
   int _currentPage = 1;
   bool _hasMore = true;
+
+  /// 评论区 id，「最热」接口必需，只能从 /comment/music 的响应里取。
+  String _childrenId = '';
+
+  /// 主评论列表是否走「最热」接口。拿不到评论区 id 或该接口失败时为 false，
+  /// 此时退回 /comment/music 的默认顺序，翻页也必须继续用同一个接口，
+  /// 否则两种排序的分页会混在一起。
+  bool _useTopliked = false;
 
   /// 长评论展开状态
   final Set<String> _expandedContents = {};
@@ -167,6 +182,8 @@ class _CommentsViewState extends State<CommentsView> {
     if (oldWidget.songHash != widget.songHash) {
       _currentPage = 1;
       _hasMore = true;
+      _childrenId = '';
+      _useTopliked = false;
       _comments.clear();
       _hotComments.clear();
       _expandedContents.clear();
@@ -199,14 +216,27 @@ class _CommentsViewState extends State<CommentsView> {
       page: 1,
     );
 
+    // 这一次 /comment/music 请求同时提供两样只有它才有的东西：歌手评论/精彩评论，
+    // 以及「最热」接口必需的评论区 id。拿到 id 后再取按点赞降序的全局排名。
+    final childrenId = result?.childrenId ?? '';
+    final hot = childrenId.isEmpty
+        ? null
+        : await KugouApiClient().getToplikedComments(childrenId, page: 1);
+
     if (mounted) {
       setState(() {
         _isLoading = false;
+        _childrenId = childrenId;
+        // 「最热」拿不到时退回 cmtlist 的默认顺序，而不是对单页假排序：
+        // 单页只是 4000+ 条里任意的 30 条，按点赞重排它并不等于热度排序。
+        _useTopliked = hot != null && hot.comments.isNotEmpty;
         if (result != null) {
-          _comments = result.comments;
+          _comments = _useTopliked
+              ? sortCommentsByHotness(hot!.comments)
+              : result.comments;
           _hotComments = result.hotComments;
           _currentPage = 1;
-          _hasMore = result.comments.length >= 20;
+          _hasMore = _comments.length >= 20;
         } else {
           _comments = [];
           _hotComments = [];
@@ -223,17 +253,26 @@ class _CommentsViewState extends State<CommentsView> {
     setState(() => _isLoadingMore = true);
 
     final kugouProvider = context.read<KugouProvider>();
-    final result = await kugouProvider.getComments(
-      widget.songHash,
-      albumAudioId: widget.albumAudioId,
-      page: _currentPage + 1,
-    );
+    final page = _currentPage + 1;
+    final result = _useTopliked
+        ? await KugouApiClient().getToplikedComments(_childrenId, page: page)
+        : await kugouProvider.getComments(
+            widget.songHash,
+            albumAudioId: widget.albumAudioId,
+            page: page,
+          );
 
     if (mounted) {
       setState(() {
         _isLoadingMore = false;
         if (result != null && result.comments.isNotEmpty) {
-          _comments.addAll(result.comments);
+          // 「最热」接口跨页整体降序，逐页稳定重排只修正页内的个别倒挂
+          // （高热度歌曲的排名快照会滞后于实时点赞数），不会打乱已读的顺序。
+          _comments.addAll(
+            _useTopliked
+                ? sortCommentsByHotness(result.comments)
+                : result.comments,
+          );
           _currentPage++;
           _hasMore = result.comments.length >= 20;
         } else {
@@ -301,15 +340,18 @@ class _CommentsViewState extends State<CommentsView> {
         mixSongId: mixSongId?.isNotEmpty == true ? mixSongId : null,
         code: comment.code,
         page: state.page,
+        pagesize: _floorPageSize,
       );
 
       if (result != null) {
         final replies = result.comments;
         state.replies = reset ? replies : [...state.replies, ...replies];
-        state.total = result.total;
-        state.hasMore = state.total > 0
-            ? state.replies.length < state.total
-            : replies.length >= 30;
+        if (result.total > 0) state.total = result.total;
+        // 不足一页即到底（翻过末页时上游连 list 字段都不返回）。
+        // 只按 total 判断是不够的：被删除或风控过滤的回复取不到，
+        // 那样「加载更多回复」会永远停不下来。
+        state.hasMore = replies.length >= _floorPageSize &&
+            (state.total <= 0 || state.replies.length < state.total);
         if (state.hasMore) state.page++;
         if (state.replies.isEmpty) {
           state.message = '暂无回复';
@@ -512,7 +554,9 @@ class _CommentsViewState extends State<CommentsView> {
         displayItems.add(_CommentDisplayItem.comment(c));
       }
       if (_comments.isNotEmpty) {
-        displayItems.add(_CommentDisplayItem.header('最新评论'));
+        displayItems.add(
+          _CommentDisplayItem.header(_useTopliked ? '最热评论' : '最新评论'),
+        );
       }
     }
     for (final c in _comments) {
@@ -900,15 +944,14 @@ class _CommentsViewState extends State<CommentsView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 回复列表
-          for (final reply in state.replies)
+          // 回复列表：按 pid 嵌套，同层按时间倒序（新的在前）
+          for (final node in buildReplyTree(state.replies))
             _buildFloorReplyItem(
-              reply,
+              node,
               primaryTextColor,
               secondaryTextColor,
               usernameColor,
               replyFontSize,
-              comment.username,
             ),
           // 加载中
           if (state.loading)
@@ -968,32 +1011,33 @@ class _CommentsViewState extends State<CommentsView> {
     );
   }
 
-  /// 清理楼中楼回复的引用后缀。
+  /// 楼中楼嵌套的每级缩进量与最大缩进级数。
   ///
-  /// 酷狗楼中楼回复内容形如「回复正文//@被回复用户名:被回复内容」。
-  /// 仅当被回复用户是楼主（[ownerName]）时去掉引用后缀、只显示回复正文；
-  /// 楼中楼用户互相回复时保留引用，便于看出回复对象。
-  String _cleanFloorReplyContent(String content, String ownerName) {
-    final idx = content.lastIndexOf('//@');
-    if (idx <= 0) return content;
-    final ref = content.substring(idx + 3);
-    final colon = ref.indexOf(':');
-    if (colon <= 0) return content;
-    if (ref.substring(0, colon).trim() != ownerName) return content;
-    final text = content.substring(0, idx).trim();
-    return text.isEmpty ? content : text;
-  }
+  /// 层级很深时继续缩进会把正文挤成窄条，超过 [_maxReplyIndentDepth] 级后
+  /// 不再增加缩进，只靠排列顺序体现从属关系。
+  static const double _replyIndentPerDepth = 16.0;
+  static const int _maxReplyIndentDepth = 4;
 
   Widget _buildFloorReplyItem(
-    KugouComment reply,
+    CommentReplyNode node,
     Color primaryTextColor,
     Color secondaryTextColor,
     Color usernameColor,
     double fontSize,
-    String ownerName,
   ) {
+    final reply = node.reply;
+    // 嵌套渲染后被回复的那条就在上方，引用后缀是重复信息；父级不在已加载数据
+    // 里（孤儿）时保留原文，否则看不出在回复谁。
+    final content = node.isOrphan
+        ? reply.content
+        : stripReplyQuote(reply.content);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
+      padding: EdgeInsets.only(
+        top: 6,
+        bottom: 6,
+        left:
+            node.depth.clamp(0, _maxReplyIndentDepth) * _replyIndentPerDepth,
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1027,7 +1071,7 @@ class _CommentsViewState extends State<CommentsView> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  _cleanFloorReplyContent(reply.content, ownerName),
+                  content,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: primaryTextColor,
                     height: 1.3,

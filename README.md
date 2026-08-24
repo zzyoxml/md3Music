@@ -1,29 +1,46 @@
 # MD3Music - Material Design 3 音乐播放器
 
 <div align="center">
-  
+注意：本项目 V5之前的所有版本和分支已经废弃并彻底删除，请勿使用过时版本 请前往 [GitHub](https://github.com/zzyoxml/md3Music/releases) 获取最新版本。
+
 基于酷狗音乐 API 的 Flutter 音乐播放器，采用 Material Design 3 设计规范，自带嵌入式 Rust API 服务器。
-支持手机/平板自适应，提供 Apple Music 风格播放页与逐字歌词。
+支持手机/平板自适应，提供 Apple Music 风格播放页与逐字歌词，并内置 LaunchPad 导航（聚合编辑精选/听书/场景音乐/频道等扩展功能）。
 本项目仅供学习使用，请勿用于商业用途，详情请参阅 [免责声明](DISCLAIMER.md)。
 
+本软件提供的投屏功能，系采用行业标准的通用传输协议（如DLNA/AirPlay），旨在帮助用户在个人家庭网络内，将音乐流转至其本人合法拥有的播放设备上进行聆听。
+
+该功能不涉及对音乐文件的再次存储、分发或向公众传播。用户在使用投屏功能时，不得将其用于任何公共场所的音乐播放或多人同步观看场景，否则由此引发的一切法律责任由用户自行承担。
 
 
 [![Flutter](https://img.shields.io/badge/Flutter-3.12+-02569B?logo=flutter)](https://flutter.dev)
 [![Platform](https://img.shields.io/badge/Platform-Android-green)]()
-[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+[![License](https://img.shields.io/badge/License-AGPL--3.0-blue)](LICENSE)
 
 </div>
 
 ## ✨ 功能特性
 
+### 🚀 LaunchPad
+- **LaunchPad 导航** - 以导航网站形式列出全部功能 Tab，点击可见 Tab 直接切换，长按隐藏 Tab 两秒即可启用并切换，点击隐藏 Tab 以二级页面打开
+- **编辑精选** - 每日编辑推荐内容聚合，支持专区/歌单/歌曲/视频多维浏览
+- **听书** - 有声书专辑浏览、每日/每周/VIP 推荐，章节在线播放，支持搜索/排序/连播
+- **场景音乐** - 按场景发现音乐，模块化分类（音乐/歌单/视频/讨论区）
+- **频道** - 频道订阅与浏览，频道内歌曲、相似频道推荐
+- **刷刷** - 竖屏视频流浏览与播放，支持画中画
+- **主页 Tab 管理** - 以上功能均可在设置页「主页 Tab 管理」中单独开启/关闭与排序
+
 ### 🎵 在线音乐
-- **音乐搜索** - 支持歌曲、专辑、歌单、云盘多维度搜索
+- **音乐搜索** - 支持歌曲、专辑、歌单、云盘多维度搜索（含歌词搜索）
 - **每日推荐** - 个性化歌曲推荐，每日更新
 - **热门排行榜** - 多种排行榜实时更新，列表/网格双模式切换
 - **私人 FM** - 猜你喜欢，无限畅听，支持红心/小众/速览模式
+- **AI 歌曲推荐** - 根据当前播放歌曲一键获取相似推荐，长按歌曲即可触发，随时发现新歌
 - **歌手详情** - 歌手歌曲浏览，支持搜索/定位/排序，关注/取消关注歌手
-- **歌曲评论** - 歌单/专辑/歌曲评论查看，支持分页加载与头像展示
-- **云盘音乐** - 登录后浏览/搜索/播放/下载云盘歌曲
+- **歌曲评论** - 歌单/专辑/歌曲评论查看，评论区支持按热度排序、楼中楼展开，支持分页加载与评论字号调节
+- **MV 播放** - 在线 MV 播放，支持一键投屏到 DLNA 设备、画中画
+- **相似歌单** - 歌单页面一键获取相似歌单推荐
+- **云盘音乐** - 登录后浏览/搜索/播放/上传云盘歌曲，支持批量上传与内嵌封面展示
+- **已购内容** - 用户中心查看已购单曲与专辑
 
 ### 💿 本地音乐
 - **文件夹浏览** - 按存储目录浏览本地音乐，专辑/艺术家/歌曲三种分类切换
@@ -35,82 +52,99 @@
 
 ### 🎧 播放体验
 - **多音质选择** - 标准(128k)、高质(320k)、无损(FLAC)、Hi-Res 无损，自动降级链
+- **DLNA 投屏** - 在线/本地/MV 一键投屏到电视、音响，支持进度拖动、悬浮窗遥控与自动切歌
+- **睡眠定时** - 到点自动暂停，支持固定档位与自定义时长，顶部实时显示剩余时间
 - **循环模式** - 单曲循环、列表循环、随机播放
+- **倍速播放** - 播放速度自由调节
 - **播放进度记忆** - 退出后恢复上次位置与列表，冷启动不会自动出声
 - **异常恢复** - 播放异常结束时强制重新解析 URL 并从断点续播
 - **暂停淡入淡出** - 暂停/播放时音量平滑过渡
-- **边听边存** - 自动缓存音频/歌词/封面，断网可播放已缓存版本，容量上限可调
 - **进度条高潮标记** - 副歌区间高亮，快速跳转
+- **USB 独占音频输出** - 绕过系统混音直写 USB DAC，独占/普通音量记忆自动切换，拔线自动暂停
+- **均衡器** - 10 段频率调节，内置预设芯片与频率响应曲线
+- **歌曲信息** - 实时查看频率/位深/码率/声道与文件信息
+- **MV 画中画** - MV 播放支持画中画模式，可按 Home 自动进入（设置可关）
 - **逐字歌词** - KRC/LRC/纯文本多格式解析，本地逐字 LRC 支持
 - **歌词辉光效果** - 智能触发逐字辉光动画（Apple Music 风格）
 - **歌词高斯模糊** - 歌词背景模糊，支持透明度可调
+- **歌词动态颜色** - 当前行歌词随专辑封面取色混色（AM 播放器）
+- **歌词字重调节** - 歌词粗细可调（细体~黑体），AM/MD3 两套面板独立配置
+- **歌词省电模式** - 歌词界面限帧省电，上下滑动歌词时自动解除
 - **翻译/罗马音** - 分离显示，支持优先翻译模式
 - **男女对唱歌词优化** - 剔除标记，男左女右、合唱居中
 - **桌面歌词** - 悬浮歌词展示，跟随主题颜色
+- **锁屏歌词** - 锁屏全屏逐字歌词展示（可独立设置字号/字重）
 - **蓝牙歌词** - 通过 MediaSession 向 AVRCP 蓝牙设备推送歌词
 - **Lyricon 词幕推送** - 向第三方歌词硬件/应用推送歌词元数据
-- **频谱动画** - 播放中动态频谱可视化
+- **SuperLyric 推送** - 系统级实时歌词（Android 8.0+），Lyricon/SuperLyric 协议二选一
+- **音乐频谱** - 环形柱状/曲线/背景条形三种样式，支持透明度、动态取色与滑动切歌
 - **封面跳转** - 点击歌名/作者/专辑可跳转详情页
-- **迷你播放器滑动切歌** - 左右滑动切换上/下一首
+- **迷你播放器** - 上滑拖拽展开进入全屏播放器，左右滑动切换上/下一首
+- **播放列表面板** - AM 风格队列面板，长按拖拽重排、右滑删除
 - **后台播放** - Android 通知栏控制与状态栏播放
 - **音频焦点** - 来电/拔耳机等场景自动暂停与恢复
-- **USB 独占输出** - 绕过 AudioFlinger 直写 UAC1 DAC（bit-perfect），支持硬件/软件音量控制
+- **快捷回桌面** - 双击返回键回到手机桌面挂后台，不杀播放器与本地服务器，快速恢复
 
 ### 📱 用户中心
-- **VIP 双签到** - 自动领取畅听 VIP + 升级概念版 VIP，签到日历可视化（进度环 + 徽章）
-- **我的收藏** - 本地收藏 + 云端同步，自建歌单支持批量多选删除
+- **VIP 双签到** - 自动领取畅听 VIP + 升级概念版 VIP，签到日历可视化（进度环 + 徽章），支持二次安全验证码
+- **多账号管理** - 凭证加密存储（Android Keystore），账号过期检测与一键切换
+- **听歌等级** - 本地听歌时长累计与自动上报，未上报时长展示
+- **我的收藏** - 本地收藏 + 云端同步，歌单/专辑支持长按批量多选删除，支持按最近点击排序
 - **播放历史** - 自动记录，支持筛选已缓存歌曲
-- **下载管理** - 后台下载、写入封面/歌词元数据、自定义目录、Hi-Res 音源
-- **听歌识曲** - 录音识别当前播放歌曲
+- **听歌排行** - 最近一周/全部累计听歌排行
+- **听歌识曲** - 录音识别当前播放歌曲，本地 Rust PCM 预处理提升性能
+- **桌面小组件** - Android 桌面小组件，实时展示播放状态与快捷控制
 
 ### 🎨 设计与设置
 - **Material Design 3** - 全站统一 ColorScheme 色彩角色与 textTheme 文字层级
 - **Apple Music 风格** - 模糊封面背景 + 弹簧动画 + 逐字歌词，支持 MD3/AM 双风格切换
-- **动态主题色** - 预设种子色面板 + 莫奈色（Android 12+）
+- **iOS 分组卡片风格** - 一级页面统一中性背景 + 圆角分组卡片，浅深色自动适配
+- **主题色** - 预设种子色面板 + 自定义取色 + 莫奈色（Android 12+）
+- **封面动态取色** - 跟随当前歌曲封面自动调整全局主题色（可叠加系统主题色）
+- **全局背景图** - 自定义全局背景图片（模糊/透明度/莫奈取色可调），歌单/歌手/专辑等详情页联动透明透出
+- **文字阴影** - 背景图下改善可读性的全局文字阴影，阴影磅数可调（默认关闭）
+- **显示大小** - 与系统同名设置一致：整体等比放大/缩小界面，一屏能显示的内容随之增减
 - **深色模式** - 浅色/深色/跟随系统/OLED 纯黑
 - **设备模式** - 自动/手机/平板手动切换
-- **歌词设置** - 字体选择、高斯模糊、辉光、双击跳转、歌词字体自定义
+- **封面流** - CoverFlow 3D 封面流浏览，横屏沉浸模式
+- **主页 Tab 管理** - 一级页面 Tab 显示/隐藏与拖拽排序（含桌面快捷方式管理）
+- **歌词设置** - 字体选择、字重、高斯模糊、辉光、动态颜色、省电模式、双击跳转、歌词字体自定义
 - **歌手写真背景** - 播放页轮播歌手写真（仅在线歌曲）
 - **背景动态流光** - 封面色彩流动效果
+- **设置搜索** - 设置页全局搜索，快速定位任意设置项
 - **新手引导** - 首次安装弹出引导页，覆盖核心操作
-- **长按图标快捷方式** - 快速进入收藏/听歌识曲/搜索
+- **长按图标快捷方式** - 快速进入收藏/听歌识曲/搜索等（可自定义）
 
 ---
 
 ## 🏗️ 架构说明
 
-### 全本地架构
+### 本地架构
 
 ```
-┌──────────────────────────────────────────────────────────┐
-│                     MD3Music App                         │
-│  ┌──────────────────┐  ┌──────────────────────────────┐  │
-│  │   Flutter UI     │  │  嵌入式 Rust API 服务器     │  │
-│  │     (Dart)       │  │  (127.0.0.1:<随机端口>)     │  │
-│  └────────┬─────────┘  └──────────┬───────────────────┘  │
-│           │                        │                      │
-│           └───────────┬────────────┘                      │
-│                       │                                   │
-│             ┌─────────▼───────────┐                       │
-│             │   本地数据 / 缓存     │                       │
-│             └─────────────────────┘                       │
-└──────────────────────────────────────────────────────────┘
-                          │
-                          │ 酷狗 API / 登录（直连上游）
-                          ▼
-             ┌────────────────────────────┐
-             │        酷狗音乐云端         │
-             │   (search/lyric/login/...) │
-             └────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    MD3Music App                         │
+│  ┌─────────────────────┐  ┌────────────────────────       │
+│  │   Flutter UI        │  │  嵌入式 Rust API 服务器  │  │
+│  │   (Dart)            │   │  (127.0.0.1)     │  │
+│  └──────────┬──────────┘  └──────────┬─────────────┘  │
+│             │                          │                  │
+│             └──────────┬───────────────┘                  │
+│                        │                                  │
+│             ──────────▼───────────────┐                  │
+│             │   本地数据 / 缓存         │                  │
+│             └──────────────────────────┘                  │
+└─────────────────────────────────────────────────────────┘
+                         
 ```
 
 ### 核心特点
 
-- **嵌入式 Rust 服务器**：App 启动时通过 `libkugou_server.so`（JNI/MethodChannel + dart:ffi 兜底）启动本地 tiny_http 服务器，监听 `127.0.0.1` 的随机端口（`[10000, 60000]`，被占用自动换），所有酷狗 API 请求都在本地处理
-- **登录全本地化**：登录/注册/验证码端点由 Rust 本地设备身份（dfid/mid）直连酷狗上游，不依赖任何第三方云端
+- **嵌入式 Rust 服务器**：App 启动时通过 `libkugou_server.so`（JNI/MethodChannel）启动本地 tiny_http 服务器（127.0.0.1），所有酷狗 API 请求都在本地处理
 - **高性能低资源**：Rust 实现取代旧 Node.js 方案，内存占用更低，启动更快
 - **无需外部服务器**：用户无需自行搭建 API 服务器
 - **多架构支持**：支持 armeabi-v7a（32位）、arm64-v8a（64位）、x86、x86_64（模拟器）
+- **本地投屏支持**：内置局域网 HTTP 服务器（支持 Range 请求），本地音乐也能投屏到 DLNA 设备
 
 ---
 
@@ -118,9 +152,9 @@
 
 项目已配置 GitHub Actions 自动构建，推送 `v*` 标签即可触发：
 
-- 自动构建并上传 3 个架构的 APK（arm64-v8a、armeabi-v7a、x86_64）
+- 自动构建 3 个架构的 APK（arm64-v8a、armeabi-v7a、x86_64）
 - 自动创建 GitHub Release 并上传产物
-- 自动递增 versionCode 并生成 Changelog
+- 自动递增 versionCode 并生成 Changelog（优先使用 CHANGELOG.md 中对应版本说明）
 
 ---
 
@@ -133,71 +167,54 @@
 ### 手机 · Material Design 3
 
 <p align="center">
-  <img src="img/phone/md3/0f720b0e915226a9d5a8ea184e81a06d.jpg" width="220" alt="手机 MD3 界面 1" />
-  <img src="img/phone/md3/58eddb6fd3ca614e60be7cb2fd4399d1.jpg" width="220" alt="手机 MD3 界面 2" />
-  <img src="img/phone/md3/ade7e5ef5165adcf0fef302e2500c6db.jpg" width="220" alt="手机 MD3 界面 3" />
+  <img src="img/phone/md3/Screenshot_2026-08-05-11-56-02-028_com.md3music.md3music.jpg" width="220" alt="手机 MD3 界面 1" />
+  <img src="img/phone/md3/Screenshot_2026-08-05-11-56-16-017_com.md3music.md3music.jpg" width="220" alt="手机 MD3 界面 2" />
+  <img src="img/phone/md3/Screenshot_2026-08-05-11-57-14-315_com.md3music.md3music.jpg" width="220" alt="手机 MD3 界面 3" />
 </p>
 
 ### 手机 · Apple Music 风格
 
 <p align="center">
-  <img src="img/phone/applemusic/Screenshot_2026-07-27-16-26-21-709_com.md3music.md3music_1785140818888edit.jpg" width="220" alt="手机 Apple Music 风格 1" />
-  <img src="img/phone/applemusic/Screenshot_2026-07-27-16-26-24-328_com.md3music.md3music_1785140811076edit.jpg" width="220" alt="手机 Apple Music 风格 2" />
-  <img src="img/phone/applemusic/Screenshot_2026-07-27-16-26-28-137_com.md3music.md3music_1785140802166edit.jpg" width="220" alt="手机 Apple Music 风格 3" />
+  <img src="img/phone/applemusic/Screenshot_2026-08-05-11-59-23-080_com.md3music.md3music.jpg" width="220" alt="手机 Apple Music 风格 1" />
+  <img src="img/phone/applemusic/Screenshot_2026-08-05-11-59-44-053_com.md3music.md3music.jpg" width="220" alt="手机 Apple Music 风格 2" />
+  <img src="img/phone/applemusic/Screenshot_2026-08-05-12-02-41-551_com.md3music.md3music-edit.jpg" width="220" alt="手机 Apple Music 风格 3" />
 </p>
 
 ### 手机 · 更多界面
 
 <p align="center">
-  <img src="img/phone/other/Screenshot_2026-07-27-12-11-55-256_com.md3music.md3music-edit.jpg" width="200" alt="手机更多界面 1" />
-  <img src="img/phone/other/Screenshot_2026-07-27-12-12-09-452_com.md3music.md3music_1785125790967edit.jpg" width="200" alt="手机更多界面 2" />
-  <img src="img/phone/other/Screenshot_2026-07-27-12-12-11-629_com.md3music.md3music_1785125804040edit.jpg" width="200" alt="手机更多界面 3" />
+  <img src="img/phone/other/Screenshot_2026-08-05-11-56-45-374_com.md3music.md3music.jpg" width="500" alt="手机更多界面 1" />
+  <img src="img/phone/other/Screenshot_2026-08-05-12-03-39-192_com.md3music.md3music.jpg" width="500" alt="手机更多界面 2" />
 </p>
-<p align="center">
-  <img src="img/phone/other/Screenshot_2026-07-27-12-12-17-432_com.md3music.md3music_1785125828120edit.jpg" width="200" alt="手机更多界面 4" />
-  <img src="img/phone/other/Screenshot_2026-07-27-12-12-29-360_com.md3music.md3music_1785125861447edit.jpg" width="200" alt="手机更多界面 5" />
-  <img src="img/phone/other/Screenshot_2026-07-27-12-12-33-145_com.md3music.md3music_1785125869619edit.jpg" width="200" alt="手机更多界面 6" />
-</p>
-<p align="center">
-  <img src="img/phone/other/Screenshot_2026-07-27-12-12-38-109_com.md3music.md3music_1785125883439edit.jpg" width="200" alt="手机更多界面 7" />
-  <img src="img/phone/other/Screenshot_2026-07-27-12-12-44-567_com.md3music.md3music_1785125899909edit.jpg" width="200" alt="手机更多界面 8" />
-  <img src="img/phone/other/Screenshot_2026-07-27-12-12-59-497_com.md3music.md3music_1785125915013edit.jpg" width="200" alt="手机更多界面 9" />
-</p>
-<p align="center">
-  <img src="img/phone/other/Screenshot_2026-07-27-12-14-20-356_com.md3music.md3music_1785125983291edit.jpg" width="200" alt="手机更多界面 10" />
-  <img src="img/phone/other/Screenshot_2026-07-27-12-14-31-085_com.md3music.md3music_1785125990804edit.jpg" width="200" alt="手机更多界面 11" />
-  <img src="img/phone/other/Screenshot_2026-07-27-12-14-40-376_com.md3music.md3music_1785126001241edit.jpg" width="200" alt="手机更多界面 12" />
-</p>
+
 
 ### 平板 · Apple Music 风格
 
 <p align="center">
-  <img src="img/pad/applemusic/5d27879361a4584d3a8118ae60d75d2a.jpg" width="420" alt="平板 Apple Music 风格 1" />
-  <img src="img/pad/applemusic/00ce9bab6dfddd67b6d83918f57cfaae.jpg" width="420" alt="平板 Apple Music 风格 2" />
+  <img src="img/pad/applemusic/Screenshot_20260805_121938_com.md3music.md3music.jpg" width="420" alt="平板 Apple Music 风格 1" />
+  <img src="img/pad/applemusic/Screenshot_20260805_121945_com.md3music.md3music.jpg" width="420" alt="平板 Apple Music 风格 2" />
 </p>
 
 
 ### 平板 · Material Design 3
 
 <p align="center">
-  <img src="img/pad/md3/919678959eeded94228d8cbc003409df.jpg" width="420" alt="平板 MD3 界面 1" />
-  <img src="img/pad/md3/a57b3aa463c33dad0c450cb6d39e8030.jpg" width="420" alt="平板 MD3 界面 2" />
+  <img src="img/pad/md3/Screenshot_20260805_121929_com.md3music.md3music.jpg" width="420" alt="平板 MD3 界面 1" />
+  <img src="img/pad/md3/Screenshot_20260805_122006_com.md3music.md3music.jpg" width="420" alt="平板 MD3 界面 2" />
 </p>
 
 ### 平板 · 更多界面
 
 <p align="center">
-  <img src="img/pad/other/mmexport1785140345418_1785140430976edit.jpg" width="560" alt="平板更多界面 1" />
+  <img src="img/pad/other/Screenshot_20260805_121010_com.md3music.md3music.jpg" width="560" alt="平板更多界面 1" />
 </p>
 <p align="center">
-  <img src="img/pad/other/mmexport1785140349229_1785140392889edit.jpg" width="560" alt="平板更多界面 2" />
+  <img src="img/pad/other/Screenshot_20260805_121025_com.md3music.md3music.jpg" width="560" alt="平板更多界面 2" />
 </p>
 <p align="center">
-  <img src="img/pad/other/mmexport1785140353053_1785140379593edit.jpg" width="560" alt="平板更多界面 3" />
+  <img src="img/pad/other/Screenshot_20260805_121030_com.md3music.md3music.jpg" width="560" alt="平板更多界面 3" />
 </p>
-<p align="center">
-  <img src="img/pad/other/mmexport1785140356378_1785140371441edit.jpg" width="560" alt="平板更多界面 4" />
-</p>
+
 
 ---
 
@@ -250,27 +267,14 @@ flutter run
 ### 5. 构建发布版 APK
 
 ```bash
-# 构建各架构的 APK（分拆包）
+# 构建三个架构的 APK（分拆包）
 flutter build apk --release --split-per-abi
 
-# 输出位置（build/app/outputs/flutter-apk/）：
-# app-armeabi-v7a-release.apk  (32位)
-# app-arm64-v8a-release.apk    (64位，推荐)
-# app-x86_64-release.apk       (64位模拟器)
-# app-x86-release.apk          (32位模拟器)
+# 输出位置：
+# build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk  (32位)
+# build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   (64位)
+# build/app/outputs/flutter-apk/app-x86_64-release.apk      (模拟器)
 ```
-
----
-
-## 📦 下载安装
-
-从 [Releases](https://github.com/zzyoxml/md3Music/releases) 页面下载最新版本的 APK 安装包。
-
-- **arm64-v8a**：大多数现代 Android 设备（推荐）
-- **armeabi-v7a**：较旧的 32 位设备
-- **x86_64**：64 位 Android 模拟器
-- **x86**：32 位 Android 模拟器
-
 
 ---
 
@@ -283,31 +287,39 @@ md3Music/
 │   ├── app.dart                # 主应用组件
 │   ├── core/                   # 核心模块
 │   │   ├── layout/             # 响应式布局
-│   │   ├── services/           # 平台服务（音频/桌面歌词/Lyricon/通知）
+│   │   ├── services/           # 平台服务（音频/USB 独占/均衡器/DLNA 投屏/频谱/桌面歌词/词幕/小组件）
 │   │   ├── theme/              # 主题配置
 │   │   └── utils/              # 工具类
 │   ├── data/                   # 数据层
 │   │   ├── models/             # 数据模型
-│   │   └── repositories/       # 数据仓库（设置/收藏/历史/下载）
+│   │   └── repositories/       # 数据仓库（设置/收藏/历史）
 │   ├── modules/                # 功能模块
+│   │   ├── home/               # 主页（每日推荐等）
+│   │   ├── launchpad/          # LaunchPad 导航
 │   │   ├── discover/           # 发现页
 │   │   ├── charts/             # 排行榜
-│   │   ├── player/             # 播放器（含评论视图）
+│   │   ├── coverflow/          # 封面流（CoverFlow 3D）
+│   │   ├── player/             # 播放器（含评论视图/MV 播放）
+│   │   ├── playlist/           # 歌单详情
 │   │   ├── search/             # 搜索
 │   │   ├── album/              # 专辑详情
 │   │   ├── artist/             # 歌手详情
 │   │   ├── personal_fm/        # 私人 FM
-│   │   ├── user/               # 用户中心（签到/收藏/下载/历史）
+│   │   ├── ip/                 # 编辑精选
+│   │   ├── audiobook/          # 听书
+│   │   ├── scene/              # 场景音乐
+│   │   ├── channel/            # 频道
+│   │   ├── brush/              # 刷刷（竖屏视频流）
+│   │   ├── user/               # 用户中心（签到/收藏/历史/听歌排行）
 │   │   ├── library/            # 音乐库（本地音乐/云盘）
-│   │   ├── settings/           # 设置
+│   │   ├── settings/           # 设置（含均衡器）
 │   │   ├── login/              # 登录
 │   │   ├── onboarding/         # 新手引导
 │   │   └── recognition/        # 听歌识曲
 │   ├── providers/              # 状态管理
-│   ├── services/               # API 服务（元数据写入/下载管理）
+│   ├── services/               # 服务层（本地 API 客户端 / 服务器启动）
 │   └── widgets/                # 公共组件
-│       ├── apple_lyrics/       # Apple Music 风格歌词
-│       └── usb_exclusive_section.dart  # USB 独占输出设置项
+│       └── apple_lyrics/       # Apple Music 风格歌词
 ├── kugou_api_server/           # 嵌入式 Rust API 服务器
 │   ├── rust/                   # Rust crate（tiny_http + ureq）
 │   │   ├── src/
@@ -321,7 +333,6 @@ md3Music/
 │   │   ├── build_android.sh    # 一键交叉编译脚本
 │   │   └── Cargo.toml
 │   └── module/                 # 旧 JS 模块（已废弃，仅供参考）
-├── third_party/just_audio/     # just_audio fork（UsbAudioSinkController 拦截音频流）
 ├── img/                        # 界面预览截图（README 用）
 │   ├── phone/                  # 手机：md3 / applemusic / other
 │   └── pad/                    # 平板：md3 / applemusic / other
@@ -330,10 +341,9 @@ md3Music/
 │   └── fonts/                  # 字体文件
 ├── android/                    # Android 平台配置
 │   └── app/src/main/
-│       ├── kotlin/.../        # KugouApiService、UsbAudio*（USB 独占输出）
-│       ├── cpp/               # usb-audio-output（UAC1 DAC 直写）
+│       ├── cpp/                # USB 独占输出 C++ 驱动（CMake）
+│       ├── kotlin/.../        # KugouApiService（启动本地服务器）/ MainActivity
 │       └── jniLibs/           # libkugou_server.so（四个架构）
-├── networkapi/                 # 旧云端登录 API（Node.js，已退役，仅作参考）
 └── pubspec.yaml                # Flutter 配置
 ```
 
@@ -345,19 +355,26 @@ md3Music/
 |------|------|
 | **UI 框架** | Flutter 3.12+ |
 | **状态管理** | Provider |
-| **音频播放** | just_audio + just_audio_background（含 USB 独占输出 fork） |
+| **动效** | m3e_core（M3 Expressive Motion） |
+| **音频播放** | just_audio + just_audio_background |
 | **音频焦点** | audio_session |
 | **网络请求** | Dio |
 | **本地存储** | SharedPreferences + SQLite |
 | **图片缓存** | cached_network_image |
 | **嵌入式服务器** | Rust（tiny_http + ureq） |
 | **加密** | rsa / aes / md-5 / sha1 / sha2 |
-| **元数据写入** | JAudioTagger (MP3/FLAC/M4A) |
+| **元数据读取/写入** | audio_metadata_reader + JAudioTagger (MP3/FLAC/M4A) |
+| **DLNA 投屏** | dlna_dart |
+| **MV 播放** | video_player + chewie |
+| **USB 独占输出** | 原生 JNI + CMake C++（usbdevfs） |
+| **取色** | palette_generator + dynamic_color + material_color_utilities |
 | **桌面歌词** | Lyricon Provider |
+| **听歌识曲** | record（录音）+ Rust PCM 预处理 |
+| **原生通知** | fluttertoast（Toast） |
+| **文件/权限** | permission_handler + path_provider |
+| **桌面快捷方式** | quick_actions |
 | **音频均衡器** | just_audio 平台均衡器 |
-| **USB 独占输出** | C++（usbdevfs ISO URB 直写）+ UsbAudioPlugin |
 | **音乐源** | 酷狗音乐 API |
-| **登录** | Rust 本地直连酷狗上游（networkapi 已退役） |
 
 ---
 
@@ -365,11 +382,7 @@ md3Music/
 
 ### 嵌入式服务器
 
-应用启动时会自动启动本地 Rust 服务器（`libkugou_server.so`），监听 `127.0.0.1` 上的随机端口（`[10000, 60000]`），无需任何配置。设置页「在线音乐 → 本地数据接口」可手动重启服务器。
-
-### 登录
-
-登录/注册/验证码全部由本地 Rust 服务器使用设备身份（dfid/mid）直连酷狗上游完成，无需部署任何云端 API。旧 `networkapi`（`115.29.236.96:5621`）已退役。
+应用启动时会自动启动本地 Rust 服务器（`libkugou_server.so`），监听 `127.0.0.1` 的**随机端口**（10000~60000，被占用自动更换），实际端口由服务器启动后回传给应用。无需任何配置。
 
 ### 音质设置
 
@@ -390,7 +403,7 @@ md3Music/
 
 ### Q: 登录功能无法使用？
 
-**A:** 登录由本地 Rust 服务器直连酷狗上游完成。请检查设备网络是否正常、本地服务器是否成功启动（Logcat 搜索 "KugouApiService"），以及设备时间是否准确（影响签名校验）。登录不依赖任何第三方云端服务器。
+**A:** 登录/注册/验证码已全部本地化：由嵌入式 Rust 服务器直连酷狗官方接口处理，不再依赖第三方云端。请确保设备可正常联网，并在 Logcat 中搜索 `KugouApiService` 确认本地服务器已成功启动。
 
 ### Q: 如何修改 API 服务器代码？
 
@@ -444,17 +457,20 @@ cargo test          # 本地测试（不依赖外网）
 感谢以下项目的支持：
 
 - [EchoMusic](https://github.com/hoowhoami/EchoMusic) - UI 设计和架构参考
+- [apple-music-like-lyrics](https://github.com/amll-dev/applemusic-like-lyrics) - Apple Music 风格逐字歌词渲染参考
+- [Reorderable](https://github.com/Calvin-LL/Reorderable) - 播放列表面板长按拖拽排序
+- [MaterialKolor](https://github.com/jordond/MaterialKolor) - 莫奈取色 / Material Design 3 动态配色
 - [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) - API 代理服务
 - [tiny_http](https://github.com/tiny-http/tiny-http) - Rust HTTP 服务器
 - [ureq](https://github.com/algesten/ureq) - Rust HTTP 客户端
 - [JAudioTagger](https://www.jthink.net/jaudiotagger/) - 音频元数据读写
-- [decent-player](https://github.com/Ma145/decent-player) - USB 位完美（bit-perfect）音频输出驱动与集成库参考
+- [decent-player](https://github.com/Ma145/decent-player) - USB 独占音频输出（DAC 独占驱动 C++/Kotlin 移植自其 `decent-usb-audio-driver`）
 
 ---
 
 ## 📄 许可证
 
-本项目采用 [MIT License](LICENSE) 许可证。
+本项目采用 [GNU AGPL-3.0](LICENSE) 许可证。
 
 ---
 
@@ -464,6 +480,6 @@ cargo test          # 本地测试（不依赖外网）
 
 <div align="center">
 
-**Made with ❤️ by zzyoxml and Little-White3110**
+**Made with ❤️ by zzyoxml and Little-White3110 and Lyon**
 
 </div>

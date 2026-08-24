@@ -36,13 +36,13 @@ class TabItem {
 /// 默认 Tab 定义（与 app.dart _MainLayout._pages 顺序对应）。
 const List<TabItem> kDefaultTabs = [
   TabItem(id: 'discover', label: '发现'),
-  TabItem(id: 'favorites', label: '收藏'),
   TabItem(id: 'launchpad', label: 'LaunchPad'),
   TabItem(id: 'user', label: '我的', isRemovable: false),
 ];
 
 /// 可选 Tab（默认隐藏，需在设置页手动开启）。
 const List<TabItem> kOptionalTabs = [
+  TabItem(id: 'favorites', label: '收藏'),
   TabItem(id: 'library', label: '本地音乐'), // 原默认（本地音乐），现改为可选
   TabItem(id: 'fm', label: '私人FM'), // 原默认（私人FM），现改为可选
   TabItem(id: 'coverflow', label: '封面流'),
@@ -72,8 +72,11 @@ class TabConfigProvider extends ChangeNotifier {
   /// 所有 tab 的完整排序（含隐藏项），用于设置页展示。
   List<TabItem> _allTabs = List.from(kAllAvailableTabs);
 
-  /// 隐藏的 tab id 集合。可选 Tab 默认隐藏。
-  Set<String> _hiddenTabs = {for (final t in kOptionalTabs) t.id};
+  /// 隐藏的 tab id 集合。可选 Tab 默认隐藏（本地音乐 library 默认显示）。
+  Set<String> _hiddenTabs = {
+    for (final t in kOptionalTabs)
+      if (t.id != 'library') t.id,
+  };
 
   List<TabItem> get visibleTabs => _visibleTabs;
   List<TabItem> get allTabs => _allTabs;
@@ -111,10 +114,12 @@ class TabConfigProvider extends ChangeNotifier {
         }
         _allTabs = ordered;
       } else {
-        // 新用户：使用全部可用 Tab，可选 Tab 默认隐藏
+        // 新用户：使用全部可用 Tab，可选 Tab 默认隐藏（本地音乐默认显示）
         _allTabs = List.from(kAllAvailableTabs);
         for (final tab in kOptionalTabs) {
-          _hiddenTabs.add(tab.id);
+          if (tab.id != 'library') {
+            _hiddenTabs.add(tab.id);
+          }
         }
       }
 
@@ -176,7 +181,10 @@ class TabConfigProvider extends ChangeNotifier {
   /// 重置为默认配置。
   Future<void> resetToDefault() async {
     _allTabs = List.from(kAllAvailableTabs);
-    _hiddenTabs = {for (final t in kOptionalTabs) t.id};
+    _hiddenTabs = {
+      for (final t in kOptionalTabs)
+        if (t.id != 'library') t.id,
+    };
     _rebuildVisible();
     notifyListeners();
     await _repo.setTabOrder(kAllAvailableTabs.map((t) => t.id).toList());

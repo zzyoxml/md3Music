@@ -266,7 +266,7 @@ class LocalMusicRepository {
               artist: data['artist'] as String,
               album: data['album'] as String,
               duration: Duration(
-                milliseconds: (data['durationMs'] as int) ?? 0,
+                milliseconds: (data['durationMs'] as int?) ?? 0,
               ),
               localPath: filePath,
               // 用 local:// 前缀标识内嵌封面，UI 层通过 LocalArtworkCache 懒加载

@@ -129,10 +129,10 @@ try {
     # ---------- 3. 白名单拷贝 ----------
     Write-Step '白名单拷贝公开文件'
     $whitelist = @(
-        'lib', 'android', 'assets', 'web', 'windows', 'test',
+        'lib', 'android', 'assets', 'web', 'test',
         'third_party', 'img', 'scripts', '.github',
         'pubspec.yaml', 'analysis_options.yaml', 'README.md',
-        'LICENSE', 'CHANGELOG.md', 'DISCLAIMER.md',
+        'LICENSE', 'DISCLAIMER.md',
         'devtools_options.yaml'
     )
     $copied = 0
@@ -157,6 +157,53 @@ try {
         Remove-ItemBypass $lockFile
         Write-Ok '已排除 pubspec.lock（公开侧重新生成，避免私有包记录）'
     }
+    # 导出工具链自身不进公开树（导出脚本 / 闸门脚本 / 否认清单均为私有侧工具；
+    # build_android.ps1 等构建脚本保留，公开树构建仍可复用）
+    foreach ($tool in @('export_public.ps1', 'verify_public_clean.ps1', 'public_deny.txt')) {
+        $toolPath = Join-Path (Join-Path $OutDir 'scripts') $tool
+        if (Test-Path $toolPath) {
+            Remove-ItemBypass $toolPath
+            Write-Ok "已排除 scripts/$tool（导出工具链，不进公开树）"
+        }
+    }
+    # Windows 构建链为私有版功能（公开版 Android-only）：排除 windows 专用 CI
+    $winCi = Join-Path (Join-Path $OutDir '.github') 'workflows\build-windows.yml'
+    if (Test-Path $winCi) {
+        Remove-ItemBypass $winCi
+        Write-Ok '已排除 .github/workflows/build-windows.yml（私有版 Windows CI）'
+    }
+    # Android 编译时临时产物：导出树内跑过构建验证后残留的 Gradle 缓存/构建输出/
+    # Kotlin 缓存/本地 SDK 路径文件，均不进公开树（local.properties 含本地路径会泄漏）
+    foreach ($tmp in @('build', '.gradle', '.kotlin', 'local.properties')) {
+        $tmpPath = Join-Path (Join-Path $OutDir 'android') $tmp
+        if (Test-Path $tmpPath) {
+            Remove-ItemBypass $tmpPath
+            Write-Ok "已排除 android/$tmp（编译时临时产物）"
+        }
+    }
+    # third_party/just_audio fork 的 Gradle 缓存（fork 构建产生，不进公开树）
+    $forkGradle = Get-ChildItem (Join-Path $OutDir 'third_party\just_audio') -Recurse -Directory -Filter '.gradle' -ErrorAction SilentlyContinue
+    foreach ($d in $forkGradle) {
+        Remove-ItemBypass $d.FullName
+        Write-Ok "已排除 $($d.FullName.Substring($OutDir.Length + 1))（fork Gradle 缓存）"
+    }
+    # 下载元数据写入插件：Dart 端 metadata_writer 已隔离进 lib/private，
+    # 原生端（Kotlin 插件 + MainActivity 注册）导出时一并移除
+    $metaPlugin = Join-Path (Join-Path $OutDir 'android') 'app\src\main\kotlin\com\md3music\md3music\MetadataWriterPlugin.kt'
+    if (Test-Path $metaPlugin) {
+        Remove-ItemBypass $metaPlugin
+        Write-Ok '已排除 MetadataWriterPlugin.kt（下载元数据写入插件）'
+    }
+    $mainAct = Join-Path (Join-Path $OutDir 'android') 'app\src\main\kotlin\com\md3music\md3music\MainActivity.kt'
+    if (Test-Path $mainAct) {
+        $maContent = [System.IO.File]::ReadAllText($mainAct, $utf8NoBom)
+        $maPattern = '(?m)^\s*// 注册 MetadataWriterPlugin.*\r?\n\s*MetadataWriterPlugin\(\)\.register\(flutterEngine\)\r?\n'
+        if ([System.Text.RegularExpressions.Regex]::IsMatch($maContent, $maPattern)) {
+            $maContent = [System.Text.RegularExpressions.Regex]::Replace($maContent, $maPattern, '')
+            [System.IO.File]::WriteAllText($mainAct, $maContent, $utf8NoBom)
+            Write-Ok '已剥离 MainActivity 中 MetadataWriterPlugin 注册'
+        }
+    }
     # 防御：清理导出树内所有嵌套的 .public_export 目录
     # （历史版本曾因相对路径 + 工作目录漂移把旧导出树复制进 scripts/，此清理杜绝复发）
     $nested = Get-ChildItem $OutDir -Recurse -Directory -Filter '.public_export' -ErrorAction SilentlyContinue
@@ -176,6 +223,24 @@ try {
         Write-Ok '已剥离 md3_download_cache 依赖块'
     } else {
         Write-Warn 'pubspec.yaml 未匹配到私有依赖注释块，跳过（请人工确认私有依赖已剥离）'
+    }
+    # Windows 桌面实现依赖为私有版功能（公开版 Android-only，无 windows/ 目录）
+    $winPattern = '(?m)^  # Windows 桌面实现.*?\r?\n(?:  just_audio_windows:.*\r?\n|  video_player_win:.*\r?\n)+'
+    if ([System.Text.RegularExpressions.Regex]::IsMatch($content, $winPattern)) {
+        $content = [System.Text.RegularExpressions.Regex]::Replace($content, $winPattern, '')
+        [System.IO.File]::WriteAllText($pubspec, $content, $utf8NoBom)
+        Write-Ok '已剥离 just_audio_windows / video_player_win（私有版 Windows 依赖）'
+    } else {
+        Write-Warn 'pubspec.yaml 未匹配到 Windows 依赖注释块，跳过（请人工确认已剥离）'
+    }
+    # README 功能宣传：删除公开版不具备的「边听边存」条目（私有功能，不宣传）
+    $readme = Join-Path $OutDir 'README.md'
+    $readmeContent = [System.IO.File]::ReadAllText($readme, $utf8NoBom)
+    $readmePattern = '(?m)^- \*\*边听边存\*\*.*\r?\n'
+    if ([System.Text.RegularExpressions.Regex]::IsMatch($readmeContent, $readmePattern)) {
+        $readmeContent = [System.Text.RegularExpressions.Regex]::Replace($readmeContent, $readmePattern, '')
+        [System.IO.File]::WriteAllText($readme, $readmeContent, $utf8NoBom)
+        Write-Ok '已删除 README 中「边听边存」条目（公开版无此功能）'
     }
 
     # ---------- 6. 否认清单闸门 ----------

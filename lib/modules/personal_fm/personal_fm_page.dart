@@ -8,11 +8,7 @@ import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 
 class PersonalFmPage extends StatefulWidget {
-  /// 是否以「内嵌」模式渲染（供发现页作为可折叠区块使用）。
-  /// 内嵌时去掉 Scaffold/AppBar，不自带滚动，也不渲染「当前播放」板块。
-  const PersonalFmPage({super.key, this.embedded = false});
-
-  final bool embedded;
+  const PersonalFmPage({super.key});
 
   @override
   State<PersonalFmPage> createState() => _PersonalFmPageState();
@@ -58,10 +54,13 @@ class _PersonalFmPageState extends State<PersonalFmPage>
       duration: const Duration(milliseconds: 300),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final player = Provider.of<PlayerProvider>(context, listen: false);
-      player.addListener(_onPlayerChanged);
+      if (!mounted) return;
+      _player = Provider.of<PlayerProvider>(context, listen: false)
+        ..addListener(_onPlayerChanged);
     });
   }
+
+  PlayerProvider? _player;
 
   int _lastPrefetchIndex = -1;
 
@@ -85,10 +84,16 @@ class _PersonalFmPageState extends State<PersonalFmPage>
 
   @override
   void dispose() {
-    try {
-      final player = Provider.of<PlayerProvider>(context, listen: false);
+    final player = _player;
+    if (player != null) {
       player.removeListener(_onPlayerChanged);
-    } catch (_) {}
+      // 交还补货槽位。留着一个指向已销毁 State 的回调有两重害处：队列播完时
+      // PlayerProvider 只看槽位非空就把「播完」整个交给它（自己的「回到第一首」
+      // 兜底被跳过），而它第一句就要 context —— 抛出来的异常没人接。
+      if (player.onPlaylistEnd == _onPlaylistEnd) {
+        player.onPlaylistEnd = null;
+      }
+    }
     _vinylRotationController.dispose();
     _slideController.dispose();
     _scrollController.dispose();
@@ -124,6 +129,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
   }
 
   Future<void> _onPlaylistEnd() async {
+    if (!mounted) return;
     final prevLength = Provider.of<PlayerProvider>(
       context,
       listen: false,
@@ -149,7 +155,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
   }
 
   Future<void> _appendFmSongs() async {
-    if (_isAppending) return;
+    if (_isAppending || !mounted) return;
     setState(() => _isAppending = true);
     try {
       final kugou = Provider.of<KugouProvider>(context, listen: false);
@@ -307,46 +313,21 @@ class _PersonalFmPageState extends State<PersonalFmPage>
       sideTracks = songs.sublist(1).take(_visibleSideCount).toList();
     }
 
-    // 内嵌核心内容：推荐方式工具栏 + 黑胶 hero（不含「当前播放」板块）
-    final Widget coreContent = Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (isLoggedIn) ...[
-          _buildToolbar(cs, textTheme),
-          const SizedBox(height: 18),
-          _buildRadioHero(
-            cs,
-            textTheme,
-            currentTrack,
-            isPlaying,
-            sideTracks,
-          ),
-        ] else ...[
-          _buildEmptyState(cs, textTheme),
-        ],
-      ],
-    );
-
-    // 内嵌模式（发现页区块）：无 Scaffold/AppBar，不自带滚动，左右留边距
-    if (widget.embedded) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: coreContent,
-      );
-    }
-
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: '私人 FM',
+        opaque: true,
+        tabId: 'fm',
         scrollController: _scrollController,
       ),
       body: SingleChildScrollView(
         controller: _scrollController,
-        padding: const EdgeInsets.only(
+        // 底部叠加系统手势条（小横条）高度，避免末项被压住
+        padding: EdgeInsets.only(
           left: 16,
           right: 16,
           top: 16,
-          bottom: 16,
+          bottom: 16 + MediaQuery.paddingOf(context).bottom,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -359,9 +340,20 @@ class _PersonalFmPageState extends State<PersonalFmPage>
               ),
             ),
             const SizedBox(height: 16),
-            coreContent,
+            if (isLoggedIn) _buildToolbar(cs, textTheme),
+            const SizedBox(height: 18),
+            isLoggedIn
+                ? _buildRadioHero(
+                    cs,
+                    textTheme,
+                    currentTrack,
+                    isPlaying,
+                    sideTracks,
+                  )
+                : _buildEmptyState(cs, textTheme),
             if (isLoggedIn && currentTrack != null) const SizedBox(height: 28),
-            if (isLoggedIn) _buildNowPanel(cs, textTheme, currentTrack, isPlaying),
+            if (isLoggedIn)
+              _buildNowPanel(cs, textTheme, currentTrack, isPlaying),
             const SizedBox(height: 30),
           ],
         ),
@@ -456,7 +448,7 @@ class _PersonalFmPageState extends State<PersonalFmPage>
                 ],
               ),
               SizedBox(height: isSmallScreen ? 8 : 10),
-              _buildStrategySwitch(cs),
+              _buildStrategySwitch(cs, isSmallScreen),
             ],
           ),
         );
@@ -464,33 +456,57 @@ class _PersonalFmPageState extends State<PersonalFmPage>
     );
   }
 
-  Widget _buildStrategySwitch(ColorScheme cs) {
-    // 「推荐方式」三选一：M3E 分段控件，配色跟随主题（莫奈）：
-    // 选中 = primary + onPrimary（深色高亮 + 浅色文字），未选中 = surface + onSurfaceVariant
-    // 控件水平居中
-    return Center(
-      child: M3EToggleButtonGroup(
-        // 用默认 standard 类型：保留按压缩挤/胶囊展开的 M3E expressive 动画
-        shape: M3EButtonShape.round,
-        size: M3EButtonSize.sm,
-        // _songPoolOptions 的 value 恰为 0/1/2，与下标一致
-        selectedIndex: _selectedSongPoolId,
-        overflow: M3EButtonGroupOverflow.none,
-        onSelectedIndexChanged: (index) {
-          if (index == null) return;
-          setState(() => _selectedSongPoolId = index);
-          _loadPersonalFm();
-        },
-        decoration: M3EToggleButtonDecoration.styleFrom(
-          backgroundColor: cs.surfaceContainerHighest,
-          foregroundColor: cs.onSurfaceVariant,
-          checkedBackgroundColor: cs.primary,
-          checkedForegroundColor: cs.onPrimary,
+  Widget _buildStrategySwitch(ColorScheme cs, bool isSmallScreen) {
+    return Container(
+      padding: EdgeInsets.all(isSmallScreen ? 3 : 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: cs.onSurfaceVariant.withValues(alpha: 0.08)),
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [
+            cs.onSurfaceVariant.withValues(alpha: 0.018),
+            Colors.transparent,
+          ],
         ),
-        actions: [
-          for (final o in _songPoolOptions)
-            M3EToggleButtonGroupAction(label: Text(o['label'] as String)),
-        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.max,
+        children: _songPoolOptions.map((option) {
+          final isActive = _selectedSongPoolId == option['value'];
+          return Expanded(
+            child: InkWell(
+              onTap: () {
+                setState(() => _selectedSongPoolId = option['value']);
+                _loadPersonalFm();
+              },
+              borderRadius: BorderRadius.circular(999),
+              child: Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: isSmallScreen ? 10 : 14,
+                  vertical: isSmallScreen ? 6 : 8,
+                ),
+                decoration: isActive
+                    ? BoxDecoration(
+                        borderRadius: BorderRadius.circular(999),
+                        color: cs.primary,
+                      )
+                    : null,
+                child: Text(
+                  option['label'],
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    fontSize: isSmallScreen ? 12 : null,
+                    fontWeight: FontWeight.w700,
+                    color: isActive
+                        ? cs.onPrimary
+                        : cs.onSurfaceVariant.withValues(alpha: 0.62),
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
       ),
     );
   }

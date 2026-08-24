@@ -7,6 +7,18 @@
 
 ---
 
+## 0. 核心工作准则（必读）
+
+1. **判断功能/Bug 状态必须基于日志，不能只凭截图。**
+   真机排查时，以 `adb logcat` 等日志输出为准（关键路径已带 `[RomaToggle]`、`[LyriconDebug]` 等调试标签）。
+   截图只能作为补充参考，**不能**作为"功能是否生效 / Bug 是否存在"的判定依据；涉及状态判断时先确认日志证据。
+
+2. **临时调试/测试产物一律放 `tmp/` 目录（已被 .gitignore 忽略，永不提交）。**
+   调试截图、临时脚本、测试数据、日志导出文件、验证用的临时 APK 等，禁止散落在项目根或其他目录；
+   `tmp/` 之外的临时文件在提交前必须清理或移入 `tmp/`。
+
+---
+
 ## 1. 项目架构概览
 
 MD3Music 是一款 Android 音乐播放器，采用 **Flutter 前端 + 嵌入式 Rust API 服务器** 的混合架构：
@@ -88,7 +100,7 @@ md3Music/
 | `kugou_api_server/rust/` ↔ `networkapi/` | 两者代码完全独立，不再共享 util；networkapi 已退役（登录已改由 Rust 直连酷狗），仅作 JS 参考 |
 | `kugou_api_server/module/` 等 JS 文件 | 旧 Node 方案遗留，已被 Rust 取代，**不要**再修改 JS 版模块或重新打包 |
 | `android/app/src/main/jniLibs/` | 原生库目录，`libkugou_server.so` **已提交进 Git**（从 `rust/target/*/release/` 复制），无需下载 |
-| `android/app/src/main/cpp/` + `kotlin/.../premium/UsbAudio*.kt` + `third_party/just_audio` | **USB 独占输出**：绕过 AudioFlinger，经 usbdevfs ISO URB 直写 UAC1 DAC（参考 [decent-player](https://github.com/Ma145/decent-player) 的 bit-perfect 驱动思路）；释放恢复见 4.10 |
+| `android/app/src/main/cpp/` + `kotlin/.../md3music/UsbAudio*.kt` + `third_party/just_audio` | **USB 独占输出**：绕过 AudioFlinger，经 usbdevfs ISO URB 直写 UAC1 DAC（参考 [decent-player](https://github.com/Ma145/decent-player) 的 bit-perfect 驱动思路）；释放恢复见 4.10 |
 | `assets/nodejs-project/` | 已从 `pubspec.yaml` 移除，不再打包；旧 `server_bundle.js` 仅作参考 |
 | `lib/`（公开树） ↔ `packages/md3_download_cache/` + `lib/private/`（私有内容） | **下载/缓存隔离**：公开树 `lib/`（不含 `lib/private/`）**零下载/缓存符号**；引擎与私有层只在私有构建存在。公开类通过**中性静态钩子**扩展（见 2.1）；公开版本由 `scripts/export_public.ps1` 过滤导出（排除 `packages/`、`lib/private/`、`pubspec.lock`，剥离私有依赖，否认清单闸门），详见[第 8 节](#8-下载缓存功能隔离私有功能包--公开导出) |
 | `lib/main.dart` ↔ `lib/private/main_private.dart` | 双入口：公开入口 `lib/main.dart`（干净树）；私有入口 `-t lib/private/main_private.dart`（装配下载/缓存）。`build_android.ps1` 默认构建私有入口 |
@@ -269,7 +281,7 @@ cargo +stable-x86_64-pc-windows-gnu build --target aarch64-linux-android --relea
 
 ### 4.10 USB 独占输出（UAC1 DAC 直写）
 
-**功能**：设置页「USB 独占输出」开启后，绕过 AudioFlinger/AudioTrack/AAudio/ALSA，直接经 `usbdevfs` ISO URB 把 PCM 写入 UAC1 DAC（思路参考 [decent-player](https://github.com/Ma145/decent-player) 的 bit-perfect USB Audio 驱动）。实现横跨三层：`cpp/usb-audio-output.cpp`（原生 URB 写入）、`kotlin/.../premium/UsbAudio*.kt`（设备枚举/claim/config 控制）、`third_party/just_audio` fork（`UsbAudioSinkController` 拦截音频流）。
+**功能**：设置页「USB 独占输出」开启后，绕过 AudioFlinger/AudioTrack/AAudio/ALSA，直接经 `usbdevfs` ISO URB 把 PCM 写入 UAC1 DAC（思路参考 [decent-player](https://github.com/Ma145/decent-player) 的 bit-perfect USB Audio 驱动）。实现横跨三层：`cpp/usb-audio-output.cpp`（原生 URB 写入）、`kotlin/.../md3music/UsbAudio*.kt`（设备枚举/claim/config 控制）、`third_party/just_audio` fork（`UsbAudioSinkController` 拦截音频流）。
 
 **释放路径（关闭独占后恢复系统声音）的关键实测结论**：
 
@@ -431,10 +443,12 @@ flutter analyze                           # Dart 静态分析
 │   ├── downloads_provider.dart      #   下载编排（KugouApiClient/MetadataWriter）
 │   ├── downloads_page.dart          #   下载管理页
 │   ├── private_settings.dart        #   私有设置读写器（边听边存/下载设置，key 兼容存量）
+│   ├── metadata_writer.dart         #   元数据写入客户端（MethodChannel → 原生 JAudioTagger 嵌入标签）
 │   └── main_private.dart            #   私有入口：runBootstrap() + 安装钩子 + MyApp(extraProviders)
 ├── lib/…                            # 公开树：不 import 任何下载/缓存符号，仅保留中性静态钩子（见 2.1）
-├── scripts/export_public.ps1        # 导出公开树：白名单拷贝 → 排除 packages/、lib/private/、pubspec.lock
-│                                    #   → 剥离 pubspec 私有依赖块 → 否认清单闸门 →（可选）推送
+├── scripts/export_public.ps1        # 导出公开树：白名单拷贝 → 排除 lib/private/、导出工具链、pubspec.lock
+│                                    #   → 剥离 pubspec 私有依赖（md3_download_cache / Windows 依赖）
+│                                    #   → README 清理私有功能宣传 → 否认清单闸门 →（可选）推送
 └── scripts/public_deny.txt          # 否认清单（UTF-8，英文符号 + 中文特征短语），export/verify 共用
 
 公开仓库（由 export_public.ps1 导出，含 lib/main.dart 入口，无下载/缓存）
@@ -442,7 +456,7 @@ flutter analyze                           # Dart 静态分析
 
 ### 8.2 硬性规则（AI Agent 必读）
 
-1. **公开树零符号**：`lib/`（不含 `lib/private/`）与根 `pubspec.yaml` 不得出现否认清单中的任何符号。**否认清单外置于 `scripts/public_deny.txt`**（UTF-8，含英文符号与中文特征短语，如 `StreamCacheManager`、`getStreamCacheEnabled`、`getDownloadDir`、`md3_download_cache`、`边听边存`、`仅显示已缓存`）。新增私有特征时**必须同步追加到该文件**——否则闸门形同虚设（曾漏掉 settings_repository 的私有设置 API）。
+1. **公开树零符号**：`lib/`（不含 `lib/private/`）与根 `pubspec.yaml` 不得出现否认清单中的任何符号。**否认清单外置于 `scripts/public_deny.txt`**（UTF-8，含英文符号与中文特征短语，如 `StreamCacheManager`、`getStreamCacheEnabled`、`getDownloadDir`、`md3_download_cache`、`metadata_writer`、`边听边存`、`仅显示已缓存`）。新增私有特征时**必须同步追加到该文件**——否则闸门形同虚设（曾漏掉 settings_repository 的私有设置 API，以及 lib/services/ 下漏放的 metadata_writer.dart，后者已迁入 lib/private/ 并补 deny 符号）。
 2. **新增下载/缓存代码的落点**：引擎/持久化 → `packages/md3_download_cache/`（只收 DTO/原始值，不 import 主工程类型）；编排/UI/私有设置读写 → `lib/private/`（含 `PrivateSettings`，可自由 import 主工程类型与包）；公开类需要能力时先加**中性静态钩子**（见 2.1），不要在公开类里直接写私有逻辑。
 3. **双入口**：私有构建 `-t lib/private/main_private.dart`（`build_android.ps1` 默认）；公开构建 `lib/main.dart`。两个入口共用 `runBootstrap()`（`main.dart` 中抽出的启动引导）。
 4. **包不反向依赖主工程**：Dart 禁止循环包依赖（主工程 path 依赖包，包不能 extends 主工程类）——这是钩子采用「公开类静态字段 + 私有注入」而非子类化的原因。
@@ -456,3 +470,45 @@ flutter analyze                           # Dart 静态分析
 - **正则贪婪**：剥离 pubspec 依赖块时锚定注释行 `^  # private feature package`，勿用裸 `.*md3_download_cache`（会从首个 `# ` 注释行开始误删中间依赖）。
 - **deny 词粒度**：勿用裸「缓存/下载」作 deny 词（会误伤公开版合法的封面/歌单/本地音乐缓存功能）；用特征级符号与短语（`边听边存`、`仅显示已缓存`、`settings_download_dir` 等）。
 - **预存测试失败**：`flutter test` 有 19 个 `kugou_provider_test.dart` 多账号测试失败，根因是测试环境 shared_preferences 插件不可用（MissingPluginException），与下载/缓存改动无关。
+
+---
+
+## 9. 维护手册功能与触发时机
+
+> 双仓库工作流（私有单一源码 + 公开过滤导出）的**完整操作手册**在 `docs/public_private_workflow.md`（470 行，权威细节）。本节是它的功能速查与触发时机——**遇到下列场景时，先读对应小节再动手**。
+
+### 9.1 当前基线（2026-08 迁移后）
+
+- **包名统一**：`com.md3music.md3music`（与公开版一致；此前为 `com.md3music.premium`，已全量替换：gradle/manifest/kotlin+java 包声明/Dart MethodChannel）
+- **公开版功能已全量迁移**（15 项特性：最热评论/文字阴影/默认壁纸/显示大小/私人FM区块/MD3E 组件/edgeToEdge/双击返回/楼中楼算法等），私有下载/缓存能力通过中性钩子保留
+- **分支**：`migrate-public-features`（基于 `rust-local-two`，迁移成果，待合并回主干）
+
+### 9.2 维护手册功能清单
+
+| 功能 | 手册位置 | 一句话说明 |
+|------|---------|-----------|
+| 架构理解（数据流/代码区域/双入口/钩子） | §1.1~1.5 | 新代码往哪放、公开树↔私有层怎么通信 |
+| 两条铁律 | §2 | 公开树零私有符号；下载/缓存代码只有两个落点 |
+| 场景 A：私有库开发普通功能 | §4.1 | 日常主路径，直接开发→验证→提交 |
+| 场景 B：私有库开发下载/缓存功能 | §4.2 | 代码进包/进私有层→加钩子→同步 deny 列表 |
+| 场景 C：公开库新功能同步回私有库 | §4.3 | `git fetch zzyoxml` → `cherry-pick` → 验证 |
+| 场景 D：发布公开版本 | §4.4 | `verify_public_clean` → `export_public.ps1 -PublicRemote` |
+| 场景 E：给公开类新增私有能力（钩子全流程） | §4.5 | 加中性静态钩子→私有层注入→deny 追加 |
+| 场景 F：导出白名单维护 | §4.6 | 新增顶层文件/目录时判断该不该公开 |
+
+### 9.3 触发时机速查
+
+| 触发场景 | 应做动作 | 查哪里 |
+|---------|---------|--------|
+| 要开发**普通**新功能 | 直接写 `lib/`（公开树），无需特殊处理 | §4.1 |
+| 要开发**下载/缓存/边听边存**相关功能 | 代码进 `packages/md3_download_cache/` 或 `lib/private/`，公开类加中性钩子，**deny 列表同步追加新符号** | §4.2 + §4.5 |
+| 公开类需要**调用私有能力**（下载、缓存封面、本地音频） | 给该公开类加**中性静态钩子**（参考 §2.1 钩子表），私有层 `installCacheHooks/installUiHooks` 注入 | §4.5 + 本文档 §2.1 |
+| 改动涉及下载/缓存/新增私有符号 | 提交前跑 `scripts/verify_public_clean.ps1`（必须零命中） | §4.4 步骤 1 |
+| 要**发布公开版本** | `export_public.ps1`（自动：白名单拷贝→排除私有→剥离依赖→README 清理→闸门→可选推送）；导出后抽查导出树 analyze + 构建 | §4.4 |
+| **公开仓库**有新功能要带回私有库 | 拉取 → 挑 commit → `cherry-pick` → 冲突时保留私有依赖块 → 验证 | §4.3 |
+| 新增**顶层目录/文件**（如 docs/、新脚本） | 判断该不该公开 → 需要则加进导出白名单 `$whitelist`；**导出工具链（export_public/verify_public_clean/public_deny）与 CHANGELOG 永不导出** | §4.6 |
+| 新功能涉及 **Windows 桌面** 或 **README 功能宣传** | Windows 依赖需在导出脚本剥离、README 私有功能条目需清理、build-windows.yml 需排除（导出自动处理，但新增时确认覆盖） | §4.6 + 本文档 §8.1 |
+
+### 9.4 导出脚本职责（改脚本前先看这）
+
+`scripts/export_public.ps1` 一次完成：白名单拷贝（当前 15 项顶层）→ 排除 `lib/private/`、`pubspec.lock`、导出工具链 3 件、`build-windows.yml` → 剥离 pubspec 私有依赖（`md3_download_cache` 块 + `just_audio_windows`/`video_player_win`）→ README 删除「边听边存」条目 → deny 闸门（40 条）→ 可选 force push。**导出树应有且仅有：公开功能 + Android 平台**（无 `windows/`、无 CHANGELOG——公开仓库自行维护）。

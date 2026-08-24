@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 
@@ -11,10 +12,12 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/layout/page_title_alignment.dart';
+import '../../core/layout/ui_density.dart';
 import '../../core/services/background_image_loader.dart';
+import '../../core/widgets/app_background.dart' show kDefaultWallpaperAsset;
 import '../../core/services/custom_font_loader.dart';
 import '../../core/utils/app_toast.dart';
-import '../../core/services/audio_service_io.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/equalizer_service.dart';
 import '../../core/services/lyricon_provider_service.dart';
@@ -34,7 +37,6 @@ import '../../providers/tab_config_provider.dart';
 import '../../providers/theme_provider.dart';
 import '../../services/kugou_server.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
-import '../../widgets/apple_lyrics/layout/lyric_preferences_panel.dart';
 import '../../widgets/seed_color_picker.dart';
 import '../../widgets/usb_exclusive_section.dart';
 import '../player/mini_player.dart';
@@ -106,31 +108,29 @@ class _SettingsPageState extends State<SettingsPage>
   // 锁屏歌词独立字号/粗细（默认跟随 AM 歌词偏好）
   double _lockScreenLyricFontSize = 22;
   int _lockScreenLyricFontWeight = 400;
-  double _uiScale = 1.0;
   // 暂停淡入淡出开关
   bool _pauseFadeEnabled = false;
   // 播放时保持屏幕常亮开关
   bool _keepScreenOn = false;
+  // 忽略音频焦点开关（默认开启：允许与其他应用同时播放音频）
+  bool _ignoreAudioFocus = true;
   // MiniPlayer 滑动切歌开关（默认开启）
   bool _miniPlayerSwipeSwitch = true;
-  // 收藏歌单按「最近点击」排序（默认开启）
-  bool _sortCollectedByLatestClick = true;
-  // 完全忽略音频焦点（不响应来电 / 导航 / 拔耳机等中断），默认关闭
-  bool _ignoreAudioFocus = false;
-  // 短暂失去音频焦点时的处理策略（默认：暂停后自动恢复）
-  AudioFocusInterruptionMode _audioFocusMode =
-      AudioFocusInterruptionMode.pauseAndResume;
+  // 收藏歌单按「最近点击」排序（默认关闭）
+  bool _sortCollectedByLatestClick = false;
   // 歌词双击跳转开关（默认关闭，开启后需双击歌词才能跳转位置）
   bool _lyricDoubleTapToJump = false;
-  // 播放详情页底栏切分开关（默认关闭，保持单条长 pill）
-  bool _splitActionBar = false;
-  // 自定义背景图片（全局界面背景）
-  bool _useBackgroundImage = false;
+  // 自定义背景图片（全局界面背景）；默认开启，未选择图片时回落到内置默认壁纸
+  bool _useBackgroundImage = true;
   String? _backgroundImagePath;
-  double _backgroundBlur = 12.0;
-  double _backgroundOpacity = 0.7;
+  double _backgroundBlur = 20.0;
+  double _backgroundOpacity = 0.4;
   // 按背景图莫奈取色（默认开启）
   bool _useBackgroundMonet = true;
+  // 文字阴影（默认关闭，仅在启用自定义背景图片时生效）
+  bool _useTextShadow = false;
+  // 文字阴影磅数（阴影模糊半径）
+  double _textShadowBlur = AppTheme.defaultTextShadowBlur;
   // 音乐频谱环绕显示开关（默认关闭，仅 Android 生效）
   bool _spectrumEnabled = false;
   // 频谱柱数量（20~80，默认 40）
@@ -260,7 +260,6 @@ class _SettingsPageState extends State<SettingsPage>
     final lyricDoubleTapToJump = context
         .read<ThemeProvider>()
         .lyricDoubleTapToJump;
-    final splitActionBar = context.read<ThemeProvider>().splitActionBar;
     final useArtistPhotoBackground = context
         .read<ThemeProvider>()
         .useArtistPhotoBackground;
@@ -276,8 +275,8 @@ class _SettingsPageState extends State<SettingsPage>
     final backgroundBlur = context.read<ThemeProvider>().backgroundBlur;
     final backgroundOpacity = context.read<ThemeProvider>().backgroundOpacity;
     final useBackgroundMonet = context.read<ThemeProvider>().useBackgroundMonet;
-    // 从 ThemeProvider 同步 UI 缩放
-    final uiScale = context.read<ThemeProvider>().uiScale;
+    final useTextShadow = context.read<ThemeProvider>().useTextShadow;
+    final textShadowBlur = context.read<ThemeProvider>().textShadowBlur;
     // 读取蓝牙歌词开关
     final bluetoothLyricEnabled = await _settingsRepository
         .getBluetoothLyricEnabled();
@@ -291,6 +290,7 @@ class _SettingsPageState extends State<SettingsPage>
         .getLockScreenLyricFontWeight();
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
     final keepScreenOn = await _settingsRepository.getKeepScreenOn();
+    final ignoreAudioFocus = await _settingsRepository.getIgnoreAudioFocus();
     final spectrumEnabled = await _settingsRepository.getSpectrumEnabled();
     final spectrumBandCount = await _settingsRepository.getSpectrumBandCount();
     final spectrumStyle = await _settingsRepository.getSpectrumStyle();
@@ -303,9 +303,6 @@ class _SettingsPageState extends State<SettingsPage>
         .getMiniPlayerSwipeSwitchEnabled();
     final sortCollectedByLatestClick = await _settingsRepository
         .getSortCollectedByLatestClick();
-    final ignoreAudioFocus = await _settingsRepository.getIgnoreAudioFocus();
-    final audioFocusMode = await _settingsRepository
-        .getAudioFocusInterruptionMode();
 
     setState(() {
       _defaultQuality = quality;
@@ -314,7 +311,6 @@ class _SettingsPageState extends State<SettingsPage>
       _useCoverSeedColor = useCoverSeedColor;
       _useAmStylePlayer = useAmStylePlayer;
       _lyricDoubleTapToJump = lyricDoubleTapToJump;
-      _splitActionBar = splitActionBar;
       _useArtistPhotoBackground = useArtistPhotoBackground;
       _artistPhotoInterval = artistPhotoInterval;
       _artistPhotoOpacity = artistPhotoOpacity;
@@ -323,19 +319,21 @@ class _SettingsPageState extends State<SettingsPage>
       _backgroundBlur = backgroundBlur;
       _backgroundOpacity = backgroundOpacity;
       _useBackgroundMonet = useBackgroundMonet;
+      _useTextShadow = useTextShadow;
+      _textShadowBlur = textShadowBlur;
       _useGaussianBlur = LyricPreferences.instance.useGaussianBlur;
       _useGlowEffect = LyricPreferences.instance.useGlowEffect;
       _useFlowingBackground = LyricPreferences.instance.useFlowingBackground;
       _useDuetLayout = LyricPreferences.instance.useDuetLayout;
       _lyricEcoMode = LyricPreferences.instance.ecoMode;
       _lyricDynamicColor = LyricPreferences.instance.useDynamicLyricColor;
-      _uiScale = uiScale;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
       _lockScreenLyricEnabled = lockScreenLyricEnabled;
       _lockScreenLyricFontSize = lockScreenLyricFontSize;
       _lockScreenLyricFontWeight = lockScreenLyricFontWeight;
       _pauseFadeEnabled = pauseFadeEnabled;
       _keepScreenOn = keepScreenOn;
+      _ignoreAudioFocus = ignoreAudioFocus;
       _spectrumEnabled = spectrumEnabled;
       _spectrumBandCount = spectrumBandCount;
       _spectrumStyle = spectrumStyle;
@@ -346,8 +344,6 @@ class _SettingsPageState extends State<SettingsPage>
       _spectrumDynamicColor = spectrumDynamicColor;
       _miniPlayerSwipeSwitch = miniPlayerSwipeSwitch;
       _sortCollectedByLatestClick = sortCollectedByLatestClick;
-      _ignoreAudioFocus = ignoreAudioFocus;
-      _audioFocusMode = audioFocusMode;
     });
     // 同步到全局开关，让已挂载的 MiniPlayer 实例实时响应
     miniPlayerSwipeSwitchEnabled.value = miniPlayerSwipeSwitch;
@@ -392,6 +388,9 @@ class _SettingsPageState extends State<SettingsPage>
                 )
               : null,
           title: Text(inSubpage ? _activeSection! : '设置'),
+          // 统一对齐规则：设置页内部的分类详情本身即二级页面，一律居中；
+          // 总览页则按「是否为底部导航栏可直达的一级页面」判定
+          centerTitle: inSubpage || centerPageTitle(context, tabId: 'settings'),
         ),
         // 页面切换过渡：先淡出旧页 → 切换内容 → 再淡入新页（严格串行）。
         // 淡入方向按页面层级区分：进入二级页自右侧推进、返回总览自左侧退回。
@@ -535,8 +534,8 @@ class _SettingsPageState extends State<SettingsPage>
     (label: '背景图片模糊', category: '外观', aliases: '模糊 高斯模糊 背景'),
     (label: '背景图片透明度', category: '外观', aliases: '透明度 背景'),
     (label: '背景图片莫奈取色', category: '外观', aliases: '莫奈 取色 动态取色 背景'),
+    (label: '文字阴影', category: '外观', aliases: '阴影 文字 可读性 背景 壁纸'),
     // 播放页样式
-    (label: '底栏切分', category: '播放页样式', aliases: '底栏 切分 分离 操作栏 底部 全屏'),
     (label: '歌词双击跳转', category: '播放页样式', aliases: '双击 跳转'),
     (label: '歌手写真背景轮播', category: '播放页样式', aliases: '写真 背景 轮播'),
     (label: '写真背景透明度', category: '播放页样式', aliases: '写真 透明度'),
@@ -556,8 +555,7 @@ class _SettingsPageState extends State<SettingsPage>
     (label: '自动领取 VIP', category: '播放', aliases: 'vip 会员 自动领取'),
     (label: '暂停淡入淡出', category: '播放', aliases: '淡入淡出 渐变 音量'),
     (label: '播放时保持屏幕常亮', category: '播放', aliases: '屏幕常亮 常亮 息屏'),
-    (label: '忽略音频焦点', category: '播放', aliases: '音频焦点 焦点 中断 忽略'),
-    (label: '失去焦点处理', category: '播放', aliases: '音频焦点 焦点 中断 暂停 恢复 降低音量 duck 来电'),
+    (label: '允许与其他应用同时播放音频', category: '播放', aliases: '音频焦点 忽略焦点 同时播放 共存 不被打断 焦点'),
     (label: '播放 MV 时自动画中画', category: '播放', aliases: '画中画 pip 悬浮'),
     (label: 'MiniPlayer 滑动切歌', category: '播放', aliases: 'miniplaer 迷你播放条 滑动切歌 切歌'),
     (label: '收藏歌单按最近点击排序', category: '播放', aliases: '收藏 歌单 排序 最近点击 顺序'),
@@ -830,8 +828,8 @@ class _SettingsPageState extends State<SettingsPage>
         ),
         // 锁屏歌词（独立开关）：锁屏时全屏显示逐字歌词
         SwitchListTile(
-          title: const Text('锁屏歌词'),
-          subtitle: const Text('锁屏时全屏显示逐字歌词（熄灭屏幕后点亮，覆盖在系统锁屏上方；解锁自动关闭）'),
+          title: const Text('锁屏歌词试验线功能'),
+          subtitle: const Text('锁屏时全屏显示逐字歌词（熄灭屏幕后点亮，覆盖在系统锁屏上方；解锁自动关闭；需要在权限管理同时开启锁屏通知和后台弹出界面以及显示悬浮窗权限才能显示）'),
           value: _lockScreenLyricEnabled,
           onChanged: (value) async {
             HapticFeedback.lightImpact();
@@ -1000,116 +998,6 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
-  /// 歌词字体来源中文标签（用于"歌词字体"ListTile 的 subtitle）。
-  String _lyricFontSourceLabel(LyricFontSource source) {
-    switch (source) {
-      case LyricFontSource.system:
-        return '系统默认（手机字体优先）';
-      case LyricFontSource.bundled:
-        return '内置 SimHei';
-      case LyricFontSource.custom:
-        return '自定义字体';
-    }
-  }
-
-  /// 弹出歌词字体来源选择面板。
-  /// 与全局字体选择解耦：歌词字体独立配置，仅作用于歌词渲染路径。
-  /// 切换字体会触发 LyricPreferences.notifyListeners，
-  /// AppleLyricsView 监听到后会失效行高缓存 + 模糊图片缓存并重算。
-  void _showLyricFontSourceSheet(LyricPreferences prefs) {
-    showModalBottomSheet(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) {
-        final current = prefs.fontSource;
-        return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    '歌词字体来源',
-                    style: Theme.of(ctx).textTheme.titleMedium,
-                  ),
-                ),
-              ),
-              ListTile(
-                leading: Icon(
-                  current == LyricFontSource.system
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  color: Theme.of(ctx).colorScheme.primary,
-                ),
-                title: const Text('系统默认'),
-                subtitle: const Text('使用手机系统字体（推荐）'),
-                onTap: () async {
-                  await prefs.setFontSource(LyricFontSource.system);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-              ),
-              ListTile(
-                leading: Icon(
-                  current == LyricFontSource.bundled
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  color: Theme.of(ctx).colorScheme.primary,
-                ),
-                title: const Text('内置 SimHei'),
-                subtitle: const Text('使用打包的黑体字体'),
-                onTap: () async {
-                  await prefs.setFontSource(LyricFontSource.bundled);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-              ),
-              ListTile(
-                leading: Icon(
-                  current == LyricFontSource.custom
-                      ? Icons.radio_button_checked
-                      : Icons.radio_button_unchecked,
-                  color: Theme.of(ctx).colorScheme.primary,
-                ),
-                title: const Text('自定义字体'),
-                subtitle: Text(
-                  prefs.customFontPath == null
-                      ? '点击从设备选择 .ttf / .otf 文件'
-                      : '已加载：${prefs.customFontPath}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                onTap: () async {
-                  // 立即关闭面板，避免文件选择器与 BottomSheet 重叠
-                  if (ctx.mounted) Navigator.pop(ctx);
-                  await _pickAndApplyLyricCustomFont(prefs);
-                },
-              ),
-              const SizedBox(height: 8),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  /// 调用原生 SAF 文件选择器为歌词选字体文件，成功后保存并应用。
-  Future<void> _pickAndApplyLyricCustomFont(LyricPreferences prefs) async {
-    final path = await CustomFontLoader.pickFontFile();
-    if (path == null) {
-      // 用户取消
-      if (!mounted) return;
-      showToast('未选择字体文件', long: true);
-      return;
-    }
-    // 先保存路径并加载字体（_tryLoadCustomFont 内部会注册 FontLoader）
-    await prefs.setCustomFontPath(path);
-    // 再切换来源为 custom（即使加载失败也切换，UI 自然降级为系统字体）
-    await prefs.setFontSource(LyricFontSource.custom);
-    if (!mounted) return;
-    final loaded = prefs.effectiveFontFamily != null;
-    showToast(loaded ? '已应用自定义字体到歌词' : '字体加载失败，已降级为系统字体', long: true);
-  }
 
   Widget _buildAppearanceSection(ColorScheme colorScheme) {
     final themeProvider = context.read<ThemeProvider>();
@@ -1242,52 +1130,11 @@ class _SettingsPageState extends State<SettingsPage>
               : null,
         ),
         const Divider(),
-        // UI 缩放滑块
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-          child: Row(
-            children: [
-              Icon(Icons.format_size, color: colorScheme.onSurfaceVariant),
-              const SizedBox(width: 12),
-              Expanded(
-                child: M3ESlider(
-                  decoration: const M3ESliderDecoration(haptic: M3EHapticFeedback.medium),
-                  value: _uiScale,
-                  min: 0.5,
-                  max: 2.0,
-                  divisions: 15,
-                  label: '${_uiScale.toStringAsFixed(1)}x',
-                  onChanged: (v) {
-                    setState(() => _uiScale = v);
-                  },
-                  onChangeEnd: (v) {
-                    context.read<ThemeProvider>().setUiScale(v);
-                  },
-                ),
-              ),
-              SizedBox(
-                width: 40,
-                child: Text(
-                  '${_uiScale.toStringAsFixed(1)}x',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Text(
-            '调整全局界面大小（歌词界面不受影响）',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ),
+        // 「显示大小」滑块单独抽成 StatefulWidget：拖动中的中间值只重建这一小块。
+        // 若放在设置页里用 setState 承接，每个 drag update 都会重建整页三千余行的
+        // 元素树，滑块自身的手势识别器可能被连带重建 → 拖动中途"断触"、
+        // onChangeEnd 提前触发（手还没抬就应用并弹确认框）。
+        const _DisplayScaleTile(),
         const Divider(height: 16),
         // 底部导航栏文字显示行为：始终显示 / 仅当前页 / 始终不显示
         Padding(
@@ -1371,7 +1218,8 @@ class _SettingsPageState extends State<SettingsPage>
     return Column(
       children: [
         SwitchListTile(
-          title: const Text('启用自定义背景图片（实验性）'),
+          title: const Text('启用自定义背景图片'),
+          subtitle: const Text('关闭后恢复纯色主题背景；开启且未选图时用内置默认壁纸'),
           value: _useBackgroundImage,
           onChanged: (v) {
             HapticFeedback.lightImpact();
@@ -1390,6 +1238,66 @@ class _SettingsPageState extends State<SettingsPage>
             themeProvider.setUseBackgroundMonet(v);
           },
         ),
+        // 文字阴影：只有启用背景图时才可用（关闭背景图时开关置灰，保留用户选择）
+        SwitchListTile(
+          title: const Text('文字阴影'),
+          subtitle: Text(
+            _useBackgroundImage
+                ? '给全局文字加阴影，改善背景图上的可读性；下方滑块调阴影磅数'
+                : '需先启用自定义背景图片',
+          ),
+          value: _useTextShadow,
+          onChanged: _useBackgroundImage
+              ? (v) {
+                  HapticFeedback.lightImpact();
+                  setState(() => _useTextShadow = v);
+                  // ignore: discarded_futures
+                  themeProvider.setUseTextShadow(v);
+                }
+              : null,
+        ),
+        // 阴影磅数：阴影本身没生效时置灰（与「文字阴影」开关同一套约定，
+        // 保留用户已选的磅数）
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Row(
+            children: [
+              Icon(
+                Icons.text_fields,
+                color: (_useBackgroundImage && _useTextShadow)
+                    ? colorScheme.onSurfaceVariant
+                    : colorScheme.onSurfaceVariant.withValues(alpha: 0.38),
+              ),
+              const SizedBox(width: 50),
+              Expanded(
+                child: M3ESlider(
+                  value: _textShadowBlur,
+                  min: AppTheme.minTextShadowBlur,
+                  max: AppTheme.maxTextShadowBlur,
+                  // 不传 divisions：磅数无极（连续）调节
+                  enabled: _useBackgroundImage && _useTextShadow,
+                  label: _textShadowBlur.toStringAsFixed(1),
+                  // 拖动只动滑块，松手才提交：改磅数要整棵主题树重建
+                  onChanged: (v) => setState(() => _textShadowBlur = v),
+                  onChangeEnd: (v) => themeProvider.setTextShadowBlur(v),
+                ),
+              ),
+              SizedBox(
+                width: 34,
+                child: Text(
+                  _textShadowBlur.toStringAsFixed(1),
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: (_useBackgroundImage && _useTextShadow)
+                        ? colorScheme.primary
+                        : colorScheme.onSurfaceVariant.withValues(alpha: 0.38),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
         ListTile(
           leading: const Icon(Icons.image_outlined),
           title: Text(hasImage ? '更换背景图片' : '选择背景图片'),
@@ -1397,42 +1305,48 @@ class _SettingsPageState extends State<SettingsPage>
           trailing: const Icon(Icons.chevron_right, size: 18),
           onTap: _pickBackgroundImage,
         ),
-        if (hasImage) ...[
-          // 实时预览：按当前模糊 / 透明度渲染
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(
-                height: 120,
-                width: double.infinity,
-                child: Opacity(
-                  opacity: _backgroundOpacity,
-                  child: ImageFiltered(
-                    imageFilter: ImageFilter.blur(
-                      sigmaX: _backgroundBlur,
-                      sigmaY: _backgroundBlur,
-                    ),
-                    child: Image.file(
-                      File(_backgroundImagePath!),
-                      fit: BoxFit.cover,
-                      // 限制解码宽度，避免选高分辨率照片时全尺寸解码导致内存峰值闪退
-                      cacheWidth: 800,
-                    ),
+        // 实时预览：按当前模糊 / 透明度渲染（无用户图片时显示内置默认壁纸）
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              height: 120,
+              width: double.infinity,
+              child: Opacity(
+                opacity: _backgroundOpacity,
+                child: ImageFiltered(
+                  imageFilter: ImageFilter.blur(
+                    sigmaX: _backgroundBlur,
+                    sigmaY: _backgroundBlur,
                   ),
+                  child: hasImage
+                      ? Image.file(
+                          File(_backgroundImagePath!),
+                          fit: BoxFit.cover,
+                          // 限制解码宽度，避免选高分辨率照片时全尺寸解码导致内存峰值闪退
+                          cacheWidth: 800,
+                        )
+                      : Image.asset(
+                          kDefaultWallpaperAsset,
+                          fit: BoxFit.cover,
+                          cacheWidth: 800,
+                        ),
                 ),
               ),
             ),
           ),
+        ),
+        if (hasImage)
           ListTile(
             leading: Icon(
               Icons.cleaning_services_outlined,
               color: colorScheme.error,
             ),
             title: const Text('清除背景图片'),
+            subtitle: const Text('清除后使用内置默认壁纸'),
             onTap: _clearBackgroundImage,
           ),
-        ],
         // 模糊程度滑块
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -1514,7 +1428,8 @@ class _SettingsPageState extends State<SettingsPage>
     showToast('背景图片已设置，已自动莫奈取色', long: true);
   }
 
-  /// 清除背景图片：删除本地文件并清空配置（同时关闭开关）。
+  /// 清除背景图片：删除本地文件并回到内置默认壁纸（开关保持开启，
+  /// 避免进入"无背景"状态导致浅色模式配色异常）。
   Future<void> _clearBackgroundImage() async {
     final path = _backgroundImagePath;
     if (path != null) {
@@ -1526,12 +1441,12 @@ class _SettingsPageState extends State<SettingsPage>
     if (!mounted) return;
     setState(() {
       _backgroundImagePath = null;
-      _useBackgroundImage = false;
+      _useBackgroundImage = true;
     });
     final themeProvider = context.read<ThemeProvider>();
     await themeProvider.setBackgroundImagePath(null);
-    await themeProvider.setUseBackgroundImage(false);
-    showToast('已清除背景图片', long: true);
+    await themeProvider.setUseBackgroundImage(true);
+    showToast('已清除背景图片，使用默认壁纸', long: true);
   }
 
   /// 播放页样式 section：播放器风格卡片选择 + 视觉特效开关。
@@ -1541,16 +1456,6 @@ class _SettingsPageState extends State<SettingsPage>
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: _buildStyleCards(colorScheme),
-        ),
-        SwitchListTile(
-          title: const Text('底栏切分'),
-          subtitle: const Text('播放页底栏按作用分成两组：左侧切换页面，右侧功能按钮（含全屏）'),
-          value: _splitActionBar,
-          onChanged: (v) {
-            HapticFeedback.lightImpact();
-            setState(() => _splitActionBar = v);
-            context.read<ThemeProvider>().setSplitActionBar(v);
-          },
         ),
         SwitchListTile(
           title: const Text('歌词双击跳转'),
@@ -2076,6 +1981,19 @@ class _SettingsPageState extends State<SettingsPage>
             WakelockService.instance.setSettingEnabled(value);
           },
         ),
+        SwitchListTile(
+          title: const Text('允许与其他应用同时播放音频'),
+          subtitle: const Text('忽略音频焦点请求，打开其他 App 时音乐不被打断',
+              maxLines: 2, overflow: TextOverflow.ellipsis),
+          value: _ignoreAudioFocus,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            setState(() {
+              _ignoreAudioFocus = value;
+            });
+            context.read<PlayerProvider>().setIgnoreAudioFocus(value);
+          },
+        ),
         // MV 画中画：按 Home 自动进入（手动按钮始终可用）
         FutureBuilder<bool>(
           future: SettingsRepository().getAutoPipEnabled(),
@@ -2119,67 +2037,6 @@ class _SettingsPageState extends State<SettingsPage>
             });
             _settingsRepository.setSortCollectedByLatestClick(value);
           },
-        ),
-        // ── 音频焦点 ──
-        const Divider(),
-        SwitchListTile(
-          secondary: Icon(Icons.phonelink_off, color: colorScheme.primary),
-          title: const Text('忽略音频焦点'),
-          subtitle: const Text('来电、导航、拔耳机等系统中断时也不暂停、不降音量，持续播放'),
-          value: _ignoreAudioFocus,
-          onChanged: (value) {
-            HapticFeedback.lightImpact();
-            setState(() {
-              _ignoreAudioFocus = value;
-            });
-            _settingsRepository.setIgnoreAudioFocus(value);
-            AudioService().setIgnoreAudioFocus(value);
-          },
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '失去音频焦点时',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '关闭「忽略音频焦点」后生效',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-              const SizedBox(height: 8),
-              M3EToggleButtonGroup(
-                actions: const [
-                  M3EToggleButtonGroupAction(label: Text('保持音量')),
-                  M3EToggleButtonGroupAction(label: Text('暂停后恢复')),
-                  M3EToggleButtonGroupAction(label: Text('降低音量后恢复')),
-                ],
-                selectedIndex: _audioFocusMode.index,
-                onSelectedIndexChanged: (index) {
-                  if (index == null) return;
-                  final mode = AudioFocusInterruptionMode.values[index];
-                  setState(() {
-                    _audioFocusMode = mode;
-                  });
-                  _settingsRepository.setAudioFocusInterruptionMode(mode);
-                  AudioService().setInterruptionMode(mode);
-                },
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '备注：部分系统（如 MIUI）的导航播报、语音助手会直接在系统层压低媒体音量，'
-                '不经过音频焦点回调，此类场景上述选项可能无效',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-              ),
-            ],
-          ),
         ),
       ],
     );
@@ -2235,20 +2092,15 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
+  /// 本地持久化音频管理 section 未包含在公开版本中。
+
   Widget _buildOnlineMusicSection(ColorScheme colorScheme) {
-    // 端口为 0 表示本地 Rust 服务器从未启动成功（桌面缺 kugou_server.dll 最常见）。
-    // 此前这里无条件显示"运行中"，服务器挂了也照样显示，反而掩盖了故障。
-    final port = KugouApiServer.currentPort;
-    final running = port > 0;
     return Column(
       children: [
         ListTile(
-          leading: Icon(
-            Icons.dns,
-            color: running ? colorScheme.primary : colorScheme.error,
-          ),
+          leading: Icon(Icons.dns, color: colorScheme.primary),
           title: const Text('本地数据接口'),
-          subtitle: Text(running ? '端口：$port' : '未启动'),
+          subtitle: Text('端口：${KugouApiServer.currentPort}'),
           trailing: _isRestarting
               ? SizedBox(
                   width: 20,
@@ -2262,17 +2114,13 @@ class _SettingsPageState extends State<SettingsPage>
               : Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: running
-                        ? colorScheme.primaryContainer
-                        : colorScheme.errorContainer,
+                    color: colorScheme.primaryContainer,
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Text(
-                    running ? '运行中' : '未启动',
+                    '运行中',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: running
-                          ? colorScheme.onPrimaryContainer
-                          : colorScheme.onErrorContainer,
+                      color: colorScheme.onPrimaryContainer,
                     ),
                   ),
                 ),
@@ -2281,15 +2129,9 @@ class _SettingsPageState extends State<SettingsPage>
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: Text(
-            running
-                ? '本地 Rust 服务器运行中，推荐/排行/搜索/播放/登录等数据接口均通过本地处理（点击上方可重启）'
-                : '本地 Rust 服务器未启动，推荐/排行/搜索/播放/登录等在线功能全部不可用。'
-                    '${Platform.isWindows ? "Windows 上通常是安装包缺少 kugou_server.dll。" : ""}'
-                    '（点击上方可重试启动）',
+            '本地 Rust 服务器运行中，推荐/排行/搜索/播放/登录等数据接口均通过本地处理（点击上方可重启）',
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: running
-                  ? colorScheme.onSurfaceVariant
-                  : colorScheme.error,
+              color: colorScheme.onSurfaceVariant,
             ),
           ),
         ),
@@ -2298,17 +2140,13 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   /// 询问是否重启本地 API 服务器，确认后重启并更新端口展示。
-  /// 服务器未启动（端口 0）时同一入口用于「重试启动」。
   Future<void> _confirmRestartServer() async {
     final port = KugouApiServer.currentPort;
-    final running = port > 0;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(running ? '重启本地 API 服务器' : '重试启动本地 API 服务器'),
-        content: Text(running
-            ? '确定要重启本地 Rust API 服务器吗？\n当前端口：$port\n重启后将重新分配随机端口。\n如果你遇到了玄学问题，那就重启一下试试吧（）'
-            : '本地 Rust API 服务器当前未启动，在线功能全部不可用。\n要重试启动吗？'),
+        title: const Text('重启本地 API 服务器'),
+        content: Text('确定要重启本地 Rust API 服务器吗？\n当前端口：$port\n重启后将重新分配随机端口。\n如果你遇到了玄学问题，那就重启一下试试吧（）'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
@@ -2316,7 +2154,7 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: Text(running ? '重启' : '重试'),
+            child: const Text('重启'),
           ),
         ],
       ),
@@ -2473,20 +2311,22 @@ class _SettingsPageState extends State<SettingsPage>
           },
         ),
         // 开发者入口：Miuix（MIUI 风格组件库）发现页移植测试页（原生 Kotlin + Compose）
-        ListTile(
-          title: const Text('Miuix 发现页测试（开发）'),
-          subtitle: const Text('MIUI 风格重新排版的发现页信息呈现'),
-          leading: const Icon(Icons.explore_outlined),
-          onTap: _openMiuixDiscover,
-        ),
+        // 已隐藏：仅保留入口数据与跳转方法，可在需要时取消注释恢复
+        // ListTile(
+        //   title: const Text('Miuix 发现页测试（开发）'),
+        //   subtitle: const Text('MIUI 风格重新排版的发现页信息呈现'),
+        //   leading: const Icon(Icons.explore_outlined),
+        //   onTap: _openMiuixDiscover,
+        // ),
       ],
     );
   }
 
   /// 打开原生 Miuix 发现页测试：通过 MethodChannel 启动 MiuixDiscoverActivity，
   /// 并把本地 Rust API 服务器当前端口传过去（原生页据此直连取数）。
+  // ignore: unused_element
   Future<void> _openMiuixDiscover() async {
-    const channel = MethodChannel('com.md3music.premium/miuix_discover');
+    const channel = MethodChannel('com.md3music.md3music/miuix_discover');
     try {
       await channel.invokeMethod('open', {'port': KugouApiServer.currentPort});
     } catch (e) {
@@ -2632,7 +2472,16 @@ class _SettingsPageState extends State<SettingsPage>
                 child: SizedBox(
                   height: 140,
                   width: double.infinity,
-                  child: preview,
+                  // 迷你界面示意图：高度固定 140、宽度受 Expanded 约束，
+                  // 内部元素（28dp 顶栏、24dp 图标块）没有余量跟随系统字号，
+                  // 字一放大就撑破。这里豁免系统字号，让预览恒按真实比例呈现。
+                  // 「显示大小」不在此列 —— 它整页等比变化，预览随之整体缩放。
+                  child: MediaQuery(
+                    data: MediaQuery.of(
+                      context,
+                    ).copyWith(textScaler: TextScaler.noScaling),
+                    child: preview,
+                  ),
                 ),
               ),
               const SizedBox(height: 10),
@@ -3288,6 +3137,196 @@ class _LyricTimeOffsetTileState extends State<_LyricTimeOffsetTile> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 「显示大小」设置项：无极滑块 + 抬手应用 + 10 秒超时自动还原。
+///
+/// 单独成 widget 而非留在设置页里：拖动过程中的中间值只需要重建这一小块，
+/// 放在设置页会让每个 drag update 重建整页元素树，进而在拖动中途打断手势。
+class _DisplayScaleTile extends StatefulWidget {
+  const _DisplayScaleTile();
+
+  @override
+  State<_DisplayScaleTile> createState() => _DisplayScaleTileState();
+}
+
+class _DisplayScaleTileState extends State<_DisplayScaleTile> {
+  /// 拖动中的临时值；null 表示显示 [ThemeProvider.displayScale] 的已应用档位。
+  double? _pending;
+
+  /// 手指是否还按在滑块上。
+  ///
+  /// **不能把 M3ESlider 的 onChangeEnd 当作「抬手」信号**：它的 GestureDetector
+  /// 同时挂了 tap 与 horizontalDrag。手指按下停留超过 kPressTimeout(100ms) 会先
+  /// 触发 onTapDown（值跳到触点），随后一移动 tap 就输掉手势竞技场 → onTapCancel；
+  /// 而 onTapCancel 的守卫是 `if (!_isDragging)`，竞技场是「先 reject 其他成员、
+  /// 再 accept 胜者」，此刻 _isDragging 仍为 false，于是在 divisions == null
+  /// （无极，无吸附动画）下 onChangeEnd 被立即调用 —— 手还没抬就应用了档位并弹出
+  /// 模态确认框，弹窗吃掉后续指针事件，手感就是拖动途中"断触"。
+  /// 因此提交时机改由 Listener 的真实 pointer up / cancel 决定。
+  bool _pointerDown = false;
+
+  /// 抬手提交：值真的变了才应用，否则只清掉临时值。
+  void _commit() {
+    _pointerDown = false;
+    final pending = _pending;
+    final applied = context.read<ThemeProvider>().displayScale;
+    if (pending == null || pending == applied) {
+      if (pending != null) setState(() => _pending = null);
+      return;
+    }
+    // ignore: discarded_futures
+    _apply(pending, applied);
+  }
+
+  /// 应用档位：落盘后弹确认框，10 秒内不点「保留」自动还原。
+  /// 极端档位下滑块与按钮自身也被放大/缩小，可能已无法再操作，必须留一条
+  /// 不依赖用户交互的退路。
+  Future<void> _apply(double value, double previous) async {
+    final theme = context.read<ThemeProvider>();
+    await theme.setDisplayScale(value);
+    if (!mounted) return;
+    final keep = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _DisplayScaleConfirmDialog(),
+    );
+    if (!mounted) return;
+    if (keep != true) {
+      await theme.setDisplayScale(previous);
+      if (!mounted) return;
+    }
+    setState(() => _pending = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+    final applied = context.watch<ThemeProvider>().displayScale;
+    final value = (_pending ?? applied).clamp(kMinDisplayScale, kMaxDisplayScale);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Row(
+            children: [
+              Icon(Icons.fit_screen, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Expanded(
+                // Listener 在 GestureDetector 之上，指针事件按 hit-test 路径原样
+                // 送达、不参与手势竞技场，所以 up / cancel 是可靠的「抬手」信号。
+                child: Listener(
+                  onPointerDown: (_) => _pointerDown = true,
+                  onPointerUp: (_) => _commit(),
+                  onPointerCancel: (_) => _commit(),
+                  child: M3ESlider(
+                    // 显式给 hapticConfig：M3ESlider 在 divisions == null 时默认取
+                    // M3EHapticConfig.continuous()（minimumDragInterval 10ms +
+                    // 2% 阈值），拖动中会以最高约 100 次/秒走 MethodChannel 触发
+                    // vibrate，真机上马达饱和 + 通道洪泛。discrete() 关掉
+                    // dragTexture，只保留首尾端点反馈。
+                    decoration: const M3ESliderDecoration(
+                      haptic: M3EHapticFeedback.medium,
+                      hapticConfig: M3EHapticConfig.discrete(),
+                    ),
+                    value: value,
+                    min: kMinDisplayScale,
+                    max: kMaxDisplayScale,
+                    // divisions 不传 = 无极调节（M3ESlider.divisions 为 int?）
+                    label: '${value.toStringAsFixed(2)}x',
+                    // 拖动中只更新本地值，界面不缩放
+                    onChanged: (v) => setState(() => _pending = v),
+                    // 指针交互一律等 Listener 的 pointer up（见 _pointerDown 注释）；
+                    // 这里只兜住键盘方向键那条没有指针的路径。
+                    onChangeEnd: (_) {
+                      if (!_pointerDown) _commit();
+                    },
+                  ),
+                ),
+              ),
+              SizedBox(
+                width: 48,
+                child: Text(
+                  '${value.toStringAsFixed(2)}x',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Text(
+            '显示大小：与系统同名设置一致，整体等比放大或缩小界面，一屏能显示的内容随之增减',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// 「显示大小」确认弹窗：显示剩余秒数，超时自动返回 false（= 还原）。
+///
+/// 返回值：true = 保留新档位，false / null = 还原。
+class _DisplayScaleConfirmDialog extends StatefulWidget {
+  const _DisplayScaleConfirmDialog();
+
+  @override
+  State<_DisplayScaleConfirmDialog> createState() =>
+      _DisplayScaleConfirmDialogState();
+}
+
+class _DisplayScaleConfirmDialogState
+    extends State<_DisplayScaleConfirmDialog> {
+  static const int _timeoutSeconds = 10;
+
+  int _remaining = _timeoutSeconds;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() => _remaining--);
+      if (_remaining <= 0) {
+        _timer?.cancel();
+        Navigator.of(context).pop(false);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('保留此显示大小？'),
+      content: Text('若界面已难以操作，$_remaining 秒后将自动还原。'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('还原'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('保留'),
+        ),
+      ],
     );
   }
 }

@@ -4,7 +4,6 @@ import 'package:provider/provider.dart';
 import '../../core/layout/responsive_layout.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
-import '../../providers/device_provider.dart';
 import '../../providers/grid_columns_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/player_provider.dart';
@@ -60,7 +59,7 @@ class _AlbumsPageState extends State<AlbumsPage> {
       child: LayoutBuilder(
       builder: (context, constraints) {
         // Pad 模式取用户捏合调整的列数；非 Pad 模式按屏幕宽度响应式适配
-        final isPad = context.read<DeviceProvider>().isPad;
+        final isPad = isPadLayout(context);
         // watch 以便列数变化时重建网格
         final gridColumns = context.watch<GridColumnsProvider>().gridColumns;
 

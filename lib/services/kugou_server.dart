@@ -23,7 +23,7 @@ typedef StopServerNative = Void Function();
 typedef StopServer = void Function();
 
 class KugouApiServer {
-  static const _channel = MethodChannel('com.md3music.premium/kugou_api');
+  static const _channel = MethodChannel('com.md3music.md3music/kugou_api');
   static bool _started = false;
   /// P0: 启动中/已完成 Future，供并发调用去重（main() 与播放前兜底）。
   static Future<void>? _startFuture;

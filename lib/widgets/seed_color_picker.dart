@@ -23,7 +23,7 @@ class SeedColorPicker extends StatelessWidget {
 
   /// 当前颜色是否属于预设色之外的"自定义"色（决定自定义槽的高亮）。
   bool _isCustomSelected(List<Color> presets) {
-    return !presets.any((c) => c.value == currentColor.value);
+    return !presets.any((c) => c.toARGB32() == currentColor.toARGB32());
   }
 
   Future<void> _openCustomPicker(BuildContext ctx) async {
@@ -64,7 +64,7 @@ class SeedColorPicker extends StatelessWidget {
             itemBuilder: (ctx, i) {
               if (i < presets.length) {
                 final color = presets[i];
-                final isSelected = color.value == currentColor.value;
+                final isSelected = color.toARGB32() == currentColor.toARGB32();
                 return GestureDetector(
                   onTap: () => onSelected(color),
                   child: Container(

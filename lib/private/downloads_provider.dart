@@ -8,8 +8,8 @@ import 'package:md3_download_cache/md3_download_cache.dart';
 
 import '../data/models/song.dart';
 import '../services/kugou_api/kugou_api_client.dart';
-import '../services/metadata_writer.dart';
 import '../widgets/apple_lyrics/parsers/krc_parser.dart';
+import 'metadata_writer.dart';
 import 'private_settings.dart';
 
 /// 下载服务 Provider（私有：仅私有构建使用，导出公开版本时整体排除）。

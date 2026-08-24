@@ -4,7 +4,7 @@ import 'package:flutter/services.dart';
 ///
 /// 用户选择的目录 URI 会自动获得持久化权限，后续可直接读写。
 class FolderPickerService {
-  static const _channel = MethodChannel('com.md3music.premium/folder_picker');
+  static const _channel = MethodChannel('com.md3music.md3music/folder_picker');
 
   /// 打开系统文件夹选择器，返回用户选择的目录路径。
   ///

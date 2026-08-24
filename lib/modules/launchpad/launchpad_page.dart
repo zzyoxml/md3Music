@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/tab_config_provider.dart';
+import '../../widgets/scroll_aware_app_bar.dart';
 
 /// LaunchPad 导航页：以"导航网站"的形式列出所有可用 Tab（除"我的"和自身），
 /// 按「未固定 / 已固定」两个分区展示（固定 = 出现在底部导航栏，置底显示）。
@@ -110,10 +111,10 @@ class _LaunchPadPageState extends State<LaunchPadPage> {
         MediaQuery.orientationOf(context) == Orientation.landscape ? 4 : 3;
 
     return Scaffold(
-      appBar: AppBar(
-        // 标题左对齐（全局 appBarTheme.centerTitle=true，这里单独覆盖）
-        centerTitle: false,
-        title: const Text('LaunchPad'),
+      appBar: ScrollAwareAppBar(
+        title: 'LaunchPad',
+        tabId: 'launchpad',
+        opaque: true,
         actions: [
           if (_editing)
             TextButton(

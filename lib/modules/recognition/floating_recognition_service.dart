@@ -38,10 +38,10 @@ class FloatingRecognitionService {
   FloatingRecognitionService._();
 
   static const MethodChannel _channel = MethodChannel(
-    'com.md3music.premium/floating_recognition',
+    'com.md3music.md3music/floating_recognition',
   );
   static const MethodChannel _sdkChannel = MethodChannel(
-    'com.md3music.premium/media_store',
+    'com.md3music.md3music/media_store',
   );
 
   /// 每段录制时长（秒，与原生侧 SEGMENT_BYTES 一致：8000Hz×2字节×8s）

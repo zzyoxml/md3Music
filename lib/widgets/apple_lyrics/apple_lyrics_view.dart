@@ -314,9 +314,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     return shader;
   }
 
-  /// 最大 sigma 限制
-  static const double _maxSigma = 2.0;
-
   // ============== 男女对唱歌词处理 ==============
   //
   // 当 [LyricPreferences.useDuetLayout] 开启时，对 widget.lines 做一次预处理：
@@ -501,6 +498,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     final currentFontWeight = LyricLayout.fontWeight.value;
     final currentShowTranslation = LyricPreferences.instance.showTranslation;
     final currentDisplayMode = LyricPreferences.instance.displayMode;
+    if (currentDisplayMode != _cachedDisplayMode) {
+      debugPrint(
+        '[RomaToggle] AppleLyricsView displayMode 变化: $_cachedDisplayMode -> $currentDisplayMode',
+      );
+    }
     if (fontSize == _cachedFontSize &&
         viewportWidth == _cachedViewportWidth &&
         _cleanedLines.length == _cachedLinesLength &&
@@ -1115,7 +1117,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
     // 修复：淡入速度 4.0 → 12.0，约 150ms 完成（原 700-1000ms）。
     // 配合修改 1，模糊图在新当前行周围快速淡入出现。
     final double blurFadeSpeed = shouldBlurFadeOut ? 15.0 : 12.0;
-    final double oldBlurFade = _blurFade;
     _blurFade += (blurFadeTarget - _blurFade) *
         (1 - math.exp(-blurFadeSpeed * dt));
     if ((_blurFade - blurFadeTarget).abs() < 0.01) {
@@ -1592,17 +1593,6 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
 
   /// 计算指定行的模糊等级（参考 applemusic-like-lyrics 的 computeLineBlur）。
   ///
-  /// - 当前行：0
-  /// - 已过行：1 + |currentLine - lineIndex| + 1
-  /// - 未到行：1 + |lineIndex - currentLine|
-  /// - 用户滚动时：0
-  /// 计算指定行的模糊级别（含 fade）。
-  int _computeLineBlur(int lineIndex) {
-    if (_currentLineIndex < 0 || lineIndex == _currentLineIndex) return 0;
-    if (_blurFade < 0.01) return 0;
-    return (_computeLineBlurRaw(lineIndex) * _blurFade).round().clamp(0, 5);
-  }
-
   /// 计算指定行的原始模糊级别（不含 fade，用于缓存）。
   int _computeLineBlurRaw(int lineIndex) {
     if (_currentLineIndex < 0 || lineIndex == _currentLineIndex) return 0;

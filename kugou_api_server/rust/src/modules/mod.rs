@@ -158,6 +158,7 @@ pub fn register(routes: &mut Vec<(&'static str, ModuleFn)>) {
     routes.push(("/register/dev", register_dev::handle));
     routes.push(("/comment/music/hotword", comment_more::handle_music_hotword));
     routes.push(("/comment/music/classify", comment_more::handle_music_classify));
+    routes.push(("/comment/music/topliked", comment_more::handle_music_topliked));
     routes.push(("/comment/playlist", comment_more::handle_playlist));
     routes.push(("/comment/floor", comment_more::handle_floor));
     routes.push(("/comment/count", comment_more::handle_count));

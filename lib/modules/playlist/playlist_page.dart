@@ -12,6 +12,7 @@ import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/playlist_collection_notifier.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/song_list_item.dart';
@@ -178,16 +179,23 @@ class _PlaylistPageState extends State<PlaylistPage> {
   _SortBy? _lastSortBy;
   bool? _lastSortAscending;
 
-  /// 获取当前显示的歌曲列表（带缓存）
+  /// 获取当前显示的歌曲列表（带缓存；可选扩展筛选在缓存之上每次应用，
+  /// 保证筛选开关切换即时生效——筛选状态不参与缓存 key）。
   List<Song> get _displaySongs {
     if (_cachedDisplaySongs != null &&
         _lastSearchQuery == _searchQuery &&
         _lastSortBy == _sortBy &&
         _lastSortAscending == _sortAscending) {
-      return _cachedDisplaySongs!;
+      return _applyDisplayFilter(_cachedDisplaySongs!);
     }
     _rebuildDisplaySongs();
-    return _cachedDisplaySongs!;
+    return _applyDisplayFilter(_cachedDisplaySongs!);
+  }
+
+  /// 应用可选扩展注入的列表变换（如按本地持久化筛选；每次调用重新执行）。
+  List<Song> _applyDisplayFilter(List<Song> list) {
+    final filter = PlaylistPage.songFilterHook;
+    return filter == null ? list : filter('playlist', list);
   }
 
   void _rebuildDisplaySongs() {
@@ -201,11 +209,6 @@ class _PlaylistPageState extends State<PlaylistPage> {
             s.artist.toLowerCase().contains(q) ||
             (s.album?.toLowerCase().contains(q) ?? false);
       }).toList();
-    }
-    // 可选扩展：私有构建注入的列表变换（如按本地持久化筛选）
-    final filter = PlaylistPage.songFilterHook;
-    if (filter != null) {
-      list = filter('playlist', list);
     }
     list.sort((a, b) {
       int cmp;
@@ -280,6 +283,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
       }
     });
   }
+
+  // ==================== 批量下载（未移植：公开库不包含下载功能） ====================
 
   Future<void> _deleteSelectedSongs() async {
     if (_selectedSongIds.isEmpty) return;
@@ -914,6 +919,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final displayPlaylist = widget.playlist.copyWith(songs: _songs);
+    final useBackgroundImage =
+        context.watch<ThemeProvider>().useBackgroundImage;
 
     // 可选扩展：筛选/变换状态变更时重建本页（默认监听空信号，无额外开销）
     return ListenableBuilder(
@@ -944,10 +951,15 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         expandedHeight: 280,
                         pinned: true,
                         // pinned 后顶栏背景色：滚动到 expandedHeight - kToolbarHeight
-                        // 之后从透明渐变到 surface
+                        // 之后从透明渐变；开启壁纸时渐变到半透明 surface（遮住滚动上来的
+                        // 列表避免穿透，同时隐约透出壁纸），未开启时渐变到不透明 surface
+                        // 背景图模式：顶栏恒透明（上划列表不压暗壁纸）；
+                        // 非背景图：上划渐变到 surface（遮住列表不穿透）
                         backgroundColor: Color.lerp(
                           Colors.transparent,
-                          colorScheme.surface,
+                          useBackgroundImage
+                              ? colorScheme.surface.withValues(alpha: 0.75)
+                              : colorScheme.surface,
                           (_scrollOffset - (280 - kToolbarHeight))
                               .clamp(0.0, 60.0) / 60,
                         )!,
@@ -977,7 +989,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
                               onPressed: _scrollToPlayingSong,
                               tooltip: '定位正在播放',
                             ),
-                          if (_songs.isNotEmpty)
+                          // 专辑详情（isAlbum）不展示相似歌单
+                          if (_songs.isNotEmpty && !widget.isAlbum)
                             IconButton(
                               icon: const Icon(Icons.auto_awesome),
                               onPressed: () =>
@@ -1076,7 +1089,12 @@ class _PlaylistPageState extends State<PlaylistPage> {
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
                                 colors: [
-                                  colorScheme.primaryContainer,
+                                  // 开启壁纸时主题色渐变半透明（alpha 0.5）叠加在壁纸上：
+                                  // 主题色渐变可见且壁纸透出；未开启时实色渐变
+                                  useBackgroundImage
+                                      ? colorScheme.primaryContainer
+                                          .withValues(alpha: 0.35)
+                                      : colorScheme.primaryContainer,
                                   // 底部渐变到透明：启用全局背景图（页面背景透明）时，
                                   // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
                                   colorScheme.surface.withValues(alpha: 0),
@@ -1429,7 +1447,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
             ),
       ),
     ),
-    );
+  );
   }
 
   /// 离线时无缓存歌曲的空状态：仅展示歌单元数据，不显示错误页面。

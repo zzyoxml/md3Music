@@ -121,6 +121,7 @@ class _SceneAudioListPageState extends State<SceneAudioListPage> {
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: widget.title ?? '场景音乐列表',
+        opaque: true,
         scrollController: _scrollController,
       ),
       bottomNavigationBar: const MiniPlayer(),
