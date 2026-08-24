@@ -1142,7 +1142,7 @@ class KugouApiClient {
         return [KugouQuality.hires, KugouQuality.lossless, KugouQuality.high, KugouQuality.standard];
       case KugouQuality.lossless: // 'flac'
         return [KugouQuality.lossless, KugouQuality.high, KugouQuality.standard];
-      case KugouQuality.high: // 'hq'
+      case KugouQuality.high: // '320'
         return [KugouQuality.high, KugouQuality.standard];
       default:
         return [KugouQuality.standard];
