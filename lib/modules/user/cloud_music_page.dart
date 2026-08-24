@@ -58,11 +58,15 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
   /// 云盘歌曲加载上限，与服务端实际限制对齐。
   static const int _maxCloudSongs = 6000;
 
-  Future<void> _loadCloudSongs() async {
+  /// 加载云盘歌曲列表。
+  ///
+  /// [showLoading] 为 true 时（首次进入/重试/上传删除后）显示全屏 loading；
+  /// 下拉刷新传 false，保持列表可见，避免松手瞬间闪现全屏 loading。
+  Future<void> _loadCloudSongs({bool showLoading = true}) async {
     if (!mounted) return;
     setState(() {
-      _isLoading = true;
       _error = null;
+      if (showLoading) _isLoading = true;
     });
 
     try {
@@ -562,13 +566,13 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
               ? _buildError()
               : _songs.isEmpty
                   ? M3EPullToRefreshIndicator(
-                      onRefresh: _loadCloudSongs,
+                      onRefresh: () => _loadCloudSongs(showLoading: false),
                       child: ListView(
                         children: [_buildEmpty()],
                       ),
                     )
                   : M3EPullToRefreshIndicator(
-                      onRefresh: _loadCloudSongs,
+                      onRefresh: () => _loadCloudSongs(showLoading: false),
                       child: Column(
                         children: [
                           if (!_isSelectMode) _buildHeader(),

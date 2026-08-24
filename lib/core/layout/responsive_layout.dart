@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/device_provider.dart';
+import '../../providers/theme_provider.dart';
 
 enum ScreenType { compact, medium, expanded }
 
@@ -107,6 +109,41 @@ class ResponsiveScaffold extends StatefulWidget {
 class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  /// 每个 tab 胶囊回弹动画的 key（竖屏 NavigationBar 用 icon，横屏
+  /// NavigationRail 的 icon / selectedIcon 各占一个 key 槽位）。
+  late List<GlobalKey<_CapsuleBounceState>> _bounceKeys;
+  late List<GlobalKey<_CapsuleBounceState>> _selectedBounceKeys;
+
+  @override
+  void initState() {
+    super.initState();
+    _bounceKeys = _initBounceKeys(widget.railDestinations.length);
+    _selectedBounceKeys = _initBounceKeys(widget.railDestinations.length);
+  }
+
+  @override
+  void didUpdateWidget(covariant ResponsiveScaffold oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final count = widget.railDestinations.length;
+    if (_bounceKeys.length != count) {
+      _bounceKeys = _initBounceKeys(count);
+      _selectedBounceKeys = _initBounceKeys(count);
+    }
+  }
+
+  List<GlobalKey<_CapsuleBounceState>> _initBounceKeys(int count) {
+    return List.generate(count, (_) => GlobalKey<_CapsuleBounceState>());
+  }
+
+  /// 点击 destination 完成后的统一入口：先触发该 tab 胶囊自驱动的水平
+  /// 超出回弹（点击已选中项时），再转发原生选择回调（不改变原有切换行为；
+  /// 切换选中项时胶囊由 _CapsuleBounce 的 didUpdateWidget 自动播放）。
+  void _handleDestinationSelected(int index) {
+    _bounceKeys[index].currentState?.playBounce();
+    _selectedBounceKeys[index].currentState?.playBounce();
+    widget.onDestinationSelected(index);
+  }
+
   @override
   Widget build(BuildContext context) {
     final isLandscape =
@@ -140,13 +177,39 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
                   ? 44
                   : 64,
               selectedIndex: widget.selectedIndex,
-              onDestinationSelected: widget.onDestinationSelected,
-              destinations: widget.destinations,
+              onDestinationSelected: _handleDestinationSelected,
+              // 每个 tab 的图标外包自定义胶囊（选中时显示，点击/切换后
+              // 胶囊水平超出回弹，图标不动）
+              destinations: [
+                for (int i = 0; i < widget.destinations.length; i++)
+                  NavigationDestination(
+                    icon: _CapsuleBounce(
+                      key: _bounceKeys[i],
+                      selected: widget.selectedIndex == i,
+                      child: widget.destinations[i].icon,
+                    ),
+                    label: widget.destinations[i].label,
+                  ),
+              ],
             ),
     );
   }
 
   Widget _buildRailLayout() {
+    // 横屏侧栏文字跟随设置页「底部导航栏文字」三档
+    //（NavigationBarThemeData.labelBehavior，与竖屏 NavigationBar 同源），
+    // 映射到原生 NavigationRail 的 labelType。
+    // null（主题未显式设置）按始终显示处理，与竖屏分支的默认行为一致。
+    final labelBehavior =
+        Theme.of(context).navigationBarTheme.labelBehavior ??
+        NavigationDestinationLabelBehavior.alwaysShow;
+    final labelType = switch (labelBehavior) {
+      NavigationDestinationLabelBehavior.alwaysShow =>
+        NavigationRailLabelType.all,
+      NavigationDestinationLabelBehavior.onlyShowSelected =>
+        NavigationRailLabelType.selected,
+      NavigationDestinationLabelBehavior.alwaysHide => NavigationRailLabelType.none,
+    };
     return Scaffold(
       key: _scaffoldKey,
       appBar: widget.appBar,
@@ -158,11 +221,36 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
           Visibility(
             visible: !widget.hideNavigation,
             maintainState: true,
-            child: CompactNavigationRail(
+            child: NavigationRail(
               selectedIndex: widget.selectedIndex,
-              onDestinationSelected: widget.onDestinationSelected,
-              destinations: widget.railDestinations,
+              onDestinationSelected: _handleDestinationSelected,
+              // 每个 tab 的图标外包自定义胶囊（icon 与 selectedIcon 各占一个
+              // key 槽位，同一时刻只有其一在树中；选中时显示胶囊，
+              // 点击/切换后胶囊水平超出回弹，图标不动）
+              destinations: [
+                for (int i = 0; i < widget.railDestinations.length; i++)
+                  NavigationRailDestination(
+                    icon: _CapsuleBounce(
+                      key: _bounceKeys[i],
+                      selected: widget.selectedIndex == i,
+                      child: widget.railDestinations[i].icon,
+                    ),
+                    selectedIcon: _CapsuleBounce(
+                      key: _selectedBounceKeys[i],
+                      selected: widget.selectedIndex == i,
+                      child: widget.railDestinations[i].selectedIcon,
+                    ),
+                    label: widget.railDestinations[i].label,
+                  ),
+              ],
               leading: widget.floatingActionButton,
+              labelType: labelType,
+              // 原生胶囊已由 theme 关闭（indicatorColor transparent），
+              // 胶囊统一由 _CapsuleBounce 绘制
+              indicatorColor: Colors.transparent,
+              // 图标组从顶部开始排列（不垂直居中挤在中间）；tab 过多时
+              // NavigationRail 内部自动滚动。宽度/间距均为原生固定规格。
+              groupAlignment: -1.0,
             ),
           ),
           Visibility(
@@ -181,131 +269,127 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
   }
 }
 
-/// 紧凑侧边导航栏：仅图标（24dp），图标间距 6dp（M3 NavigationRail 内置
-/// 12dp 的一半），图标组整体垂直居中，tab 过多时可滚动。
+/// 选中指示器胶囊（外观与 M3 原生胶囊一致：secondaryContainer 实心
+/// StadiumBorder）+ 点击/切换后胶囊自驱动的水平方向超出回弹。
 ///
-/// 不直接用 NavigationRail 的原因：
-/// - 其 destination 间距（12dp）是私有常量，公开 API 无法调小；
-/// - 外包 SingleChildScrollView 会导致内部 Flexible+Align 收到无界高度，
-///   groupAlignment 垂直居中失效（图标堆在顶部、下方大片空白）。
-///
-/// 背景与指示器颜色读取 NavigationRailTheme（背景图模式下由
-/// app.dart 覆写为半透明 surface 透出壁纸）。
-class CompactNavigationRail extends StatelessWidget {
-  const CompactNavigationRail({
+/// - 选中且未启用背景图时显示胶囊（背景图模式下隐藏，与原生覆写一致）；
+/// - 胶囊回弹动画仅作用于胶囊本身（Transform.scaleX 包裹胶囊背景），
+///   图标保持不动；
+/// - 动画由 **MD3E spatial spring**（dampingRatio 0.6 / stiffness 200，
+///   与 m3e_core 弹簧一致）驱动：快速拉伸超出（1 → 1.2，过冲）后弹回
+///   （1.2 → 1，过冲振荡收敛），自驱动播完；
+/// - 不包任何手势/监听，避免与 NavigationBar / NavigationRail 自身的点击
+///   竞争；动画由父级（_handleDestinationSelected 点击）或本组件
+///   didUpdateWidget（selected false→true 切换）触发。
+class _CapsuleBounce extends StatefulWidget {
+  const _CapsuleBounce({
     super.key,
-    required this.selectedIndex,
-    required this.onDestinationSelected,
-    required this.destinations,
-    this.leading,
-  });
-
-  final int selectedIndex;
-  final ValueChanged<int> onDestinationSelected;
-  final List<NavigationRailDestination> destinations;
-  final Widget? leading;
-
-  @override
-  Widget build(BuildContext context) {
-    final railTheme = NavigationRailTheme.of(context);
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Material(
-      color: railTheme.backgroundColor ?? colorScheme.surface,
-      // 左侧安全区（横屏刘海/挖孔），与原 NavigationRail 的 SafeArea 行为一致
-      child: SafeArea(
-        left: true,
-        top: false,
-        right: false,
-        bottom: false,
-        child: SizedBox(
-          // 仅容纳 24dp 图标 + 28dp 指示器胶囊（AGENTS.md §8.6）
-          width: 34,
-          child: Column(
-            children: [
-              if (leading != null) ...[leading!, const SizedBox(height: 8)],
-              Expanded(
-                // Center + SingleChildScrollView（内容小→收缩居中；内容多→撑满滚动）
-                child: Center(
-                  child: SingleChildScrollView(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        for (int i = 0; i < destinations.length; i++)
-                          _CompactRailDestination(
-                            selected: selectedIndex == i,
-                            icon:
-                                selectedIndex == i
-                                ? destinations[i].selectedIcon
-                                : destinations[i].icon,
-                            indicatorColor:
-                                railTheme.indicatorColor ??
-                                colorScheme.secondaryContainer,
-                            selectedIconColor:
-                                railTheme.selectedIconTheme?.color ??
-                                colorScheme.onSecondaryContainer,
-                            unselectedIconColor:
-                                railTheme.unselectedIconTheme?.color ??
-                                colorScheme.onSurfaceVariant,
-                            onTap: () => onDestinationSelected(i),
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CompactRailDestination extends StatelessWidget {
-  const _CompactRailDestination({
     required this.selected,
-    required this.icon,
-    required this.indicatorColor,
-    required this.selectedIconColor,
-    required this.unselectedIconColor,
-    required this.onTap,
+    required this.child,
   });
 
   final bool selected;
-  final Widget icon;
-  final Color indicatorColor;
-  final Color selectedIconColor;
-  final Color unselectedIconColor;
-  final VoidCallback onTap;
+  final Widget child;
+
+  @override
+  State<_CapsuleBounce> createState() => _CapsuleBounceState();
+}
+
+class _CapsuleBounceState extends State<_CapsuleBounce>
+    with SingleTickerProviderStateMixin {
+  /// 回弹段 spring：**m3e_core 官方 MD3E 预设**（[M3EMotion.standardPopup]：
+  /// stiffness 1000 / damping 0.6，专为弹出类小部件设计的 bouncy 回弹），
+  /// 过冲 ~9.5%，收敛干净，无需手调参数。
+  static final _bounceMotion = M3EMotion.standardPopup.toMotion();
+
+  /// 拉伸段固定时长（spring 无固定时长，拉伸用短 animateTo 保证节奏可控）。
+  static const Duration _stretchDuration = Duration(milliseconds: 80);
+
+  /// 动画控制器 value 直接表示胶囊水平缩放（1.0 静止）。
+  /// 值域覆盖 spring 的运动范围（拉伸过冲到 ~1.25、回弹过冲到 ~0.95）；
+  /// 注意 AnimationController 默认值域 [0,1] 会把超出值 clamp 掉，必须显式放宽。
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      lowerBound: 0.8,
+      upperBound: 1.4,
+    );
+    _controller.value = 1.0;
+  }
+
+  @override
+  void didUpdateWidget(covariant _CapsuleBounce oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 从未选中 → 选中（tab 切换）：胶囊出现时自动播放一次回弹
+    if (!oldWidget.selected && widget.selected) {
+      playBounce();
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// 播放一次完整脉冲：固定短时长快速拉伸超出（1→1.2，80ms），
+  /// 完成后 spring 回弹（1.2→1.0，m3e_core 官方预设过冲收敛）。
+  void playBounce() {
+    _controller.stop();
+    _controller
+        .animateTo(1.2, duration: _stretchDuration, curve: Curves.easeOutCubic)
+        .then((_) {
+      // 拉伸完成后 spring 弹回（过冲振荡收敛）
+      if (mounted) {
+        _controller.animateWith(
+          _bounceMotion.createSimulation(start: 1.2, end: 1.0),
+        );
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(17),
-      child: Padding(
-        // 上下各 3 → 相邻图标间距 6dp（M3 默认 12dp 的一半）
-        padding: EdgeInsets.symmetric(vertical: 3),
-        child: Container(
-          width: 28,
-          height: 28,
-          alignment: Alignment.center,
-          decoration: selected
-              ? ShapeDecoration(
-                  color: indicatorColor,
-                  shape: const StadiumBorder(),
-                )
-              : null,
-          child: IconTheme.merge(
-            data: IconThemeData(
-              size: 24,
-              color: selected ? selectedIconColor : unselectedIconColor,
+    final colorScheme = Theme.of(context).colorScheme;
+    // 背景图模式下隐藏胶囊（与原生覆写行为一致）
+    final useBackgroundImage =
+        context.watch<ThemeProvider>().useBackgroundImage;
+    final showCapsule = widget.selected && !useBackgroundImage;
+
+    // 胶囊尺寸与 M3 NavigationIndicator 一致（64×32）
+    return SizedBox(
+      width: 64,
+      height: 32,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // 胶囊背景：点击后水平超出回弹（scaleX spring 动画仅作用于此层）
+          AnimatedBuilder(
+            animation: _controller,
+            builder: (context, child) => Transform.scale(
+              scaleX: _controller.value,
+              alignment: Alignment.center,
+              child: Container(
+                width: 64,
+                height: 32,
+                decoration: showCapsule
+                    ? ShapeDecoration(
+                        color: colorScheme.secondaryContainer,
+                        shape: const StadiumBorder(),
+                      )
+                    : null,
+              ),
             ),
-            child: icon,
           ),
-        ),
+          // 图标：保持不动
+          widget.child,
+        ],
       ),
     );
   }
 }
+

@@ -496,8 +496,13 @@ class _CommentsViewState extends State<CommentsView> {
       usernameColor = colorScheme.primary;
     }
 
+    // loading 指示器颜色：AM 风格保持白色，MD3 风格跟随莫奈色（primary）。
+    final indicatorColor = widget.isAmStyle
+        ? primaryTextColor
+        : Theme.of(context).colorScheme.primary;
+
     if (_isLoading) {
-      return Center(child: M3ELoadingIndicator(color: primaryTextColor));
+      return Center(child: M3ELoadingIndicator(color: indicatorColor));
     }
 
     if (_error != null) {
@@ -592,7 +597,7 @@ class _CommentsViewState extends State<CommentsView> {
                 child: _isLoadingMore
                     ? M3ELoadingIndicator(
                         constraints: BoxConstraints.tightFor(width: 24, height: 24),
-                        color: primaryTextColor)
+                        color: indicatorColor)
                     : TextButton(
                         onPressed: _loadMore,
                         style: TextButton.styleFrom(
