@@ -133,6 +133,11 @@ class AudioPlaybackService : Service() {
         // 全部失败后向 Dart 发 connect_failed 事件，由 UI 弹窗提示用户。
         private const val LYRICON_MAX_RETRIES = 3
         private const val LYRICON_RETRY_DELAY_MS = 2000L
+        // P0: setMetadata 合并节流窗口：歌词行高频变化时 300ms 内只执行一次刷新
+        private const val METADATA_REFRESH_DELAY_MS = 300L
+        // P0: 蓝牙歌词通知重建最小间隔：通知栏歌词 2s 刷新一次足够（车机读 MediaSession），
+        // 抑制 SystemUI 通知管线被歌词行变化持续唤醒
+        private const val BT_NOTIFY_THROTTLE_MS = 2000L
         private val lyriconRetryHandler = Handler(Looper.getMainLooper())
         // 用户意图上是否启用词幕（非 SDK 的 ConnectionStatus），决定失败后是否重试
         @Volatile
@@ -527,6 +532,16 @@ class AudioPlaybackService : Service() {
     private var lastBtLyricNotifyTime = 0L
     private var lastShownBtLyricTitle: String? = null
     private var lastShownBtLyricArtist: String? = null
+
+    // P0: setMetadata 节流合并：歌词行高频变化时在 [METADATA_REFRESH_DELAY_MS]
+    // 窗口内合并为一次刷新，避免无节流 setMetadata 驱动 SystemUI 媒体卡片
+    // 高频刷新（魅族等 ROM 下拉状态栏实测卡顿）
+    private val metadataRefreshHandler = Handler(Looper.getMainLooper())
+    private var pendingMetadataRefresh = false
+    // P0: 256px 降采样封面缓存：蓝牙歌词刷新走小图，Binder 负载 ~2MB → ~256KB；
+    // 由 showNotification 后台封面线程生成（与 lastArtBitmap 同源）
+    @Volatile
+    private var lastArtThumb: Bitmap? = null
 
     // P0: 缓存通知 PendingIntent（showNotification / refreshMetadata 共用），
     // 避免蓝牙歌词高频刷新时每次重建 5+ 个 PendingIntent 对象
@@ -1328,6 +1343,9 @@ class AudioPlaybackService : Service() {
                         // 后台线程显式回收存在 use-after-recycle 竞态 → 偶发闪退。
                         // 旧 bitmap 失去强引用后由 GC 回收，此处仅做引用切换。
                         lastArtBitmap = displayBitmap
+                        // P0: 256px 小图缓存，供蓝牙歌词刷新路径（refreshMetadata）复用，
+                        // 单次 setMetadata Binder 负载 ~2MB → ~256KB
+                        lastArtThumb = resizeBitmap(displayBitmap, 256)
                         // 同步封面到桌面小组件（与通知栏/MediaSession 一致）
                         MusicWidgetProvider.cachedArtwork = resizeBitmap(displayBitmap, 200)
                         MusicWidgetProvider.notifyArtworkChanged(this@AudioPlaybackService)
@@ -1443,10 +1461,10 @@ class AudioPlaybackService : Service() {
         lastShownBtLyricArtist = displayArtist
         lastShownLyricInfo = currentLyricInfo
 
-        // P0: 通知重建节流：逐字歌词每句（50-100ms）都会走到这里，
-        // 通知栏重建限制为最少 500ms 一次（车机 AVRCP 歌词读的是 MediaSession，不受节流影响）
+        // P0: 通知重建节流：歌词行变化驱动，通知栏重建限制为最少 2s 一次
+        // （车机 AVRCP 歌词读的是 MediaSession，不受节流影响；通知栏歌词 2s 刷新足够）
         val now = SystemClock.elapsedRealtime()
-        val shouldUpdateNotification = now - lastBtLyricNotifyTime >= 500
+        val shouldUpdateNotification = now - lastBtLyricNotifyTime >= BT_NOTIFY_THROTTLE_MS
         if (shouldUpdateNotification) {
             lastBtLyricNotifyTime = now
             val playPauseIcon = if (lastIsPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
@@ -1482,14 +1500,51 @@ class AudioPlaybackService : Service() {
             notificationManager?.notify(NOTIFICATION_ID, builder.build())
         }
 
-        // 更新 MediaSession 元数据（车机 AVRCP 读取此处，需要实时歌词，每次歌词变化都更新）
+        // P0: setMetadata 300ms 合并节流：歌词行高频变化时合并为一次刷新，
+        // 避免无节流 setMetadata 驱动 SystemUI 媒体卡片高频刷新（魅族等 ROM 卡顿）
+        scheduleMetadataRefresh()
+    }
+
+    /// P0: 排期一次 MediaSession 元数据刷新（300ms 合并窗口）。
+    /// 窗口内多次歌词变化只执行一次 setMetadata，使用执行时刻的最新字段值。
+    private fun scheduleMetadataRefresh() {
+        if (pendingMetadataRefresh) return
+        pendingMetadataRefresh = true
+        metadataRefreshHandler.postDelayed({
+            pendingMetadataRefresh = false
+            performMetadataRefresh()
+        }, METADATA_REFRESH_DELAY_MS)
+    }
+
+    /// P0: 执行 MediaSession 元数据刷新（合并窗口后，取最新歌词/开关状态）。
+    /// 封面压缩开关（Flutter 设置 settings_bluetooth_lyric_compress_art，默认关）：
+    /// 开启用 256px 缩略图（lastArtThumb，Binder 负载 ~2MB → ~256KB），关闭用原始 512px。
+    /// 每次直接读 SharedPreferences（进程内缓存，读取开销可忽略；开关切换即时生效）。
+    private fun performMetadataRefresh() {
+        val displayTitle: String
+        val displayArtist: String
+        if (bluetoothLyricEnabled && currentBtLyricText.isNotEmpty()) {
+            displayTitle = currentBtLyricText
+            displayArtist = if (originalArtist.isNotEmpty())
+                "$originalArtist - $originalTitle" else originalTitle
+        } else {
+            displayTitle = originalTitle
+            displayArtist = originalArtist
+        }
         val metaBuilder = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, displayTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, displayArtist)
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, lastDuration)
-        if (lastArtBitmap != null) {
-            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, lastArtBitmap)
-            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, lastArtBitmap)
+        val compressArt = try {
+            getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
+                .getBoolean("flutter.settings_bluetooth_lyric_compress_art", false)
+        } catch (_: Exception) {
+            false
+        }
+        val artwork = if (compressArt) lastArtThumb else lastArtBitmap
+        if (artwork != null) {
+            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artwork)
+            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork)
         }
         if (!lastArtUrl.isNullOrEmpty()) {
             metaBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, lastArtUrl)
@@ -1524,10 +1579,14 @@ class AudioPlaybackService : Service() {
         lyriconProvider = null
         // 取消排期中的词幕重连任务，防止服务销毁后回调仍触发
         setLyriconEnabledState(false)
+        // P0: 取消排期中的 setMetadata 合并刷新，防止服务销毁后仍回调
+        metadataRefreshHandler.removeCallbacksAndMessages(null)
         releaseWakeLock()
         // 释放缓存的封面 bitmap
         lastArtBitmap?.let { if (!it.isRecycled) it.recycle() }
         lastArtBitmap = null
+        lastArtThumb?.let { if (!it.isRecycled) it.recycle() }
+        lastArtThumb = null
         super.onDestroy()
     }
 }
