@@ -98,9 +98,11 @@ md3Music/
 ├── third_party/just_audio/       # just_audio 本地 fork（注入可拦截 AudioSink 的 RenderersFactory）
 ├── docs/                         # 文档：public_private_workflow.md（双仓库工作流权威手册，见第 9 节）等
 │
-└── scripts/                      # 构建/导出/提交脚本（统一入口 md3.ps1 <子命令>）
+└── scripts/                      # 构建/导出/提交脚本（统一入口 md3.ps1，无参数进交互界面）
     ├── md3.ps1                   # 总入口：android / windows / verify / export / commit
-    ├── lib/common.ps1            # 公共库：输出/外部命令/Rust 改动检测/否认清单闸门
+    ├── lib/common.ps1            # 公共库：输出/外部命令/Rust 改动检测/否认清单闸门/参数解析
+    ├── lib/ui.ps1                # 终端 UI：鼠标+键盘的菜单 / 参数面板 / 勾选列表
+    ├── lib/ui.tests.ps1          # ui.ps1 事件解码回归测试（不需要真实控制台）
     ├── tasks/android.ps1         # Rust 交叉编译 + Flutter 打包（默认私有入口）
     ├── tasks/windows.ps1         # Windows 桌面构建（便携版 zip）
     ├── tasks/export_public.ps1   # 导出公开版本（过滤 + 否认清单闸门 + 可选推送/PR）
@@ -208,7 +210,27 @@ Dart 侧：`flutter test`（`test/` 下 30 个测试文件）。**注意有预�
 
 其他工作流：`main.yml`（按 tag 正式发版）、`debug-build.yml`（手动指定 build_type 的调试构建）、`build-windows.yml`（Windows portable zip，私有版专用，**导出公开树时会被排除**，见 9.4）。
 
-### 3.5 公开版本导出（一条命令，见第 8 节）
+### 3.5 脚本入口与交互界面（鼠标 + 键盘）
+
+`scripts/md3.ps1` 是所有构建/导出/提交任务的统一入口，**不带参数运行即进入交互界面**，双击运行也可用。
+
+- **鼠标**：单击选中、双击执行/看 diff、点击 `[ 执行 ] [ 参数 ] [ 全选 ] [ 取消 ]` 等按钮、滚轮滚动列表
+- **键盘**（等价可用）：`↑↓`/`jk` 移动，`Enter` 执行，`空格` 勾选/输入，`Esc` 返回，`q` 退出，勾选列表另有 `a` 全选 / `n` 全不选 / `i` 反选 / `d` 看 diff / `PgUp PgDn Home End`
+- 任务列表上 `Enter` 或双击 = **直接用默认参数执行**；要改参数才需要 `空格` 或点 `[ 参数 ]` 进参数页
+- 任务执行期间自动关掉鼠标模式（恢复 QuickEdit），构建日志仍可用鼠标选中复制
+
+界面实现在 `scripts/lib/ui.ps1`（`ReadConsoleInput` + `ENABLE_MOUSE_INPUT`，定点重绘不闪屏）。
+终端不支持鼠标时自动退回纯键盘，底部提示行会写明当前是哪种模式；输入/输出被重定向时（管道、CI、
+被其他脚本调用）跳过界面并打印文本帮助，不会阻塞。事件解码有回归测试：
+`powershell -File scripts\lib\ui.tests.ps1`。
+
+```powershell
+.\scripts\md3.ps1            # 交互界面
+.\scripts\md3.ps1 help       # 文本帮助（子命令列表）
+.\scripts\md3.ps1 <子命令> [参数...]   # 直接执行，参数按目标脚本的参数表解析后透传
+```
+
+### 3.5.1 公开版本导出（一条命令，见第 8 节）
 
 ```powershell
 .\scripts\md3.ps1 verify                                  # 校验公开树 lib/ 否认清单零命中
@@ -224,7 +246,7 @@ TUI 勾选改动 → 否认清单闸门 → 提交 → 推送 → 可选开 PR�
 未勾选的文件只是本次不提交，仍留在工作区（不写任何忽略文件）；**确认后按勾选结果重置暂存区**。
 
 ```powershell
-.\scripts\md3.ps1 commit                                  # 交互：↑↓ 移动 / 空格 勾选 / a 全选 / d diff / Enter 确认
+.\scripts\md3.ps1 commit                                  # 交互：点击/空格 勾选，双击/d 看 diff，点 [提交所选] 或 Enter
 .\scripts\md3.ps1 commit -All -Message "fix(player): ..."  # 非交互：全选 + 指定信息
 .\scripts\md3.ps1 commit -Pr                              # 提交推送后向 upstream 开 PR
 .\scripts\md3.ps1 commit -PublicPr                        # 提交后导出公开版并在公开仓库开 PR

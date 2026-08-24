@@ -152,43 +152,11 @@ function Format-ChangeLabel([object]$It) {
     $name = if ($It.Orig) { "$($It.Orig) -> $($It.Path)" } else { $It.Path }
     [pscustomobject]@{ Code = $code; Name = $name; Info = $info }
 }
-# ---------- TUI ----------
-# 交互按键统一走 lib/common.ps1 的 Read-ConsoleKey，这里只补一句本任务的替代指引
+# ---------- 改动挑选界面 ----------
+# 列表/按钮/滚动统一走 lib/ui.ps1 的 Show-CheckList（鼠标 + 键盘），这里只提供
+# 行格式化、统计行与 diff 详情三个回调。
 $script:KeyHint = '请在 PowerShell 窗口中运行，或改用非交互方式：md3.ps1 commit -All -Message "..." -Yes'
 
-function Write-PickerFrame {
-    param(
-        [Parameter(Mandatory)][object[]]$Items,
-        [int]$Cursor, [int]$Top, [int]$Viewport
-    )
-    Clear-Host
-    Write-Host '选择本次提交的改动' -ForegroundColor Cyan -NoNewline
-    Write-Host '  (↑↓ 移动  空格 勾选  a 全选  n 全不选  d diff  Enter 确认  q 取消)' -ForegroundColor DarkGray
-    Write-Host ''
-    $last = [Math]::Min($Items.Count, $Top + $Viewport)
-    for ($i = $Top; $i -lt $last; $i++) {
-        $it = $Items[$i]
-        $f = Format-ChangeLabel $it
-        $mark = if ($it.Checked) { 'x' } else { ' ' }
-        $arrow = if ($i -eq $Cursor) { '>' } else { ' ' }
-        $name = $f.Name
-        if ($name.Length -gt 52) { $name = '…' + $name.Substring($name.Length - 51) }
-        $color = if ($i -eq $Cursor) { 'Cyan' }
-                 elseif (-not $it.Checked) { 'DarkGray' }
-                 elseif ($it.Untracked) { 'Green' }
-                 elseif ($it.Deleted) { 'Red' }
-                 else { 'White' }
-        Write-Host ("{0} [{1}] {2,-3} {3,-53}{4}" -f $arrow, $mark, $f.Code, $name, $f.Info) -ForegroundColor $color
-    }
-    if ($Items.Count -gt $Viewport) {
-        Write-Host ("   ... 共 {0} 项，当前显示 {1}-{2}" -f $Items.Count, ($Top + 1), $last) -ForegroundColor DarkGray
-    }
-    $sel = @($Items | Where-Object Checked)
-    $add = ($sel | Where-Object { $_.Add -match '^\d+$' } | Measure-Object -Property Add -Sum).Sum
-    $del = ($sel | Where-Object { $_.Del -match '^\d+$' } | Measure-Object -Property Del -Sum).Sum
-    Write-Host ''
-    Write-Host ("已选 {0} / {1}  •  待提交 +{2} -{3}" -f $sel.Count, $Items.Count, [int]$add, [int]$del) -ForegroundColor Yellow
-}
 function Show-FileDiff([object]$It) {
     Clear-Host
     Write-Host "diff: $($It.Path)" -ForegroundColor Cyan
@@ -208,45 +176,35 @@ function Show-FileDiff([object]$It) {
             Write-Host $l -ForegroundColor $c
         }
     }
-    Write-Host ''
-    Write-Host '按任意键返回...' -ForegroundColor Cyan
-    $null = Read-ConsoleKey -FallbackHint $script:KeyHint
+    Wait-AnyKey '按任意键 / 点击窗口返回列表...'
 }
 
 # 就地修改 $Items 的 Checked，返回 $true=确认 / $false=取消
 function Show-ChangePicker {
-    param([Parameter(Mandatory)][object[]]$Items)
-    $cursor = 0; $top = 0
-    while ($true) {
-        $height = try { $Host.UI.RawUI.WindowSize.Height } catch { 30 }
-        $viewport = [Math]::Max(5, $height - 9)
-        if ($cursor -lt $top) { $top = $cursor }
-        if ($cursor -ge $top + $viewport) { $top = $cursor - $viewport + 1 }
-        Write-PickerFrame -Items $Items -Cursor $cursor -Top $top -Viewport $viewport
-        $key = Read-ConsoleKey -FallbackHint $script:KeyHint
-        switch ($key.VirtualKeyCode) {
-            38 { if ($cursor -gt 0) { $cursor-- } }                              # ↑
-            40 { if ($cursor -lt $Items.Count - 1) { $cursor++ } }               # ↓
-            33 { $cursor = [Math]::Max(0, $cursor - $viewport) }                 # PgUp
-            34 { $cursor = [Math]::Min($Items.Count - 1, $cursor + $viewport) }  # PgDn
-            36 { $cursor = 0 }                                                   # Home
-            35 { $cursor = $Items.Count - 1 }                                    # End
-            32 { $Items[$cursor].Checked = -not $Items[$cursor].Checked }         # 空格
-            13 { return $true }                                                  # Enter
-            27 { return $false }                                                 # Esc
-            default {
-                switch ("$($key.Character)".ToLowerInvariant()) {
-                    'a' { foreach ($i in $Items) { $i.Checked = $true } }
-                    'n' { foreach ($i in $Items) { $i.Checked = $false } }
-                    'd' { Show-FileDiff $Items[$cursor] }
-                    'q' { return $false }
-                    'j' { if ($cursor -lt $Items.Count - 1) { $cursor++ } }
-                    'k' { if ($cursor -gt 0) { $cursor-- } }
-                }
-            }
-        }
+    param([Parameter(Mandatory)][object[]]$Items, [string]$Branch = '')
+    $fmt = {
+        param($It)
+        $f = Format-ChangeLabel $It
+        $color = if ($It.Untracked) { 'Green' } elseif ($It.Deleted) { 'Red' } else { 'White' }
+        @{ Code = $f.Code; Name = $f.Name; Info = $f.Info; Color = $color }
     }
+    $sum = {
+        param($Its)
+        $sel = @($Its | Where-Object Checked)
+        $add = ($sel | Where-Object { $_.Add -match '^\d+$' } | Measure-Object -Property Add -Sum).Sum
+        $del = ($sel | Where-Object { $_.Del -match '^\d+$' } | Measure-Object -Property Del -Sum).Sum
+        "已选 $($sel.Count) / $($Its.Count)  •  待提交 +$([int]$add) -$([int]$del)　　未勾选的只是本次不提交，仍留在工作区"
+    }
+    $detail = { param($It) Show-FileDiff $It }
+    $title = '选择本次提交的改动' + $(if ($Branch) { "（分支 $Branch）" })
+    $mouse = Enable-ConsoleMouse
+    try {
+        Show-CheckList -Items $Items -Format $fmt -Summary $sum -OnDetail $detail `
+            -Title $title -ConfirmText '提交所选'
+    }
+    finally { if ($mouse) { Disable-ConsoleMouse } }
 }
+
 # ---------- 提交信息候选 ----------
 # 仓库沿用 conventional commit + 中文描述（如 feat(settings, android): ...）。
 # 这里只能从路径推断 type/scope，描述必须人工确认，因此候选只作为起草。
@@ -325,7 +283,7 @@ try {
     Write-Ok "当前分支：$branch  •  $($items.Count) 个改动"
 
     if (-not $All) {
-        if (-not (Show-ChangePicker -Items $items)) {
+        if (-not (Show-ChangePicker -Items $items -Branch $branch)) {
             Clear-Host
             Write-Warn '已取消，未做任何改动'
             exit 130

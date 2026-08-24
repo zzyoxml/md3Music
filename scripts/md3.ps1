@@ -132,42 +132,73 @@ function Invoke-Task {
         Write-Host '若这是公开导出树，该任务属于私有侧工具链，已被导出脚本剥离，请在私有仓库执行。' -ForegroundColor Yellow
         return 3
     }
-    $list = @(); if ($TaskArgs) { $list = @($TaskArgs) }
-    & $taskPath @list
+    try { $p = ConvertTo-TaskParams -ScriptPath $taskPath -ArgList @($TaskArgs) }
+    catch {
+        Write-Host "参数错误：$($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "查看该子命令的参数：Get-Help .\scripts\tasks\$($Tasks[$Key].File) -Detailed" -ForegroundColor Yellow
+        return 2
+    }
+    $named = $p.Named
+    $pos = @($p.Positional)
+    & $taskPath @named @pos
     # 任务脚本正常结束且未调用过外部命令时 $LASTEXITCODE 可能为空，按成功处理
     if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
 }
 
-# 菜单模式：子命令 -> 参数勾选 -> 执行 -> 回到菜单，直到 q 退出
+# 菜单模式：选任务 →（可选）配参数 → 执行 → 回菜单，直到退出
+# 任务执行期间关掉鼠标模式，让 QuickEdit 恢复，构建日志仍可用鼠标选中复制。
 function Invoke-MenuLoop {
     $lastCode = 0
-    while ($true) {
-        $items = @()
-        foreach ($k in $Tasks.Keys) {
-            $items += New-MenuItem -Key $k -Label $k -Desc $Tasks[$k].Desc -Enabled (Test-TaskAvailable $k)
-        }
-        $sel = Show-Menu -Items $items -Title 'MD3Music' `
-            -Hint '↑↓ 选择   Enter 下一步   q 退出' -Footer (Get-RepoStatusLine)
-        if ($sel -lt 0) { Clear-Host; return $lastCode }
+    [void](Enable-ConsoleMouse)
+    try {
+        while ($true) {
+            $items = @()
+            foreach ($k in $Tasks.Keys) {
+                $items += New-MenuItem -Key $k -Label $k -Desc $Tasks[$k].Desc -Enabled (Test-TaskAvailable $k)
+            }
+            $sel = Show-Menu -Items $items -Title 'MD3Music　脚本入口' -Footer (Get-RepoStatusLine) -WithConfig
+            if (-not $sel) { Clear-Host; return $lastCode }
 
-        $key = $items[$sel].Key
-        $opts = Get-TaskOptions $key
-        if (-not (Show-OptionPicker -Options $opts -Title "MD3Music › $key" -CommandPrefix "md3.ps1 $key")) {
-            continue    # Esc：回到子命令菜单
+            $key = $items[$sel.Index].Key
+            $taskArgs = @()
+            if ($sel.Action -eq 'config') {
+                $opts = Get-TaskOptions $key
+                if (-not (Show-OptionPicker -Options $opts -Title "MD3Music › $key" -CommandPrefix "md3.ps1 $key")) {
+                    continue    # 返回：回到任务列表
+                }
+                $taskArgs = Get-OptionArgs $opts
+            }
+
+            Disable-ConsoleMouse
+            Clear-Host
+            $lastCode = Invoke-Task -Key $key -TaskArgs $taskArgs
+            if ($lastCode -ne 0) { Write-Host "`n[退出码 $lastCode]" -ForegroundColor Yellow }
+            [void](Enable-ConsoleMouse)
+            Wait-AnyKey '按任意键 / 点击窗口返回菜单...'
         }
-        Clear-Host
-        $lastCode = Invoke-Task -Key $key -TaskArgs (Get-OptionArgs $opts)
-        if ($lastCode -ne 0) { Write-Host "`n[退出码 $lastCode]" -ForegroundColor Yellow }
-        Wait-AnyKey '按任意键返回菜单...'
     }
+    finally { Disable-ConsoleMouse }
 }
 
 if (-not $Command) {
+    # 非交互环境（管道/CI/被其他脚本调用）不进菜单，否则会阻塞在按键读取上
+    if (-not (Test-InteractiveConsole)) {
+        Write-Host '检测到非交互环境（输入或输出被重定向），跳过键盘菜单。' -ForegroundColor Yellow
+        Show-Usage
+        exit 0
+    }
     exit (Invoke-MenuLoop)
 }
 
 if ($Command -in @('help', '-h', '--help', '/?', 'menu')) {
-    if ($Command -eq 'menu') { exit (Invoke-MenuLoop) }
+    if ($Command -eq 'menu') {
+        if (-not (Test-InteractiveConsole)) {
+            Write-Host '菜单需要交互式控制台：当前输入或输出被重定向。' -ForegroundColor Red
+            Write-Host '请在 PowerShell 窗口中运行，或直接用子命令调用（.\scripts\md3.ps1 help 查看）。' -ForegroundColor Yellow
+            exit 4
+        }
+        exit (Invoke-MenuLoop)
+    }
     Show-Usage
     exit 0
 }

@@ -205,162 +205,67 @@ function New-GitHubPr {
     catch { Write-Warn '无法自动打开浏览器，请手动复制上面的链接。' }
 }
 
-# ---------- 通用 TUI ----------
-# 非控制台宿主（输出被重定向 / CI）下 RawUI.ReadKey 不可用，给出可执行的替代指引而不是崩栈
-function Read-ConsoleKey {
-    param([string]$FallbackHint = '请在 PowerShell 窗口中运行，或直接用命令行参数调用。')
-    try { return $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') }
-    catch { throw "当前宿主不支持交互按键（非控制台环境）。$FallbackHint" }
-}
-
-function Wait-AnyKey([string]$Msg = '按任意键继续...') {
-    Write-Host ''
-    Write-Host $Msg -ForegroundColor Cyan
-    $null = Read-ConsoleKey
-}
-
-function New-MenuItem {
-    param([string]$Key, [string]$Label, [string]$Desc, [bool]$Enabled = $true)
-    [pscustomobject]@{ Key = $Key; Label = $Label; Desc = $Desc; Enabled = $Enabled }
-}
-
-# 光标只停在 Enabled 项上，首尾循环
-function Get-AdjacentEnabledIndex {
-    param([Parameter(Mandatory)][object[]]$Items, [int]$From, [int]$Step)
-    $n = $Items.Count
-    for ($i = 1; $i -le $n; $i++) {
-        $idx = (($From + $Step * $i) % $n + $n) % $n
-        if ($Items[$idx].Enabled) { return $idx }
-    }
-    $From
-}
-
+# ---------- 任务参数解析 ----------
 <#
-  单选菜单。$Items 用 New-MenuItem 构造（Enabled=$false 显示为灰色且不可选中）。
-  返回选中项索引；Esc/q 返回 -1。
+  把命令行风格的参数数组（'-Switch'、'-Name','值'、'-Name:值'、裸位置值）解析成
+  哈希表 + 位置参数数组，供 `& $script @named @pos` 调用。
+
+  必须这么做的原因：PowerShell 的**数组** splat 只按位置传参——
+  `$a = @('-Quiet'); & $script @a` 会把 '-Quiet' 当成第一个位置参数的**值**，
+  而不是开关（实测 `-Flag` 被绑进了 `[string]$Name`）。只有**哈希表** splat
+  才能绑定命名参数，所以透传前必须按目标脚本的参数元数据把 token 还原成键值。
 #>
-function Show-Menu {
+function ConvertTo-TaskParams {
     param(
-        [Parameter(Mandatory)][object[]]$Items,
-        [string]$Title = '',
-        [string]$Hint = '↑↓ 选择   Enter 确认   q 退出',
-        [string]$Footer = ''
+        [Parameter(Mandatory)][string]$ScriptPath,
+        [AllowEmptyCollection()][object[]]$ArgList = @()
     )
-    if (-not @($Items | Where-Object Enabled).Count) { throw '菜单没有可用项' }
-    $cursor = Get-AdjacentEnabledIndex -Items $Items -From ($Items.Count - 1) -Step 1
-    $width = ($Items | ForEach-Object { $_.Label.Length } | Measure-Object -Maximum).Maximum
-    while ($true) {
-        Clear-Host
-        if ($Title) { Write-Host $Title -ForegroundColor Cyan -NoNewline; Write-Host "   $Hint" -ForegroundColor DarkGray }
-        else { Write-Host $Hint -ForegroundColor DarkGray }
-        Write-Host ''
-        for ($i = 0; $i -lt $Items.Count; $i++) {
-            $it = $Items[$i]
-            $arrow = if ($i -eq $cursor) { '>' } else { ' ' }
-            $color = if (-not $it.Enabled) { 'DarkGray' } elseif ($i -eq $cursor) { 'Cyan' } else { 'White' }
-            $tag = if ($it.Enabled) { '' } else { '(当前树不可用) ' }
-            Write-Host ("  {0} {1}   {2}{3}" -f $arrow, $it.Label.PadRight($width), $tag, $it.Desc) -ForegroundColor $color
+    $meta = (Get-Command -Name $ScriptPath -CommandType ExternalScript).Parameters
+    $common = @('Verbose', 'Debug', 'ErrorAction', 'WarningAction', 'InformationAction',
+        'ErrorVariable', 'WarningVariable', 'InformationVariable', 'OutVariable',
+        'OutBuffer', 'PipelineVariable', 'WhatIf', 'Confirm', 'ProgressAction')
+    $scriptName = [System.IO.Path]::GetFileName($ScriptPath)
+
+    # 参数名解析：先精确匹配，再前缀匹配（PowerShell 原生也支持缩写）
+    function Resolve-ParamName([string]$Want) {
+        $c = @($meta.Keys | Where-Object { $_ -ieq $Want })
+        if (-not $c.Count) { $c = @($meta.Keys | Where-Object { $_ -ilike "$Want*" -and $common -notcontains $_ }) }
+        if ($c.Count -eq 1) { return $c[0] }
+        if ($c.Count -gt 1) { throw "参数 -$Want 有歧义（可匹配：$($c -join ', ')）" }
+        throw "参数 -$Want 不存在：$scriptName 没有这个参数"
+    }
+
+    $named = @{}
+    $pos = @()
+    $i = 0
+    $n = @($ArgList).Count
+    while ($i -lt $n) {
+        $tok = [string]$ArgList[$i]
+        if ($tok -match '^--?([A-Za-z][\w-]*):(.+)$') {
+            # -Name:值 单 token 形式
+            $name = Resolve-ParamName $Matches[1]
+            $val = $Matches[2]
+            if ($meta[$name].ParameterType -eq [System.Management.Automation.SwitchParameter]) {
+                $named[$name] = [bool]($val -inotin @('false', '$false', '0'))
+            } else { $named[$name] = $val }
+            $i++
         }
-        if ($Footer) { Write-Host ''; Write-Host "  $Footer" -ForegroundColor DarkGray }
-        $key = Read-ConsoleKey
-        switch ($key.VirtualKeyCode) {
-            38      { $cursor = Get-AdjacentEnabledIndex -Items $Items -From $cursor -Step -1 }
-            40      { $cursor = Get-AdjacentEnabledIndex -Items $Items -From $cursor -Step 1 }
-            13      { return $cursor }
-            27      { return -1 }
-            default {
-                switch ("$($key.Character)".ToLowerInvariant()) {
-                    'k' { $cursor = Get-AdjacentEnabledIndex -Items $Items -From $cursor -Step -1 }
-                    'j' { $cursor = Get-AdjacentEnabledIndex -Items $Items -From $cursor -Step 1 }
-                    'q' { return -1 }
-                }
+        elseif ($tok -match '^--?([A-Za-z][\w-]*):?$') {
+            $name = Resolve-ParamName $Matches[1]
+            if ($meta[$name].ParameterType -eq [System.Management.Automation.SwitchParameter]) {
+                $named[$name] = $true
+                $i++
+            } else {
+                if ($i + 1 -ge $n) { throw "参数 -$($Matches[1]) 缺少值" }
+                $named[$name] = $ArgList[$i + 1]
+                $i += 2
             }
         }
+        else { $pos += $tok; $i++ }
     }
+    [pscustomobject]@{ Named = $named; Positional = @($pos) }
 }
 
-# 参数项：switch = 开关；value = 需要取值（空格进入输入，回车留空即清除）
-function New-TaskOption {
-    param(
-        [Parameter(Mandatory)][string]$Name,
-        [ValidateSet('switch', 'value')][string]$Kind = 'switch',
-        [string]$Desc = '',
-        [string]$Value = ''
-    )
-    [pscustomobject]@{ Name = $Name; Kind = $Kind; Desc = $Desc; Checked = $false; Value = $Value }
-}
-
-# 把勾选结果拼成参数数组（数组透传给任务脚本，值里的空格无需自行转义）
-function Get-OptionArgs {
-    param([object[]]$Options)
-    $a = @()
-    foreach ($o in @($Options)) {
-        if ($o.Kind -eq 'switch') { if ($o.Checked) { $a += $o.Name } }
-        elseif ($o.Value) { $a += @($o.Name, $o.Value) }
-    }
-    , $a
-}
-
-function Format-ArgPreview {
-    param([object[]]$ArgList)
-    (@($ArgList) | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }) -join ' '
-}
-
-<#
-  参数勾选面板。就地修改 $Options（New-TaskOption 构造）。
-  返回 $true=执行 / $false=返回上一级。无可选参数时直接返回 $true。
-#>
-function Show-OptionPicker {
-    param(
-        [Parameter(Mandatory)][AllowEmptyCollection()][object[]]$Options,
-        [string]$Title = '',
-        [string]$CommandPrefix = ''
-    )
-    if (-not @($Options).Count) { return $true }
-    $cursor = 0
-    $width = ($Options | ForEach-Object { $_.Name.Length } | Measure-Object -Maximum).Maximum
-    while ($true) {
-        Clear-Host
-        Write-Host $Title -ForegroundColor Cyan -NoNewline
-        Write-Host '   ↑↓ 移动   空格 切换/输入   Enter 执行   Esc 返回' -ForegroundColor DarkGray
-        Write-Host ''
-        for ($i = 0; $i -lt $Options.Count; $i++) {
-            $o = $Options[$i]
-            $on = if ($o.Kind -eq 'switch') { $o.Checked } else { [bool]$o.Value }
-            $box = if ($o.Kind -eq 'switch') { if ($o.Checked) { '[x]' } else { '[ ]' } }
-                   elseif ($o.Value) { '[=]' } else { '[ ]' }
-            $arrow = if ($i -eq $cursor) { '>' } else { ' ' }
-            $suffix = if ($o.Kind -eq 'value' -and $o.Value) { "   = $($o.Value)" }
-                      elseif ($o.Kind -eq 'value') { '   （空格输入）' } else { '' }
-            $color = if ($i -eq $cursor) { 'Cyan' } elseif ($on) { 'White' } else { 'DarkGray' }
-            Write-Host ("  {0} {1} {2}   {3}{4}" -f $arrow, $box, $o.Name.PadRight($width), $o.Desc, $suffix) -ForegroundColor $color
-        }
-        Write-Host ''
-        $preview = Format-ArgPreview (Get-OptionArgs $Options)
-        Write-Host "  将执行：$CommandPrefix$(if ($preview) { " $preview" })" -ForegroundColor Yellow
-        $key = Read-ConsoleKey
-        switch ($key.VirtualKeyCode) {
-            38 { if ($cursor -gt 0) { $cursor-- } else { $cursor = $Options.Count - 1 } }
-            40 { if ($cursor -lt $Options.Count - 1) { $cursor++ } else { $cursor = 0 } }
-            13 { return $true }
-            27 { return $false }
-            32 {
-                $o = $Options[$cursor]
-                if ($o.Kind -eq 'switch') { $o.Checked = -not $o.Checked }
-                else {
-                    Write-Host ''
-                    $tip = if ($o.Value) { "（当前 $($o.Value)；直接回车清除）" } else { '（直接回车取消）' }
-                    $v = Read-Host "  输入 $($o.Name) 的值$tip"
-                    $o.Value = "$v".Trim()
-                }
-            }
-            default {
-                switch ("$($key.Character)".ToLowerInvariant()) {
-                    'k' { if ($cursor -gt 0) { $cursor-- } else { $cursor = $Options.Count - 1 } }
-                    'j' { if ($cursor -lt $Options.Count - 1) { $cursor++ } else { $cursor = 0 } }
-                    'q' { return $false }
-                }
-            }
-        }
-    }
-}
+# ---------- 终端 UI ----------
+# 菜单 / 参数面板 / 勾选列表（鼠标 + 键盘）统一放在 lib/ui.ps1
+. (Join-Path $PSScriptRoot 'ui.ps1')
