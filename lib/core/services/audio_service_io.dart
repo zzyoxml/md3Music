@@ -15,6 +15,97 @@ enum AudioFocusInterruptionMode {
   duckAndRestore,
 }
 
+/// 音频焦点中断的决策动作（纯逻辑层，便于单测）。
+sealed class AudioFocusAction {
+  const AudioFocusAction();
+}
+
+/// 不做任何响应：保持当前音量与播放状态。
+class KeepPlayingAction extends AudioFocusAction {
+  const KeepPlayingAction();
+}
+
+/// 降低音量到 [targetVolume]（相对当前音量的 [kDuckVolumeRatio] 倍）。
+class DuckVolumeAction extends AudioFocusAction {
+  const DuckVolumeAction(this.targetVolume);
+  final double targetVolume;
+}
+
+/// 恢复 [targetVolume]（中断前记录的原始音量）。
+class RestoreVolumeAction extends AudioFocusAction {
+  const RestoreVolumeAction(this.targetVolume);
+  final double targetVolume;
+}
+
+/// 暂停播放（调用方仅在正在播放时执行）。
+class PausePlaybackAction extends AudioFocusAction {
+  const PausePlaybackAction();
+}
+
+/// 尝试恢复播放（调用方内部校验「中断暂停」标志与播放器就绪态）。
+class ResumePlaybackAction extends AudioFocusAction {
+  const ResumePlaybackAction();
+}
+
+/// duck 降音量的相对比例（当前音量的 0.5 倍）。
+const double kDuckVolumeRatio = 0.5;
+
+/// 决策函数：按 [mode] 策略与中断事件，返回应执行的动作。
+///
+/// 纯函数（无副作用、不触碰播放器），由 AudioService 的
+/// interruptionEventStream 监听器调用并执行返回的动作，
+/// 使三模式策略逻辑可独立单测。
+AudioFocusAction decideInterruptionAction({
+  required AudioFocusInterruptionMode mode,
+  required bool begin,
+  required AudioInterruptionType type,
+  required bool isPlaying,
+  required double currentVolume,
+  double? volumeBeforeDuck,
+}) {
+  if (!begin) {
+    // —— 中断结束 ——
+    if (type == AudioInterruptionType.duck) {
+      if (mode == AudioFocusInterruptionMode.duckAndRestore) {
+        return RestoreVolumeAction(volumeBeforeDuck ?? currentVolume);
+      }
+      return const KeepPlayingAction();
+    }
+    switch (mode) {
+      case AudioFocusInterruptionMode.keepPlaying:
+        return const KeepPlayingAction();
+      case AudioFocusInterruptionMode.pauseAndResume:
+        return const ResumePlaybackAction();
+      case AudioFocusInterruptionMode.duckAndRestore:
+        return RestoreVolumeAction(volumeBeforeDuck ?? currentVolume);
+    }
+  }
+
+  // —— 中断开始 ——
+  if (type == AudioInterruptionType.duck) {
+    // 仅「降低音量后自动恢复」模式响应 duck，其余模式保持音量
+    // （避免荣耀平板 V8 Pro 频繁 duck/unduck 音量波动）。
+    if (mode == AudioFocusInterruptionMode.duckAndRestore && isPlaying) {
+      return DuckVolumeAction(currentVolume * kDuckVolumeRatio);
+    }
+    return const KeepPlayingAction();
+  }
+  // pause / unknown 开始
+  switch (mode) {
+    case AudioFocusInterruptionMode.keepPlaying:
+      return const KeepPlayingAction(); // 保持播放、保持音量
+    case AudioFocusInterruptionMode.pauseAndResume:
+      return isPlaying
+          ? const PausePlaybackAction()
+          : const KeepPlayingAction();
+    case AudioFocusInterruptionMode.duckAndRestore:
+      // 暂停型中断也改为降音量处理：播放不中断，仅压低音量
+      return isPlaying
+          ? DuckVolumeAction(currentVolume * kDuckVolumeRatio)
+          : const KeepPlayingAction();
+  }
+}
+
 /// 音频焦点 / 音频会话管理。
 ///
 /// 关键设计：
