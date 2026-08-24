@@ -2042,29 +2042,33 @@ class _SettingsPageState extends State<SettingsPage>
             ],
           ),
         ),
-        RadioListTile<AudioFocusInterruptionMode>(
-          dense: true,
-          title: const Text('保持播放与音量'),
-          subtitle: const Text('如来电、导航等中断时不做任何响应'),
-          value: AudioFocusInterruptionMode.keepPlaying,
+        RadioGroup<AudioFocusInterruptionMode>(
           groupValue: _audioFocusInterruptionMode,
-          onChanged: (v) => _onAudioFocusModeChanged(v!),
-        ),
-        RadioListTile<AudioFocusInterruptionMode>(
-          dense: true,
-          title: const Text('暂停后自动恢复'),
-          subtitle: const Text('来电等中断时暂停，结束后自动继续播放'),
-          value: AudioFocusInterruptionMode.pauseAndResume,
-          groupValue: _audioFocusInterruptionMode,
-          onChanged: (v) => _onAudioFocusModeChanged(v!),
-        ),
-        RadioListTile<AudioFocusInterruptionMode>(
-          dense: true,
-          title: const Text('降低音量后自动恢复'),
-          subtitle: const Text('中断时降低音量不暂停，结束后恢复原音量'),
-          value: AudioFocusInterruptionMode.duckAndRestore,
-          groupValue: _audioFocusInterruptionMode,
-          onChanged: (v) => _onAudioFocusModeChanged(v!),
+          onChanged: (v) {
+            if (v != null) _onAudioFocusModeChanged(v);
+          },
+          child: Column(
+            children: [
+              RadioListTile<AudioFocusInterruptionMode>(
+                dense: true,
+                title: const Text('保持播放与音量'),
+                subtitle: const Text('如来电、导航等中断时不做任何响应'),
+                value: AudioFocusInterruptionMode.keepPlaying,
+              ),
+              RadioListTile<AudioFocusInterruptionMode>(
+                dense: true,
+                title: const Text('暂停后自动恢复'),
+                subtitle: const Text('来电等中断时暂停，结束后自动继续播放'),
+                value: AudioFocusInterruptionMode.pauseAndResume,
+              ),
+              RadioListTile<AudioFocusInterruptionMode>(
+                dense: true,
+                title: const Text('降低音量后自动恢复'),
+                subtitle: const Text('中断时降低音量不暂停，结束后恢复原音量'),
+                value: AudioFocusInterruptionMode.duckAndRestore,
+              ),
+            ],
+          ),
         ),
         // MV 画中画：按 Home 自动进入（手动按钮始终可用）
         FutureBuilder<bool>(
