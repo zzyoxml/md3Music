@@ -336,6 +336,20 @@ class SettingsRepository {
     await prefs.setBool(_keyBluetoothLyricEnabled, v);
   }
 
+  // 蓝牙歌词封面压缩开关：默认 false（不压缩，保持原始 512px 封面质量）。
+  // 开启后原生端 refreshMetadata 使用 256px 缩略图，降低 Binder 负载与 SystemUI 解码压力。
+  static const String _keyBluetoothLyricCompressArt = 'settings_bluetooth_lyric_compress_art';
+
+  Future<bool> getBluetoothLyricCompressArt() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyBluetoothLyricCompressArt) ?? false;
+  }
+
+  Future<void> setBluetoothLyricCompressArt(bool v) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyBluetoothLyricCompressArt, v);
+  }
+
   // ===== LyricInfo 歌词转发 =====
   // 通过 MediaSession 元数据 extras.lyricInfo 发布整首歌词（LRC/ELRC），
   // 供 ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取。

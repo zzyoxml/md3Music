@@ -84,6 +84,8 @@ class DesktopLyricService {
   // 解析后的歌词行列表（统一模型，KRC 含 words，LRC/纯文本 words 为空）
   List<LyricLine> _lines = const [];
   int _currentLineIndex = -1;
+  // 行切换迟滞时间戳：position 抖动时抑制行来回跳变、重复推送（蓝牙歌词高频刷新根因之一）
+  DateTime? _lastLineSwitchAt;
   Timer? _ticker;
   bool _awaitingLyric = false;
 
@@ -558,6 +560,7 @@ class DesktopLyricService {
       _currentLrcText = null;
       _lines = const [];
       _currentLineIndex = -1;
+      _lastLineSwitchAt = null;
       _awaitingLyric = false;
       _lastPushedPosMs = null;
       _pushPlaying(_player!.isPlaying);
@@ -653,16 +656,26 @@ class DesktopLyricService {
 
     // 行变化时推送（逐行模式：每行只在进入时推一次，不高频刷字色）
     if (newIndex != _currentLineIndex) {
-      _currentLineIndex = newIndex;
-      final current = newIndex >= 0 ? _lines[newIndex].text : '';
-      final next = (_doubleLine && newIndex + 1 < _lines.length)
-          ? _lines[newIndex + 1].text
-          : '';
-      // sungCharCount 固定 -1：不启用逐字二分色，原生侧走整行渐变色（避免 100ms invalidate 卡顿）
-      _pushLyric(current, next, -1);
-      // SuperLyric：行变化时推送当前行（含逐字 words、翻译、副歌词）
-      if (_superLyricEnabled) {
-        _pushSuperLyricLine(newIndex >= 0 ? _lines[newIndex] : null);
+      // P0: 行切换 300ms 迟滞：position 抖动（MediaSession/just_audio 位置源相位差）
+      // 会导致行在相邻行间来回跳变、同一行被重复推送（日志实测同一行被推 3~16 次）。
+      // 迟滞窗口内保持当前行，稳定后才切换，消除无效推送。
+      final now = DateTime.now();
+      if (_lastLineSwitchAt != null &&
+          now.difference(_lastLineSwitchAt!).inMilliseconds < 300) {
+        // 迟滞窗口内：保持当前行，下个 tick 再判定
+      } else {
+        _lastLineSwitchAt = now;
+        _currentLineIndex = newIndex;
+        final current = newIndex >= 0 ? _lines[newIndex].text : '';
+        final next = (_doubleLine && newIndex + 1 < _lines.length)
+            ? _lines[newIndex + 1].text
+            : '';
+        // sungCharCount 固定 -1：不启用逐字二分色，原生侧走整行渐变色（避免 100ms invalidate 卡顿）
+        _pushLyric(current, next, -1);
+        // SuperLyric：行变化时推送当前行（含逐字 words、翻译、副歌词）
+        if (_superLyricEnabled) {
+          _pushSuperLyricLine(newIndex >= 0 ? _lines[newIndex] : null);
+        }
       }
     }
 

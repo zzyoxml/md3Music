@@ -103,6 +103,8 @@ class _SettingsPageState extends State<SettingsPage>
       _androidSdkVersion == null || _androidSdkVersion! >= 26;
   // 蓝牙歌词开关：通过 MediaSession 元数据替换在车机等设备显示歌词
   bool _bluetoothLyricEnabled = false;
+  // 蓝牙歌词封面压缩开关：默认关闭（不压缩，保持原始封面质量）
+  bool _bluetoothLyricCompressArt = false;
   // 锁屏歌词开关：锁屏时全屏显示逐字歌词（覆盖在系统锁屏上方），默认关闭
   bool _lockScreenLyricEnabled = false;
   // 锁屏歌词独立字号/粗细（默认跟随 AM 歌词偏好）
@@ -280,6 +282,9 @@ class _SettingsPageState extends State<SettingsPage>
     // 读取蓝牙歌词开关
     final bluetoothLyricEnabled = await _settingsRepository
         .getBluetoothLyricEnabled();
+    // 读取蓝牙歌词封面压缩开关
+    final bluetoothLyricCompressArt = await _settingsRepository
+        .getBluetoothLyricCompressArt();
     // 读取锁屏歌词开关
     final lockScreenLyricEnabled = await _settingsRepository
         .getLockScreenLyricEnabled();
@@ -328,6 +333,7 @@ class _SettingsPageState extends State<SettingsPage>
       _lyricEcoMode = LyricPreferences.instance.ecoMode;
       _lyricDynamicColor = LyricPreferences.instance.useDynamicLyricColor;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
+      _bluetoothLyricCompressArt = bluetoothLyricCompressArt;
       _lockScreenLyricEnabled = lockScreenLyricEnabled;
       _lockScreenLyricFontSize = lockScreenLyricFontSize;
       _lockScreenLyricFontWeight = lockScreenLyricFontWeight;
@@ -826,9 +832,20 @@ class _SettingsPageState extends State<SettingsPage>
             MediaNotificationService.setBluetoothLyricEnabled(value);
           },
         ),
+        // 蓝牙歌词封面压缩：默认关闭。开启后原生刷新用 256px 缩略图，降低系统负载
+        SwitchListTile(
+          title: const Text('压缩封面图'),
+          subtitle: const Text('开启后蓝牙歌词刷新使用 256px 压缩封面，降低系统负载；关闭保持原始封面质量'),
+          value: _bluetoothLyricCompressArt,
+          onChanged: (value) async {
+            HapticFeedback.lightImpact();
+            setState(() => _bluetoothLyricCompressArt = value);
+            await _settingsRepository.setBluetoothLyricCompressArt(value);
+          },
+        ),
         // 锁屏歌词（独立开关）：锁屏时全屏显示逐字歌词
         SwitchListTile(
-          title: const Text('锁屏歌词试验线功能'),
+          title: const Text('锁屏歌词（实验性）'),
           subtitle: const Text('锁屏时全屏显示逐字歌词（熄灭屏幕后点亮，覆盖在系统锁屏上方；解锁自动关闭；需要在权限管理同时开启锁屏通知和后台弹出界面以及显示悬浮窗权限才能显示）'),
           value: _lockScreenLyricEnabled,
           onChanged: (value) async {
