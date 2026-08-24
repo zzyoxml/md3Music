@@ -951,15 +951,18 @@ class _PlaylistPageState extends State<PlaylistPage> {
                         expandedHeight: 280,
                         pinned: true,
                         // pinned 后顶栏背景色：滚动到 expandedHeight - kToolbarHeight
-                        // 之后从透明渐变到 surface；开启壁纸时完全透明透出壁纸
-                        backgroundColor: useBackgroundImage
-                            ? Colors.transparent
-                            : Color.lerp(
-                                Colors.transparent,
-                                colorScheme.surface,
-                                (_scrollOffset - (280 - kToolbarHeight))
-                                    .clamp(0.0, 60.0) / 60,
-                              )!,
+                        // 之后从透明渐变；开启壁纸时渐变到半透明 surface（遮住滚动上来的
+                        // 列表避免穿透，同时隐约透出壁纸），未开启时渐变到不透明 surface
+                        // 背景图模式：顶栏恒透明（上划列表不压暗壁纸）；
+                        // 非背景图：上划渐变到 surface（遮住列表不穿透）
+                        backgroundColor: Color.lerp(
+                          Colors.transparent,
+                          useBackgroundImage
+                              ? colorScheme.surface.withValues(alpha: 0.75)
+                              : colorScheme.surface,
+                          (_scrollOffset - (280 - kToolbarHeight))
+                              .clamp(0.0, 60.0) / 60,
+                        )!,
                         surfaceTintColor: Colors.transparent,
                         scrolledUnderElevation: 0,
                         actions: [
@@ -1085,21 +1088,17 @@ class _PlaylistPageState extends State<PlaylistPage> {
                               gradient: LinearGradient(
                                 begin: Alignment.topCenter,
                                 end: Alignment.bottomCenter,
-                                colors: useBackgroundImage
-                                    ? [
-                                        // 开启壁纸时整个展开区完全透明，壁纸透出
-                                        colorScheme.primaryContainer
-                                            .withValues(alpha: 0),
-                                        colorScheme.surface
-                                            .withValues(alpha: 0),
-                                      ]
-                                    : [
-                                        colorScheme.primaryContainer,
-                                        // 底部渐变到透明：启用全局背景图（页面背景透明）时，
-                                        // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
-                                        colorScheme.surface
-                                            .withValues(alpha: 0),
-                                      ],
+                                colors: [
+                                  // 开启壁纸时主题色渐变半透明（alpha 0.5）叠加在壁纸上：
+                                  // 主题色渐变可见且壁纸透出；未开启时实色渐变
+                                  useBackgroundImage
+                                      ? colorScheme.primaryContainer
+                                          .withValues(alpha: 0.35)
+                                      : colorScheme.primaryContainer,
+                                  // 底部渐变到透明：启用全局背景图（页面背景透明）时，
+                                  // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
+                                  colorScheme.surface.withValues(alpha: 0),
+                                ],
                               ),
                             ),
                             child: SafeArea(

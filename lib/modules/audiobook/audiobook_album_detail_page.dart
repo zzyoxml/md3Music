@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../../data/models/song.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/smart_artwork_image.dart';
 import '../../widgets/song_list_item.dart';
@@ -260,6 +261,8 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+    final useBackgroundImage =
+        context.watch<ThemeProvider>().useBackgroundImage;
     final intro = _intro;
     final displaySongs = _displaySongs;
 
@@ -276,7 +279,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                     controller: _scrollController,
                     physics: const AlwaysScrollableScrollPhysics(),
                     slivers: [
-                      _buildSliverAppBar(cs, tt),
+                      _buildSliverAppBar(cs, tt, useBackgroundImage),
                       // 简介（默认折叠，带动画）
                       if (intro != null)
                         SliverToBoxAdapter(
@@ -401,7 +404,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                               return AnimatedContainer(
                                 duration: const Duration(milliseconds: 300),
                                 color: isHighlighted
-                                    ? cs.primaryContainer.withValues(alpha: 0.5)
+                                    ? cs.primaryContainer.withValues(alpha: 0.35)
                                     : Colors.transparent,
                                 child: SongListItem(
                                   song: song,
@@ -427,16 +430,19 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
   }
 
   /// SliverAppBar：pinned 大头部（渐变背景）+ 滚动 fade-in 专辑名 + 操作按钮
-  Widget _buildSliverAppBar(ColorScheme cs, TextTheme tt) {
+  Widget _buildSliverAppBar(ColorScheme cs, TextTheme tt, bool useBackgroundImage) {
     final displaySongs = _displaySongs;
     return SliverAppBar(
       expandedHeight: 280,
       pinned: true,
       backgroundColor: Color.lerp(
-        Colors.transparent,
-        cs.surface,
-        ((_scrollOffset - (280 - kToolbarHeight)).clamp(0.0, 60.0) / 60),
-      )!,
+                          Colors.transparent,
+                          useBackgroundImage
+                              ? cs.surface.withValues(alpha: 0.75)
+                              : cs.surface,
+                          (_scrollOffset - (280 - kToolbarHeight))
+                              .clamp(0.0, 60.0) / 60,
+                        )!,
       surfaceTintColor: Colors.transparent,
       scrolledUnderElevation: 0,
       actions: [
@@ -534,7 +540,11 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                cs.primaryContainer,
+                // 开启壁纸时主题色渐变半透明叠加在壁纸上，
+                // 渐变可见且壁纸透出；未开启时实色渐变
+                useBackgroundImage
+                    ? cs.primaryContainer.withValues(alpha: 0.35)
+                    : cs.primaryContainer,
                 // 底部渐变到透明：与歌单详情页一致，启用全局背景图时不形成接缝穿帮
                 cs.surface.withValues(alpha: 0),
               ],

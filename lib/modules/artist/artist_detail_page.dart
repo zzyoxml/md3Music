@@ -6,6 +6,7 @@ import 'package:m3e_core/m3e_core.dart';
 import '../../core/utils/app_toast.dart';
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
+import '../../providers/theme_provider.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/song_list_item.dart';
@@ -400,6 +401,8 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
+    final useBackgroundImage =
+        context.watch<ThemeProvider>().useBackgroundImage;
     final avatarUrl = _fixImageUrl(_resolvedAvatarUrl ?? widget.avatarUrl);
 
     return Scaffold(
@@ -488,11 +491,13 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           ),
                       ],
                       backgroundColor: Color.lerp(
-                        Colors.transparent,
-                        colorScheme.surface,
-                        (_scrollOffset - (240 - kToolbarHeight))
-                            .clamp(0.0, 60.0) / 60,
-                      )!,
+                          Colors.transparent,
+                          useBackgroundImage
+                              ? colorScheme.surface.withValues(alpha: 0.75)
+                              : colorScheme.surface,
+                          (_scrollOffset - (240 - kToolbarHeight))
+                              .clamp(0.0, 60.0) / 60,
+                        )!,
                       surfaceTintColor: Colors.transparent,
                       scrolledUnderElevation: 0,
                       // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示歌手名
@@ -514,7 +519,12 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                               begin: Alignment.topCenter,
                               end: Alignment.bottomCenter,
                               colors: [
-                                colorScheme.primaryContainer,
+                                // 开启壁纸时主题色渐变半透明叠加在壁纸上，
+                                // 渐变可见且壁纸透出；未开启时实色渐变
+                                useBackgroundImage
+                                    ? colorScheme.primaryContainer
+                                        .withValues(alpha: 0.35)
+                                    : colorScheme.primaryContainer,
                                 // 底部渐变到透明：启用全局背景图（页面背景透明）时，
                                 // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
                                 colorScheme.surface.withValues(alpha: 0),
