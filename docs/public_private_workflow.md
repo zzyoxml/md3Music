@@ -12,7 +12,7 @@
 ## 0. 一句话总结
 
 > **所有开发都在私有仓库做，公开仓库只是"过滤导出的干净快照"。**
-> 公开版 = 私有仓库跑一遍 `export_public.ps1` 得到 `.public_export/`，再推送。
+> 公开版 = 私有仓库跑一遍 `md3.ps1 export` 得到 `.public_export/`，再推送。
 > 私有仓库独有的东西（`packages/`、`lib/private/`、`main_private.dart`、私有设置 API）在导出时被整体排除，并在导出前用**否认清单闸门**强制校验"公开树零下载/缓存痕迹"。
 
 ### 0.1 功能清单与触发时机（速查）
@@ -40,7 +40,8 @@
 ```
 ┌────────────────────────────────────────────────────────────┐
 │  私有仓库（单一源码，全部功能都在这里开发）                  │
-│  origin = https://github.com/Little-White3110/private_md3music │
+│  origin   = <你的账号>/private_md3music（你的 fork）        │
+│  upstream = zzyoxml/private_md3music（私有源，PR 目标）     │
 │                                                            │
 │  lib/                      ← 公开树（不含 lib/private/）    │
 │  ├── main.dart             ← 公开入口（干净版）             │
@@ -48,11 +49,11 @@
 │  ├── private/              ← 私有层（6 个文件，导出时排除） │
 │  └── (无 main_private.dart，它在 lib/private/ 里)          │
 │  packages/md3_download_cache/  ← 私有功能包（导出时排除）   │
-│  scripts/export_public.ps1     ← 过滤导出脚本               │
-│  scripts/verify_public_clean.ps1 ← 闸门校验脚本             │
+│  scripts/md3.ps1 export     ← 过滤导出脚本               │
+│  scripts/md3.ps1 verify ← 闸门校验脚本             │
 │  scripts/public_deny.txt        ← 否认清单（闸门的数据源）   │
 └───────────────┬────────────────────────────────────────────┘
-                │ export_public.ps1（白名单拷贝 → 排除私有内容
+                │ md3.ps1 export（白名单拷贝 → 排除私有内容
                 │ → 剥离 pubspec 依赖 → deny 闸门）
                 ▼
 ┌────────────────────────────────────────────────────────────┐
@@ -60,11 +61,13 @@
 │  = 干净的公开源码：无 packages/、无 lib/private/、           │
 │    pubspec.yaml 已剥离私有依赖行                             │
 └───────────────┬────────────────────────────────────────────┘
-                │ git push -f origin HEAD:main（-PublicRemote 参数）
+                │ 在 .public_export/ 内 git push -f（-PublicRemote 参数指定 URL；
+                │ 该临时仓库自己的 origin，与主仓库的 origin 无关）
                 ▼
 ┌────────────────────────────────────────────────────────────┐
 │  公开仓库（发布产物，只读镜像）                              │
-│  zzyoxml = https://github.com/zzyoxml/md3Music.git          │
+│  public = https://github.com/zzyoxml/md3Music.git           │
+│  注意：与 upstream 的 private_md3music 是【两个不同仓库】     │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -84,7 +87,7 @@
 | 私有入口 | `lib/private/main_private.dart` | 完整版：`runBootstrap()` + `installCacheHooks()` + `installUiHooks()` + 注册 `DownloadsProvider` | `flutter build apk -t lib/private/main_private.dart` |
 
 - 两个入口共用 `main.dart` 里抽出的 `runBootstrap()`（启动引导），差异仅在私有入口多装钩子。
-- `scripts/build_android.ps1` 已默认走私有入口（每日构建 = 完整功能版）。
+- `scripts/md3.ps1 android` 已默认走私有入口（每日构建 = 完整功能版）。
 
 ### 1.4 中性静态钩子系统（公开树 ↔ 私有层 的唯一通道）
 
@@ -102,13 +105,32 @@
 | `PlaylistPage` / `PlayHistoryPage` | `songFilterHook(String pageKey, List<Song>)`<br>`songFilterListenable`<br>`extraAppBarActionsBuilder(BuildContext)` | 「仅显示已缓存」筛选：公开类只剩 `List→List` 变换插槽 + 重建信号 + AppBar 按钮注入位 |
 | `MyApp`（app.dart） | `extraProviders` | 注册 `DownloadsProvider` |
 
-### 1.5 两个仓库的关系
+### 1.5 三个远端角色
+
+本项目在 GitHub 上呈**树状**：根是 `zzyoxml/private_md3music`（私有源），其下有多个贡献者 fork。因此 `origin` **因人而异，不可写死**——远端名按角色理解：
+
+| 角色 | 远端名 | 值 | 用途 |
+|------|--------|-----|------|
+| 你的 fork | `origin` | `<你的 GitHub 账号>/private_md3music` | 日常推送、开 PR 的源 |
+| 私有源 | `upstream` | `zzyoxml/private_md3music` | **PR 合入目标**；`git fetch upstream` 同步 |
+| 公开镜像 | `public` | `zzyoxml/md3Music` | 发布产物；场景 C 从这里回捡改动 |
 
 ```bash
 git remote -v
-# origin    https://github.com/Little-White3110/private_md3music   ← 私有（开发主战场）
-# zzyoxml   https://github.com/zzyoxml/md3Music.git                ← 公开（发布镜像）
+# origin    https://github.com/<你的账号>/private_md3music     ← 你的 fork（开发主战场）
+# upstream  https://github.com/zzyoxml/private_md3music        ← 私有源（PR 目标）
+# public    https://github.com/zzyoxml/md3Music.git            ← 公开镜像（发布/回捡）
+
+# public 远端通常需自行补配一次（发布链路用 -PublicRemote 传 URL，不依赖它；
+# 只有场景 C 的 git fetch 需要）：
+git remote add public https://github.com/zzyoxml/md3Music.git
 ```
+
+> ⚠️ **两个易混点**
+> 1. `upstream`（`private_md3music`）与 `public`（`md3Music`）**同属 zzyoxml 但是两个不同仓库**，用途不可互换：前者是源码上游，后者是导出快照。
+> 2. `.public_export/` 临时导出树里也有个 `origin`（指向公开镜像），那是**它自己那个一次性仓库**的远端，与主仓库的 `origin` 毫无关系。
+
+实际取值永远以 `git remote -v` 为准，勿照抄文档里的示例账号。
 
 ---
 
@@ -129,8 +151,8 @@ git remote -v
 |---|------|-----------|---------|
 | A | 私有库开发**普通**新功能 | 直接在私有库写 → 验证 → 提交 | [4.1](#41-场景-a私有库开发普通新功能日常主路径) |
 | B | 私有库开发**下载/缓存**新功能 | 代码进包或进 `lib/private/` → 加钩子 → 同步 deny 列表 | [4.2](#42-场景-b私有库开发下载缓存相关新功能) |
-| C | **公开库**开发了新功能，同步回私有库 | `git fetch zzyoxml` → `git cherry-pick` → 验证 | [4.3](#43-场景-c公开库新功能同步回私有库) |
-| D | 私有库开发完，**发布公开版** | `verify_public_clean` → `export_public.ps1 -PublicRemote` | [4.4](#44-场景-d发布公开版本) |
+| C | **公开库**开发了新功能，同步回私有库 | `git fetch public` → `git cherry-pick` → 验证 | [4.3](#43-场景-c公开库新功能同步回私有库) |
+| D | 私有库开发完，**发布公开版** | `md3.ps1 verify` → `md3.ps1 export -PublicRemote` | [4.4](#44-场景-d发布公开版本) |
 | E | 给公开类新增一个私有能力 | 加中性钩子 → 私有层注入 → deny 追加 | [4.5](#45-场景-e给公开类新增一个私有能力加钩子全流程) |
 | F | 新增**顶层文件/目录**要随公开版发布 | 判断该不该公开 → 加进导出白名单 → 重新导出 | [4.6](#46-场景-f导出白名单维护新增文件目录时) |
 
@@ -193,12 +215,12 @@ my_new_cache_feature_key
 
 ```bash
 flutter analyze
-.\scripts\verify_public_clean.ps1     # 必须 exit 0（零命中）
+.\scripts\md3.ps1 verify     # 必须 exit 0（零命中）
 ```
 
 ### 4.3 场景 C：公开库新功能同步回私有库 ★
 
-**前提认识**：公开仓库（`zzyoxml`）是导出快照。它与私有树在 `lib/` 公开部分**路径完全一致**，但公开树里**没有** `lib/private/`、`packages/`、`main_private.dart`，且 `pubspec.yaml` 是剥离后的。所以同步时：
+**前提认识**：公开仓库（远端 `public` = `zzyoxml/md3Music`）是导出快照。它与私有树在 `lib/` 公开部分**路径完全一致**，但公开树里**没有** `lib/private/`、`packages/`、`main_private.dart`，且 `pubspec.yaml` 是剥离后的。所以同步时：
 - ✅ 改动只碰 `lib/` 公开部分（或其他白名单目录：`android/`、`assets/`、`test/` 等）→ 可以无损同步
 - ⚠️ 改动碰了 `pubspec.yaml` → 大概率冲突，需手工合并（见下方冲突处理）
 - ❌ 公开树里永远不该出现私有内容的改动——若公开仓库里出现了 `lib/private/` 之类，那是误推，直接丢弃
@@ -206,11 +228,14 @@ flutter analyze
 **推荐方法：cherry-pick（逐提交同步）**
 
 ```powershell
+# 0. 首次使用需补配公开镜像远端（见 1.5）
+git remote add public https://github.com/zzyoxml/md3Music.git
+
 # 1. 拉取公开仓库最新
-git fetch zzyoxml
+git fetch public
 
 # 2. 查看公开仓库最近提交，找到要同步的 commit
-git log zzyoxml/main --oneline -20
+git log public/main --oneline -20
 
 # 3. 只同步选中的提交（推荐，粒度小、可回退）
 git cherry-pick <commit-sha>
@@ -223,7 +248,7 @@ git cherry-pick <commit-sha>
 # 5. 同步后必须验证（防止公开改动破坏私有构建或引入符号）
 flutter analyze
 flutter test
-.\scripts\verify_public_clean.ps1    # 零命中才安全
+.\scripts\md3.ps1 verify    # 零命中才安全
 ```
 
 **方法对比**
@@ -231,7 +256,7 @@ flutter test
 | 方法 | 命令 | 适用 | 风险 |
 |------|------|------|------|
 | cherry-pick（推荐） | `git cherry-pick <sha>` | 少量、明确的提交 | pubspec 冲突需手工合并 |
-| 整分支 merge | `git merge zzyoxml/main` | 公开仓库长期无人开发时一次性全量同步 | 会把公开树的结构差异（缺目录）带进来，冲突面大，**不推荐** |
+| 整分支 merge | `git merge public/main` | 公开仓库长期无人开发时一次性全量同步 | 会把公开树的结构差异（缺目录）带进来，冲突面大，**不推荐** |
 | 文件复制 | 手动复制文件内容 | 改动只有 1-2 个小文件 | 无 git 历史；易漏 |
 | format-patch | `git format-patch` + `git am` | 离线批量 | 与 cherry-pick 等价 |
 
@@ -246,11 +271,11 @@ flutter test
 
 ```powershell
 # 1.（可选）先在私有库跑一次闸门，快速发现问题
-.\scripts\verify_public_clean.ps1
+.\scripts\md3.ps1 verify
 # 期望输出：Public lib/ tree clean: deny-list zero-hit.（exit 0）
 
 # 2. 生成公开树（只导出，不推送）
-.\scripts\export_public.ps1
+.\scripts\md3.ps1 export
 # 期望输出：Public tree exported to .public_export (deny-list zero-hit, gate passed)
 
 # 3. 抽查导出树（可选但推荐）：
@@ -259,22 +284,30 @@ flutter test
 #    grep -rn "边听边存\|StreamCacheManager\|md3_download_cache" lib/  # 空 = 干净
 
 # 4. 推送到公开仓库（脚本内部：git init → commit → force push 到 main）
-.\scripts\export_public.ps1 -PublicRemote https://github.com/zzyoxml/md3Music.git
+.\scripts\md3.ps1 export -PublicRemote https://github.com/zzyoxml/md3Music.git
 # 期望输出：Pushed to public repository: https://github.com/zzyoxml/md3Music.git
+
+# 4'. 或走 PR 审阅（保留公开仓库历史，可逐文件比对本次导出差异）
+.\scripts\md3.ps1 export -PublicRemote https://github.com/zzyoxml/md3Music.git -AsPr
+# 内部：浅克隆公开仓库 → 用导出树整体替换工作区 → 提交到 public-export-<时间戳> 分支 → 开 PR
 ```
 
 **手动推送（不想用脚本参数时）**：
+
+> 下面的 `git init` / `git remote add origin` 都发生在 `.public_export/` 这个**一次性临时仓库**内，
+> 它的 `origin` 与主仓库的 `origin`（你的 fork）**毫无关系**，不会改动主仓库任何远端配置。
+
 ```powershell
 cd .public_export
 git init
 git add -A
 git commit -m "public export"
-git remote add origin https://github.com/zzyoxml/md3Music.git
+git remote add origin https://github.com/zzyoxml/md3Music.git   # 临时仓库自己的 origin
 git push -f origin HEAD:main
 ```
 
 **注意事项**：
-- 推送是 **force push 到公开仓库 main 分支**——公开仓库是镜像，历史上只允许被覆盖，不要在公开仓库上开分支开发（那样同步会很痛苦）。
+- 默认推送是 **force push 到公开仓库 main 分支**——公开仓库是镜像，历史上只允许被覆盖，不要在公开仓库上开分支开发（那样同步会很痛苦）。`-AsPr` 是唯一例外：它只为本次导出建一个临时分支供审阅，合并后仍是线性镜像。
 - `.public_export/` 已被 `.gitignore` 忽略，不入私有仓库。
 - 导出树里的 `test/` 会被原样拷贝：**不要在公开树的 `test/` 里写下载/缓存测试**（会命中闸门）；私有功能测试放 `packages/md3_download_cache/test/`。
 
@@ -304,7 +337,7 @@ void installUiHooks() {
 
 ```
 ④ deny 列表追加：新私有实现里出现的符号追加到 scripts/public_deny.txt
-⑤ 验证：flutter analyze + verify_public_clean.ps1
+⑤ 验证：flutter analyze + md3.ps1 verify
 ```
 
 **钩子命名纪律**：
@@ -314,7 +347,7 @@ void installUiHooks() {
 
 ### 4.6 场景 F：导出白名单维护（新增文件/目录时）
 
-> 导出的白名单在 `scripts/export_public.ps1` 的 `$whitelist` 数组（当前 17 项）。**白名单制 = 只有列出的顶层项才会被拷贝进公开树**，未列出的东西（包括意外创建的任何顶层目录/文件）一律不进公开仓库——这是隔离的**第一道闸**。
+> 导出的白名单在 `scripts/md3.ps1 export` 的 `$whitelist` 数组（当前 17 项）。**白名单制 = 只有列出的顶层项才会被拷贝进公开树**，未列出的东西（包括意外创建的任何顶层目录/文件）一律不进公开仓库——这是隔离的**第一道闸**。
 
 **新增功能时按落点分类处理：**
 
@@ -327,7 +360,7 @@ void installUiHooks() {
 | 新增**顶层文件**（如 `SECURITY.md`、`CONTRIBUTING.md`） | ✅ **要加** | 同上 |
 | 改动现有白名单项**内部**的文件（如 `android/`、`assets/`、`scripts/` 里的文件） | ❌ 不用 | 整目录拷贝，内部文件自动带上 |
 
-> ⚠️ **`scripts/` 目录例外**：`export_public.ps1`、`verify_public_clean.ps1`、`public_deny.txt` 三个**导出工具链文件**属于私有侧工具，导出时会被步骤 4 明确删除，**不进公开仓库**（避免导出脚本自复制、否认清单外泄）。`build_android.ps1` / `build_windows.ps1` 等构建脚本保留在公开树（构建复用）。新增导出相关脚本时，同样应加入该排除清单。
+> ⚠️ **`scripts/` 目录例外**：`tasks/export_public.ps1`、`tasks/verify_public.ps1`、`tasks/commit.ps1`、`public_deny.txt` 四个**私有侧工具链文件**导出时会被步骤 4 明确删除，**不进公开仓库**（避免导出脚本自复制、否认清单外泄）。`md3.ps1` 总入口、`lib/common.ps1` 公共库与 `tasks/android.ps1` / `tasks/windows.ps1` 保留在公开树（构建复用；被剥离的子命令在公开树里会提示"该任务属私有侧工具"）。新增导出相关脚本时，同样应加入该排除清单。
 >
 > ⚠️ **其他私有功能排除**：`windows/` 目录（私有版 Windows 桌面功能，公开版 Android-only）不在白名单；pubspec 的 `just_audio_windows`/`video_player_win` 依赖与 README 的「边边存」条目、`.github/workflows/build-windows.yml` 在导出时被剥离/删除；`CHANGELOG.md` 不在白名单（私有版 CHANGELOG 含私有功能记录且版本滞后，公开仓库自行维护自己的 CHANGELOG）。**新增私有功能时，同步检查这三处：依赖剥离、文档宣传清理、CI 排除。**
 
@@ -350,14 +383,14 @@ $whitelist = @(
 ```
 
 **⚠️ 白名单目录不经过 deny 扫描**（重要，勿踩）：
-`export_public.ps1` 的否认闸门只扫描 `lib/*.dart` 与 `pubspec.yaml`。**`scripts/`、`assets/`、`android/` 等其他白名单目录的内容不会过闸门**。因此：
+`md3.ps1 export` 的否认闸门只扫描 `lib/*.dart` 与 `pubspec.yaml`。**`scripts/`、`assets/`、`android/` 等其他白名单目录的内容不会过闸门**。因此：
 - 新增的**脚本/文档/资源**若含下载/缓存私有信息（如脚本里硬编码私有 URL、文档里写内部架构），不会被闸门拦截，会直接进公开仓库
 - 规则：**白名单内的非 lib 文件，写入前先自问"这段内容能公开吗"**；涉及私有特征的，改用占位/通用描述
-- 若想让闸门也覆盖某个新目录，可把该目录加入 `verify_public_clean.ps1` / `export_public.ps1` 的扫描范围（当前仅 lib + pubspec）
+- 若想让闸门也覆盖某个新目录，可把该目录加入 `md3.ps1 verify` / `md3.ps1 export` 的扫描范围（当前仅 lib + pubspec）
 
 **修改白名单后的验证流程**：
 ```powershell
-.\scripts\export_public.ps1 -NoPause          # 重新导出（闸门自动跑）
+.\scripts\md3.ps1 export -NoPause          # 重新导出（闸门自动跑）
 # 抽查新增项是否如期出现 / 不该出现的没出现：
 ls .public_export\docs\user-guide              # 例：新增目录已在
 ls .public_export\AGENTS.md                    # 例：应报 No such file（已排除）
@@ -386,7 +419,7 @@ ls .public_export\AGENTS.md                    # 例：应报 No such file（已
    │                 ├─ 是 → 加中性钩子（4.5）
    │                 └─ 否 → 直接私有层实现
    │
-   └─ 收尾：deny 列表追加新符号 → flutter analyze → verify_public_clean.ps1
+   └─ 收尾：deny 列表追加新符号 → flutter analyze → md3.ps1 verify
 ```
 
 ---
@@ -399,8 +432,8 @@ ls .public_export\AGENTS.md                    # 例：应报 No such file（已
 - [ ] `flutter test` 无新增失败
 - [ ] 涉及下载/缓存的改动已在真机验证（下载→文件+元数据、边听边存命中、缓存统计/清空）
 - [ ] 新增私有符号已追加到 `scripts/public_deny.txt`
-- [ ] `.\scripts\verify_public_clean.ps1` 输出 zero-hit（exit 0）
-- [ ] `.\scripts\export_public.ps1` 输出 gate passed
+- [ ] `.\scripts\md3.ps1 verify` 输出 zero-hit（exit 0）
+- [ ] `.\scripts\md3.ps1 export` 输出 gate passed
 - [ ] 导出树 `.public_export/` 抽查：`flutter analyze` 零错误、特征 grep 空
 - [ ] 包代码有改动时：包版本已递增、`pubspec.lock` 已提交
 - [ ] 私有改动已全部提交（发布推送与代码提交分离，先提交后发布）
@@ -448,13 +481,13 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 
 | 目的 | 命令 |
 |------|------|
-| 闸门校验（私有库内） | `.\scripts\verify_public_clean.ps1` |
-| 生成公开树 | `.\scripts\export_public.ps1` |
-| 生成并推送公开树 | `.\scripts\export_public.ps1 -PublicRemote https://github.com/zzyoxml/md3Music.git` |
+| 闸门校验（私有库内） | `.\scripts\md3.ps1 verify` |
+| 生成公开树 | `.\scripts\md3.ps1 export` |
+| 生成并推送公开树 | `.\scripts\md3.ps1 export -PublicRemote https://github.com/zzyoxml/md3Music.git` |
 | 私有入口构建 | `flutter build apk --debug -t lib/private/main_private.dart` |
 | 公开入口构建 | `flutter build apk --debug`（默认 lib/main.dart） |
-| 每日完整构建 | `.\scripts\build_android.ps1`（默认私有入口） |
-| 同步公开改动 | `git fetch zzyoxml && git cherry-pick <sha>` |
+| 每日完整构建 | `.\scripts\md3.ps1 android`（默认私有入口） |
+| 同步公开改动 | `git fetch public && git cherry-pick <sha>` |
 
 ### 8.2 目录速查
 
@@ -463,8 +496,10 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 | `lib/`（不含 private/） | 公开 | 公开功能；只许中性钩子 |
 | `lib/private/` | 私有 | 6 文件：`cache_bridge.dart`、`enhanced_ui.dart`、`downloads_provider.dart`、`downloads_page.dart`、`private_settings.dart`、`main_private.dart` |
 | `packages/md3_download_cache/` | 私有 | 引擎包：`download/`（manager/repository/task）+ `cache/`（stream_cache_manager/repository/lyric_data） |
-| `scripts/export_public.ps1` | 工具 | 过滤导出 + deny 闸门 + 可选推送 |
-| `scripts/verify_public_clean.ps1` | 工具 | 闸门校验（pre-push/CI 用） |
+| `scripts/tasks/export_public.ps1` | 工具 | 过滤导出 + deny 闸门 + 可选推送/PR |
+| `scripts/tasks/verify_public.ps1` | 工具 | 闸门校验（pre-push/CI 用） |
+| `scripts/tasks/commit.ps1` | 工具 | 一键提交（TUI 勾选 + 闸门 + 推送 + PR） |
+| `scripts/lib/common.ps1` | 工具 | 公共库：闸门唯一实现 `Invoke-DenyGate` 等 |
 | `scripts/public_deny.txt` | 工具 | 否认清单（新增私有特征必须追加） |
 | `.public_export/` | 临时 | 导出产物，已 gitignore |
 
@@ -483,4 +518,4 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 - **已完成的隔离改造**：引擎入包、公开树减法（deny 零命中）、双入口、过滤导出脚本、闸门强化（deny 外置 + 中文短语）、私有设置 API 迁出、筛选功能形态 B 化、字段/注释中性化。
 - **验证结果**：`flutter analyze` 零错误；`flutter test` +345 通过（19 个预存插件失败除外）；双入口 debug APK 均构建成功；导出树独立 analyze 零错误 + 特征残留零命中。
 - **待办**：真机验证（需接入 R52R30F3Q9Z）；改动尚未提交（`git status` 见未提交文件），建议按逻辑单元提交：引擎入包 / 公开树减法 / 导出脚本与闸门。
-- **回滚**：改动未提交，`git checkout -- .` + `git clean -fd lib/private packages scripts/export_public.ps1 scripts/verify_public_clean.ps1` 可回到改造前。
+- **回滚**：改动未提交，`git checkout -- .` + `git clean -fd lib/private packages scripts/tasks scripts/lib` 可回到改造前。
