@@ -1,6 +1,7 @@
 package com.ryanheise.just_audio;
 
 import android.content.Context;
+import android.media.AudioManager;
 import android.media.audiofx.AudioEffect;
 import android.media.audiofx.Equalizer;
 import android.media.audiofx.LoudnessEnhancer;
@@ -9,8 +10,8 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import androidx.media3.common.C;
-import androidx.media3.exoplayer.DefaultLivePlaybackSpeedControl;
-import androidx.media3.exoplayer.DefaultLoadControl;
+import androidx.media3.exoplayer.AudioFocusManager;
+import androidx.media3.exoplayer.DefaultLivePlaybackSpeedControl;import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
 import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.LivePlaybackSpeedControl;
@@ -30,6 +31,7 @@ import androidx.media3.exoplayer.audio.AudioSink;
 import androidx.media3.exoplayer.NoSampleRenderer;
 import androidx.media3.exoplayer.Renderer;
 import androidx.media3.exoplayer.RenderersFactory;
+import androidx.media3.session.MediaSession;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.common.Metadata;
 import androidx.media3.common.Format;
@@ -85,6 +87,8 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
     private final MethodChannel methodChannel;
     private final BetterEventChannel eventChannel;
     private final BetterEventChannel dataEventChannel;
+    // MD3Music fork: 音频焦点原始事件通道（Media3 AudioFocusManager 转发）
+    private final BetterEventChannel focusEventChannel;
 
     private ProcessingState processingState;
     private long updatePosition;
@@ -195,6 +199,13 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         methodChannel.setMethodCallHandler(this);
         eventChannel = new BetterEventChannel(messenger, "com.ryanheise.just_audio.events." + id);
         dataEventChannel = new BetterEventChannel(messenger, "com.ryanheise.just_audio.data." + id);
+        // MD3Music fork: 订阅 Media3 的原始音频焦点事件（duck/pause/gain 均由
+        // AudioFocusManager.handlePlatformAudioFocusChange 转发，先于自动处理发出），
+        // 供 Dart 层做三模式决策（保持音量 / 降音量恢复 / 暂停恢复）。
+        focusEventChannel = new BetterEventChannel(
+                messenger, "com.ryanheise.just_audio.focus_events." + id);
+        AudioFocusManager.setAudioFocusEventListener(focusChange ->
+                focusEventChannel.success(focusChange));
         processingState = ProcessingState.idle;
         if (audioLoadConfiguration != null) {
             Map<?, ?> loadControlMap = (Map<?, ?>)audioLoadConfiguration.get("androidLoadControl");
@@ -474,6 +485,14 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                 break;
             case "setVolume":
                 setVolume((float) ((double) ((Double) call.argument("volume"))));
+                result.success(new HashMap<String, Object>());
+                break;
+            case "setForceWillPauseWhenDucked":
+                // MD3Music fork: 三模式「保持播放与音量」时把 duck 事件转为 pause 语义，
+                // 由 Dart 侧对抗自动 pause，保持音量不变。
+                Boolean force = (Boolean) call.argument("force");
+                android.util.Log.i("AudioFocusFork", "setForcedWillPauseWhenDucked=" + force);
+                AudioFocusManager.setForcedWillPauseWhenDucked(force);
                 result.success(new HashMap<String, Object>());
                 break;
             case "getSourceFormat":
@@ -844,8 +863,18 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             );
             setAudioSessionId(player.getAudioSessionId());
             player.addListener(this);
+            // MD3Music fork: 创建 Media3 MediaSession 关联 ExoPlayer。
+            // 小米等系统按「播放器是否关联 MediaSession」判定是否自动 duck
+            // （hasUid=false → 系统绕过 app 直接 VolumeShaper duck，三模式收不到事件）。
+            // 关联后系统识别播放器、不自动 duck，焦点事件正常进入 AudioFocusManager。
+            // 焦点仍由 ExoPlayer 的 AudioFocusManager 管理（handleAudioFocus=true），
+            // MediaSession 仅作关联标识（不请求焦点、不绑定通知栏）。
+            mediaSession = new MediaSession.Builder(context, player).build();
         }
     }
+
+    // MD3Music fork: 关联系统的 MediaSession（见 ensurePlayerInitialized）
+    private MediaSession mediaSession;
 
     private void setAudioAttributes(int contentType, int flags, int usage) {
         AudioAttributes.Builder builder = new AudioAttributes.Builder();
@@ -859,7 +888,10 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             // avoid an ExoPlayer glitch.
             pendingAudioAttributes = audioAttributes;
         } else {
-            player.setAudioAttributes(audioAttributes, false);
+            // MD3Music fork: handleAudioFocus=true 让 Media3 请求音频焦点。
+            // 系统自动 duck（VolumeShaper）只发生在无焦点管理的播放器上；
+            // Media3 接管后原始焦点事件经 AudioFocusManager 转发给 Dart 三模式决策。
+            player.setAudioAttributes(audioAttributes, true);
         }
     }
 
@@ -1140,6 +1172,14 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         }
         eventChannel.endOfStream();
         dataEventChannel.endOfStream();
+        // MD3Music fork: 注销焦点事件监听并关闭通道
+        AudioFocusManager.setAudioFocusEventListener(null);
+        focusEventChannel.endOfStream();
+        // MD3Music fork: 释放 MediaSession（与 player 关联）
+        if (mediaSession != null) {
+            mediaSession.release();
+            mediaSession = null;
+        }
     }
 
     private void abortSeek() {
