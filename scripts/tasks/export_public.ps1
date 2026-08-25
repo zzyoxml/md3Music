@@ -260,7 +260,14 @@ try {
         Invoke-Native { git -C $OutDir init -q }
         Invoke-Native { git -C $OutDir add -A }
         Invoke-Native { git -C $OutDir -c user.name="md3music" -c user.email="md3music@local" commit -q -m "public export" }
-        & git -C $OutDir remote remove origin 2>$null | Out-Null
+        # 全新 init 的导出树本无 origin；remove 仅作幂等清理（可能残留自上次 force push）。
+        # 注意：git 在无 origin 时报 "error: No such remote: 'origin'"，会被 $ErrorActionPreference='Stop'
+        # 误判为 NativeCommandError 并中断脚本（此前正是卡在这里，导致 remote add 与 push 未执行）。
+        # 因此这里临时放宽 ErrorActionPreference，仅让清理静默完成。
+        $prevEAP = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        & git -C $OutDir remote remove origin 2>&1 | Out-Null
+        $ErrorActionPreference = $prevEAP
         Invoke-Native { git -C $OutDir remote add origin $PublicRemote }
         Invoke-WithRetry -What '推送公开仓库' -Action { Invoke-Native { git -C $OutDir push -f origin HEAD:$PublicBranch } }
         Write-Ok "已推送 $PublicRemote（分支 $PublicBranch）"
