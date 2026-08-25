@@ -168,12 +168,20 @@ public final class AudioFocusManager {
     void onAudioFocusChanged(int focusChange);
   }
 
-  /** MD3Music fork: 全局焦点事件监听器（单例播放器场景下足够）。 */
-  @Nullable private static volatile AudioFocusEventListener audioFocusEventListener;
+  /** MD3Music fork: 全局焦点事件监听器（支持多播放器，各自转发到自己的 Dart 通道）。 */
+  private static final java.util.List<AudioFocusEventListener> audioFocusEventListeners =
+      new java.util.concurrent.CopyOnWriteArrayList<>();
 
-  /** MD3Music fork: 注册焦点事件监听；传 null 取消。 */
-  public static void setAudioFocusEventListener(@Nullable AudioFocusEventListener listener) {
-    audioFocusEventListener = listener;
+  /** MD3Music fork: 注册焦点事件监听。 */
+  public static void addAudioFocusEventListener(AudioFocusEventListener listener) {
+    if (listener != null && !audioFocusEventListeners.contains(listener)) {
+      audioFocusEventListeners.add(listener);
+    }
+  }
+
+  /** MD3Music fork: 注销焦点事件监听。 */
+  public static void removeAudioFocusEventListener(AudioFocusEventListener listener) {
+    audioFocusEventListeners.remove(listener);
   }
 
   /** MD3Music fork: 强制 willPauseWhenDucked 的值；null 恢复默认（按 contentType 判断）。 */
@@ -321,17 +329,20 @@ public final class AudioFocusManager {
   @RequiresApi(26)
   private int requestAudioFocusV26() {
     if (audioFocusRequestCompat == null || rebuildAudioFocusRequest) {
-      // MD3Music fork: 改用 AudioFocusRequestCompat。框架 AudioFocusRequest.Builder
-      // 无法设置 ACCEPTS_DUCKING flag（默认 0），导致 Android 12+ 对持有者不派发
-      // CAN_DUCK 事件、直接对 AudioTrack 自动 duck（VolumeShaper），三模式收不到事件。
-      // AudioFocusRequestCompat 在 willPauseWhenDucked=false 时自动携带 ACCEPTS_DUCKING，
-      // 事件必达；forced 值只影响 handlePlatformAudioFocusChange 的分支（duck→pause 或 duck→降音量）。
+      // MD3Music fork: willPauseWhenDucked 跟随 forced（Dart 三模式）：
+      // - forced=true（保持/暂停）：true → 系统对 MAY_DUCK 请求发 LOSS_TRANSIENT
+      //   （pause 语义）而非系统级自动 duck（VolumeShaper）。事件可达 Media3
+      //   AudioFocusManager → Dart 三模式（keepPlaying 对抗 / pauseAndResume 暂停恢复）。
+      // - forced=false（降音量恢复）：false → 系统级自动 duck（0.2→恢复），无需事件。
+      // Android 15+ 对 willPauseWhenDucked=false 的持有者直接 applyVolumeShaper，
+      // 不派发任何焦点事件——故「降音量后自动恢复」完全依赖系统行为。
+      boolean willPauseWhenDucked = willPauseWhenDucked();
       AudioFocusRequestCompat.Builder builder =
           new AudioFocusRequestCompat.Builder(focusGainToRequest);
       builder.setAudioAttributes(AudioAttributesCompat.wrap(
           checkNotNull(audioAttributes).getAudioAttributesV21().audioAttributes));
       builder.setOnAudioFocusChangeListener(focusListener);
-      builder.setWillPauseWhenDucked(false);
+      builder.setWillPauseWhenDucked(willPauseWhenDucked);
       AudioFocusRequestCompat compat = builder.build();
       audioFocusRequestCompat = compat;
       rebuildAudioFocusRequest = false;
@@ -459,8 +470,7 @@ public final class AudioFocusManager {
     // MD3Music fork: 先把原始焦点事件转发给外部（just_audio 的 Dart 层做三模式决策），
     // 再继续 Media3 内置的自动处理（duck/pause）。事件与自动处理并存：
     // Dart 层可据此覆盖 Media3 的默认行为（如「保持播放与音量」对抗 duck）。
-    AudioFocusEventListener listener = audioFocusEventListener;
-    if (listener != null) {
+    for (AudioFocusEventListener listener : audioFocusEventListeners) {
       listener.onAudioFocusChanged(focusChange);
     }
     // MD3Music fork: 排障日志

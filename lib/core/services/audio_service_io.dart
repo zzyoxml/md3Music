@@ -223,19 +223,34 @@ class AudioService {
         _player.audioFocusChangeStream.listen(_handleMedia3FocusChange);
   }
 
+  /// 是否因为音频焦点中断而暂停（pauseAndResume 模式）。
+  /// 仅中断引起的暂停在 GAIN 时自动恢复；用户主动暂停会清除该标记。
+  bool _pausedByInterruption = false;
+
   /// Media3 焦点事件入口（Android AudioManager 原始 focusChange 值）：
   /// 1=GAIN, -1=LOSS, -2=LOSS_TRANSIENT, -3=LOSS_TRANSIENT_CAN_DUCK。
-  /// 除「保持播放与音量」外的模式完全由 Media3 自动处理
-  /// （duck→降音量自动恢复 / pause→暂停后自动恢复）。
+  ///
+  /// 三模式行为（Android 15 机制）：
+  /// - keepPlaying：Media3 抑制播放（playbackSuppressionReason，音量不变），
+  ///   Dart 不干预（playWhenReady 保持），GAIN 自动恢复。
+  /// - pauseAndResume：主动 pause() 让 UI 正确显示暂停并标记「中断暂停」，
+  ///   GAIN 时恢复播放（不覆盖用户主动暂停）。
+  /// - duckAndRestore：forced=false → 系统级自动 duck（VolumeShaper 0.2→恢复），无需干预。
   void _handleMedia3FocusChange(int focusChange) {
     if (_ignoreAudioFocus) return;
-    if (_interruptionMode != AudioFocusInterruptionMode.keepPlaying) return;
-    // keepPlaying：中断开始（非 GAIN）时对抗 Media3 的自动 duck/pause，保持播放。
-    // 音量不变由 setForceWillPauseWhenDucked(true) 保证（duck 不再降音量）。
-    final isBegin = focusChange != 1;
-    if (isBegin && !_player.playing) {
-      // ignore: discarded_futures
-      _player.play();
+    if (_interruptionMode == AudioFocusInterruptionMode.keepPlaying) return;
+    if (_interruptionMode == AudioFocusInterruptionMode.pauseAndResume) {
+      if (focusChange != 1) {
+        if (_player.playing) {
+          _pausedByInterruption = true;
+          // ignore: discarded_futures
+          _player.pause();
+        }
+      } else if (_pausedByInterruption) {
+        _pausedByInterruption = false;
+        // ignore: discarded_futures
+        _player.play();
+      }
     }
   }
 
@@ -257,10 +272,14 @@ class AudioService {
   }
 
   Future<void> play() async {
+    // 用户主动播放：清除中断暂停标记（避免后续无关 GAIN 误恢复）
+    _pausedByInterruption = false;
     await _player.play();
   }
 
   Future<void> pause() async {
+    // 用户主动暂停：清除中断暂停标记（中断引起的暂停不在 GAIN 时自动恢复）
+    _pausedByInterruption = false;
     await _player.pause();
   }
 

@@ -89,6 +89,8 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
     private final BetterEventChannel dataEventChannel;
     // MD3Music fork: 音频焦点原始事件通道（Media3 AudioFocusManager 转发）
     private final BetterEventChannel focusEventChannel;
+    // MD3Music fork: 焦点事件监听引用（dispose 时按同一引用注销）
+    private AudioFocusManager.AudioFocusEventListener focusEventListener;
 
     private ProcessingState processingState;
     private long updatePosition;
@@ -204,8 +206,8 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         // 供 Dart 层做三模式决策（保持音量 / 降音量恢复 / 暂停恢复）。
         focusEventChannel = new BetterEventChannel(
                 messenger, "com.ryanheise.just_audio.focus_events." + id);
-        AudioFocusManager.setAudioFocusEventListener(focusChange ->
-                focusEventChannel.success(focusChange));
+        focusEventListener = focusChange -> focusEventChannel.success(focusChange);
+        AudioFocusManager.addAudioFocusEventListener(focusEventListener);
         processingState = ProcessingState.idle;
         if (audioLoadConfiguration != null) {
             Map<?, ?> loadControlMap = (Map<?, ?>)audioLoadConfiguration.get("androidLoadControl");
@@ -1173,7 +1175,10 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         eventChannel.endOfStream();
         dataEventChannel.endOfStream();
         // MD3Music fork: 注销焦点事件监听并关闭通道
-        AudioFocusManager.setAudioFocusEventListener(null);
+        if (focusEventListener != null) {
+            AudioFocusManager.removeAudioFocusEventListener(focusEventListener);
+            focusEventListener = null;
+        }
         focusEventChannel.endOfStream();
         // MD3Music fork: 释放 MediaSession（与 player 关联）
         if (mediaSession != null) {
