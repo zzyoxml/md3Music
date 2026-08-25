@@ -463,6 +463,279 @@ function Read-UiText {
     "$v".Trim()
 }
 
+# ---------- 多行文本编辑器 ----------
+# 供 commit 的起草结果就地改写用：整段文本进来，改完出去，像文本编辑器一样移动光标。
+# 编辑状态与按键处理拆成纯函数（New-TextBufferState / Invoke-TextBufferKey），
+# 不依赖真实控制台，可在 ui.tests.ps1 里直接断言。
+
+function New-TextBufferState {
+    param([AllowEmptyString()][string]$Text = '')
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    foreach ($l in @("$Text" -split "`r?`n")) { [void]$lines.Add("$l") }
+    if ($lines.Count -eq 0) { [void]$lines.Add('') }
+    [pscustomobject]@{ Lines = $lines; Row = 0; Col = 0; Top = 0; Dirty = $false }
+}
+
+function Get-TextBufferText { param([Parameter(Mandatory)]$State) ($State.Lines -join "`n") }
+
+function Set-TextBufferCursor {
+    param([Parameter(Mandatory)]$State, [int]$Row, [int]$Col)
+    $State.Row = [Math]::Max(0, [Math]::Min($State.Lines.Count - 1, $Row))
+    $State.Col = [Math]::Max(0, [Math]::Min($State.Lines[$State.Row].Length, $Col))
+}
+
+<#
+  处理一个界面事件，就地更新 $State。返回动作：
+    ''（继续编辑）/ 'save'（保存退出）/ 'cancel'（放弃）/ 'external'（转外部编辑器）
+  $Page 是 PgUp/PgDn 的翻页行数（由调用方按视口高度传入）。
+#>
+function Invoke-TextBufferKey {
+    param([Parameter(Mandatory)]$State, [Parameter(Mandatory)]$UiEvent, [int]$Page = 10)
+    if ($UiEvent.Type -eq 'Wheel') {
+        Set-TextBufferCursor -State $State -Row ($State.Row - 3 * $UiEvent.Delta) -Col $State.Col
+        return ''
+    }
+    if ($UiEvent.Type -ne 'Key') { return '' }
+    $row = $State.Row
+    $line = $State.Lines[$row]
+    $ch = "$($UiEvent.Char)"
+    $code = if ($ch.Length -eq 1) { [int][char]$ch } else { -1 }
+    # Ctrl 组合：RawUI.ReadKey 给的是控制字符（Ctrl+S = 0x13、Ctrl+E = 0x05）
+    if ($code -eq 19) { return 'save' }
+    if ($code -eq 5)  { return 'external' }
+    switch ($UiEvent.Code) {
+        113 { return 'save' }        # F2
+        27  { return 'cancel' }      # Esc
+        37 {                         # ←
+            if ($State.Col -gt 0) { $State.Col-- }
+            elseif ($row -gt 0) { $State.Row--; $State.Col = $State.Lines[$State.Row].Length }
+            return ''
+        }
+        39 {                         # →
+            if ($State.Col -lt $line.Length) { $State.Col++ }
+            elseif ($row -lt $State.Lines.Count - 1) { $State.Row++; $State.Col = 0 }
+            return ''
+        }
+        38 { Set-TextBufferCursor -State $State -Row ($row - 1) -Col $State.Col; return '' }        # ↑
+        40 { Set-TextBufferCursor -State $State -Row ($row + 1) -Col $State.Col; return '' }        # ↓
+        36 { $State.Col = 0; return '' }                                                            # Home
+        35 { $State.Col = $line.Length; return '' }                                                 # End
+        33 { Set-TextBufferCursor -State $State -Row ($row - $Page) -Col $State.Col; return '' }     # PgUp
+        34 { Set-TextBufferCursor -State $State -Row ($row + $Page) -Col $State.Col; return '' }     # PgDn
+        13 {                         # Enter：在光标处断行
+            $State.Lines[$row] = $line.Substring(0, $State.Col)
+            $State.Lines.Insert($row + 1, $line.Substring($State.Col))
+            $State.Row = $row + 1
+            $State.Col = 0
+            $State.Dirty = $true
+            return ''
+        }
+        8 {                          # Backspace
+            if ($State.Col -gt 0) {
+                $State.Lines[$row] = $line.Remove($State.Col - 1, 1)
+                $State.Col--
+                $State.Dirty = $true
+            }
+            elseif ($row -gt 0) {
+                $prev = $State.Lines[$row - 1]
+                $State.Lines[$row - 1] = $prev + $line
+                $State.Lines.RemoveAt($row)
+                $State.Row = $row - 1
+                $State.Col = $prev.Length
+                $State.Dirty = $true
+            }
+            return ''
+        }
+        46 {                         # Delete
+            if ($State.Col -lt $line.Length) {
+                $State.Lines[$row] = $line.Remove($State.Col, 1)
+                $State.Dirty = $true
+            }
+            elseif ($row -lt $State.Lines.Count - 1) {
+                $State.Lines[$row] = $line + $State.Lines[$row + 1]
+                $State.Lines.RemoveAt($row + 1)
+                $State.Dirty = $true
+            }
+            return ''
+        }
+        9 {                          # Tab：两个空格，避免制表符在不同终端宽度不一
+            $State.Lines[$row] = $line.Insert($State.Col, '  ')
+            $State.Col += 2
+            $State.Dirty = $true
+            return ''
+        }
+    }
+    if ($code -ge 32) {              # 可打印字符（含中文）
+        $State.Lines[$row] = $line.Insert($State.Col, $ch)
+        $State.Col += $ch.Length
+        $State.Dirty = $true
+    }
+    ''
+}
+
+# 取一行在水平视窗 [$FromCol, $FromCol+$Width) 内的可见部分（按显示宽度算，中文占 2 列）
+function Get-LineWindow {
+    param([AllowEmptyString()][string]$Text, [int]$FromCol, [int]$Width)
+    if ($FromCol -le 0 -and (Get-DisplayWidth $Text) -le $Width) { return "$Text" }
+    $skip = 0; $w = 0
+    foreach ($chunk in "$Text".ToCharArray()) {
+        if ($w -ge $FromCol) { break }
+        $w += (Get-DisplayWidth $chunk); $skip++
+    }
+    $rest = if ($skip -ge "$Text".Length) { '' } else { "$Text".Substring($skip) }
+    $acc = ''; $w = 0
+    foreach ($chunk in $rest.ToCharArray()) {
+        $cw = Get-DisplayWidth $chunk
+        if ($w + $cw -gt $Width) { break }
+        $acc += $chunk; $w += $cw
+    }
+    $acc
+}
+
+<#
+  找一个外部编辑器：MD3_EDITOR > VISUAL > EDITOR > git config core.editor > code --wait > notepad。
+  返回 @{ Exe; Args }（$Args 里的 {} 占位由调用方替换成文件路径），找不到返回 $null。
+  注意 code / codium 这类会立刻返回的启动器必须带 --wait，否则脚本会读到未编辑的文件。
+#>
+function Get-ExternalEditor {
+    $cands = @()
+    foreach ($v in @($env:MD3_EDITOR, $env:VISUAL, $env:EDITOR)) {
+        if ($v) { $cands += "$v" }
+    }
+    try {
+        $g = & git config --get core.editor 2>$null
+        if ($LASTEXITCODE -eq 0 -and "$g".Trim()) { $cands += "$g".Trim() }
+    } catch { }
+    foreach ($c in $cands) {
+        $exe = $c; $rest = ''
+        if ($c -match '^\s*"([^"]+)"\s*(.*)$') { $exe = $Matches[1]; $rest = $Matches[2] }
+        elseif ($c -match '^\s*(\S+)\s*(.*)$') { $exe = $Matches[1]; $rest = $Matches[2] }
+        if (-not (Test-HasCommand $exe) -and -not (Test-Path -LiteralPath $exe)) { continue }
+        $edArgs = @()
+        if ($rest) { $edArgs += @($rest -split '\s+' | Where-Object { $_ }) }
+        # 命令行里给的编辑器多半没写 --wait，补上（VS Code 系不等就读不到改动）
+        if ($exe -match '(?i)(^|\\|/)(code|code-insiders|codium)(\.cmd|\.exe)?$' -and $edArgs -notcontains '--wait' -and $edArgs -notcontains '-w') {
+            $edArgs += '--wait'
+        }
+        return @{ Exe = $exe; Args = $edArgs }
+    }
+    if (Test-HasCommand 'code') { return @{ Exe = 'code'; Args = @('--wait') } }
+    if (Test-HasCommand 'notepad.exe') { return @{ Exe = 'notepad.exe'; Args = @() } }
+    $null
+}
+
+# 用外部编辑器改一段文本：写临时文件 -> 等编辑器退出 -> 读回。找不到编辑器返回 $null。
+function Edit-TextWithExternalEditor {
+    param([AllowEmptyString()][string]$Text = '', [string]$Extension = '.md')
+    $ed = Get-ExternalEditor
+    if (-not $ed) { return $null }
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) ("md3-edit-" + [Guid]::NewGuid().ToString('N') + $Extension)
+    [IO.File]::WriteAllText($tmp, "$Text", (New-Object Text.UTF8Encoding($true)))
+    try {
+        Write-Host ''
+        Write-Host "  已用 $($ed.Exe) 打开草稿，改完保存并关闭编辑器…" -ForegroundColor Cyan
+        $p = Start-Process -FilePath $ed.Exe -ArgumentList (@($ed.Args) + @("`"$tmp`"")) -PassThru -Wait
+        if ($p.ExitCode -ne 0) { Write-Warn "编辑器退出码 $($p.ExitCode)，仍按文件内容读取" }
+        [IO.File]::ReadAllText($tmp, [Text.Encoding]::UTF8)
+    }
+    finally { Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue }
+}
+
+<#
+  终端内嵌的多行编辑器。返回改好的文本；按 Esc 放弃返回 $null。
+  非交互控制台下直接返回原文（调用方自己决定退路）。
+  按键：↑↓←→ / Home / End / PgUp / PgDn 移动，Enter 换行，Backspace / Delete 删除，
+        Ctrl+S 或 F2 保存退出，Esc 放弃，Ctrl+E 转到外部编辑器；鼠标点击定位、滚轮滚动。
+#>
+function Show-TextEditor {
+    param(
+        [AllowEmptyString()][string]$Text = '',
+        [string]$Title = '编辑内容',
+        [string]$Extension = '.md'
+    )
+    if (-not (Test-InteractiveConsole)) { return "$Text" }
+    $s = New-TextBufferState -Text $Text
+    $mouse = Enable-ConsoleMouse
+    $prevCursor = try { [Console]::CursorVisible } catch { $true }
+    Reset-UiScreen
+    try {
+        while ($true) {
+            $w = try { [Math]::Max(20, [Console]::BufferWidth - 1) } catch { 100 }
+            $view = Get-UiViewportHeight -Chrome 7
+            $bodyW = [Math]::Max(10, $w - 4)
+            # 垂直滚动：光标始终留在视口内
+            if ($s.Row -lt $s.Top) { $s.Top = $s.Row }
+            if ($s.Row -ge $s.Top + $view) { $s.Top = $s.Row - $view + 1 }
+            if ($s.Top -gt $s.Lines.Count - 1) { $s.Top = [Math]::Max(0, $s.Lines.Count - 1) }
+            # 水平滚动：按光标前文本的显示宽度算，让光标列可见
+            $curLine = $s.Lines[$s.Row]
+            $curW = Get-DisplayWidth $curLine.Substring(0, $s.Col)
+            $left = if ($curW -ge $bodyW) { $curW - $bodyW + 1 } else { 0 }
+
+            $lines = @()
+            $lines += New-UiLine -Text "  $Title" -Color 'Cyan'
+            $lines += New-UiLine -Text "  行 $($s.Row + 1)/$($s.Lines.Count)   列 $($s.Col + 1)$(if ($s.Dirty) { '   (已修改)' })" -Color 'DarkGray'
+            $lines += New-UiLine
+            $bodyTop = $lines.Count
+            for ($i = 0; $i -lt $view; $i++) {
+                $idx = $s.Top + $i
+                if ($idx -ge $s.Lines.Count) { $lines += New-UiLine; continue }
+                $text = Get-LineWindow -Text $s.Lines[$idx] -FromCol $left -Width $bodyW
+                $color = if ($s.Lines[$idx] -match '^===\s') { 'Yellow' }
+                         elseif ($s.Lines[$idx] -match '^\s*#') { 'DarkGray' }
+                         elseif ($idx -eq $s.Row) { 'White' } else { 'Gray' }
+                $lines += New-UiLine -Text ('  ' + $text) -Color $color -Hit @{ Type = 'Item'; Index = $idx }
+            }
+            $lines += New-UiLine
+            $lines += New-UiLine -Text '  Ctrl+S / F2 保存并继续　Esc 放弃修改　Ctrl+E 转外部编辑器' -Color 'DarkCyan'
+            Write-UiFrame -Lines $lines
+
+            # 把真实光标放到编辑位置（比自绘一个反色块稳，且中文宽度天然对齐）
+            try {
+                [Console]::CursorVisible = $true
+                [Console]::SetCursorPosition(
+                    [Math]::Min($w, 2 + ($curW - $left)),
+                    $script:UiTop + $bodyTop + ($s.Row - $s.Top))
+            } catch { }
+
+            $e = Read-UiEvent
+            if ($e.Type -in @('Click', 'DoubleClick')) {
+                $hit = Get-UiHit -UiEvent $e
+                if ($hit -and $hit.Type -eq 'Item') {
+                    # 点击列 -> 字符位置：按显示宽度从行首累加
+                    $targetW = [Math]::Max(0, $e.X - 2) + $left
+                    $line = $s.Lines[$hit.Index]
+                    $col = 0; $acc = 0
+                    foreach ($c in $line.ToCharArray()) {
+                        if ($acc -ge $targetW) { break }
+                        $acc += (Get-DisplayWidth $c); $col++
+                    }
+                    Set-TextBufferCursor -State $s -Row $hit.Index -Col $col
+                }
+                continue
+            }
+            $act = Invoke-TextBufferKey -State $s -UiEvent $e -Page $view
+            switch ($act) {
+                'save'   { return (Get-TextBufferText -State $s) }
+                'cancel' { return $null }
+                'external' {
+                    if ($mouse) { Disable-ConsoleMouse }
+                    $r = Edit-TextWithExternalEditor -Text (Get-TextBufferText -State $s) -Extension $Extension
+                    if ($null -eq $r) { Write-Warn '没找到可用的外部编辑器（可设 MD3_EDITOR / EDITOR 或 git config core.editor）'; Wait-AnyKey }
+                    else { return $r }
+                    if (-not (Test-MouseEnabled)) { $mouse = Enable-ConsoleMouse }
+                    Reset-UiScreen
+                }
+            }
+        }
+    }
+    finally {
+        if ($mouse) { Disable-ConsoleMouse }
+        try { [Console]::CursorVisible = $prevCursor } catch { }
+        Clear-Host
+    }
+}
+
 <#
   参数勾选面板。就地修改 $Options。返回 $true=执行 / $false=返回上一级。
   无可选参数时直接返回 $true（不让用户多按一次回车）。
