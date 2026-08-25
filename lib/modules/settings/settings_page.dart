@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/layout/page_title_alignment.dart';
 import '../../core/layout/ui_density.dart';
+import '../../core/services/audio_service_io.dart';
 import '../../core/services/background_image_loader.dart';
 import '../../core/widgets/app_background.dart' show kDefaultWallpaperAsset;
 import '../../core/services/custom_font_loader.dart';
@@ -116,6 +117,9 @@ class _SettingsPageState extends State<SettingsPage>
   bool _keepScreenOn = false;
   // 忽略音频焦点开关（默认开启：允许与其他应用同时播放音频）
   bool _ignoreAudioFocus = true;
+  // 音频焦点中断策略（默认：暂停后自动恢复）
+  AudioFocusInterruptionMode _audioFocusInterruptionMode =
+      AudioFocusInterruptionMode.pauseAndResume;
   // MiniPlayer 滑动切歌开关（默认开启）
   bool _miniPlayerSwipeSwitch = true;
   // 收藏歌单按「最近点击」排序（默认关闭）
@@ -296,6 +300,8 @@ class _SettingsPageState extends State<SettingsPage>
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
     final keepScreenOn = await _settingsRepository.getKeepScreenOn();
     final ignoreAudioFocus = await _settingsRepository.getIgnoreAudioFocus();
+    final audioFocusInterruptionMode = await _settingsRepository
+        .getAudioFocusInterruptionMode();
     final spectrumEnabled = await _settingsRepository.getSpectrumEnabled();
     final spectrumBandCount = await _settingsRepository.getSpectrumBandCount();
     final spectrumStyle = await _settingsRepository.getSpectrumStyle();
@@ -340,6 +346,7 @@ class _SettingsPageState extends State<SettingsPage>
       _pauseFadeEnabled = pauseFadeEnabled;
       _keepScreenOn = keepScreenOn;
       _ignoreAudioFocus = ignoreAudioFocus;
+      _audioFocusInterruptionMode = audioFocusInterruptionMode;
       _spectrumEnabled = spectrumEnabled;
       _spectrumBandCount = spectrumBandCount;
       _spectrumStyle = spectrumStyle;
@@ -353,6 +360,26 @@ class _SettingsPageState extends State<SettingsPage>
     });
     // 同步到全局开关，让已挂载的 MiniPlayer 实例实时响应
     miniPlayerSwipeSwitchEnabled.value = miniPlayerSwipeSwitch;
+  }
+
+  void _onAudioFocusModeChanged(AudioFocusInterruptionMode mode) {
+    HapticFeedback.lightImpact();
+    setState(() {
+      _audioFocusInterruptionMode = mode;
+    });
+    context.read<PlayerProvider>().setAudioFocusInterruptionMode(mode);
+  }
+
+  /// 音频焦点三选一的当前模式说明文字（跟随选中项）。
+  String _audioFocusModeDescription(AudioFocusInterruptionMode mode) {
+    switch (mode) {
+      case AudioFocusInterruptionMode.keepPlaying:
+        return '中断时保持播放状态、音量不变（受系统限制可能无声）';
+      case AudioFocusInterruptionMode.pauseAndResume:
+        return '中断时暂停播放，结束后自动恢复';
+      case AudioFocusInterruptionMode.duckAndRestore:
+        return '中断时降低音量，结束后恢复原音量';
+    }
   }
 
   Future<void> _loadVersion() async {
@@ -2010,6 +2037,66 @@ class _SettingsPageState extends State<SettingsPage>
             });
             context.read<PlayerProvider>().setIgnoreAudioFocus(value);
           },
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 与「默认音质」一致的标题排版
+              Text(
+                '失去音频焦点时',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              // 与「默认音质」同款 M3E 按钮组；横排 + xs 尺寸 + 紧凑密度，文字过长省略
+              M3EToggleButtonGroup(
+                actions: const [
+                  M3EToggleButtonGroupAction(
+                    label: Text(
+                      '保持播放',
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                  M3EToggleButtonGroupAction(
+                    label: Text(
+                      '暂停后恢复',
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                  M3EToggleButtonGroupAction(
+                    label: Text(
+                      '降音量恢复',
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                ],
+                direction: Axis.horizontal,
+                size: M3EButtonSize.xs,
+                density: M3EButtonGroupDensity.compact,
+                selectedIndex: AudioFocusInterruptionMode.values
+                    .indexOf(_audioFocusInterruptionMode),
+                onSelectedIndexChanged: (index) {
+                  if (index == null) return;
+                  _onAudioFocusModeChanged(
+                      AudioFocusInterruptionMode.values[index]);
+                },
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _audioFocusModeDescription(_audioFocusInterruptionMode),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
+          ),
         ),
         // MV 画中画：按 Home 自动进入（手动按钮始终可用）
         FutureBuilder<bool>(
