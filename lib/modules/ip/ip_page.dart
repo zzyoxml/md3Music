@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 
 import '../../core/utils/app_toast.dart';
 import '../../data/models/playlist.dart';
@@ -114,7 +115,7 @@ class _IpPageState extends State<IpPage> {
                     ),
                   );
                 }
-                return M3EPullToRefreshIndicator(
+                return Md3PullToRefresh(
                   onRefresh: _load,
                   child: ListView(
                     controller: _scrollController,

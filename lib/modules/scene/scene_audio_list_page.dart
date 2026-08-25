@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/player_provider.dart';
@@ -69,11 +70,11 @@ class _SceneAudioListPageState extends State<SceneAudioListPage> {
     _loadingMore = false;
   }
 
-  Future<void> _load({required bool reset}) async {
+  Future<void> _load({required bool reset, bool showLoading = true}) async {
     if (reset) {
       _page = 1;
       _hasMore = true;
-      if (mounted) setState(() => _isLoading = true);
+      if (showLoading && mounted) setState(() => _isLoading = true);
     }
     final r = await KugouApiClient().getSceneAudioList(
       sceneId: widget.sceneId,
@@ -129,8 +130,8 @@ class _SceneAudioListPageState extends State<SceneAudioListPage> {
           ? const Center(child: M3ELoadingIndicator())
           : _songs.isEmpty
               ? _buildEmpty(cs)
-              : M3EPullToRefreshIndicator(
-                  onRefresh: () => _load(reset: true),
+              : Md3PullToRefresh(
+                  onRefresh: () => _load(reset: true, showLoading: false),
                   child: ListView.builder(
                     controller: _scrollController,
                     padding: const EdgeInsets.only(bottom: 24),

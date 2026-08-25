@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/utils/app_toast.dart';
@@ -115,8 +116,8 @@ class _ChannelDetailPageState extends State<ChannelDetailPage> {
 
   /// 首次加载：并行请求 detail / amway / song(第1页) / similar。
   /// 单个接口失败（超时/上游错误）不阻塞整体，失败项降级为 null。
-  Future<void> _load() async {
-    if (mounted) setState(() => _isLoading = true);
+  Future<void> _load({bool showLoading = true}) async {
+    if (showLoading && mounted) setState(() => _isLoading = true);
     final api = KugouApiClient();
     final id = widget.channel.id;
     final results = await Future.wait([
@@ -470,8 +471,8 @@ class _ChannelDetailPageState extends State<ChannelDetailPage> {
       bottomNavigationBar: const MiniPlayer(),
       body: _isLoading
           ? const Center(child: M3ELoadingIndicator())
-          : M3EPullToRefreshIndicator(
-              onRefresh: _load,
+          : Md3PullToRefresh(
+              onRefresh: () => _load(showLoading: false),
               child: ListView(
                 controller: _scrollController,
                 padding: const EdgeInsets.only(bottom: 24),

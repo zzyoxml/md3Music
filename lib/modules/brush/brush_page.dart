@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
@@ -357,7 +358,7 @@ class _BrushPageState extends State<BrushPage> {
               ? _buildMessage(cs, _error!, Icons.error_outline)
               : _cards.isEmpty
                   ? _buildMessage(cs, '暂无内容', Icons.video_library_outlined)
-                  : M3EPullToRefreshIndicator(
+                  : Md3PullToRefresh(
                       onRefresh: _load,
                       child: ListView.builder(
                         controller: _scrollController,

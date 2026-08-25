@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/kugou_provider.dart';
@@ -85,7 +86,7 @@ class _AudiobookPageState extends State<AudiobookPage> {
       ),
       body: _isLoading
           ? const Center(child: M3ELoadingIndicator())
-          : M3EPullToRefreshIndicator(
+          : Md3PullToRefresh(
               onRefresh: _loadAll,
               child: hasAnyData
                   ? ListView(

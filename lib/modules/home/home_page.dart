@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 
 import '../../core/layout/responsive_layout.dart';
 import '../../data/models/album.dart';
@@ -107,7 +108,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
       ),
-      body: M3EPullToRefreshIndicator(
+      body: Md3PullToRefresh(
         onRefresh: _loadData,
         child: CustomScrollView(
           slivers: [

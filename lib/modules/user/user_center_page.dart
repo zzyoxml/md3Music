@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/utils/app_toast.dart';
@@ -87,7 +88,7 @@ class _UserCenterPageState extends State<UserCenterPage> {
       body: Consumer<KugouProvider>(
         builder: (context, kugou, _) {
           if (!kugou.isLoggedIn) return _buildNotLoggedIn(cs, tt);
-          return M3EPullToRefreshIndicator(
+          return Md3PullToRefresh(
             onRefresh: () async {
               await kugou.getVipDetail();
               await kugou.getVipMonthRecord();

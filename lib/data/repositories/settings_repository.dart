@@ -639,6 +639,33 @@ class SettingsRepository {
     await prefs.setBool(_keySortCollectedByLatestClick, value);
   }
 
+  static const String _keyCreatedPlaylistSort =
+      'settings_created_playlist_sort';
+  static const String _keyCollectedPlaylistSort =
+      'settings_collected_playlist_sort';
+
+  /// 收藏页「我创建的歌单」手动排序方向：0=默认顺序，1=升序（A→Z），2=降序（Z→A）。
+  Future<int> getCreatedPlaylistSort() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keyCreatedPlaylistSort) ?? 0;
+  }
+
+  Future<void> setCreatedPlaylistSort(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyCreatedPlaylistSort, value);
+  }
+
+  /// 收藏页「我收藏的歌单」手动排序方向：0=默认顺序，1=升序（A→Z），2=降序（Z→A）。
+  Future<int> getCollectedPlaylistSort() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_keyCollectedPlaylistSort) ?? 0;
+  }
+
+  Future<void> setCollectedPlaylistSort(int value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyCollectedPlaylistSort, value);
+  }
+
   // ===== Pad 端网格列数 =====
 
   /// 读取 Pad 端网格页面列数偏好，默认 4。
