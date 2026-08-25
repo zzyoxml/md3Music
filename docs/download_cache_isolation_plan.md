@@ -173,7 +173,7 @@
 
 ### 阶段 5 — 验证与回滚
 
-- 私有：`flutter build apk`（或 `scripts/build_android.ps1`），`adb install` 到 `R52R30F3Q9Z` 真机：下载→本地文件 + 元数据嵌入；播放→边听边存命中；设置页缓存统计与清空正常。
+- 私有：`flutter build apk`（或 `scripts/md3.ps1 android`），`adb install` 到 `R52R30F3Q9Z` 真机：下载→本地文件 + 元数据嵌入；播放→边听边存命中；设置页缓存统计与清空正常。
 - 公开：`flutter analyze` + `flutter test` 通过；导出树否认清单零命中。
 - **回滚预案**：每阶段独立提交；若阶段 2 移除导致播放回归，单独 `git revert` 该阶段；保留原单例文件于 `backup/pre-isolation` 分支一周后再清理。
 - **成功标准**：私有行为等价；公开零引用、可构建可测试。
@@ -244,8 +244,8 @@
 | 阶段 0 | ✅ 完成 | 本地包 `packages/md3_download_cache/`（引擎+DTO+barrel），根 `pubspec.yaml` path 依赖，`flutter pub get` 通过 |
 | 阶段 1 | ✅ 完成 | 引擎迁入包（DTO 适配、缓存上限注入）；私有层 `lib/private/`（downloads_provider / downloads_page / cache_bridge / enhanced_ui / main_private）；`flutter analyze` 通过 |
 | 阶段 2 | ✅ 完成 | 公开树减法：player_provider(4 钩子)、kugou_provider(2 钩子)、smart_artwork_image、song_list_item、full_player(+_am)、settings_page、user_center_page、playlist_page、play_history_page、app.dart(extraProviders)；`lib/`（不含 private）否认清单 grep **零命中**；删除 7 个旧引擎/下载文件 |
-| 阶段 3 | ✅ 完成 | 双入口分离；`scripts/export_public.ps1` 过滤导出 + 否认清单闸门（一条命令）；导出树 `flutter pub get` + `flutter analyze` **零错误**；`build_android.ps1` 默认改走私有入口 |
-| 阶段 4 | ✅ 完成 | 包版本 0.1.0；`scripts/verify_public_clean.ps1` 独立闸门（lib/ 命中即失败） |
+| 阶段 3 | ✅ 完成 | 双入口分离；`scripts/md3.ps1 export` 过滤导出 + 否认清单闸门（一条命令）；导出树 `flutter pub get` + `flutter analyze` **零错误**；`md3.ps1 android` 默认改走私有入口 |
+| 阶段 4 | ✅ 完成 | 包版本 0.1.0；`scripts/md3.ps1 verify` 独立闸门（lib/ 命中即失败） |
 | 阶段 5 | ⏳ 待办 | 真机验证：设备 `R52R30F3Q9Z` 接入后 `adb install`，验证下载/边听边存/缓存统计与清空；回滚预案见下 |
 
 **实现要点（与计划的 2 处必要修正）**
@@ -257,10 +257,10 @@
 - **问题 2（搜索索引）**：settings_page 搜索索引 5 条边听边存/下载关键词删除，改由 `extraSearchIndexEntries` 注入（私有侧随 extraCategories 注入）。
 - **3c 形态 B（筛选功能移入私有层）**：playlist_page/play_history_page 删除筛选状态/按钮/文案，公开类只留 `songFilterHook`（`List→List` 纯函数插槽）+ `songFilterListenable`（重建信号）+ `extraAppBarActionsBuilder`（按钮注入）；筛选开关/查询/实时过滤全部在 `lib/private/enhanced_ui.dart`（按 pageKey 隔离状态）。
 - **低危清理**：`_cachedArtworkPath`→`_localArtworkPath`、`_cachedArtworkBytes`→`_localArtworkBytes` 等字段/注释中性化。
-- **问题 4（闸门强化）**：否认清单外置 `scripts/public_deny.txt`（UTF-8，英文符号 + 中文特征短语 `边听边存`/`仅显示已缓存` 等），`export_public.ps1` 与 `verify_public_clean.ps1` 共用读取（脚本本体保持纯 ASCII，防 PS5.1 编码坑）。
+- **问题 4（闸门强化）**：否认清单外置 `scripts/public_deny.txt`（UTF-8，英文符号 + 中文特征短语 `边听边存`/`仅显示已缓存` 等），`md3.ps1 export` 与 `md3.ps1 verify` 共用读取（脚本本体保持纯 ASCII，防 PS5.1 编码坑）。
 - **验证**：公开树特征残留 grep 零命中；analyze 零错误；test +345 无回归；导出树 analyze 零错误 + 闸门通过。
 
-**回滚预案**：本阶段改动尚未提交。执行 `git checkout -- .` + `git clean -fd lib/private packages scripts/export_public.ps1 scripts/verify_public_clean.ps1 scripts/public_deny.txt` 可完整回到改动前；已确认通过后再按逻辑单元提交（引擎入包 / 公开树减法 / 残留清零 / 导出脚本各一个 commit）。
+**回滚预案**：本阶段改动尚未提交。执行 `git checkout -- .` + `git clean -fd lib/private packages scripts/md3.ps1 export scripts/md3.ps1 verify scripts/public_deny.txt` 可完整回到改动前；已确认通过后再按逻辑单元提交（引擎入包 / 公开树减法 / 残留清零 / 导出脚本各一个 commit）。
 
 > 下一步：接入真机 `R52R30F3Q9Z` 执行阶段 5 真机验证（下载→本地文件+元数据嵌入；播放→边听边存命中；设置页缓存统计/清空；`flutter test` 全绿（预存 19 个插件依赖测试除外））。
 

@@ -114,7 +114,7 @@ include(flutter/generated_plugins.cmake)
 
 # === 复制 Rust 本地 API 服务器 dll 到 exe 同目录 ===
 # 桌面版 kugou_server.dll 由 kugou_api_server\rust\build_desktop.ps1 产出。
-# 打包脚本(scripts\build_windows.ps1)只在 release 构建后手动复制，导致
+# 打包脚本(scripts\md3.ps1 windows)只在 release 构建后手动复制，导致
 # `flutter run --debug` 时 DynamicLibrary.open('kugou_server.dll') 找不到 dll，
 # 本地 API 服务器无法启动 → 所有酷狗联网请求失败（搜索/播放/歌词全挂），
 # 且会误触播放列表"自动切下一首"。
@@ -136,7 +136,7 @@ else()
   # 残包直到用户运行时才暴露问题。宁可构建期就失败。
   message(FATAL_ERROR
     "未找到 kugou_server.dll：${KUGOU_SERVER_DLL}\n"
-    "先运行 kugou_api_server\\rust\\build_desktop.ps1 编译（或直接用 scripts\\build_windows.ps1 一键构建），"
+    "先运行 kugou_api_server\\rust\\build_desktop.ps1 编译（或直接用 scripts\\md3.ps1 windows 一键构建），"
     "否则本地 API 服务器无法启动，App 无法联网。")
 endif()
 

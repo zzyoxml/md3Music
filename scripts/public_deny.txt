@@ -1,5 +1,6 @@
 # 公开树否认清单（public deny-list）
-# 本文件由 scripts/export_public.ps1 与 scripts/verify_public_clean.ps1 读取，
+# 本文件由 scripts/tasks/export_public.ps1 与 scripts/tasks/verify_public.ps1 读取
+# （统一实现在 scripts/lib/common.ps1 的 Invoke-DenyGate），
 # 匹配公开树 lib/（不含 lib/private/）与 pubspec.yaml。任何一行命中即拒绝导出。
 # 编码：UTF-8（含中文特征短语）。新增私有特征时同步追加。
 # 注意：勿添加裸词「缓存/下载」（会误伤公开版合法的封面/歌单/本地音乐缓存功能）。
