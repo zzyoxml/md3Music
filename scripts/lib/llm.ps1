@@ -13,8 +13,11 @@
     MD3_LLM_API_KEY    API key
     MD3_LLM_MODEL      模型名（默认 gpt-5.6-luna）
 
-  失败（无 key / 网络不通 / 返回异常 / 解析不出结果）一律返回 $null，
+  失败（无 key / 网络不通 / 返回异常 / 解析不出结果）一律抛出，
   调用方回退到按文件路径推断的候选信息，不影响提交本身。
+
+  接口按「次」计费：这里不做任何重试，一次不成就回退模板；相应地单次请求尽量
+  喂足上下文、把标题 / 提交正文 / PR 描述一并要回来，别为同一批改动付第二次。
 #>
 
 # 内置默认配置：写死在脚本里，克隆下来即可用；用环境变量可覆盖任意一项。
@@ -104,22 +107,31 @@ function ConvertFrom-LlmJson([string]$Text) {
 }
 
 <#
-  让模型按仓库惯例写提交信息。返回 [pscustomobject]@{ Title; Body }，任何失败返回 $null。
+  让模型按仓库惯例写提交信息。返回 [pscustomobject]@{ Title; Body; PrBody }。
+
+  接口按「次」计费，所以这里只发一次请求、不重试：任何失败（HTTP 非 200 / 返回
+  解析不出 / 没给标题）都直接抛出，由调用方回退到模板候选。相应地，一次请求里
+  尽量把能用上的东西都要齐——标题、提交正文、PR 描述——避免为同一批改动再花第二次。
+
   $DiffText 由调用方裁剪好（含文件清单 + 统计 + 截断的 unified diff）。
 #>
 function New-LlmCommitMessage {
     param(
         [Parameter(Mandatory)][string]$DiffText,
         [string[]]$ScopeHints = @(),
-        [int]$TimeoutSec = 60
+        [int]$TimeoutSec = 120
     )
     $sys = @'
-你是资深工程师，为 git 改动撰写 Conventional Commits 提交信息。仓库惯例：
+你是资深工程师，为 git 改动撰写 Conventional Commits 提交信息与 PR 描述。仓库惯例：
 - 标题格式 type(scope): 中文描述；type 取 feat/fix/docs/style/refactor/perf/test/chore/ci 之一
 - scope 用英文小写，多个用 ", " 分隔，最多 3 个；与 type 同名时省略 scope
 - 标题为一行，不超过 50 个汉字，描述改动做了什么，不写「更新若干文件」这类空话，句尾不加句号
 - 正文可选：只在改动有多个要点或需要说明动机时给出，用「- 」开头的中文短句，每行一个要点，最多 5 行
-只输出 JSON：{"title": "...", "body": "..."}；无正文时 body 为空字符串。不要输出任何其它内容。
+- PR 描述比正文详细：交代这批改动解决什么问题、怎么做的、有哪些值得复核的地方；
+  中文 markdown，可用「## 改动」「## 复核要点」等小标题与「- 」列表，控制在 25 行内；
+  只写 diff 里看得出的事实，不要编造测试结论或未做的工作
+只输出 JSON：{"title": "...", "body": "...", "pr_body": "..."}；
+无正文时 body 为空字符串；改动过于琐碎时 pr_body 也可为空字符串。不要输出任何其它内容。
 '@
     $hint = if ($ScopeHints.Count) { "候选 scope（按改动文件推断，可参考也可自选）：$($ScopeHints -join ', ')`n`n" } else { '' }
     $usr = "$hint以下是本次要提交的改动：`n`n$DiffText"
@@ -135,6 +147,9 @@ function New-LlmCommitMessage {
     if (-not $obj) { throw "LLM 返回无法解析为 JSON：$("$($r.Content)".Substring(0, [Math]::Min(200, "$($r.Content)".Length)))" }
     $title = "$(@("$($obj.title)" -split "`r?`n")[0])".Trim()
     if (-not $title) { throw 'LLM 未给出标题' }
-    $body = "$($obj.body)".Trim()
-    [pscustomobject]@{ Title = $title; Body = $body }
+    [pscustomobject]@{
+        Title  = $title
+        Body   = "$($obj.body)".Trim()
+        PrBody = "$($obj.pr_body)".Trim()
+    }
 }
