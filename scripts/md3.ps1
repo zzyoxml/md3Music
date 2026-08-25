@@ -36,6 +36,7 @@ $Tasks = [ordered]@{
     'verify'  = @{ File = 'verify_public.ps1'; Desc = '否认清单闸门：自检当前仓库公开面是否干净';   Alias = @('check') }
     'export'  = @{ File = 'export_public.ps1'; Desc = '导出公开版本（可选推送 / 开 PR）';           Alias = @('public') }
     'commit'  = @{ File = 'commit.ps1';        Desc = 'TUI 一键提交：勾选改动 / 提交 / 推送 / 开 PR'; Alias = @('ci') }
+    'token'   = @{ File = 'token.ps1';         Desc = '管理 GitHub token（开 PR / 自动合并用）';      Alias = @('auth') }
 }
 
 # 各任务在菜单里可勾选的参数（与任务脚本的 param 块保持一致）
@@ -69,11 +70,19 @@ function Get-TaskOptions([string]$Key) {
             (New-TaskOption -Name '-All'          -Desc '跳过勾选界面，提交全部改动'),
             (New-TaskOption -Name '-NoPush'       -Desc '只提交，不推送'),
             (New-TaskOption -Name '-Pr'           -Desc '推送后向 upstream 开 PR'),
+            (New-TaskOption -Name '-PrMerge'      -Desc '开 PR 并直接合并到 upstream（需 token）'),
             (New-TaskOption -Name '-PrBase'       -Kind value -Desc 'upstream PR 的 base 分支'),
+            (New-TaskOption -Name '-NoSyncBack'   -Desc '合并后不把 upstream 结果拉回本地'),
             (New-TaskOption -Name '-PublicPr'     -Desc '提交后导出公开版并开 PR'),
             (New-TaskOption -Name '-PublicExport' -Desc '提交后导出公开版并 force push'),
             (New-TaskOption -Name '-SkipGate'     -Desc '跳过否认清单闸门'),
             (New-TaskOption -Name '-Yes'          -Desc '非交互：不询问后续动作')
+        ) }
+        'token' { @(
+            (New-TaskOption -Name '-Show'   -Desc '查看当前 token 来源与状态'),
+            (New-TaskOption -Name '-Set'    -Desc '设置 token（可永久保存或仅本次）'),
+            (New-TaskOption -Name '-Test'   -Desc '验证 token 是否可用'),
+            (New-TaskOption -Name '-Remove' -Desc '删除本机保存的 token')
         ) }
         default { @() }
     }
@@ -88,7 +97,7 @@ function Show-Usage {
     Write-Host 'MD3Music 脚本入口' -ForegroundColor Cyan
     Write-Host ''
     Write-Host '  用法: .\scripts\md3.ps1 [<子命令>] [参数...]'
-    Write-Host '        不带子命令运行则进入键盘菜单'
+    Write-Host '        不带子命令运行则进入交互界面（鼠标 + 键盘）'
     Write-Host ''
     Write-Host '  子命令:' -ForegroundColor Cyan
     foreach ($k in $Tasks.Keys) {

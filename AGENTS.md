@@ -100,14 +100,15 @@ md3Music/
 │
 └── scripts/                      # 构建/导出/提交脚本（统一入口 md3.ps1，无参数进交互界面）
     ├── md3.ps1                   # 总入口：android / windows / verify / export / commit
-    ├── lib/common.ps1            # 公共库：输出/外部命令/Rust 改动检测/否认清单闸门/参数解析
+    ├── lib/common.ps1            # 公共库：输出/外部命令/Rust 改动检测/否认清单闸门/参数解析/自动代理
     ├── lib/ui.ps1                # 终端 UI：鼠标+键盘的菜单 / 参数面板 / 勾选列表
     ├── lib/ui.tests.ps1          # ui.ps1 事件解码回归测试（不需要真实控制台）
     ├── tasks/android.ps1         # Rust 交叉编译 + Flutter 打包（默认私有入口）
     ├── tasks/windows.ps1         # Windows 桌面构建（便携版 zip）
     ├── tasks/export_public.ps1   # 导出公开版本（过滤 + 否认清单闸门 + 可选推送/PR）
     ├── tasks/verify_public.ps1   # 公开树洁净度校验（lib/ 否认清单零命中）
-    ├── tasks/commit.ps1          # 一键提交（TUI 勾选改动 → 闸门 → 提交 → 推送 → PR）
+    ├── tasks/commit.ps1          # 一键提交（TUI 勾选改动 → 闸门 → 提交 → 推送 → PR/合并）
+    ├── tasks/token.ps1           # GitHub token 管理（DPAPI 加密存 %LOCALAPPDATA%，不入库）
     ├── public_deny.txt           # 否认清单（export/verify 共用，见 8.2）
     └── test_api.ps1              # API 测试脚本
 ```
@@ -248,13 +249,61 @@ TUI 勾选改动 → 否认清单闸门 → 提交 → 推送 → 可选开 PR�
 ```powershell
 .\scripts\md3.ps1 commit                                  # 交互：点击/空格 勾选，双击/d 看 diff，点 [提交所选] 或 Enter
 .\scripts\md3.ps1 commit -All -Message "fix(player): ..."  # 非交互：全选 + 指定信息
-.\scripts\md3.ps1 commit -Pr                              # 提交推送后向 upstream 开 PR
+.\scripts\md3.ps1 commit -Pr                              # 提交推送后向 upstream 开 PR（不合并）
+.\scripts\md3.ps1 commit -PrMerge                         # 开 PR 并直接合并到 upstream，再拉回同步 origin
 .\scripts\md3.ps1 commit -PublicPr                        # 提交后导出公开版并在公开仓库开 PR
 ```
 
 - 不传 `-Message` 时按改动路径生成 `type(scope): 描述` 候选，回车接受或直接改写（描述必须人工确认）
 - PR 创建优先用 `gh` CLI；未安装则构造 GitHub compare 链接并打开浏览器（标题/正文预填）
 - 闸门与 `md3.ps1 verify` 同一实现（`lib/common.ps1` 的 `Invoke-DenyGate`），命中私有符号即中止提交
+
+#### `-PrMerge`：向源仓库开 PR 并直接合并
+
+`origin`（个人 fork）→ `upstream`（源私有仓库）的完整闭环，走 GitHub REST API（curl，与 git 共用同一套代理）：
+
+1. 查已存在的同 head open PR，有则复用，没有才创建（避免重复开 PR）
+2. 轮询等 GitHub 算出 `mergeable`（PR 刚建出来是 `null`，此时直接合并会被拒）
+3. 用 **merge commit** 策略合并（与仓库既有 `Merge pull request #NN` 历史一致）
+4. 合并成功后 `git fetch upstream <base>` → 合并到本地 → 推 `origin`，三方同步（`-NoSyncBack` 可跳过）
+
+失败会给出确切原因并让退出码为 1：`403` 无合并权限、`405` 分支保护要求评审/CI、`409` head 已变化、
+`mergeable=false` 有冲突。网络/5xx 抖动由 `Invoke-WithRetry` 重试，权限与冲突类错误不重试。
+
+需要一个对 upstream 有写权限的 PAT，用 `md3.ps1 token` 管理：
+
+```powershell
+.\scripts\md3.ps1 token            # 交互管理（查看 / 设置 / 验证 / 删除）
+.\scripts\md3.ps1 token -Show
+.\scripts\md3.ps1 token -Set       # 输入时可选「永久保存」或「仅本次运行」
+.\scripts\md3.ps1 token -Test      # 调 /user 验证
+.\scripts\md3.ps1 token -Remove
+```
+
+取用顺序 `GH_TOKEN` → `GITHUB_TOKEN` → 本机保存。永久保存走 Windows DPAPI 加密，落在
+`%LOCALAPPDATA%\md3music\github_token.dat`（**不在仓库内**，换用户或换机器都解不开）；
+选「仅本次运行」则只写当前进程的 `$env:GH_TOKEN`，不落盘。
+`-Yes` 或非控制台环境下不会弹输入提示（`Read-Host` 在重定向下会阻塞），而是直接报「没有可用的 token」。
+
+### 3.7 GitHub 网络操作的自动代理（没开 TUN 也能推）
+
+推送 / 克隆 / 开 PR 前会自动调用 `Enable-AutoProxy`（`lib/common.ps1`），判定顺序：
+
+1. 环境里已有 `HTTPS_PROXY` / `ALL_PROXY` → 原样沿用，不干预
+2. 直连 `github.com` 能通（TUN 模式开着）→ 不用代理
+3. 否则逐个探测常见本地代理端口 `7890 / 7897 / 10809 / 7891 / 10808 / 1080 / 8889 / 2080`：
+   先做 SOCKS5 握手 + 对 `github.com:443` 真实 CONNECT，通过则用 `socks5h://`；
+   否则识别是否为 HTTP 代理并用 .NET 发一次 HTTPS HEAD 验证，通过则用 `http://`
+4. 都没有 → 只警告，不阻断（自己开代理或设 `$env:HTTPS_PROXY` 后重试）
+
+**只设置当前进程的 `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`**，不写 `git config`，
+不影响 GitHub Desktop 等其他工具；结果在本次运行内缓存，子脚本（如 commit 串联 export）
+会沿用同一份而不重复探测。
+
+> 优先 SOCKS5 是因为它的验证是对 `github.com:443` 的真实 CONNECT，比一次 HTTPS HEAD 更硬。
+> 另外经代理访问 GitHub 时链路会**偶发抖动**（实测 `git ls-remote` 约 1/5 概率报
+> `schannel: failed to receive handshake`，换 `http.sslBackend=openssl` 同样会失败，
+> 说明不是 TLS 后端问题），所以推送 / 克隆 / 开 PR 都套了 `Invoke-WithRetry`（默认 3 次，间隔 2s）。
 
 ---
 

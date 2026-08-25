@@ -26,7 +26,14 @@
   只提交，不推送。
 
 .PARAMETER Pr
-  推送后向 upstream 仓库开 PR（fork -> upstream 流程）。
+  推送后向 upstream 仓库开 PR（fork -> upstream 流程），不自动合并。
+
+.PARAMETER PrMerge
+  推送后向 upstream 开 PR **并直接合并**（merge commit 策略），合并后默认把结果拉回本地并同步 origin。
+  走 GitHub REST API，需要对 upstream 有写权限的 PAT（用 md3.ps1 token 管理）。
+
+.PARAMETER NoSyncBack
+  -PrMerge 合并成功后不拉回 upstream 的合并结果（默认会 fetch + merge + 推 origin）。
 
 .PARAMETER PrBase
   upstream PR 的 base 分支（默认与当前分支同名）。
@@ -58,6 +65,8 @@ param(
     [switch]$All,
     [switch]$NoPush,
     [switch]$Pr,
+    [switch]$PrMerge,
+    [switch]$NoSyncBack,
     [string]$PrBase = '',
     [switch]$PublicExport,
     [switch]$PublicPr,
@@ -367,10 +376,13 @@ try {
         Write-Warn '按 -NoPush 跳过推送'
     } else {
         Write-Step "推送到 origin/$branch"
+        [void](Enable-AutoProxy)
         Invoke-Git @('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}') -Quiet | Out-Null
         $hasUpstream = ($LASTEXITCODE -eq 0)
-        $out = if ($hasUpstream) { Invoke-Git @('push', 'origin', "HEAD:$branch") }
-               else { Invoke-Git @('push', '-u', 'origin', $branch) }
+        $out = Invoke-WithRetry -What "推送 origin/$branch" -Action {
+            if ($hasUpstream) { Invoke-Git @('push', 'origin', "HEAD:$branch") }
+            else { Invoke-Git @('push', '-u', 'origin', $branch) }
+        }
         foreach ($l in @($out)) { Write-Note "  $l" }
         $pushed = $true
         Write-Ok "已推送 origin/$branch"
@@ -381,12 +393,15 @@ try {
         if ($LASTEXITCODE -eq 0) { "$u".Trim() } else { $null }
     }
 
-    $doPr = [bool]$Pr
+    $doPr = [bool]$Pr -or [bool]$PrMerge
+    $doMerge = [bool]$PrMerge
     if (-not $Yes -and -not $doPr -and $pushed -and (Get-RemoteUrl 'upstream')) {
         $doPr = Read-YesNo '  向 upstream 开 PR？'
+        if ($doPr) { $doMerge = Read-YesNo '    开完直接合并到 upstream？' $true }
     }
     if ($doPr) {
-        Write-Step '向 upstream 开 PR'
+        Write-Step $(if ($doMerge) { '向 upstream 开 PR 并合并' } else { '向 upstream 开 PR' })
+        [void](Enable-AutoProxy)
         $upstreamUrl = Get-RemoteUrl 'upstream'
         if (-not $upstreamUrl) { throw '未配置 upstream 远端，无法开 PR（git remote add upstream <URL>）' }
         if (-not $pushed) { throw '未推送分支，无法开 PR（去掉 -NoPush 后重试）' }
@@ -398,7 +413,46 @@ try {
             "$(($originSlug -split '/')[0]):$branch"
         } else { $branch }
         $base = if ($PrBase) { $PrBase } else { $branch }
-        New-GitHubPr -RemoteUrl $upstreamUrl -Base $base -Head $head -Title $Message -Body "由 scripts/md3.ps1 commit 创建。`n`n- 提交：$sha`n- 分支：$head" -RepoDir $Root
+        $prBody = "由 scripts/md3.ps1 commit 创建。`n`n- 提交：$sha`n- 分支：$head"
+
+        if (-not $doMerge) {
+            New-GitHubPr -RemoteUrl $upstreamUrl -Base $base -Head $head -Title $Message -Body $prBody -RepoDir $Root
+        }
+        else {
+            if (-not $upstreamSlug) { throw "无法从 upstream 地址解析 owner/repo：$upstreamUrl" }
+            # -Yes 或非控制台环境下不能交互要 token（Read-Host 会直接阻塞）
+            $noPrompt = $Yes -or -not (Test-InteractiveConsole)
+            $token = Get-GitHubToken -NoPrompt:$noPrompt
+            if (-not $token) { throw '没有可用的 GitHub token，无法自动合并（md3.ps1 token -Set 设置，或改用 -Pr 只开 PR）' }
+            $r = Invoke-WithRetry -What '开 PR 并合并' -Action {
+                Invoke-GitHubPrMerge -RepoSlug $upstreamSlug -Base $base -Head $head -Token $token `
+                    -Title $Message -Body $prBody -MergeMethod 'merge'
+            }
+            if ($r.Merged) {
+                Write-Ok "PR #$($r.Number) 已合并到 $upstreamSlug/$base（合并提交 $($r.Message.Substring(0, [Math]::Min(8, $r.Message.Length)))）"
+                if ($r.Url) { Write-Note "  $($r.Url)" }
+                # 合并结果只在 upstream 上，不拉回来本地就会立刻落后一个提交
+                if ($NoSyncBack) {
+                    Write-Warn '按 -NoSyncBack 跳过拉回；本地当前落后 upstream 一个合并提交'
+                } else {
+                    Write-Step "拉回 upstream/$base 并同步 origin"
+                    Invoke-WithRetry -What "拉取 upstream/$base" -Action { Invoke-Git @('fetch', 'upstream', $base) | Out-Null }
+                    $mergeOut = Invoke-Git @('merge', '--no-edit', 'FETCH_HEAD') -Quiet
+                    if ($LASTEXITCODE -ne 0) {
+                        Write-Fail "拉回时发生冲突，请手动解决后再推 origin："
+                        foreach ($l in @($mergeOut)) { Write-Note "  $l" }
+                    } else {
+                        foreach ($l in @($mergeOut)) { Write-Note "  $l" }
+                        Invoke-WithRetry -What '同步 origin' -Action { Invoke-Git @('push', 'origin', "HEAD:$branch") | Out-Null }
+                        Write-Ok "已同步：本地 = upstream/$base = origin/$branch"
+                    }
+                }
+            } else {
+                Write-Fail "未合并：$($r.Message)"
+                if ($r.Url) { Write-Note "  PR 地址：$($r.Url)" }
+                $exitCode = 1   # 提交推送成功但合并没成，退出码要能反映出来
+            }
+        }
     }
 
     # ---------- 后续动作：公开版导出 ----------

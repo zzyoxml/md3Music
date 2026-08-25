@@ -127,7 +127,7 @@ try {
     }
     # 导出工具链自身不进公开树（导出 / 闸门 / 一键提交 / 否认清单均为私有侧工具；
     # md3.ps1 + lib/common.ps1 + android/windows 任务保留，公开树构建仍可复用）
-    foreach ($tool in @('tasks\export_public.ps1', 'tasks\verify_public.ps1', 'tasks\commit.ps1', 'public_deny.txt')) {
+    foreach ($tool in @('tasks\export_public.ps1', 'tasks\verify_public.ps1', 'tasks\commit.ps1', 'tasks\token.ps1', 'public_deny.txt')) {
         $toolPath = Join-Path (Join-Path $OutDir 'scripts') $tool
         if (Test-Path $toolPath) {
             Remove-ItemBypass $toolPath
@@ -226,22 +226,26 @@ try {
     if ($PublicRemote -and -not $AsPr) {
         # 覆盖模式：导出树是全新 git init 的单提交仓库，force push 直接覆盖目标分支
         Write-Step "推送到公开仓库（force push 覆盖 $PublicBranch）"
+        [void](Enable-AutoProxy)
         Invoke-Native { git -C $OutDir init -q }
         Invoke-Native { git -C $OutDir add -A }
         Invoke-Native { git -C $OutDir -c user.name="md3music" -c user.email="md3music@local" commit -q -m "public export" }
         & git -C $OutDir remote remove origin 2>$null | Out-Null
         Invoke-Native { git -C $OutDir remote add origin $PublicRemote }
-        Invoke-Native { git -C $OutDir push -f origin HEAD:$PublicBranch }
+        Invoke-WithRetry -What '推送公开仓库' -Action { Invoke-Native { git -C $OutDir push -f origin HEAD:$PublicBranch } }
         Write-Ok "已推送 $PublicRemote（分支 $PublicBranch）"
     }
     elseif ($PublicRemote -and $AsPr) {
         # PR 模式：必须保留公开仓库历史，否则「无关历史」的分支无法与 main 比较、开不了 PR。
         # 做法是浅克隆公开仓库 → 用导出树整体替换工作区 → 提交到新分支 → 开 PR。
         Write-Step "推送到公开仓库新分支并开 PR（base: $PublicBranch）"
+        [void](Enable-AutoProxy)
         if (-not $PrBranch) { $PrBranch = "public-export-$(Get-Date -Format 'yyyyMMdd-HHmm')" }
         $clone = Join-Path $env:TEMP "md3music-public-pr-$(Get-Date -Format 'yyyyMMddHHmmss')"
-        Remove-ItemBypass $clone
-        Invoke-Native { git clone --depth 1 --branch $PublicBranch $PublicRemote $clone }
+        Invoke-WithRetry -What '克隆公开仓库' -Action {
+            Remove-ItemBypass $clone
+            Invoke-Native { git clone --depth 1 --branch $PublicBranch $PublicRemote $clone }
+        }
         Invoke-Native { git -C $clone checkout -q -b $PrBranch }
         # 清空克隆工作区（保留 .git），再整体放入导出树：删除的文件才能体现在 PR 差异里
         foreach ($item in (Get-ChildItem $clone -Force | Where-Object { $_.Name -ne '.git' })) {
@@ -263,7 +267,7 @@ try {
             $body += "- 否认清单闸门：通过（$($gate.DenyCount) 条规则零命中）`n"
             $body += "- 变更文件数：$(@($diff).Count)`n"
             Invoke-Native { git -C $clone -c user.name="md3music" -c user.email="md3music@local" commit -q -m $title }
-            Invoke-Native { git -C $clone push -u origin $PrBranch }
+            Invoke-WithRetry -What '推送 PR 分支' -Action { Invoke-Native { git -C $clone push -u origin $PrBranch } }
             Write-Ok "已推送分支 $PrBranch（$(@($diff).Count) 个文件变更）"
             New-GitHubPr -RemoteUrl $PublicRemote -Base $PublicBranch -Head $PrBranch -Title $title -Body $body -RepoDir $clone
             Write-Note "克隆目录（如需人工补救）：$clone"
