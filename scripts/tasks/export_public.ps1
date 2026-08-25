@@ -210,6 +210,37 @@ try {
         }
     }
 
+    # AndroidManifest 与 main.dart：公开版不请求「所有文件访问」权限（MANAGE_EXTERNAL_STORAGE）。
+    # 该权限供私有版下载/边听边存写公共目录文件元数据（封面/歌词）使用；公开版无下载功能，
+    # 导出时一并剔除（与公开库 4fc6c43 移除 MANAGE_EXTERNAL_STORAGE 保持一致），
+    # 避免公开版在无该权限的 Manifest 前提下仍向上发权限申请。
+    $manifest = Join-Path $OutDir 'android\app\src\main\AndroidManifest.xml'
+    if (Test-Path $manifest) {
+        $mfContent = [System.IO.File]::ReadAllText($manifest, $utf8NoBom)
+        $mfPattern = '(?m)^\s*<!-- Android 11\+ 修改外部存储文件元数据.*\r?\n\s*<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\r?\n'
+        if ([System.Text.RegularExpressions.Regex]::IsMatch($mfContent, $mfPattern)) {
+            $mfContent = [System.Text.RegularExpressions.Regex]::Replace($mfContent, $mfPattern, '')
+            # 兜底：权限行可能无注释，仅剩单行时再清一次
+            $mfContent = $mfContent -replace '(?m)^\s*<uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\r?\n', ''
+            [System.IO.File]::WriteAllText($manifest, $mfContent, $utf8NoBom)
+            Write-Ok '已移除 AndroidManifest 中 MANAGE_EXTERNAL_STORAGE（所有文件访问）权限'
+        } else {
+            Write-Warn 'AndroidManifest 未匹配到 MANAGE_EXTERNAL_STORAGE 权限，跳过（请人工确认公开版权限已收敛）'
+        }
+    }
+    $outMain = Join-Path $OutDir 'lib\main.dart'
+    if (Test-Path $outMain) {
+        $mmContent = [System.IO.File]::ReadAllText($outMain, $utf8NoBom)
+        $mmPattern = '(?s)  // Android 11\+ 管理外部存储权限.*?\r?\n  }\r?\n'
+        if ([System.Text.RegularExpressions.Regex]::IsMatch($mmContent, $mmPattern)) {
+            $mmContent = [System.Text.RegularExpressions.Regex]::Replace($mmContent, $mmPattern, '')
+            [System.IO.File]::WriteAllText($outMain, $mmContent, $utf8NoBom)
+            Write-Ok '已剥离 main.dart 中 manageExternalStorage 权限请求'
+        } else {
+            Write-Warn 'main.dart 未匹配到 manageExternalStorage 请求块，跳过（请人工确认已剥离）'
+        }
+    }
+
     # ---------- 6. 否认清单闸门 ----------
     Write-Step '否认清单闸门'
     $gate = Invoke-DenyGate -TreeRoot $OutDir -DenyFile $denyFile
