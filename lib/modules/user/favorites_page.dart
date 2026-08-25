@@ -59,6 +59,11 @@ class _FavoritesPageState extends State<FavoritesPage>
   bool _createdExpanded = true;
   bool _collectedExpanded = true;
 
+  // 分组手动排序方向（按歌单名称）：null=默认顺序（不主动排序）；
+  // true=升序（A→Z）；false=降序（Z→A）。分组标题右侧按钮循环切换。
+  bool? _createdSortAsc;
+  bool? _collectedSortAsc;
+
   // 歌单访问排序：歌单 ID → 最后访问时间戳（毫秒）
   // 点击歌单后记录时间，列表按最近访问排序（最近访问的排最前）
   Map<String, int> _playlistAccessOrder = {};
@@ -97,6 +102,12 @@ class _FavoritesPageState extends State<FavoritesPage>
       await _loadAccessOrder();
       _sortByLatestClick = await _settingsRepository
           .getSortCollectedByLatestClick();
+      _createdSortAsc = await _loadPlaylistSort(
+        _settingsRepository.getCreatedPlaylistSort,
+      );
+      _collectedSortAsc = await _loadPlaylistSort(
+        _settingsRepository.getCollectedPlaylistSort,
+      );
       if (!mounted) return;
       setState(() {});
       _loadAllData();
@@ -105,6 +116,21 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     });
   }
+
+  /// 读取持久化的分组排序方向并转成 bool?：0=默认顺序(null)，1=升序，2=降序。
+  Future<bool?> _loadPlaylistSort(Future<int> Function() getter) async {
+    switch (await getter()) {
+      case 1:
+        return true;
+      case 2:
+        return false;
+      default:
+        return null;
+    }
+  }
+
+  /// 分组排序方向转持久化值：null=0，升序=1，降序=2。
+  int _sortToInt(bool? sortAsc) => sortAsc == null ? 0 : (sortAsc ? 1 : 2);
 
   /// 轻量级网络探测：用 /server/now 接口。结果通过 dio 拦截器自动
   /// 反映到 KugouApiClient.networkReachable。
@@ -230,19 +256,27 @@ class _FavoritesPageState extends State<FavoritesPage>
   int _getAccessTime(KugouPlaylistBrief p) =>
       _playlistAccessOrder[p.globalCollectionId ?? p.id] ?? 0;
 
-  List<KugouPlaylistBrief> get _createdPlaylists {
-    final list = _playlists.where(_isCreated).toList();
-    if (_sortByLatestClick) {
+  /// 对分组列表应用排序：手动排序（按名称升/降）优先，
+  /// 未启用时退回「最近点击」排序逻辑（_sortByLatestClick）。
+  void _applySort(List<KugouPlaylistBrief> list, bool? sortAsc) {
+    if (sortAsc != null) {
+      list.sort(
+        (a, b) => sortAsc ? a.name.compareTo(b.name) : b.name.compareTo(a.name),
+      );
+    } else if (_sortByLatestClick) {
       list.sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
     }
+  }
+
+  List<KugouPlaylistBrief> get _createdPlaylists {
+    final list = _playlists.where(_isCreated).toList();
+    _applySort(list, _createdSortAsc);
     return list;
   }
 
   List<KugouPlaylistBrief> get _collectedPlaylists {
     final list = _playlists.where((p) => !_isCreated(p)).toList();
-    if (_sortByLatestClick) {
-      list.sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
-    }
+    _applySort(list, _collectedSortAsc);
     return list;
   }
 
@@ -877,14 +911,23 @@ class _FavoritesPageState extends State<FavoritesPage>
               playlists: _createdPlaylists,
               onBuildTile: (playlist) =>
                   _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
-              // 新建歌单：原顶栏右上角的 "+" 移到此处
+              // 新建歌单：原顶栏右上角的 "+" 移到此处；排序按钮靠最右
               trailing: _isManaging
                   ? null
-                  : IconButton(
-                      icon: const Icon(Icons.add, size: 20),
-                      visualDensity: VisualDensity.compact,
-                      tooltip: '新建歌单',
-                      onPressed: _showCreatePlaylistDialog,
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.add, size: 20),
+                          visualDensity: VisualDensity.compact,
+                          tooltip: '新建歌单',
+                          onPressed: _showCreatePlaylistDialog,
+                        ),
+                        _buildPlaylistSortButton(
+                          _createdSortAsc,
+                          _toggleCreatedSort,
+                        ),
+                      ],
                     ),
             ),
             if (_collectedPlaylists.isNotEmpty)
@@ -896,6 +939,12 @@ class _FavoritesPageState extends State<FavoritesPage>
                 playlists: _collectedPlaylists,
                 onBuildTile: (playlist) =>
                     _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
+                trailing: _isManaging
+                    ? null
+                    : _buildPlaylistSortButton(
+                        _collectedSortAsc,
+                        _toggleCollectedSort,
+                      ),
               ),
             // 底部加载更多指示器
             if (_isLoadingMorePlaylists)
@@ -920,6 +969,42 @@ class _FavoritesPageState extends State<FavoritesPage>
         ),
       ),
     );
+  }
+
+  /// 分组标题右侧的升降序切换按钮：未排序时显示 [Icons.sort]，
+  /// 点击后按歌单名称升序（↑）/降序（↓）循环切换。
+  Widget _buildPlaylistSortButton(bool? sortAsc, VoidCallback onToggle) {
+    final cs = Theme.of(context).colorScheme;
+    final IconData icon;
+    final String tooltip;
+    if (sortAsc == null) {
+      icon = Icons.sort;
+      tooltip = '按名称升序排序';
+    } else if (sortAsc) {
+      icon = Icons.arrow_upward;
+      tooltip = '切换为降序';
+    } else {
+      icon = Icons.arrow_downward;
+      tooltip = '切换为升序';
+    }
+    return IconButton(
+      icon: Icon(icon, size: 20, color: cs.onSurfaceVariant),
+      visualDensity: VisualDensity.compact,
+      tooltip: tooltip,
+      onPressed: onToggle,
+    );
+  }
+
+  /// 切换「我创建的歌单」排序方向（null→升序→降序→升序…），并持久化。
+  void _toggleCreatedSort() {
+    setState(() => _createdSortAsc = !(_createdSortAsc ?? false));
+    _settingsRepository.setCreatedPlaylistSort(_sortToInt(_createdSortAsc));
+  }
+
+  /// 切换「我收藏的歌单」排序方向（null→升序→降序→升序…），并持久化。
+  void _toggleCollectedSort() {
+    setState(() => _collectedSortAsc = !(_collectedSortAsc ?? false));
+    _settingsRepository.setCollectedPlaylistSort(_sortToInt(_collectedSortAsc));
   }
 
   Widget _buildPlaylistTile(KugouPlaylistBrief playlist, int index) {
