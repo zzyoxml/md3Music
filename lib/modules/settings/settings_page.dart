@@ -2038,27 +2038,17 @@ class _SettingsPageState extends State<SettingsPage>
             context.read<PlayerProvider>().setIgnoreAudioFocus(value);
           },
         ),
-        const Divider(height: 24),
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-          child: Row(
-            children: [
-              Icon(Icons.headphones, size: 20, color: colorScheme.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '失去音频焦点时',
-                  style: Theme.of(context).textTheme.titleSmall,
-                ),
-              ),
-            ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 与「默认音质」一致的标题排版
+              Text(
+                '失去音频焦点时',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
               // 与「默认音质」同款 M3E 按钮组；横排 + xs 尺寸 + 紧凑密度，文字过长省略
               M3EToggleButtonGroup(
                 actions: const [
