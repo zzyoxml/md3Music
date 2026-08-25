@@ -103,7 +103,7 @@ try {
     # target\release\kugou_server.dll，光看时间戳分不出是哪条路线编的；
     # MinGW 版 dll 依赖 libgcc_s_seh-1.dll / libwinpthread-1.dll，
     # 被打进便携包后 DynamicLibrary.open 会失败（App 起来但完全不能联网）。
-    # build_windows.ps1 读这个戳来决定是否必须重编。
+    # scripts/tasks/windows.ps1 读这个戳来决定是否必须重编。
     Set-Content -Path (Join-Path $PSScriptRoot 'target\release\kugou_server.toolchain') `
         -Value $Toolchain -Encoding ASCII
     Write-Host "Built: $dll ($([math]::Round((Get-Item $dll).Length / 1MB, 1)) MB)" -ForegroundColor Green

@@ -63,7 +63,7 @@ jobs:
       #     exe / flutter_windows.dll / 各插件 dll / kugou_server.dll 都是 /MD
       #     动态链接 MSVC 运行库；目标机没装「VC++ 2015-2022 可再发行组件包」时
       #     直接起不来（缺 VCRUNTIME140.dll）。便携版 zip 号称解压即用，必须自带。
-      #     逻辑与 scripts\build_windows.ps1 的同名步骤一致。
+      #     逻辑与 scripts\tasks\windows.ps1 的同名步骤一致。
       - name: Bundle VC++ runtime into Release
         shell: pwsh
         run: |

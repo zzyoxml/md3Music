@@ -57,24 +57,24 @@
 | `flutter analyze`（私有入口 + 公开入口） | ✅ 0 error / 0 warning |
 | `flutter test` 全量 | ✅ +401 通过 / -19 失败（19 个均为预存 `kugou_provider_test` 多账号插件测试，与迁移无关；新增 56 个迁移测试全过） |
 | 私有入口构建 `-t lib/private/main_private.dart` | ✅ debug APK 构建成功（含 kotlin 编译） |
-| `verify_public_clean.ps1` | ✅ 零命中（3 处公开版自带注释已中性化） |
-| `export_public.ps1` 导出 | ✅ 432.4MB、闸门零命中 |
+| `md3.ps1 verify` | ✅ 零命中（3 处公开版自带注释已中性化） |
+| `md3.ps1 export` 导出 | ✅ 432.4MB、闸门零命中 |
 | 导出树 `flutter analyze` | ✅ 0 error |
 | 导出树特征残留 grep（边听边存/下载/缓存符号） | ✅ 零命中 |
 | 导出树公开入口构建 `flutter build apk --debug` | ✅ 成功 |
 
 ## 4. 导出脚本与公开树维护要点
 
-1. **闸门已实际拦截过**：迁移后 `verify_public_clean.ps1` 命中 3 处公开版**自带注释**中的「边听边存/下载」字样（公开版源码里"未移植"说明）。已中性化（`本地持久化音频管理 section 未包含在公开版本中` 等）。**教训：公开版源码注释也可能含特征词，导出前必须跑闸门。**
+1. **闸门已实际拦截过**：迁移后 `md3.ps1 verify` 命中 3 处公开版**自带注释**中的「边听边存/下载」字样（公开版源码里"未移植"说明）。已中性化（`本地持久化音频管理 section 未包含在公开版本中` 等）。**教训：公开版源码注释也可能含特征词，导出前必须跑闸门。**
 2. **deny 列表**（`scripts/public_deny.txt`，38 条）本次无需追加新词——迁移全部使用中性钩子，无新增下载/缓存符号。
-3. **导出流程不变**：`verify_public_clean.ps1` → `export_public.ps1`（白名单拷贝 → 排除 `lib/private/`、`packages/`、`pubspec.lock` → 剥离私有依赖 → 闸门）→ 导出树 analyze + 构建。
-4. **`kugou_api_server` 不在导出白名单**——Rust 源码改动不影响公开树，但**必须重新编译 `libkugou_server.so`** 才能让 topliked 端点生效（`build_android.ps1` 会自动检测 Rust 改动触发交叉编译）。
+3. **导出流程不变**：`md3.ps1 verify` → `md3.ps1 export`（白名单拷贝 → 排除 `lib/private/`、`packages/`、`pubspec.lock` → 剥离私有依赖 → 闸门）→ 导出树 analyze + 构建。
+4. **`kugou_api_server` 不在导出白名单**——Rust 源码改动不影响公开树，但**必须重新编译 `libkugou_server.so`** 才能让 topliked 端点生效（`md3.ps1 android` 会自动检测 Rust 改动触发交叉编译）。
 5. **行尾符已规范**：`.gitattributes` 生效（dart/kt/md/rs LF、ps1 CRLF、二进制不转换），后续 diff 不再被 CRLF 污染。
 
 ## 5. 私有仓库维护要点
 
 1. **新增功能落点不变**：公开功能 → `lib/`（公开树，可随导出发布）；下载/缓存 → `packages/md3_download_cache/` 或 `lib/private/`；公开类需要私有能力 → 加中性静态钩子（参考 2.1 钩子表）。
-2. **双入口**：私有构建 `-t lib/private/main_private.dart`（`build_android.ps1` 自动选择）；公开构建 `lib/main.dart`。
+2. **双入口**：私有构建 `-t lib/private/main_private.dart`（`md3.ps1 android` 自动选择）；公开构建 `lib/main.dart`。
 3. **回填纪律**：任何大文件替换（`cp 公开版`）后必须逐块回填钩子并 `flutter analyze`——`lib/private/cache_bridge.dart` 编译依赖钩子存在。
 4. **版本基线**：私有版功能已对齐公开版 5.3.0 + 私有下载/缓存能力。建议尽快合并 `migrate-public-features` → `rust-local-two` 并提交，再按 4.4 发布公开版。
 5. **待真机验证**（需接 R52R30F3Q9Z）：下载→文件+元数据嵌入、边听边存命中、缓存统计/清空、双击返回、edgeToEdge、显示大小滑块、FM 区块、最热/最新评论、歌单「仅显示已缓存」。

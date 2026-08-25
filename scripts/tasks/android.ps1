@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  MD3Music Windows 一键打包脚本（PowerShell 版）
+  Android 一键打包：Rust 交叉编译（按需）+ Flutter 分包 APK。
 
 .DESCRIPTION
   智能检测 Rust 代码是否有改动：
@@ -22,27 +22,28 @@
   手动指定 Android NDK 目录（默认按 ANDROID_NDK_HOME / ANDROID_NDK / 常见 SDK 路径自动探测，
   取版本号最高者）。
 
+.PARAMETER NoPause
+  结束时不等待按键（CI/被其他脚本调用时使用）。
+
 .EXAMPLE
-  .\scripts\build_android.ps1                # 智能检测 + 打包
-  .\scripts\build_android.ps1 -ForceRust     # 强制重编 Rust + 打包
-  .\scripts\build_android.ps1 -SkipFlutter   # 只更新 .so
+  .\scripts\md3.ps1 android                # 智能检测 + 打包
+  .\scripts\md3.ps1 android -ForceRust     # 强制重编 Rust + 打包
+  .\scripts\md3.ps1 android -SkipFlutter   # 只更新 .so
 #>
 [CmdletBinding()]
 param(
     [switch]$ForceRust,
     [switch]$SkipFlutter,
-    [string]$NdkPath
+    [string]$NdkPath,
+    [switch]$NoPause
 )
 
 $ErrorActionPreference = 'Stop'
-# 外部命令（cargo/flutter）的 stderr 输出会触发 NativeCommandError，需临时切回 Continue
-$script:PrevEAP = $null
+. (Join-Path $PSScriptRoot '..\lib\common.ps1')
 
-# ---------- 常量 ----------
-$RepoRoot = Split-Path -Parent $PSScriptRoot              # scripts/.. = 项目根
-$RustDir  = Join-Path $RepoRoot 'kugou_api_server\rust'
-$JniDir   = Join-Path $RepoRoot 'android\app\src\main\jniLibs'
-$CargoBin = Join-Path $env:USERPROFILE '.cargo\bin'
+$RepoRoot  = Get-RepoRoot
+$RustDir   = Join-Path $RepoRoot 'kugou_api_server\rust'
+$JniDir    = Join-Path $RepoRoot 'android\app\src\main\jniLibs'
 $Toolchain = 'stable-x86_64-pc-windows-gnu'               # msvc 缺 link.exe，用 GNU toolchain 交叉编译
 # host 侧 C 编译器（编译 build-script 用，如 ring 的 cc-rs）
 $HostGcc = 'C:\Program Files (x86)\Dev-Cpp\MinGW64\bin\gcc.exe'
@@ -55,32 +56,11 @@ $ABIs = @(
     @{ target='x86_64-linux-android';    abi='x86_64';      clang='x86_64-linux-android21-clang';    triple='x86_64-linux-android21' }
 )
 
-function Write-Step([string]$Msg) { Write-Host "`n=== $Msg ===" -ForegroundColor Cyan }
-
-# 结束前暂停，避免双击运行/外部调用时窗口一闪而过
-function Wait-Exit {
-    Write-Host "`n按任意键退出..." -ForegroundColor Cyan
-    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-}
-
-# 运行外部命令：cargo/flutter 正常进度输出走 stderr，PowerShell 会视为 NativeCommandError，
-# 这里临时把 ErrorActionPreference 切回 Continue 并检查退出码，真正失败再 throw。
-function Invoke-Native {
-    param([scriptblock]$Command)
-    $script:PrevEAP = $ErrorActionPreference
-    $ErrorActionPreference = 'Continue'
-    try {
-        & $Command
-        if ($LASTEXITCODE -ne 0) { throw "命令失败，退出码 $LASTEXITCODE" }
-    }
-    finally { $ErrorActionPreference = $script:PrevEAP }
-}
-
 # ---------- 1. 工具检测 ----------
 Write-Step '检查构建工具'
-$env:Path = "$CargoBin;$env:Path"
-if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { throw '未找到 cargo，请先安装 rustup（https://rustup.rs/）' }
-if (-not (Get-Command flutter -ErrorAction SilentlyContinue)) { throw '未找到 flutter，请先安装并加入 PATH' }
+Add-CargoToPath
+Assert-Command cargo   '请先安装 rustup（https://rustup.rs/）'
+Assert-Command flutter '请先安装并加入 PATH'
 
 # ---------- 2. NDK 探测 ----------
 if ($NdkPath) {
@@ -112,12 +92,8 @@ if (-not (Test-Path (Join-Path $NDKBin 'clang.exe'))) { throw "NDK LLVM 工具�
 Write-Host "NDK: $NDK"
 
 # ---------- 3. 判断是否需要编译 Rust ----------
-$needRust = $ForceRust
-if (-not $needRust -and (Get-Command git -ErrorAction SilentlyContinue)) {
-    # 工作区未提交改动（含未跟踪文件）
-    $st = & git -C $RepoRoot status --porcelain -- kugou_api_server/rust/ 2>$null
-    if ($LASTEXITCODE -eq 0 -and $st) { $needRust = $true }
-}
+$needRust = [bool]$ForceRust
+if (-not $needRust) { $needRust = Test-RustDirty }
 if (-not $needRust) {
     # 兜底：比较 target 产物与 jniLibs 的修改时间，.so 比 jniLibs 新说明 Rust 编译过但未同步
     foreach ($a in $ABIs) {
@@ -138,19 +114,16 @@ if ($needRust) {
     foreach ($a in $ABIs) {
         Write-Host "==> 构建 $($a.abi) ($($a.target))" -ForegroundColor Yellow
         # cc-rs / cargo 读取的环境变量：CC_/AR_ 用小写 target（- 转 _），linker 必须大写
-        $ccVar  = "CC_"  + ($a.target -replace '-', '_')
-        $arVar  = "AR_"  + ($a.target -replace '-', '_')
-        $lnVar  = 'CARGO_TARGET_' + ($a.target -replace '-', '_').ToUpper() + '_LINKER'
+        $ccVar = 'CC_' + ($a.target -replace '-', '_')
+        $arVar = 'AR_' + ($a.target -replace '-', '_')
+        $lnVar = 'CARGO_TARGET_' + ($a.target -replace '-', '_').ToUpper() + '_LINKER'
         Set-Item -Path "Env:$ccVar" -Value "$NDKBin\$($a.clang).cmd"
         Set-Item -Path "Env:$arVar" -Value "$NDKBin\llvm-ar.exe"
         Set-Item -Path "Env:$lnVar" -Value "$NDKBin\clang.exe"
         # 链接时显式指定 target（带 API 级别）+ lld，clang 才能定位 sysroot 里的 crt 文件
         $env:RUSTFLAGS = "-C link-arg=--target=$($a.triple) -C link-arg=-fuse-ld=lld"
         Push-Location $RustDir
-        try {
-            Invoke-Native { cargo "+$Toolchain" build --target $a.target --release }
-            if ($LASTEXITCODE -ne 0) { throw "cargo build 失败：$($a.target)" }
-        }
+        try { Invoke-Native { cargo "+$Toolchain" build --target $a.target --release } }
         finally { Pop-Location }
     }
     Remove-Item Env:RUSTFLAGS -ErrorAction SilentlyContinue
@@ -172,7 +145,7 @@ else {
 # ---------- 5. Flutter 分包打包（排除 x86） ----------
 if ($SkipFlutter) {
     Write-Host "`n完成（-SkipFlutter）。jniLibs 已就绪，可用 flutter build apk --release --split-per-abi --target-platform android-arm64,android-arm,android-x64 手动打包" -ForegroundColor Green
-    Wait-Exit
+    if (-not $NoPause) { Wait-Exit }
     exit 0
 }
 
@@ -181,7 +154,7 @@ Push-Location $RepoRoot
 try {
     # 入口自动选择：
     #   - 私有仓库：存在 lib/private/main_private.dart → 构建完整功能版（含下载/缓存）
-    #   - 公开树（export_public.ps1 导出）：lib/private 已被排除 → 回退默认公开入口 lib/main.dart
+    #   - 公开树（md3.ps1 export 导出）：lib/private 已被排除 → 回退默认公开入口 lib/main.dart
     $target = 'lib/main.dart'
     if (Test-Path (Join-Path $RepoRoot 'lib\private\main_private.dart')) {
         $target = 'lib/private/main_private.dart'
@@ -192,8 +165,8 @@ finally { Pop-Location }
 
 Write-Step '打包完成'
 $outDir = Join-Path $RepoRoot 'build\app\outputs\flutter-apk'
-Get-ChildItem "$outDir\*release.apk" | ForEach-Object {
+Get-ChildItem "$outDir\*release.apk" -ErrorAction SilentlyContinue | ForEach-Object {
     Write-Host "    $($_.Name)  $([math]::Round($_.Length / 1MB, 1)) MB" -ForegroundColor Green
 }
 
-Wait-Exit
+if (-not $NoPause) { Wait-Exit }
