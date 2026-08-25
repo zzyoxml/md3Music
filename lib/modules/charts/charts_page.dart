@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
@@ -99,7 +100,7 @@ class _ChartsPageState extends State<ChartsPage> {
             ),
           );
         }
-        return M3EPullToRefreshIndicator(
+        return Md3PullToRefresh(
           onRefresh: () =>
               context.read<KugouProvider>().getRankList(forceRefresh: true),
           child: ListView.builder(
@@ -241,7 +242,7 @@ class _ChartsPageState extends State<ChartsPage> {
             ),
           );
         }
-        return M3EPullToRefreshIndicator(
+        return Md3PullToRefresh(
           onRefresh: () =>
               context.read<KugouProvider>().getRankList(forceRefresh: true),
           // 使用 PinchableGridView 替代固定2列 GridView：

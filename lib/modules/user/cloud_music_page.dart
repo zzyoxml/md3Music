@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/services/media_store_service.dart';
@@ -565,13 +566,13 @@ class _CloudMusicPageState extends State<CloudMusicPage> {
           : _error != null
               ? _buildError()
               : _songs.isEmpty
-                  ? M3EPullToRefreshIndicator(
+                  ? Md3PullToRefresh(
                       onRefresh: () => _loadCloudSongs(showLoading: false),
                       child: ListView(
                         children: [_buildEmpty()],
                       ),
                     )
-                  : M3EPullToRefreshIndicator(
+                  : Md3PullToRefresh(
                       onRefresh: () => _loadCloudSongs(showLoading: false),
                       child: Column(
                         children: [

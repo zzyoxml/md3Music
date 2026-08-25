@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -81,7 +82,13 @@ class _FavoritesPageState extends State<FavoritesPage>
   final Set<int> _selectedIndices = {};
 
   /// 顶栏渐变 ScrollController：与 ScrollAwareAppBar 共享
-  final ScrollController _scrollController = ScrollController();
+  ///
+  /// `keepScrollOffset: false` —— 关闭跨重建的位置恢复。TabBarView 切换
+  /// tab 时非活动 tab 的 ListView 会被 PageView 销毁/重建，默认的
+  /// `keepScrollOffset = true` 会让重建后的 ListView 恢复旧 offset，
+  /// `extentBefore > 0` 致 M3E 下拉条件（extentBefore == 0）不满足、
+  /// 歌单 tab 无法下拉刷新；专辑/歌手 tab 用临时 controller 不受影响。
+  final ScrollController _scrollController = ScrollController(keepScrollOffset: false);
 
   @override
   void initState() {
@@ -233,9 +240,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     // 全部走 noCache：绕过本地代理 apicache，收藏/取消收藏后
     // 进入页面即可看到最新数据（否则需手动下拉或重启 App 才生效）
     await Future.wait([
-      _loadPlaylists(forceNoCache: true),
-      _loadAlbums(noCache: true),
-      _loadArtists(noCache: true),
+      _loadPlaylists(forceNoCache: true, showLoading: false),
+      _loadAlbums(noCache: true, showLoading: false),
+      _loadArtists(noCache: true, showLoading: false),
     ]);
   }
 
@@ -282,7 +289,10 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   // ==================== 数据加载 ====================
 
-  Future<void> _loadPlaylists({bool forceNoCache = false}) async {
+  Future<void> _loadPlaylists({
+    bool forceNoCache = false,
+    bool showLoading = true,
+  }) async {
     if (!mounted) return;
     // 重置分页状态
     _playlistPage = 1;
@@ -290,7 +300,7 @@ class _FavoritesPageState extends State<FavoritesPage>
     // 刷新时重新读取「最近点击排序」开关，使设置改动无需重启即可生效
     _sortByLatestClick = await _settingsRepository
         .getSortCollectedByLatestClick();
-    setState(() => _isLoadingPlaylists = true);
+    if (showLoading) setState(() => _isLoadingPlaylists = true);
 
     try {
       final api = KugouApiClient();
@@ -415,9 +425,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
   }
 
-  Future<void> _loadAlbums({bool noCache = false}) async {
+  Future<void> _loadAlbums({bool noCache = false, bool showLoading = true}) async {
     if (!mounted) return;
-    setState(() => _isLoadingAlbums = true);
+    if (showLoading) setState(() => _isLoadingAlbums = true);
 
     try {
       final api = KugouApiClient();
@@ -500,9 +510,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
   }
 
-  Future<void> _loadArtists({bool noCache = false}) async {
+  Future<void> _loadArtists({bool noCache = false, bool showLoading = true}) async {
     if (!mounted) return;
-    setState(() => _isLoadingArtists = true);
+    if (showLoading) setState(() => _isLoadingArtists = true);
 
     try {
       final api = KugouApiClient();
@@ -883,11 +893,12 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return M3EPullToRefreshIndicator(
-      onRefresh: () => _loadPlaylists(forceNoCache: true),
+    return RefreshIndicator(
+      onRefresh: () => _loadPlaylists(forceNoCache: true, showLoading: false),
       child: NotificationListener<ScrollNotification>(
         onNotification: (notification) {
           if (notification is ScrollEndNotification &&
+              notification.metrics.maxScrollExtent > 0 &&
               notification.metrics.pixels >=
                   notification.metrics.maxScrollExtent - 200) {
             _loadMorePlaylists();
@@ -896,6 +907,8 @@ class _FavoritesPageState extends State<FavoritesPage>
         },
         child: ListView(
           controller: _scrollController,
+          // 内容不满一屏时也能下拉（原生 RefreshIndicator 依赖 overscroll）
+          physics: const AlwaysScrollableScrollPhysics(),
           // 底部叠加系统手势条（小横条）高度，避免末项被压住
           padding: EdgeInsets.only(
             top: 8,
@@ -1165,8 +1178,8 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return M3EPullToRefreshIndicator(
-      onRefresh: () => _loadAlbums(noCache: true),
+    return Md3PullToRefresh(
+      onRefresh: () => _loadAlbums(noCache: true, showLoading: false),
       child: ListView.builder(
         padding: EdgeInsets.only(
           top: 8,
@@ -1344,8 +1357,8 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return M3EPullToRefreshIndicator(
-      onRefresh: () => _loadArtists(noCache: true),
+    return Md3PullToRefresh(
+      onRefresh: () => _loadArtists(noCache: true, showLoading: false),
       child: ListView.builder(
         padding: EdgeInsets.only(
           top: 8,

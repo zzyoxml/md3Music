@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 
 import '../../data/models/album.dart';
 import '../../providers/kugou_provider.dart';
@@ -237,7 +238,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
           ),
         ],
       ),
-      body: M3EPullToRefreshIndicator(
+      body: Md3PullToRefresh(
         onRefresh: _loadAllData,
         child: _isLoading
             ? const Center(child: M3ELoadingIndicator())

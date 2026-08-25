@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
@@ -61,11 +62,11 @@ class _SceneCollectionListPageState extends State<SceneCollectionListPage> {
     _loadingMore = false;
   }
 
-  Future<void> _load({required bool reset}) async {
+  Future<void> _load({required bool reset, bool showLoading = true}) async {
     if (reset) {
       _page = 1;
       _hasMore = true;
-      if (mounted) setState(() => _isLoading = true);
+      if (showLoading && mounted) setState(() => _isLoading = true);
     }
     final r = await KugouApiClient().getSceneCollectionList(
       widget.tagId,
@@ -136,8 +137,8 @@ class _SceneCollectionListPageState extends State<SceneCollectionListPage> {
           ? const Center(child: M3ELoadingIndicator())
           : _lists.isEmpty
               ? _buildEmpty(cs)
-              : M3EPullToRefreshIndicator(
-                  onRefresh: () => _load(reset: true),
+              : Md3PullToRefresh(
+                  onRefresh: () => _load(reset: true, showLoading: false),
                   child: PinchableGridView(
                     controller: _scrollController,
                     itemCount: _lists.length,
