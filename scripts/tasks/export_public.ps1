@@ -7,8 +7,8 @@
   全程分步提示：
     1. 前置检查（仓库结构、否认清单、可选推送的 git）
     2. 清空旧导出目录
-    3. 白名单拷贝公开文件（lib/android/assets/... 顶层项）
-    4. 排除私有内容（lib/private/、pubspec.lock、私有侧工具链、编译临时产物）
+    3. 白名单拷贝公开文件（lib/android/assets/... 顶层项，scripts/ 不在其中）
+    4. 排除私有内容（lib/private/、pubspec.lock、scripts/ 残留、编译临时产物）
     5. 剥离 pubspec.yaml 的私有依赖块与 README 私有功能条目
     6. 否认清单闸门（scripts/public_deny.txt，lib/ 与 pubspec 零命中才通过）
     7. 可选：推送导出树到公开仓库（force push 覆盖分支，或 -AsPr 开 PR 审阅）
@@ -96,9 +96,11 @@ try {
 
     # ---------- 3. 白名单拷贝 ----------
     Write-Step '白名单拷贝公开文件'
+    # scripts/ 整体不进公开树：导出/闸门/一键提交/token 全是私有侧工具链，
+    # 且公开侧 CI 与 README 都不引用任何脚本，构建仅靠 flutter 原生命令即可。
     $whitelist = @(
         'lib', 'android', 'assets', 'web', 'test',
-        'third_party', 'img', 'scripts', '.github',
+        'third_party', 'img', '.github',
         'pubspec.yaml', 'analysis_options.yaml', 'README.md',
         'LICENSE', 'DISCLAIMER.md',
         'devtools_options.yaml'
@@ -125,14 +127,11 @@ try {
         Remove-ItemBypass $lockFile
         Write-Ok '已排除 pubspec.lock（公开侧重新生成，避免私有包记录）'
     }
-    # 导出工具链自身不进公开树（导出 / 闸门 / 一键提交 / 否认清单均为私有侧工具；
-    # md3.ps1 + lib/common.ps1 + android/windows 任务保留，公开树构建仍可复用）
-    foreach ($tool in @('tasks\export_public.ps1', 'tasks\verify_public.ps1', 'tasks\commit.ps1', 'tasks\token.ps1', 'public_deny.txt')) {
-        $toolPath = Join-Path (Join-Path $OutDir 'scripts') $tool
-        if (Test-Path $toolPath) {
-            Remove-ItemBypass $toolPath
-            Write-Ok "已排除 scripts/$($tool -replace '\\','/')（导出工具链，不进公开树）"
-        }
+    # 防御：scripts/ 不在白名单内，但历史导出树或人工拷贝可能残留，一律清掉
+    $scriptsDir = Join-Path $OutDir 'scripts'
+    if (Test-Path $scriptsDir) {
+        Remove-ItemBypass $scriptsDir
+        Write-Ok '已排除 scripts/（私有侧工具链整体不进公开树）'
     }
     # Windows 构建链为私有版功能（公开版 Android-only）：排除 windows 专用 CI
     $winCi = Join-Path (Join-Path $OutDir '.github') 'workflows\build-windows.yml'

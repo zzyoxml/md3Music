@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  一键提交：TUI 勾选改动 -> 否认清单闸门 -> 提交 -> 推送 -> 可选开 PR。
+  一键提交：TUI 勾选改动 -> 否认清单闸门 -> 提交 -> 同步 upstream/origin -> 推送 -> 可选开 PR。
 
 .DESCRIPTION
   面向本仓库「私有开发 + 公开导出」双仓库流程的提交入口，替代大部分 GitHub Desktop 操作：
@@ -9,7 +9,8 @@
     1. 列出工作区所有改动（含未跟踪文件），方向键 + 空格勾选本次要提交的文件
     2. 提交前跑否认清单闸门（scripts/public_deny.txt），命中私有符号即中止
     3. 自动生成 conventional commit 候选信息，回车接受或直接改写
-    4. 提交并推送当前分支到 origin（首次推送自动 -u 建立跟踪）
+    4. 同步当前分支：先合并 upstream/<分支> 的新提交，再合并 origin/<分支>，最后推送 origin
+       （首次推送自动 -u 建立跟踪；upstream 的提交因此经本地带到 origin，fork 不会越落越远）
     5. 可选：向 upstream 开 PR / 导出公开版本（覆盖推送或开 PR）
 
   未勾选的文件只是本次不提交，仍留在工作区，不写入任何忽略文件。
@@ -23,7 +24,13 @@
   跳过勾选界面，直接提交全部改动。
 
 .PARAMETER NoPush
-  只提交，不推送。
+  只提交，不做任何同步（既不拉 upstream/origin 也不推送）。
+
+.PARAMETER NoUpstreamSync
+  同步阶段跳过 upstream：只与 origin 对齐后推送。
+
+.PARAMETER UpstreamBranch
+  同步阶段从 upstream 拉取的分支（默认与当前分支同名）。
 
 .PARAMETER Pr
   推送后向 upstream 仓库开 PR（fork -> upstream 流程），不自动合并。
@@ -64,6 +71,8 @@ param(
     [string]$Message = '',
     [switch]$All,
     [switch]$NoPush,
+    [switch]$NoUpstreamSync,
+    [string]$UpstreamBranch = '',
     [switch]$Pr,
     [switch]$PrMerge,
     [switch]$NoSyncBack,
@@ -370,29 +379,86 @@ try {
     $sha = "$(Invoke-Git @('rev-parse', '--short', 'HEAD'))".Trim()
     Write-Ok "$sha  $Message"
 
-    # ---------- 推送 ----------
-    $pushed = $false
-    if ($NoPush) {
-        Write-Warn '按 -NoPush 跳过推送'
-    } else {
-        Write-Step "推送到 origin/$branch"
-        [void](Enable-AutoProxy)
-        Invoke-Git @('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}') -Quiet | Out-Null
-        $hasUpstream = ($LASTEXITCODE -eq 0)
-        $out = Invoke-WithRetry -What "推送 origin/$branch" -Action {
-            if ($hasUpstream) { Invoke-Git @('push', 'origin', "HEAD:$branch") }
-            else { Invoke-Git @('push', '-u', 'origin', $branch) }
-        }
-        foreach ($l in @($out)) { Write-Note "  $l" }
-        $pushed = $true
-        Write-Ok "已推送 origin/$branch"
-    }
-    # ---------- 后续动作：upstream PR ----------
+    # ---------- 同步 + 推送 ----------
     function Get-RemoteUrl([string]$Name) {
         $u = Invoke-Git @('remote', 'get-url', $Name) -Quiet
         if ($LASTEXITCODE -eq 0) { "$u".Trim() } else { $null }
     }
 
+    # 把 <远端>/<分支> 的新提交并进本地。
+    # 返回 'ok' / 'missing'（远端无此分支）/ 'conflict'；网络类失败重试后抛出。
+    function Sync-FromRemote {
+        param([Parameter(Mandatory)][string]$Remote, [Parameter(Mandatory)][string]$RemoteBranch)
+        $status = Invoke-WithRetry -What "拉取 $Remote/$RemoteBranch" -Action {
+            $out = Invoke-Git @('fetch', $Remote, $RemoteBranch) -Quiet
+            if ($LASTEXITCODE -eq 0) { return 'ok' }
+            # 远端没这个分支是确定性结果，重试没意义；其余（网络/认证）交给重试
+            if ("$out" -match "find remote ref") { return 'missing' }
+            throw "git fetch $Remote $RemoteBranch 失败：$(@($out) -join ' ')"
+        }
+        if ($status -eq 'missing') {
+            Write-Warn "$Remote 上没有分支 $RemoteBranch，跳过与它的同步"
+            return 'missing'
+        }
+        $behind = [int]("$(Invoke-Git @('rev-list', '--count', 'HEAD..FETCH_HEAD'))".Trim())
+        if ($behind -le 0) {
+            Write-Ok "本地已包含 $Remote/$RemoteBranch 的全部提交"
+            return 'ok'
+        }
+        Write-Note "$Remote/$RemoteBranch 领先 $behind 个提交，先合并进本地"
+        $mergeOut = Invoke-Git @('merge', '--no-edit', 'FETCH_HEAD') -Quiet
+        if ($LASTEXITCODE -ne 0) {
+            Write-Fail "与 $Remote/$RemoteBranch 合并时发生冲突：本次提交已在本地，解决冲突后重跑推送"
+            foreach ($l in @($mergeOut)) { Write-Note "  $l" }
+            return 'conflict'
+        }
+        foreach ($l in @($mergeOut)) { Write-Note "  $l" }
+        Write-Ok "已并入 $Remote/$RemoteBranch 的 $behind 个提交"
+        'ok'
+    }
+
+    $pushed = $false
+    if ($NoPush) {
+        Write-Warn '按 -NoPush 跳过同步与推送'
+    } else {
+        Write-Step "同步分支 $branch（upstream → 本地 → origin）"
+        [void](Enable-AutoProxy)
+        Invoke-Git @('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}') -Quiet | Out-Null
+        $hasTracking = ($LASTEXITCODE -eq 0)
+
+        # 1. 先跟 upstream 对齐：上游的新提交要经由本地带到 origin，否则 fork 会越落越远。
+        #    上游不可达时只警告——它不该拦住本次改动进自己的 fork。
+        $upSynced = $false
+        if ($NoUpstreamSync) {
+            Write-Warn '按 -NoUpstreamSync 跳过与 upstream 的同步'
+        } elseif (-not (Get-RemoteUrl 'upstream')) {
+            Write-Note '未配置 upstream 远端，跳过上游同步'
+        } else {
+            $upBranch = if ($UpstreamBranch) { $UpstreamBranch } else { $branch }
+            $r = 'skip'
+            try { $r = Sync-FromRemote -Remote 'upstream' -RemoteBranch $upBranch }
+            catch { Write-Warn "拉取 upstream/$upBranch 失败：$($_.Exception.Message)" }
+            if ($r -eq 'conflict') { throw "与 upstream/$upBranch 合并冲突，未推送" }
+            if ($r -eq 'skip') { Write-Warn '跳过上游同步，继续同步并推送 origin' }
+            $upSynced = ($r -eq 'ok')
+        }
+
+        # 2. 再跟 origin 对齐：远端分支领先时（另一台机器 / 网页端改动）直接 push 会被
+        #    non-fast-forward 拒绝，重试也过不去，历史上只能手动 git pull 补一个合并提交。
+        if ((Sync-FromRemote -Remote 'origin' -RemoteBranch $branch) -eq 'conflict') {
+            throw "与 origin/$branch 合并冲突，未推送"
+        }
+
+        # 3. 推送：本地此时已包含 upstream + origin 的全部提交
+        $out = Invoke-WithRetry -What "推送 origin/$branch" -Action {
+            if ($hasTracking) { Invoke-Git @('push', 'origin', "HEAD:$branch") }
+            else { Invoke-Git @('push', '-u', 'origin', $branch) }
+        }
+        foreach ($l in @($out)) { Write-Note "  $l" }
+        $pushed = $true
+        Write-Ok "已同步 origin/$branch$(if ($upSynced) { '（已与 upstream 对齐）' })"
+    }
+    # ---------- 后续动作：upstream PR ----------
     $doPr = [bool]$Pr -or [bool]$PrMerge
     $doMerge = [bool]$PrMerge
     if (-not $Yes -and -not $doPr -and $pushed -and (Get-RemoteUrl 'upstream')) {
