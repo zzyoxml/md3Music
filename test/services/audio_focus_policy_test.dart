@@ -51,7 +51,7 @@ void main() {
       expect((a as RestoreVolumeAction).targetVolume, closeTo(0.4, 1e-9));
     });
 
-    test('pauseAndResume + duck → KeepPlayingAction（保持音量）', () {
+    test('pauseAndResume + duck begin + playing → PausePlaybackAction（暂停）', () {
       final a = decideInterruptionAction(
         mode: AudioFocusInterruptionMode.pauseAndResume,
         begin: true,
@@ -59,7 +59,29 @@ void main() {
         isPlaying: true,
         currentVolume: 0.8,
       );
+      expect(a, isA<PausePlaybackAction>());
+    });
+
+    test('pauseAndResume + duck begin + 未播放 → KeepPlayingAction', () {
+      final a = decideInterruptionAction(
+        mode: AudioFocusInterruptionMode.pauseAndResume,
+        begin: true,
+        type: AudioInterruptionType.duck,
+        isPlaying: false,
+        currentVolume: 0.8,
+      );
       expect(a, isA<KeepPlayingAction>());
+    });
+
+    test('pauseAndResume + duck end → ResumePlaybackAction（恢复）', () {
+      final a = decideInterruptionAction(
+        mode: AudioFocusInterruptionMode.pauseAndResume,
+        begin: false,
+        type: AudioInterruptionType.duck,
+        isPlaying: false,
+        currentVolume: 0.8,
+      );
+      expect(a, isA<ResumePlaybackAction>());
     });
 
     test('keepPlaying + duck → KeepPlayingAction', () {

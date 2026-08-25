@@ -66,10 +66,15 @@ AudioFocusAction decideInterruptionAction({
   if (!begin) {
     // —— 中断结束 ——
     if (type == AudioInterruptionType.duck) {
-      if (mode == AudioFocusInterruptionMode.duckAndRestore) {
-        return RestoreVolumeAction(volumeBeforeDuck ?? currentVolume);
+      switch (mode) {
+        case AudioFocusInterruptionMode.keepPlaying:
+          return const KeepPlayingAction();
+        case AudioFocusInterruptionMode.pauseAndResume:
+          // duck 型中断（如导航提示）结束时同样尝试恢复被中断的播放
+          return const ResumePlaybackAction();
+        case AudioFocusInterruptionMode.duckAndRestore:
+          return RestoreVolumeAction(volumeBeforeDuck ?? currentVolume);
       }
-      return const KeepPlayingAction();
     }
     switch (mode) {
       case AudioFocusInterruptionMode.keepPlaying:
@@ -83,12 +88,21 @@ AudioFocusAction decideInterruptionAction({
 
   // —— 中断开始 ——
   if (type == AudioInterruptionType.duck) {
-    // 仅「降低音量后自动恢复」模式响应 duck，其余模式保持音量
-    // （避免荣耀平板 V8 Pro 频繁 duck/unduck 音量波动）。
-    if (mode == AudioFocusInterruptionMode.duckAndRestore && isPlaying) {
-      return DuckVolumeAction(currentVolume * kDuckVolumeRatio);
+    switch (mode) {
+      case AudioFocusInterruptionMode.keepPlaying:
+        // 保持播放、保持音量
+        return const KeepPlayingAction();
+      case AudioFocusInterruptionMode.pauseAndResume:
+        // 「暂停后自动恢复」对 duck 型中断（导航提示音等）同样暂停，
+        // 中断结束后自动恢复（用户明确预期：选了暂停就暂停）
+        return isPlaying
+            ? const PausePlaybackAction()
+            : const KeepPlayingAction();
+      case AudioFocusInterruptionMode.duckAndRestore:
+        return isPlaying
+            ? DuckVolumeAction(currentVolume * kDuckVolumeRatio)
+            : const KeepPlayingAction();
     }
-    return const KeepPlayingAction();
   }
   // pause / unknown 开始
   switch (mode) {
@@ -126,6 +140,11 @@ class AudioService {
     // 所有音频焦点策略统一由本服务按 AudioFocusInterruptionMode 处理，
     // 避免两套逻辑叠加导致重复暂停/恢复。
     handleInterruptions: false,
+    // MD3Music fork: 关闭 just_audio 对 audio_session 的自动激活。
+    // 焦点由 Media3 的 AudioFocusManager 唯一管理（handleAudioFocus=true），
+    // audio_session 保持 setActive(false)；否则播放时会重新激活 audio_session
+    // 抢回焦点，与 Media3 交替 request/abandon 导致播放反复暂停。
+    handleAudioSessionActivation: false,
     // Media3 (just_audio 0.10.x) 下缓冲区默认值已较合理，
     // 这里适度收紧：maxBuffer 从 60s 降到 30s（减少内存占用），
     // rebuffer 从 10s 降到 3s（缩短欠载后恢复等待，用户体验更流畅）。
@@ -170,16 +189,6 @@ class AudioService {
   /// just_audio 0.9.x 在播放器初始化后才会有值。
   int? get androidAudioSessionId => _player.androidAudioSessionId;
 
-  /// 是否因为音频焦点丢失 / 设备中断（拔耳机、来电等）而处于暂停状态。
-  /// 在此状态下若重新获得音频焦点，可自动恢复播放。
-  /// 主动调用 [pause] 不会设置此标志。
-  bool _pausedByInterruption = false;
-  bool get wasPausedByInterruption => _pausedByInterruption;
-
-  /// 恢复中的互斥锁：焦点事件流与就绪兜底流可能并发触发恢复，
-  /// 用该标志防止重复进入 [play]，避免恢复瞬间的状态抖动。
-  bool _resumeInProgress = false;
-
   /// 是否完全忽略音频焦点：开启后不响应任何中断事件
   /// （来电 / 导航 / 拔耳机等），保持音量与播放状态不变。
   bool _ignoreAudioFocus = false;
@@ -190,52 +199,56 @@ class AudioService {
   AudioFocusInterruptionMode _interruptionMode =
       AudioFocusInterruptionMode.pauseAndResume;
   AudioFocusInterruptionMode get interruptionMode => _interruptionMode;
-  void setInterruptionMode(AudioFocusInterruptionMode mode) =>
-      _interruptionMode = mode;
+  void setInterruptionMode(AudioFocusInterruptionMode mode) {
+    _interruptionMode = mode;
+    // MD3Music fork: 同步 Media3 的 willPauseWhenDucked 强制值。
+    // - duckAndRestore：false → Media3 对 duck 自动降音量（0.2）并自动恢复
+    // - keepPlaying / pauseAndResume：true → duck 按 pause 语义处理（音量不变），
+    //   由 Media3 自动暂停并在焦点恢复时自动播放
+    // ignore: discarded_futures
+    _player.setForceWillPauseWhenDucked(
+        mode != AudioFocusInterruptionMode.duckAndRestore);
+  }
 
-  /// duck 降音量前的原音量，用于中断结束后还原。
-  /// nullable：首次 duck 时记录，恢复后置 null；嵌套中断不覆盖首个原音量。
-  double? _volumeBeforeDuck;
-
-  /// 各事件流的订阅句柄，dispose 时统一取消，避免单例长期持有泄漏。
-  StreamSubscription<PlayerState>? _resumeSub;
-  StreamSubscription<AudioInterruptionEvent>? _interruptionSub;
-  StreamSubscription<void>? _noisySub;
+  /// Media3 AudioFocusManager 原始焦点事件订阅（真实系统事件，先于 Media3
+  /// 自动 duck/pause 处理发出）。keepPlaying 模式据此对抗自动暂停。
+  StreamSubscription<int>? _media3FocusSub;
 
   Future<void> init() async {
     await _player.setLoopMode(LoopMode.off);
     await _configureAudioSession();
-    _setupResumeOnReady();
+    // MD3Music fork: 焦点事件源改为 Media3 AudioFocusManager 转发
+    // （audio_session 的 interruptionEventStream 已停用，见 _configureAudioSession）
+    _media3FocusSub =
+        _player.audioFocusChangeStream.listen(_handleMedia3FocusChange);
   }
 
-  /// 兜底恢复：当 [tryResumeAfterFocusLoss] 因播放器未 ready 跳过时，
-  /// 监听播放器状态变为 ready 后自动尝试恢复。
-  void _setupResumeOnReady() {
-    _resumeSub = _player.playerStateStream.listen((state) {
-      if (_pausedByInterruption &&
-          state.processingState == ProcessingState.ready) {
-        // ignore: discarded_futures
-        tryResumeAfterFocusLoss();
-      }
-    });
+  /// Media3 焦点事件入口（Android AudioManager 原始 focusChange 值）：
+  /// 1=GAIN, -1=LOSS, -2=LOSS_TRANSIENT, -3=LOSS_TRANSIENT_CAN_DUCK。
+  /// 除「保持播放与音量」外的模式完全由 Media3 自动处理
+  /// （duck→降音量自动恢复 / pause→暂停后自动恢复）。
+  void _handleMedia3FocusChange(int focusChange) {
+    if (_ignoreAudioFocus) return;
+    if (_interruptionMode != AudioFocusInterruptionMode.keepPlaying) return;
+    // keepPlaying：中断开始（非 GAIN）时对抗 Media3 的自动 duck/pause，保持播放。
+    // 音量不变由 setForceWillPauseWhenDucked(true) 保证（duck 不再降音量）。
+    final isBegin = focusChange != 1;
+    if (isBegin && !_player.playing) {
+      // ignore: discarded_futures
+      _player.play();
+    }
   }
 
   Future<void> _configureAudioSession() async {
     try {
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration.music());
-      _interruptionSub = session.interruptionEventStream.listen(_handleInterruption);
-      // 拔耳机 / 蓝牙断开：暂停播放，但**不标记「可自动恢复」**。
-      // 插回耳机不会有焦点 gain 事件，保留 _pausedByInterruption 会在
-      // 下次任意 ready / 焦点事件时误触发自动播放（P2-3）。
-      _noisySub = session.becomingNoisyEventStream.listen((_) {
-        if (_ignoreAudioFocus) return; // 忽略模式下拔耳机也不暂停
-        if (_player.playing) {
-          _pausedByInterruption = false;
-          // ignore: discarded_futures
-          _player.pause();
-        }
-      });
+      // MD3Music fork: 停用 audio_session 的音频焦点请求（setActive(false)）。
+      // 焦点由 Media3 的 AudioFocusManager 唯一持有（handleAudioFocus=true），
+      // 原始事件经 just_audio fork 转发到 audioFocusChangeStream；避免双焦点
+      // 内斗（Media3 与 audio_session 交替 request/abandon 导致播放反复暂停）。
+      // 拔耳机由 Media3 的 becomingNoisy 自动暂停（不标记可自动恢复）。
+      await session.setActive(false);
     } catch (e) {
       // P2-2: 焦点/会话配置失败必须留痕，否则无法用 logcat 排障
       // ignore: avoid_print
@@ -243,85 +256,16 @@ class AudioService {
     }
   }
 
-  /// 音频焦点中断事件入口：纯函数决策 → 执行动作。
-  /// 忽略模式（_ignoreAudioFocus）下不响应任何事件。
-  void _handleInterruption(AudioInterruptionEvent event) {
-    if (_ignoreAudioFocus) return;
-    final action = decideInterruptionAction(
-      mode: _interruptionMode,
-      begin: event.begin,
-      type: event.type,
-      isPlaying: _player.playing,
-      currentVolume: _player.volume,
-      volumeBeforeDuck: _volumeBeforeDuck,
-    );
-    switch (action) {
-      case KeepPlayingAction():
-        break;
-      case DuckVolumeAction(:final targetVolume):
-        // 仅首次降音量记录原音量，嵌套中断不覆盖
-        _volumeBeforeDuck ??= _player.volume;
-        // ignore: discarded_futures
-        _player.setVolume(targetVolume);
-        break;
-      case RestoreVolumeAction(:final targetVolume):
-        final restoreTo = _volumeBeforeDuck ?? targetVolume;
-        _volumeBeforeDuck = null;
-        // ignore: discarded_futures
-        _player.setVolume(restoreTo);
-        break;
-      case PausePlaybackAction():
-        _pausedByInterruption = true;
-        // 直接调 _player.pause()，不经公共 pause()（公共方法会清除中断标志）
-        // ignore: discarded_futures
-        _player.pause();
-        break;
-      case ResumePlaybackAction():
-        // ignore: discarded_futures
-        tryResumeAfterFocusLoss();
-        break;
-    }
-  }
-
-  /// 焦点恢复时尝试自动恢复播放。
-  ///
-  /// 仅当：
-  /// 1) 当前处于「中断暂停」状态（_pausedByInterruption=true）
-  /// 2) 播放器已 ready（processingState == ready）
-  /// 时才会调 play()，避免与用户主动暂停冲突。
-  Future<void> tryResumeAfterFocusLoss() async {
-    if (_resumeInProgress) return; // 防并发恢复
-    if (!_pausedByInterruption) return;
-    if (_player.processingState != ProcessingState.ready) {
-      // 还没 ready，留着标志位等下次状态变化再试
-      return;
-    }
-    _resumeInProgress = true;
-    try {
-      _pausedByInterruption = false;
-      await play();
-    } finally {
-      _resumeInProgress = false;
-    }
-  }
-
   Future<void> play() async {
-    // 主动 play 不影响 _pausedByInterruption 标志；
-    // 若是被动恢复（_pausedByInterruption=true），play 后清掉标志。
     await _player.play();
-    _pausedByInterruption = false;
   }
 
   Future<void> pause() async {
-    // 用户主动暂停：清除中断暂停标志，
-    // 避免焦点恢复 / 播放器 ready 兜底时误自动播放（覆盖用户意图）。
-    _pausedByInterruption = false;
     await _player.pause();
   }
 
   Future<void> stop() async {
     await _player.stop();
-    _pausedByInterruption = false;
   }
 
   Future<void> seek(Duration position) async {
@@ -382,12 +326,8 @@ class AudioService {
   }
 
   Future<void> dispose() async {
-    await _resumeSub?.cancel();
-    await _interruptionSub?.cancel();
-    await _noisySub?.cancel();
+    await _media3FocusSub?.cancel();
     await _player.dispose();
-    _pausedByInterruption = false;
-    _resumeInProgress = false;
   }
 }
 
