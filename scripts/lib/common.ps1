@@ -97,6 +97,49 @@ function Test-RustDirty {
     ($LASTEXITCODE -eq 0) -and [bool]$st
 }
 
+# ---------- 设置搜索索引（生成产物） ----------
+<#
+  设置页搜索索引由 scripts/tools/gen_settings_search_index.dart 从设置页源码生成。
+  设置项新增/改名后忘记重新生成，搜索结果就与实际设置项不一致，因此在任何
+  commit / build 前静默同步一次：无变化不输出，有变化只提示一行（提醒一并提交）。
+
+  工具缺失（公开导出树剥离了 scripts/tools）、dart 不在 PATH、或生成失败时
+  只告警不拦断——构建/提交流程不该被开发期工具卡死；一致性由
+  test/modules/settings/settings_search_index_test.dart 兜底。
+#>
+function Sync-SettingsSearchIndex {
+    $root = Get-RepoRoot
+    $gen = Join-Path $root 'scripts\tools\gen_settings_search_index.dart'
+    $out = Join-Path $root 'lib\modules\settings\settings_search_index.g.dart'
+    if (-not (Test-Path $gen)) { return }
+    if (-not (Test-HasCommand dart)) { return }
+
+    $before = if (Test-Path $out) { [System.IO.File]::ReadAllText($out) } else { '' }
+    # dart run 把 "Running build hooks..." 写到 stderr，'Stop' 下会被当成终止错误，
+    # 这里临时降为 Continue，只按退出码判成败（与 Invoke-Native / Invoke-Git 同一套约定）
+    $prevPref = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    Push-Location $root          # 生成器按当前目录定位源码
+    try {
+        $log = @(& dart run $gen 2>&1 | ForEach-Object { [string]$_ })
+        $code = $LASTEXITCODE
+    }
+    finally {
+        Pop-Location
+        $ErrorActionPreference = $prevPref
+    }
+
+    if ($code -ne 0) {
+        $tail = @($log) | Where-Object { $_.Trim() } | Select-Object -Last 1
+        Write-Warn "设置搜索索引生成失败（不拦断流程）：$tail"
+        return
+    }
+    $after = if (Test-Path $out) { [System.IO.File]::ReadAllText($out) } else { '' }
+    if ($after -ne $before) {
+        Write-Warn '设置搜索索引已重新生成：lib/modules/settings/settings_search_index.g.dart（请一并提交）'
+    }
+}
+
 # ---------- 否认清单闸门（唯一实现） ----------
 function Get-DenyPattern {
     param([string]$DenyFile)

@@ -46,6 +46,7 @@ $RustDir    = Join-Path $RepoRoot 'kugou_api_server\rust'
 $DllPath    = Join-Path $RustDir 'target\release\kugou_server.dll'
 $StampPath  = Join-Path $RustDir 'target\release\kugou_server.toolchain'
 $ReleaseDir = Join-Path $RepoRoot 'build\windows\x64\runner\Release'
+Sync-SettingsSearchIndex          # 设置搜索索引：构建前静默同步（有变化才提示）
 Add-CargoToPath
 
 # 现存 dll 的工具链标记（build_desktop.ps1 写入），非 *-msvc 视为不可发布

@@ -42,6 +42,7 @@ import '../../widgets/seed_color_picker.dart';
 import '../../widgets/usb_exclusive_section.dart';
 import '../player/mini_player.dart';
 import 'equalizer_settings_page.dart';
+import 'settings_search_index.g.dart';
 
 /// CI compile-time version injection via --dart-define=APP_VERSION=X
 /// Fallback display when runtime PackageInfo read fails.
@@ -542,77 +543,9 @@ class _SettingsPageState extends State<SettingsPage>
     ];
   }
 
-  /// 设置搜索索引：label 为展示名，aliases 为补充匹配词。
-  /// 命中后在总览页展示对应设置项，点击进入所属分类。
-  static const List<({String label, String category, String aliases})> _searchIndex = [
-    // 歌词
-    (label: '翻译歌词', category: '歌词', aliases: '翻译'),
-    (label: '罗马音歌词', category: '歌词', aliases: '罗马音 拼音'),
-    (label: '优先翻译', category: '歌词', aliases: '优先'),
-    (label: '解锁桌面歌词', category: '歌词', aliases: '桌面歌词 桌面'),
-    (label: '蓝牙歌词', category: '歌词', aliases: '蓝牙'),
-    (label: '锁屏歌词', category: '歌词', aliases: '锁屏'),
-    (label: '锁屏歌词字号', category: '歌词', aliases: '字号 大小'),
-    (label: '锁屏歌词粗细', category: '歌词', aliases: '粗细 加粗'),
-    (label: '歌词字体', category: '歌词', aliases: '字体'),
-    // 外观
-    (label: 'app 全局字体', category: '外观', aliases: '字体'),
-    (label: '主题色', category: '外观', aliases: '主题 颜色 换肤'),
-    (label: '使用系统主题色', category: '外观', aliases: '系统主题 壁纸 莫奈'),
-    (label: '封面动态取色', category: '外观', aliases: '动态取色 封面'),
-    (label: 'OLED 纯黑深色', category: '外观', aliases: 'oled 纯黑 深色 黑色'),
-    (label: '启用自定义背景图片', category: '外观', aliases: '背景 图片 壁纸'),
-    (label: '选择背景图片', category: '外观', aliases: '背景 图片 选择 更换'),
-    (label: '清除背景图片', category: '外观', aliases: '背景 图片 清除 移除'),
-    (label: '背景图片模糊', category: '外观', aliases: '模糊 高斯模糊 背景'),
-    (label: '背景图片透明度', category: '外观', aliases: '透明度 背景'),
-    (label: '背景图片莫奈取色', category: '外观', aliases: '莫奈 取色 动态取色 背景'),
-    (label: '文字阴影', category: '外观', aliases: '阴影 文字 可读性 背景 壁纸'),
-    // 播放页样式
-    (label: '歌词双击跳转', category: '播放页样式', aliases: '双击 跳转'),
-    (label: '歌手写真背景轮播', category: '播放页样式', aliases: '写真 背景 轮播'),
-    (label: '写真背景透明度', category: '播放页样式', aliases: '写真 透明度'),
-    (label: '歌词高斯模糊', category: '播放页样式', aliases: '高斯模糊 模糊'),
-    (label: '歌词辉光效果', category: '播放页样式', aliases: '辉光 发光'),
-    (label: '背景动态流光', category: '播放页样式', aliases: '流光 背景'),
-    (label: '男女对唱歌词优化', category: '播放页样式', aliases: '对唱 男女'),
-    (label: '歌词省电模式', category: '播放页样式', aliases: '省电 限帧'),
-    (label: '歌词动态颜色', category: '播放页样式', aliases: '动态颜色 混色'),
-    (label: '音乐频谱环绕', category: '播放页样式', aliases: '频谱 环绕 可视化'),
-    (label: '频谱柱数量', category: '播放页样式', aliases: '频谱'),
-    (label: '频谱动态取色', category: '播放页样式', aliases: '频谱'),
-    (label: '频谱透明度', category: '播放页样式', aliases: '频谱'),
-    // 播放
-    (label: '默认音质', category: '播放', aliases: '音质 清晰度'),
-    (label: '均衡器', category: '播放', aliases: 'eq 均衡'),
-    (label: '自动领取 VIP', category: '播放', aliases: 'vip 会员 自动领取'),
-    (label: '暂停淡入淡出', category: '播放', aliases: '淡入淡出 渐变 音量'),
-    (label: '播放时保持屏幕常亮', category: '播放', aliases: '屏幕常亮 常亮 息屏'),
-    (label: '允许与其他应用同时播放音频', category: '播放', aliases: '音频焦点 忽略焦点 同时播放 共存 不被打断 焦点'),
-    (label: '播放 MV 时自动画中画', category: '播放', aliases: '画中画 pip 悬浮'),
-    (label: 'MiniPlayer 滑动切歌', category: '播放', aliases: 'miniplaer 迷你播放条 滑动切歌 切歌'),
-    (label: '收藏歌单按最近点击排序', category: '播放', aliases: '收藏 歌单 排序 最近点击 顺序'),
-    // 主页管理
-    (label: '主页 Tab 管理', category: '主页管理', aliases: 'tab 标签页 主页'),
-    // 桌面快捷方式
-    (label: '桌面快捷方式', category: '桌面快捷方式', aliases: '快捷方式 快捷 长按'),
-    // USB 独占
-    (label: 'USB 独占输出', category: 'USB 独占', aliases: 'usb dac 独占 音频'),
-    // 在线音乐
-    (label: '本地数据接口', category: '在线音乐', aliases: '接口 本地服务器 api 在线音乐'),
-    // 缓存与数据
-    (label: '清除缓存', category: '缓存与数据', aliases: '缓存 清除'),
-    (label: '数据迁移', category: '缓存与数据', aliases: '迁移 数据 修复'),
-    // 关于
-    (label: '新手教程', category: '关于', aliases: '教程 引导'),
-    (label: '用户协议', category: '关于', aliases: '协议 条款'),
-    (label: '免责声明', category: '关于', aliases: '免责'),
-    (label: '应用版本', category: '关于', aliases: '版本 检查更新'),
-    (label: '更新最新版本', category: '关于', aliases: '更新'),
-    (label: '开源许可', category: '关于', aliases: '开源 license 许可'),
-  ];
-
   /// 按查询词过滤搜索索引（label + aliases 包含匹配）。
+  /// 索引由 scripts/tools/gen_settings_search_index.dart 从本文件源码生成，
+  /// 新增/改名设置项后重新生成即可，无需手工维护条目。
   List<({String label, String category, String aliases})> _searchResults(
     String query,
   ) {
@@ -620,7 +553,7 @@ class _SettingsPageState extends State<SettingsPage>
     if (q.isEmpty) return const [];
     // 合并私有构建注入的额外索引条目（默认无）
     final entries = [
-      ..._searchIndex,
+      ...kSettingsSearchIndex,
       ...?SettingsPage.extraSearchIndexEntries,
     ];
     return entries
@@ -709,6 +642,27 @@ class _SettingsPageState extends State<SettingsPage>
     );
   }
 
+  /// 区块内的分组小标题：把语义相关的设置项聚成一组。
+  /// [first] 为区块内第一个分组（顶部留白小一些，避免与卡片上沿脱开）。
+  Widget _buildGroupLabel(
+    String text,
+    ColorScheme colorScheme, {
+    bool first = false,
+  }) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(16, first ? 12 : 20, 16, 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Text(
+          text,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+            color: colorScheme.onSurfaceVariant,
+          ),
+        ),
+      ),
+    );
+  }
+
   /// 歌词设置 section：MD3 与 Apple Music 两种风格播放页的歌词
   /// （字号/行间距/字体）均已移入播放页右上角菜单的"歌词显示设置"入口，
   /// 设置页不再保留独立入口。
@@ -716,19 +670,8 @@ class _SettingsPageState extends State<SettingsPage>
     final protocolActive = _lyricPushProtocol != 'none';
     return Column(
       children: [
-        // 实时歌词推送：Lyricon / SuperLyric / LyricInfo 三选一 + 关闭
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              '歌词推送',
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ),
+        // ① 歌词推送：先选推送协议，再调该协议下的共用文本偏好
+        _buildGroupLabel('歌词推送', colorScheme, first: true),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
           child: DropdownButtonFormField<String>(
@@ -787,6 +730,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
           ),
         // 共用偏好：翻译 / 罗马音 / 优先翻译（关闭或无协议时禁用）
+        // search: 翻译
         SwitchListTile(
           title: const Text('翻译歌词'),
           subtitle: const Text('向所选推送目标显示翻译文本'),
@@ -798,6 +742,7 @@ class _SettingsPageState extends State<SettingsPage>
                 }
               : null,
         ),
+        // search: 罗马音 拼音
         SwitchListTile(
           title: const Text('罗马音歌词'),
           subtitle: Text(
@@ -814,6 +759,7 @@ class _SettingsPageState extends State<SettingsPage>
                     }
                   : null,
         ),
+        // search: 优先 翻译
         SwitchListTile(
           title: const Text('优先翻译（同时存在时）'),
           subtitle: Text(
@@ -830,8 +776,10 @@ class _SettingsPageState extends State<SettingsPage>
                     }
                   : null,
         ),
-        // 解锁桌面歌词：悬浮窗锁定后点击穿透（无法点击自身解锁），
+        // ② 桌面歌词：悬浮窗锁定后点击穿透（无法点击自身解锁），
         // 且无法下拉通知栏时，可在此一键解锁悬浮窗。
+        _buildGroupLabel('桌面歌词', colorScheme),
+        // search: 桌面歌词 桌面
         SwitchListTile(
           title: const Text('解锁桌面歌词'),
           subtitle: Text(
@@ -845,7 +793,9 @@ class _SettingsPageState extends State<SettingsPage>
             await DesktopLyricService.instance.unlock();
           },
         ),
-        // 蓝牙歌词（独立开关）：通过 MediaSession 元数据替换在车机等设备显示歌词
+        // ③ 蓝牙歌词：主开关 + 从属的封面压缩
+        _buildGroupLabel('蓝牙歌词', colorScheme),
+        // search: 蓝牙
         SwitchListTile(
           title: const Text('蓝牙歌词'),
           subtitle: const Text('通过蓝牙在汽车主机等设备显示当前歌词（标题显示歌词，作者显示「作者 - 标题」）'),
@@ -860,6 +810,7 @@ class _SettingsPageState extends State<SettingsPage>
           },
         ),
         // 蓝牙歌词封面压缩：默认关闭。开启后原生刷新用 256px 缩略图，降低系统负载
+        // search: 蓝牙 封面 压缩
         SwitchListTile(
           title: const Text('压缩封面图'),
           subtitle: const Text('开启后蓝牙歌词刷新使用 256px 压缩封面，降低系统负载；关闭保持原始封面质量'),
@@ -870,7 +821,9 @@ class _SettingsPageState extends State<SettingsPage>
             await _settingsRepository.setBluetoothLyricCompressArt(value);
           },
         ),
-        // 锁屏歌词（独立开关）：锁屏时全屏显示逐字歌词
+        // ④ 锁屏歌词：主开关 + 从属的字号 / 粗细
+        _buildGroupLabel('锁屏歌词', colorScheme),
+        // search: 锁屏
         SwitchListTile(
           title: const Text('锁屏歌词（实验性）'),
           subtitle: const Text('锁屏时全屏显示逐字歌词（熄灭屏幕后点亮，覆盖在系统锁屏上方；解锁自动关闭；需要在权限管理同时开启锁屏通知和后台弹出界面以及显示悬浮窗权限才能显示）'),
@@ -884,6 +837,7 @@ class _SettingsPageState extends State<SettingsPage>
           },
         ),
         // 锁屏歌词字号（独立于 App 内歌词）
+        // search: 字号 大小
         ListTile(
           title: const Text('锁屏歌词字号'),
           subtitle: M3ESlider(
@@ -905,6 +859,7 @@ class _SettingsPageState extends State<SettingsPage>
           trailing: Text('${_lockScreenLyricFontSize.round()}'),
         ),
         // 锁屏歌词粗细（独立于 App 内歌词）
+        // search: 粗细 加粗
         ListTile(
           title: const Text('锁屏歌词粗细'),
           subtitle: M3ESlider(
@@ -926,7 +881,8 @@ class _SettingsPageState extends State<SettingsPage>
           ),
           trailing: Text('$_lockScreenLyricFontWeight'),
         ),
-        // 逐字歌词时间偏移（仅在线音乐生效）
+        // ⑤ 歌词同步：逐字歌词时间偏移（仅在线音乐生效）
+        _buildGroupLabel('歌词同步', colorScheme),
         const _LyricTimeOffsetTile(),
       ],
     );
@@ -1052,19 +1008,8 @@ class _SettingsPageState extends State<SettingsPage>
         context.watch<ThemeProvider>().themeMode != ThemeMode.light;
     return Column(
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '主题模式',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-              ),
-            ],
-          ),
-        ),
+        // ① 明暗：主题模式 + 其从属的 OLED 纯黑（仅深色生效）
+        _buildGroupLabel('主题模式', colorScheme, first: true),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           // 注意：按钮顺序(浅色/深色/跟随系统)与 ThemeMode.index(system=0,light=1,dark=2)
@@ -1097,14 +1042,44 @@ class _SettingsPageState extends State<SettingsPage>
             },
           ),
         ),
-        // app全局字体入口：点击弹出三选一面板（系统 / 内置 SimHei / 自定义 TTF）
-        // 选择"自定义"时打开 Android SAF 文件选择器选 .ttf/.otf 文件
-        ListTile(
-          leading: const Icon(Icons.text_fields),
-          title: const Text('app全局字体'),
-          subtitle: Text(_getFontSourceLabel(themeProvider.fontSource)),
-          trailing: const Icon(Icons.chevron_right, size: 18),
-          onTap: () => _showFontSourceSheet(themeProvider),
+        // OLED 纯黑开关：light 模式禁用；dark 与 system 可勾选。
+        // system 模式下勾选后，系统切深色时自动生效，切浅色时不影响 lightTheme。
+        // search: oled 纯黑 深色 黑色
+        SwitchListTile(
+          title: const Text('OLED 纯黑深色'),
+          subtitle: const Text('将深色背景改为纯黑（仅深色模式生效，节省 OLED 电量）'),
+          value: themeProvider.useOledBlack,
+          onChanged: canToggleOled
+              ? (v) {
+                  HapticFeedback.lightImpact();
+                  themeProvider.setUseOledBlack(v);
+                }
+              : null,
+        ),
+        // ② 配色来源：自动取色（系统壁纸 / 封面）优先，两者都关闭时才用手动
+        // 种子色，因此「主题色」排在两个自动来源之后，作为兜底项。
+        _buildGroupLabel('主题配色', colorScheme),
+        // search: 系统主题 壁纸 莫奈
+        SwitchListTile(
+          title: const Text('使用系统主题色'),
+          subtitle: const Text('跟随系统壁纸取色（Android 12+ 莫奈色，HCT 多点量化）'),
+          value: _useDynamicColor,
+          onChanged: (v) {
+            HapticFeedback.lightImpact();
+            setState(() => _useDynamicColor = v);
+            context.read<ThemeProvider>().setUseDynamicColor(v);
+          },
+        ),
+        // search: 动态取色 封面
+        SwitchListTile(
+          title: const Text('封面动态取色'),
+          subtitle: const Text('根据当前播放歌曲封面动态改变主题色（可叠加系统主题色，封面优先）'),
+          value: _useCoverSeedColor,
+          onChanged: (v) {
+            HapticFeedback.lightImpact();
+            setState(() => _useCoverSeedColor = v);
+            context.read<ThemeProvider>().setUseCoverSeedColor(v);
+          },
         ),
         // 主题色入口：点击弹出 8 色预设面板。
         // 系统主题色 / 封面动态取色 / 背景莫奈取色开启时用 IgnorePointer 禁用点击
@@ -1115,6 +1090,7 @@ class _SettingsPageState extends State<SettingsPage>
               themeProvider.useCoverSeedColor ||
               (themeProvider.useBackgroundImage &&
                   themeProvider.useBackgroundMonet),
+          // search: 主题 颜色 换肤
           child: ListTile(
             leading: const Icon(Icons.palette),
             title: const Text('主题色'),
@@ -1140,60 +1116,25 @@ class _SettingsPageState extends State<SettingsPage>
             onTap: () => _showSeedColorPicker(themeProvider),
           ),
         ),
-        SwitchListTile(
-          title: const Text('使用系统主题色'),
-          subtitle: const Text('跟随系统壁纸取色（Android 12+ 莫奈色，HCT 多点量化）'),
-          value: _useDynamicColor,
-          onChanged: (v) {
-            HapticFeedback.lightImpact();
-            setState(() => _useDynamicColor = v);
-            context.read<ThemeProvider>().setUseDynamicColor(v);
-          },
+        // ③ 字体与显示：全局字体来源 + 显示大小，两者都直接改变文字/界面尺寸
+        _buildGroupLabel('字体与显示', colorScheme),
+        // app全局字体入口：点击弹出三选一面板（系统 / 内置 SimHei / 自定义 TTF）
+        // 选择"自定义"时打开 Android SAF 文件选择器选 .ttf/.otf 文件
+        // search: 字体
+        ListTile(
+          leading: const Icon(Icons.text_fields),
+          title: const Text('app全局字体'),
+          subtitle: Text(_getFontSourceLabel(themeProvider.fontSource)),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: () => _showFontSourceSheet(themeProvider),
         ),
-        SwitchListTile(
-          title: const Text('封面动态取色'),
-          subtitle: const Text('根据当前播放歌曲封面动态改变主题色（可叠加系统主题色，封面优先）'),
-          value: _useCoverSeedColor,
-          onChanged: (v) {
-            HapticFeedback.lightImpact();
-            setState(() => _useCoverSeedColor = v);
-            context.read<ThemeProvider>().setUseCoverSeedColor(v);
-          },
-        ),
-        // OLED 纯黑开关：light 模式禁用；dark 与 system 可勾选。
-        // system 模式下勾选后，系统切深色时自动生效，切浅色时不影响 lightTheme。
-        SwitchListTile(
-          title: const Text('OLED 纯黑深色'),
-          subtitle: const Text('将深色背景改为纯黑（仅深色模式生效，节省 OLED 电量）'),
-          value: themeProvider.useOledBlack,
-          onChanged: canToggleOled
-              ? (v) {
-                  HapticFeedback.lightImpact();
-                  themeProvider.setUseOledBlack(v);
-                }
-              : null,
-        ),
-        const Divider(),
         // 「显示大小」滑块单独抽成 StatefulWidget：拖动中的中间值只重建这一小块。
         // 若放在设置页里用 setState 承接，每个 drag update 都会重建整页三千余行的
         // 元素树，滑块自身的手势识别器可能被连带重建 → 拖动中途"断触"、
         // onChangeEnd 提前触发（手还没抬就应用并弹确认框）。
         const _DisplayScaleTile(),
-        const Divider(height: 16),
-        // 底部导航栏文字显示行为：始终显示 / 仅当前页 / 始终不显示
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '底部导航栏文字',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                ),
-              ),
-            ],
-          ),
-        ),
+        // ④ 导航栏：底部导航栏文字显示行为（始终显示 / 仅当前页 / 始终不显示）
+        _buildGroupLabel('底部导航栏', colorScheme),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: M3EToggleButtonGroup(
@@ -1231,18 +1172,8 @@ class _SettingsPageState extends State<SettingsPage>
             },
           ),
         ),
-        const Divider(height: 32),
-        // 界面背景：独立子区块（保留与外观其他条目分隔的独立包裹）
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-          child: Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              '界面背景',
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-          ),
-        ),
+        // ⑤ 界面背景：全局背景图及其衍生的取色 / 可读性设置
+        _buildGroupLabel('界面背景', colorScheme),
         _buildBackgroundSection(colorScheme),
       ],
     );
@@ -1261,6 +1192,7 @@ class _SettingsPageState extends State<SettingsPage>
         File(_backgroundImagePath!).existsSync();
     return Column(
       children: [
+        // search: 背景 图片 壁纸
         SwitchListTile(
           title: const Text('启用自定义背景图片'),
           subtitle: const Text('关闭后恢复纯色主题背景；开启且未选图时用内置默认壁纸'),
@@ -1272,6 +1204,131 @@ class _SettingsPageState extends State<SettingsPage>
             themeProvider.setUseBackgroundImage(v);
           },
         ),
+        // 图片本身：选图 → 预览 → 清除 → 模糊 → 透明度（先有图，再调图）
+        // 标题随是否已选图切换，索引固定按「选择背景图片」登记
+        // search-item: 选择背景图片 | 背景 图片 选择 更换
+        ListTile(
+          leading: const Icon(Icons.image_outlined),
+          title: Text(hasImage ? '更换背景图片' : '选择背景图片'),
+          subtitle: Text(hasImage ? '已选择图片，点击更换' : '从系统文件选择器选择一张图片'),
+          trailing: const Icon(Icons.chevron_right, size: 18),
+          onTap: _pickBackgroundImage,
+        ),
+        // 实时预览：按当前模糊 / 透明度渲染（无用户图片时显示内置默认壁纸）
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              height: 120,
+              width: double.infinity,
+              child: Opacity(
+                opacity: _backgroundOpacity,
+                child: ImageFiltered(
+                  imageFilter: ImageFilter.blur(
+                    sigmaX: _backgroundBlur,
+                    sigmaY: _backgroundBlur,
+                  ),
+                  child: hasImage
+                      ? Image.file(
+                          File(_backgroundImagePath!),
+                          fit: BoxFit.cover,
+                          // 限制解码宽度，避免选高分辨率照片时全尺寸解码导致内存峰值闪退
+                          cacheWidth: 800,
+                        )
+                      : Image.asset(
+                          kDefaultWallpaperAsset,
+                          fit: BoxFit.cover,
+                          cacheWidth: 800,
+                        ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        if (hasImage)
+          // search: 背景 图片 清除 移除
+          ListTile(
+            leading: Icon(
+              Icons.cleaning_services_outlined,
+              color: colorScheme.error,
+            ),
+            title: const Text('清除背景图片'),
+            subtitle: const Text('清除后使用内置默认壁纸'),
+            onTap: _clearBackgroundImage,
+          ),
+        // 模糊程度滑块
+        // search-item: 背景图片模糊 | 模糊 高斯模糊 背景
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Row(
+            children: [
+              Icon(Icons.blur_on, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Expanded(
+                child: M3ESlider(
+                  value: _backgroundBlur,
+                  min: 0,
+                  max: 30,
+                  // 界面背景控件不显示节点
+                  label: '${_backgroundBlur.round()}',
+                  onChanged: (v) => setState(() => _backgroundBlur = v),
+                  onChangeEnd: (v) => themeProvider.setBackgroundBlur(v),
+                ),
+              ),
+              SizedBox(
+                width: 34,
+                child: Text(
+                  '${_backgroundBlur.round()}',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 透明度滑块
+        // search-item: 背景图片透明度 | 透明度 背景
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Row(
+            children: [
+              Icon(Icons.opacity, color: colorScheme.onSurfaceVariant),
+              const SizedBox(width: 12),
+              Expanded(
+                child: M3ESlider(
+                  value: _backgroundOpacity,
+                  min: 0.2,
+                  max: 1.0,
+                  // 界面背景控件不显示节点
+                  label: '${(_backgroundOpacity * 100).round()}%',
+                  onChanged: (v) {
+                    setState(() => _backgroundOpacity = v);
+                    // 实时同步到全局背景（ThemeProvider notify → AppBackgroundLayer 重建）
+                    // ignore: discarded_futures
+                    themeProvider.setBackgroundOpacity(v);
+                  },
+                ),
+              ),
+              SizedBox(
+                width: 34,
+                child: Text(
+                  '${(_backgroundOpacity * 100).round()}%',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // 图片的衍生效果：先取色，再管背景图上的文字可读性
+        // search: 莫奈 取色 动态取色 背景
         SwitchListTile(
           title: const Text('按背景图莫奈取色'),
           value: _useBackgroundMonet,
@@ -1283,6 +1340,7 @@ class _SettingsPageState extends State<SettingsPage>
           },
         ),
         // 文字阴影：只有启用背景图时才可用（关闭背景图时开关置灰，保留用户选择）
+        // search: 阴影 文字 可读性 背景 壁纸
         SwitchListTile(
           title: const Text('文字阴影'),
           subtitle: Text(
@@ -1342,123 +1400,6 @@ class _SettingsPageState extends State<SettingsPage>
             ],
           ),
         ),
-        ListTile(
-          leading: const Icon(Icons.image_outlined),
-          title: Text(hasImage ? '更换背景图片' : '选择背景图片'),
-          subtitle: Text(hasImage ? '已选择图片，点击更换' : '从系统文件选择器选择一张图片'),
-          trailing: const Icon(Icons.chevron_right, size: 18),
-          onTap: _pickBackgroundImage,
-        ),
-        // 实时预览：按当前模糊 / 透明度渲染（无用户图片时显示内置默认壁纸）
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: SizedBox(
-              height: 120,
-              width: double.infinity,
-              child: Opacity(
-                opacity: _backgroundOpacity,
-                child: ImageFiltered(
-                  imageFilter: ImageFilter.blur(
-                    sigmaX: _backgroundBlur,
-                    sigmaY: _backgroundBlur,
-                  ),
-                  child: hasImage
-                      ? Image.file(
-                          File(_backgroundImagePath!),
-                          fit: BoxFit.cover,
-                          // 限制解码宽度，避免选高分辨率照片时全尺寸解码导致内存峰值闪退
-                          cacheWidth: 800,
-                        )
-                      : Image.asset(
-                          kDefaultWallpaperAsset,
-                          fit: BoxFit.cover,
-                          cacheWidth: 800,
-                        ),
-                ),
-              ),
-            ),
-          ),
-        ),
-        if (hasImage)
-          ListTile(
-            leading: Icon(
-              Icons.cleaning_services_outlined,
-              color: colorScheme.error,
-            ),
-            title: const Text('清除背景图片'),
-            subtitle: const Text('清除后使用内置默认壁纸'),
-            onTap: _clearBackgroundImage,
-          ),
-        // 模糊程度滑块
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Row(
-            children: [
-              Icon(Icons.blur_on, color: colorScheme.onSurfaceVariant),
-              const SizedBox(width: 12),
-              Expanded(
-                child: M3ESlider(
-                  value: _backgroundBlur,
-                  min: 0,
-                  max: 30,
-                  // 界面背景控件不显示节点
-                  label: '${_backgroundBlur.round()}',
-                  onChanged: (v) => setState(() => _backgroundBlur = v),
-                  onChangeEnd: (v) => themeProvider.setBackgroundBlur(v),
-                ),
-              ),
-              SizedBox(
-                width: 34,
-                child: Text(
-                  '${_backgroundBlur.round()}',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        // 透明度滑块
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-          child: Row(
-            children: [
-              Icon(Icons.opacity, color: colorScheme.onSurfaceVariant),
-              const SizedBox(width: 12),
-              Expanded(
-                child: M3ESlider(
-                  value: _backgroundOpacity,
-                  min: 0.2,
-                  max: 1.0,
-                  // 界面背景控件不显示节点
-                  label: '${(_backgroundOpacity * 100).round()}%',
-                  onChanged: (v) {
-                    setState(() => _backgroundOpacity = v);
-                    // 实时同步到全局背景（ThemeProvider notify → AppBackgroundLayer 重建）
-                    // ignore: discarded_futures
-                    themeProvider.setBackgroundOpacity(v);
-                  },
-                ),
-              ),
-              SizedBox(
-                width: 34,
-                child: Text(
-                  '${(_backgroundOpacity * 100).round()}%',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
       ],
     );
   }
@@ -1494,13 +1435,21 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   /// 播放页样式 section：播放器风格卡片选择 + 视觉特效开关。
+  ///
+  /// 排列逻辑：先选风格 → 两种风格通用项 → MD3 专属 → Apple Music 专属 →
+  /// 两种风格均支持的频谱。专属项按其生效风格聚拢，避免灰显开关散落在各处。
   Widget _buildPlayerStyleSection(ColorScheme colorScheme) {
     return Column(
       children: [
+        // ① 风格选择：决定下方哪些专属项可用
+        _buildGroupLabel('播放页风格', colorScheme, first: true),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: _buildStyleCards(colorScheme),
         ),
+        // ② 两种风格通用
+        _buildGroupLabel('通用', colorScheme),
+        // search: 双击 跳转
         SwitchListTile(
           title: const Text('歌词双击跳转'),
           subtitle: const Text('开启后需双击歌词行才能跳转播放位置'),
@@ -1511,6 +1460,9 @@ class _SettingsPageState extends State<SettingsPage>
             context.read<ThemeProvider>().setLyricDoubleTapToJump(v);
           },
         ),
+        // ③ MD3 风格专属：歌手写真背景 + 其从属的间隔 / 透明度
+        _buildGroupLabel('MD3Music 风格', colorScheme),
+        // search: 写真 背景 轮播
         SwitchListTile(
           title: const Text('歌手写真背景轮播'),
           subtitle: const Text('MD3 风格播放页显示歌手写真背景（仅在线歌曲）'),
@@ -1524,6 +1476,7 @@ class _SettingsPageState extends State<SettingsPage>
               : null,
         ),
         if (_useArtistPhotoBackground && !_useAmStylePlayer)
+          // search: 写真 轮播 间隔
           ListTile(
             title: const Text('轮播间隔'),
             subtitle: Text('每 $_artistPhotoInterval 秒切换'),
@@ -1540,6 +1493,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
           ),
         if (_useArtistPhotoBackground && !_useAmStylePlayer)
+          // search: 写真 透明度
           ListTile(
             title: const Text('写真背景透明度'),
             subtitle: M3ESlider(
@@ -1556,42 +1510,9 @@ class _SettingsPageState extends State<SettingsPage>
             ),
             trailing: Text('${(_artistPhotoOpacity * 100).round()}%'),
           ),
-        SwitchListTile(
-          title: const Text('歌词高斯模糊'),
-          subtitle: const Text('开启为高斯模糊渐变，高功耗，关闭为 alpha 淡出'),
-          value: _useGaussianBlur,
-          onChanged: _useAmStylePlayer
-              ? (v) {
-                  HapticFeedback.lightImpact();
-                  setState(() => _useGaussianBlur = v);
-                  LyricPreferences.instance.setUseGaussianBlur(v);
-                }
-              : null,
-        ),
-        SwitchListTile(
-          title: const Text('歌词辉光效果'),
-          subtitle: const Text('持续时间较长的字触发发光缩放效果'),
-          value: _useGlowEffect,
-          onChanged: _useAmStylePlayer
-              ? (v) {
-                  HapticFeedback.lightImpact();
-                  setState(() => _useGlowEffect = v);
-                  LyricPreferences.instance.setUseGlowEffect(v);
-                }
-              : null,
-        ),
-        SwitchListTile(
-          title: const Text('背景动态流光'),
-          subtitle: const Text('专辑封面色彩流动效果,高功耗 '),
-          value: _useFlowingBackground,
-          onChanged: _useAmStylePlayer
-              ? (v) {
-                  HapticFeedback.lightImpact();
-                  setState(() => _useFlowingBackground = v);
-                  LyricPreferences.instance.setUseFlowingBackground(v);
-                }
-              : null,
-        ),
+        // ④ Apple Music 风格专属：先歌词内容/排版，再颜色，再特效，最后性能兜底
+        _buildGroupLabel('Apple Music 风格', colorScheme),
+        // search: 对唱 男女
         SwitchListTile(
           title: const Text('男女对唱歌词优化'),
           subtitle: const Text('剔除「男/女/合」标记，男左女右、合唱居中'),
@@ -1604,20 +1525,8 @@ class _SettingsPageState extends State<SettingsPage>
                 }
               : null,
         ),
-        // 歌词省电模式：AM 播放器歌词界面锁定 60fps，上下滑动歌词时临时解锁
-        SwitchListTile(
-          title: const Text('歌词省电模式'),
-          subtitle: const Text('歌词界面锁定 60fps 更省电，上下滑动歌词时自动解除限帧'),
-          value: _lyricEcoMode,
-          onChanged: _useAmStylePlayer
-              ? (v) {
-                  HapticFeedback.lightImpact();
-                  setState(() => _lyricEcoMode = v);
-                  LyricPreferences.instance.setEcoMode(v);
-                }
-              : null,
-        ),
         // 歌词动态字体颜色：当前行按「85% 白 + 15% 封面提取色」混色（仅 AM 播放器）
+        // search: 动态颜色 混色
         SwitchListTile(
           title: const Text('歌词动态颜色'),
           subtitle: const Text('当前行歌词根据专辑封面取色混色（85% 白 + 15% 提取色）'),
@@ -1630,7 +1539,65 @@ class _SettingsPageState extends State<SettingsPage>
                 }
               : null,
         ),
+        // search: 高斯模糊 模糊
+        SwitchListTile(
+          title: const Text('歌词高斯模糊'),
+          subtitle: const Text('开启为高斯模糊渐变，高功耗，关闭为 alpha 淡出'),
+          value: _useGaussianBlur,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  HapticFeedback.lightImpact();
+                  setState(() => _useGaussianBlur = v);
+                  LyricPreferences.instance.setUseGaussianBlur(v);
+                }
+              : null,
+        ),
+        // search: 辉光 发光
+        SwitchListTile(
+          title: const Text('歌词辉光效果'),
+          subtitle: const Text('持续时间较长的字触发发光缩放效果'),
+          value: _useGlowEffect,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  HapticFeedback.lightImpact();
+                  setState(() => _useGlowEffect = v);
+                  LyricPreferences.instance.setUseGlowEffect(v);
+                }
+              : null,
+        ),
+        // search: 流光 背景
+        SwitchListTile(
+          title: const Text('背景动态流光'),
+          subtitle: const Text('专辑封面色彩流动效果,高功耗 '),
+          value: _useFlowingBackground,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  HapticFeedback.lightImpact();
+                  setState(() => _useFlowingBackground = v);
+                  LyricPreferences.instance.setUseFlowingBackground(v);
+                }
+              : null,
+        ),
+        // 歌词省电模式：AM 播放器歌词界面锁定 60fps，上下滑动歌词时临时解锁。
+        // 排在特效末尾：它是上面几项高功耗特效的性能兜底。
+        // search: 省电 限帧
+        SwitchListTile(
+          title: const Text('歌词省电模式'),
+          subtitle: const Text('歌词界面锁定 60fps 更省电，上下滑动歌词时自动解除限帧'),
+          value: _lyricEcoMode,
+          onChanged: _useAmStylePlayer
+              ? (v) {
+                  HapticFeedback.lightImpact();
+                  setState(() => _lyricEcoMode = v);
+                  LyricPreferences.instance.setEcoMode(v);
+                }
+              : null,
+        ),
+        // ⑤ 音乐频谱：两种风格均支持。开关 → 样式（决定下方哪些参数有效）
+        // → 柱数量 → 取色 → 该样式的透明度/高度
+        _buildGroupLabel('音乐频谱', colorScheme),
         // 音乐频谱环绕：仅在 Android 生效；其他平台开关置灰
+        // search: 频谱 环绕 可视化
         SwitchListTile(
           title: const Text('音乐频谱环绕'),
           subtitle: Text(
@@ -1647,28 +1614,8 @@ class _SettingsPageState extends State<SettingsPage>
                 }
               : null,
         ),
-        // 频谱柱数量滑块：仅开关开启且 Android 时显示
-        if (_spectrumEnabled && Platform.isAndroid)
-          ListTile(
-            title: const Text('频谱柱数量'),
-            subtitle: M3ESlider(
-              value: _spectrumBandCount.toDouble(),
-              min: 20,
-              max: 80,
-              // 频谱柱数量不显示节点
-              label: '$_spectrumBandCount 根',
-              onChanged: (v) {
-                setState(() => _spectrumBandCount = v.round());
-              },
-              onChangeEnd: (v) {
-                final count = v.round();
-                _settingsRepository.setSpectrumBandCount(count);
-                SpectrumService.instance.bandCount = count;
-              },
-            ),
-            trailing: Text('$_spectrumBandCount 根'),
-          ),
-        // 频谱样式切换（3选1）：柱状图(环绕) / 曲线(环绕) / 背景层(条形)
+        // 频谱样式切换（3选1）：柱状图(环绕) / 曲线(环绕) / 背景层(条形)。
+        // 先定样式，再调该样式下的参数。
         if (_spectrumEnabled && Platform.isAndroid)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -1695,8 +1642,31 @@ class _SettingsPageState extends State<SettingsPage>
               ],
             ),
           ),
+        // 频谱柱数量滑块：仅开关开启且 Android 时显示
+        if (_spectrumEnabled && Platform.isAndroid)
+          // search: 频谱
+          ListTile(
+            title: const Text('频谱柱数量'),
+            subtitle: M3ESlider(
+              value: _spectrumBandCount.toDouble(),
+              min: 20,
+              max: 80,
+              // 频谱柱数量不显示节点
+              label: '$_spectrumBandCount 根',
+              onChanged: (v) {
+                setState(() => _spectrumBandCount = v.round());
+              },
+              onChangeEnd: (v) {
+                final count = v.round();
+                _settingsRepository.setSpectrumBandCount(count);
+                SpectrumService.instance.bandCount = count;
+              },
+            ),
+            trailing: Text('$_spectrumBandCount 根'),
+          ),
         // 频谱动态取色：AM 播放器频谱颜色取封面主色（50% 白 + 50% 取色混合）
         if (_spectrumEnabled && Platform.isAndroid)
+          // search: 频谱 取色
           SwitchListTile(
             title: const Text('频谱动态取色'),
             subtitle: const Text('AM 播放器频谱颜色取自封面主色（白色与取色各半混合，深色自动提亮）'),
@@ -1711,6 +1681,7 @@ class _SettingsPageState extends State<SettingsPage>
         if (_spectrumEnabled && Platform.isAndroid)
           // style 0：柱状图透明度；style 1：曲线透明度
           if (_spectrumStyle == 0)
+            // search: 频谱 透明度
             ListTile(
               title: const Text('频谱柱状图透明度'),
               subtitle: M3ESlider(
@@ -1730,6 +1701,7 @@ class _SettingsPageState extends State<SettingsPage>
               trailing: Text('${(_spectrumBarOpacity * 100).round()}%'),
             )
           else if (_spectrumStyle == 1)
+            // search: 频谱 透明度
             ListTile(
               title: const Text('频谱曲线透明度'),
               subtitle: M3ESlider(
@@ -1750,6 +1722,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
         // 背景层参数：仅 style=2 时显示
         if (_spectrumEnabled && _spectrumStyle == 2 && Platform.isAndroid) ...[
+          // search: 频谱 透明度
           ListTile(
             title: const Text('频谱背景透明度'),
             subtitle: M3ESlider(
@@ -1768,6 +1741,7 @@ class _SettingsPageState extends State<SettingsPage>
             ),
             trailing: Text('${(_spectrumBgOpacity * 100).round()}%'),
           ),
+          // search: 频谱 高度
           ListTile(
             title: const Text('频谱背景高度'),
             subtitle: M3ESlider(
@@ -1931,9 +1905,17 @@ class _SettingsPageState extends State<SettingsPage>
     showToast(loaded ? '已应用自定义字体' : '字体加载失败，已降级为系统字体', long: true);
   }
 
+  /// 播放 section。
+  ///
+  /// 排列逻辑：音质与音效（音质 → 解锁高音质的 VIP → 输出音效）→ 播放行为
+  /// （淡入淡出 / 音频焦点及其从属策略）→ 屏幕与视频 → 列表与交互。
   Widget _buildPlaybackSection(ColorScheme colorScheme) {
     return Column(
       children: [
+        // ① 音质与音效
+        _buildGroupLabel('音质与音效', colorScheme, first: true),
+        // 标题与按钮组分离（非 ListTile），索引条目手写声明
+        // search-item: 默认音质 | 音质 清晰度
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
           child: Column(
@@ -1965,10 +1947,25 @@ class _SettingsPageState extends State<SettingsPage>
             ],
           ),
         ),
+        // 自动领取 VIP 紧随音质：它决定高音质/无损是否真的可播
+        // search: vip 会员 自动领取
+        SwitchListTile(
+          title: const Text('自动领取VIP'),
+          subtitle: const Text('每次启动自动领取每日VIP（需要登录）'),
+          value: _autoReceiveVip,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            setState(() {
+              _autoReceiveVip = value;
+            });
+            _settingsRepository.setAutoReceiveVip(value);
+          },
+        ),
         ListenableBuilder(
           listenable: EqualizerService.instance,
           builder: (context, _) {
             final eq = EqualizerService.instance;
+            // search: eq 均衡
             return ListTile(
               leading: Icon(
                 Icons.graphic_eq,
@@ -1988,18 +1985,9 @@ class _SettingsPageState extends State<SettingsPage>
             );
           },
         ),
-        SwitchListTile(
-          title: const Text('自动领取VIP'),
-          subtitle: const Text('每次启动自动领取每日VIP（需要登录）'),
-          value: _autoReceiveVip,
-          onChanged: (value) {
-            HapticFeedback.lightImpact();
-            setState(() {
-              _autoReceiveVip = value;
-            });
-            _settingsRepository.setAutoReceiveVip(value);
-          },
-        ),
+        // ② 播放行为：音量过渡 → 与其他应用共存策略
+        _buildGroupLabel('播放行为', colorScheme),
+        // search: 淡入淡出 渐变 音量
         SwitchListTile(
           title: const Text('暂停淡入淡出'),
           subtitle: const Text('暂停/播放时音量平滑过渡，避免突然出声'),
@@ -2012,19 +2000,8 @@ class _SettingsPageState extends State<SettingsPage>
             _settingsRepository.setPauseFadeEnabled(value);
           },
         ),
-        SwitchListTile(
-          title: const Text('播放时保持屏幕常亮'),
-          subtitle: const Text('播放歌曲或 MV 时屏幕不会自动息屏'),
-          value: _keepScreenOn,
-          onChanged: (value) {
-            HapticFeedback.lightImpact();
-            setState(() {
-              _keepScreenOn = value;
-            });
-            _settingsRepository.setKeepScreenOn(value);
-            WakelockService.instance.setSettingEnabled(value);
-          },
-        ),
+        // 「失去音频焦点时」是下面这个开关的从属策略：忽略焦点关闭时才有意义
+        // search: 音频焦点 忽略焦点 同时播放 共存 不被打断 焦点
         SwitchListTile(
           title: const Text('允许与其他应用同时播放音频'),
           subtitle: const Text('忽略音频焦点请求，打开其他 App 时音乐不被打断',
@@ -2098,11 +2075,28 @@ class _SettingsPageState extends State<SettingsPage>
             ],
           ),
         ),
+        // ③ 屏幕与视频：都与「播放时的屏幕表现」相关
+        _buildGroupLabel('屏幕与视频', colorScheme),
+        // search: 屏幕常亮 常亮 息屏
+        SwitchListTile(
+          title: const Text('播放时保持屏幕常亮'),
+          subtitle: const Text('播放歌曲或 MV 时屏幕不会自动息屏'),
+          value: _keepScreenOn,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            setState(() {
+              _keepScreenOn = value;
+            });
+            _settingsRepository.setKeepScreenOn(value);
+            WakelockService.instance.setSettingEnabled(value);
+          },
+        ),
         // MV 画中画：按 Home 自动进入（手动按钮始终可用）
         FutureBuilder<bool>(
           future: SettingsRepository().getAutoPipEnabled(),
           builder: (context, snapshot) {
             final enabled = snapshot.data ?? false;
+            // search: 画中画 pip 悬浮
             return SwitchListTile(
               secondary: Icon(Icons.picture_in_picture_alt, color: colorScheme.primary),
               title: const Text('播放 MV 时自动画中画'),
@@ -2116,6 +2110,9 @@ class _SettingsPageState extends State<SettingsPage>
             );
           },
         ),
+        // ④ 列表与交互：不改变音频本身，只影响操作手势与列表排序
+        _buildGroupLabel('列表与交互', colorScheme),
+        // search: miniplayer 迷你播放条 滑动切歌 切歌
         SwitchListTile(
           title: const Text('MiniPlayer 滑动切歌'),
           subtitle: const Text('在迷你播放条上左右滑动切换上一首/下一首'),
@@ -2130,6 +2127,7 @@ class _SettingsPageState extends State<SettingsPage>
             _settingsRepository.setMiniPlayerSwipeSwitchEnabled(value);
           },
         ),
+        // search: 收藏 歌单 排序 最近点击 顺序
         SwitchListTile(
           title: const Text('收藏歌单按最近点击排序'),
           subtitle: const Text('最近点击的歌单排在前面；关闭后按收藏顺序排列'),
@@ -2150,6 +2148,7 @@ class _SettingsPageState extends State<SettingsPage>
   Widget _buildTabManagementSection(ColorScheme colorScheme) {
     return Column(
       children: [
+        // search: tab 标签页 主页
         ListTile(
           leading: const Icon(Icons.tab),
           title: const Text('主页 Tab 管理'),
@@ -2175,6 +2174,7 @@ class _SettingsPageState extends State<SettingsPage>
   Widget _buildDesktopShortcutSection(ColorScheme colorScheme) {
     return Column(
       children: [
+        // search: 快捷方式 快捷 长按
         ListTile(
           leading: const Icon(Icons.bolt),
           title: const Text('桌面快捷方式'),
@@ -2201,6 +2201,7 @@ class _SettingsPageState extends State<SettingsPage>
   Widget _buildOnlineMusicSection(ColorScheme colorScheme) {
     return Column(
       children: [
+        // search: 接口 本地服务器 api 在线音乐
         ListTile(
           leading: Icon(Icons.dns, color: colorScheme.primary),
           title: const Text('本地数据接口'),
@@ -2286,11 +2287,13 @@ class _SettingsPageState extends State<SettingsPage>
   Widget _buildCacheSection(ColorScheme colorScheme) {
     return Column(
       children: [
+        // search: 缓存 清除
         ListTile(
           title: const Text('清除缓存'),
           leading: Icon(Icons.delete_outline, color: colorScheme.error),
           onTap: () => _showClearCacheDialog(),
         ),
+        // search: 迁移 数据 修复
         ListTile(
           title: const Text('数据迁移（修复数据混乱）'),
           subtitle: const Text('如果看到其他用户的信息，执行此操作'),
@@ -2351,9 +2354,29 @@ class _SettingsPageState extends State<SettingsPage>
     }
   }
 
+  /// 关于 section：版本 → 帮助 → 法律与许可。
   Widget _buildAboutSection(ColorScheme colorScheme) {
     return Column(
       children: [
+        // ① 版本：先看当前版本，再去更新
+        _buildGroupLabel('版本', colorScheme, first: true),
+        // search: 版本 检查更新
+        ListTile(
+          title: const Text('应用版本'),
+          subtitle: Text(_appVersion.isEmpty ? kBuildAppVersion : _appVersion),
+          leading: const Icon(Icons.info_outline),
+        ),
+        // search: 更新
+        ListTile(
+          title: const Text('更新最新版本'),
+          subtitle: const Text('https://github.com/zzyoxml/md3Music/releases'),
+          leading: const Icon(Icons.system_update_outlined),
+          trailing: const Icon(Icons.open_in_new, size: 18),
+          onTap: () => _openReleasesUrl(),
+        ),
+        // ② 帮助
+        _buildGroupLabel('帮助', colorScheme),
+        // search: 教程 引导
         ListTile(
           title: const Text('新手教程'),
           subtitle: const Text('重新查看功能引导'),
@@ -2365,6 +2388,9 @@ class _SettingsPageState extends State<SettingsPage>
             );
           },
         ),
+        // ③ 法律与许可：协议 → 免责 → 开源许可
+        _buildGroupLabel('法律与许可', colorScheme),
+        // search: 协议 条款
         ListTile(
           title: const Text('用户协议'),
           subtitle: const Text('查看用户协议全文'),
@@ -2382,6 +2408,7 @@ class _SettingsPageState extends State<SettingsPage>
             );
           },
         ),
+        // search: 免责
         ListTile(
           title: const Text('免责声明'),
           subtitle: const Text('查看本软件免责声明'),
@@ -2389,18 +2416,7 @@ class _SettingsPageState extends State<SettingsPage>
           trailing: const Icon(Icons.chevron_right, size: 18),
           onTap: () => UserAgreementPage.showDisclaimerDialog(context),
         ),
-        ListTile(
-          title: const Text('应用版本'),
-          subtitle: Text(_appVersion.isEmpty ? kBuildAppVersion : _appVersion),
-          leading: const Icon(Icons.info_outline),
-        ),
-        ListTile(
-          title: const Text('更新最新版本'),
-          subtitle: const Text('https://github.com/zzyoxml/md3Music/releases'),
-          leading: const Icon(Icons.system_update_outlined),
-          trailing: const Icon(Icons.open_in_new, size: 18),
-          onTap: () => _openReleasesUrl(),
-        ),
+        // search: 开源 license 许可
         ListTile(
           title: const Text('开源许可'),
           leading: const Icon(Icons.description_outlined),
