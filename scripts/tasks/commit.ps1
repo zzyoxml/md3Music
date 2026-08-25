@@ -8,7 +8,7 @@
 
     1. 列出工作区所有改动（含未跟踪文件），方向键 + 空格勾选本次要提交的文件
     2. 提交前跑否认清单闸门（scripts/public_deny.txt），命中私有符号即中止
-    3. 自动生成 conventional commit 候选信息，回车接受或直接改写
+    3. 自动生成 conventional commit 候选信息（可选 -Llm 交给模型按 diff 起草），回车接受或直接改写
     4. 同步当前分支：先合并 upstream/<分支> 的新提交，再合并 origin/<分支>，最后推送 origin
        （首次推送自动 -u 建立跟踪；upstream 的提交因此经本地带到 origin，fork 不会越落越远）
     5. 可选：向 upstream 开 PR / 导出公开版本（覆盖推送或开 PR）
@@ -19,6 +19,11 @@
 
 .PARAMETER Message
   提交信息。不传则进入候选信息确认/编辑环节。
+
+.PARAMETER Llm
+  候选提交信息交给 LLM 按 diff 起草（标题 + 可选正文），仍需回车确认或改写。
+  配置见 scripts/lib/llm.ps1：默认用内置 key，可用 MD3_LLM_API_KEY / MD3_LLM_BASE_URL /
+  MD3_LLM_MODEL 覆盖。调用失败自动回退到按文件路径推断的候选，不影响提交。
 
 .PARAMETER All
   跳过勾选界面，直接提交全部改动。
@@ -62,6 +67,7 @@
 
 .EXAMPLE
   .\scripts\md3.ps1 commit
+  .\scripts\md3.ps1 commit -Llm
   .\scripts\md3.ps1 commit -All -Message "fix(player): 修复切歌闪烁"
   .\scripts\md3.ps1 commit -Pr
   .\scripts\md3.ps1 commit -PublicPr
@@ -69,6 +75,7 @@
 [CmdletBinding()]
 param(
     [string]$Message = '',
+    [switch]$Llm,
     [switch]$All,
     [switch]$NoPush,
     [switch]$NoUpstreamSync,
@@ -281,6 +288,42 @@ function New-CommitMessageCandidate {
     else { "$type($($scopes -join ', ')): $desc" }
 }
 
+# ---------- LLM 提交信息 ----------
+# 给模型的上下文：文件清单 + 增删行数 + 截断后的 unified diff。
+# 整体上限 $MaxChars（约几千 token），超出就按文件依次丢弃，保证清单永远完整。
+function Get-CommitDiffContext {
+    param([Parameter(Mandatory)][object[]]$Items, [int]$MaxChars = 12000, [int]$PerFileChars = 3000)
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine("文件清单（共 $($Items.Count) 个）：")
+    foreach ($it in $Items) {
+        $state = if ($it.Untracked) { '新增' } elseif ($it.Deleted) { '删除' } elseif ($it.Orig) { "重命名（原 $($it.Orig)）" } else { '修改' }
+        $stat = if ($it.Add -ne '' -or $it.Del -ne '') { "  +$($it.Add) -$($it.Del)" } else { '' }
+        [void]$sb.AppendLine("- $($it.Path)  [$state]$stat")
+    }
+    [void]$sb.AppendLine()
+    $budget = $MaxChars - $sb.Length
+    foreach ($it in $Items) {
+        if ($budget -le 200) { [void]$sb.AppendLine('（diff 过长，其余文件内容已省略）'); break }
+        if ($it.Deleted) { continue }
+        $text = ''
+        if ($it.Untracked) {
+            $full = Join-Path $Root $it.Path
+            $head = @(Get-Content -LiteralPath $full -TotalCount 120 -ErrorAction SilentlyContinue)
+            if ($head.Count) { $text = "新文件 $($it.Path) 内容（前 $($head.Count) 行）：`n" + ($head -join "`n") }
+        } else {
+            $d = @(Invoke-Git @('--no-pager', 'diff', 'HEAD', '--', $it.Path) -Quiet)
+            if ($d.Count) { $text = ($d -join "`n") }
+        }
+        if (-not $text) { continue }
+        $cap = [Math]::Min($PerFileChars, $budget - 100)
+        if ($text.Length -gt $cap) { $text = $text.Substring(0, $cap) + "`n…（此文件 diff 已截断）" }
+        [void]$sb.AppendLine($text)
+        [void]$sb.AppendLine()
+        $budget = $MaxChars - $sb.Length
+    }
+    $sb.ToString()
+}
+
 function Read-YesNo {
     param([Parameter(Mandatory)][string]$Prompt, [bool]$Default = $false)
     $hint = if ($Default) { '[Y/n]' } else { '[y/N]' }
@@ -339,17 +382,47 @@ try {
         Write-Ok "闸门通过（$($gate.DenyCount) 条规则零命中）"
     }
     # ---------- 提交信息 ----------
+    $MessageBody = ''
     if (-not $Message) {
         Write-Step '提交信息'
         $cand = New-CommitMessageCandidate -Items $sel
-        Write-Host "  候选：$cand" -ForegroundColor Yellow
+        $candBody = ''
+        $from = '按文件路径推断'
+        if ($Llm) {
+            . (Join-Path $PSScriptRoot '..\lib\llm.ps1')
+            $cfg = Get-LlmConfig
+            Write-Note "  调用 LLM 起草提交信息（$($cfg.Model) @ $($cfg.BaseUrl)，key 来源：$($cfg.Source)）…"
+            try {
+                [void](Enable-AutoProxy)
+                $hints = @($sel | ForEach-Object { Get-PathScope $_.Path } | Select-Object -Unique)
+                $ctx = Get-CommitDiffContext -Items $sel
+                $r = New-LlmCommitMessage -DiffText $ctx -ScopeHints $hints
+                $cand = $r.Title
+                $candBody = $r.Body
+                $from = 'LLM 按 diff 生成'
+            }
+            catch {
+                Write-Warn "LLM 起草失败，回退到路径推断候选：$($_.Exception.Message)"
+            }
+        }
+        Write-Host "  候选（$from）：$cand" -ForegroundColor Yellow
+        if ($candBody) {
+            foreach ($l in @($candBody -split "`r?`n")) { Write-Host "    $l" -ForegroundColor DarkYellow }
+        }
         if ($Yes) {
             $Message = $cand
+            $MessageBody = $candBody
             Write-Ok '按 -Yes 直接采用候选信息'
         } else {
-            Write-Note '  （候选只按文件路径推断 type/scope，描述请按实际改动改写）'
+            if ($from -eq 'LLM 按 diff 生成') { Write-Note '  （由模型阅读 diff 生成，仍请自行确认措辞是否准确）' }
+            else { Write-Note '  （候选只按文件路径推断 type/scope，描述请按实际改动改写）' }
             $in = Read-Host '  回车接受候选，或直接输入提交信息'
-            $Message = if ([string]::IsNullOrWhiteSpace($in)) { $cand } else { $in.Trim() }
+            if ([string]::IsNullOrWhiteSpace($in)) {
+                $Message = $cand
+                $MessageBody = $candBody
+            } else {
+                $Message = $in.Trim()   # 自己写标题时不带上模型给的正文
+            }
         }
     }
 
@@ -375,7 +448,9 @@ try {
     Write-Ok "已暂存 $($stagedNow.Count) 个文件"
 
     Write-Step '提交'
-    Invoke-Git @('commit', '-q', '-m', $Message) | Out-Null
+    $commitArgs = @('commit', '-q', '-m', $Message)
+    if ($MessageBody) { $commitArgs += @('-m', $MessageBody) }
+    Invoke-Git $commitArgs | Out-Null
     $sha = "$(Invoke-Git @('rev-parse', '--short', 'HEAD'))".Trim()
     Write-Ok "$sha  $Message"
 

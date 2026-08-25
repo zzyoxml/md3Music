@@ -67,6 +67,7 @@ function Get-TaskOptions([string]$Key) {
         ) }
         'commit' { @(
             (New-TaskOption -Name '-Message'      -Kind value -Desc '提交信息（不填=用候选信息确认环节）'),
+            (New-TaskOption -Name '-Llm'          -Desc '候选提交信息交给 LLM 按 diff 起草'),
             (New-TaskOption -Name '-All'          -Desc '跳过勾选界面，提交全部改动'),
             (New-TaskOption -Name '-NoPush'       -Desc '只提交，不做任何同步'),
             (New-TaskOption -Name '-NoUpstreamSync' -Desc '同步阶段跳过 upstream，只对齐 origin'),
