@@ -115,6 +115,27 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
 }
 
+// MD3Music fork: 全局强制 media3 版本与本地 just_audio fork 的 exoplayer 源码一致（1.4.1）。
+// video_player 等库声明更高版本（1.9.2），若不强制会出现重复类（本地源码 vs maven 1.9.2）。
+// media3-exoplayer 的 maven 版本全局排除——由 just_audio fork 内的本地源码提供。
+configurations.all {
+    exclude(group = "androidx.media3", module = "media3-exoplayer")
+    resolutionStrategy {
+        force(
+            "androidx.media3:media3-common:1.4.1",
+            "androidx.media3:media3-container:1.4.1",
+            "androidx.media3:media3-database:1.4.1",
+            "androidx.media3:media3-datasource:1.4.1",
+            "androidx.media3:media3-decoder:1.4.1",
+            "androidx.media3:media3-exoplayer-dash:1.4.1",
+            "androidx.media3:media3-exoplayer-hls:1.4.1",
+            "androidx.media3:media3-exoplayer-rtsp:1.4.1",
+            "androidx.media3:media3-exoplayer-smoothstreaming:1.4.1",
+            "androidx.media3:media3-extractor:1.4.1"
+        )
+    }
+}
+
 flutter {
     source = "../.."
 }
