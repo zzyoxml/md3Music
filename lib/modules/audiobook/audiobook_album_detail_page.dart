@@ -3,6 +3,7 @@ import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
 import '../../data/models/song.dart';
+import '../../core/widgets/app_background.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/theme_provider.dart';
@@ -435,14 +436,17 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
     return SliverAppBar(
       expandedHeight: 280,
       pinned: true,
-      backgroundColor: Color.lerp(
-                          Colors.transparent,
-                          useBackgroundImage
-                              ? cs.surface.withValues(alpha: 0.75)
-                              : cs.surface,
-                          (_scrollOffset - (280 - kToolbarHeight))
-                              .clamp(0.0, 60.0) / 60,
-                        )!,
+      // 背景图模式：顶栏恒透明——flexibleSpace 是普通 Stack
+      // （非 FlexibleSpaceBar，折叠时不产生视差位移，壁纸层顶部固定裁剪），
+      // 任意滚动位置壁纸都与主体背景对齐、不透 UI；非背景图：上划渐变到 surface
+      backgroundColor: useBackgroundImage
+          ? Colors.transparent
+          : Color.lerp(
+              Colors.transparent,
+              cs.surface,
+              (_scrollOffset - (280 - kToolbarHeight))
+                  .clamp(0.0, 60.0) / 60,
+            )!,
       surfaceTintColor: Colors.transparent,
       scrolledUnderElevation: 0,
       actions: [
@@ -533,8 +537,15 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
           style: tt.titleLarge?.copyWith(fontWeight: FontWeight.w600),
         ),
       ),
-      flexibleSpace: FlexibleSpaceBar(
-        background: Container(
+      // 不用 FlexibleSpaceBar：折叠时不产生视差位移，壁纸层顶部固定裁剪，
+      // 滚动中始终与主体背景对齐。显式 ClipRect：全屏壁纸层仅靠 Stack
+      // 默认 hardEdge 裁剪可能失效，必须显式裁剪，否则壁纸会溢出覆盖歌曲列表
+      flexibleSpace: ClipRect(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (useBackgroundImage) const WallpaperHeaderBackground(),
+            Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
@@ -602,7 +613,9 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
             ),
           ),
         ),
+        ],
       ),
+    ),
     );
   }
 

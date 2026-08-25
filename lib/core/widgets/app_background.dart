@@ -28,6 +28,32 @@ ImageProvider backgroundImageProvider(
   );
 }
 
+/// 顶栏沉浸壁纸层：用于 SliverAppBar flexibleSpace 等头部区域的背景。
+///
+/// 与 [AppBackground] 同层结构（surface 打底 + 模糊 + 透明度 + cover 图），
+/// 但按**全屏尺寸 + topCenter 对齐**渲染：图片缩放比例与主体背景一致，
+/// 头部区域显示背景图在自身位置处的切片，与页面主体视觉连续。
+/// 外层需自行裁剪（Sliver 区域），避免全屏溢出覆盖下方内容。
+class WallpaperHeaderBackground extends StatelessWidget {
+  const WallpaperHeaderBackground({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    return OverflowBox(
+      alignment: Alignment.topCenter,
+      minWidth: size.width,
+      maxWidth: size.width,
+      minHeight: size.height,
+      maxHeight: size.height,
+      child: SizedBox(
+        width: size.width,
+        height: size.height,
+        child: const AppBackground(),
+      ),
+    );
+  }
+}
 /// 页面背景组件：模糊背景图 + 透明度调节（主题背景色打底）。
 ///
 /// 作为页面内容的底层（页面 Scaffold 背景透明时透出），并**随页面一起位移/

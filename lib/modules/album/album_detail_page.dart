@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:m3e_core/m3e_core.dart';
 
 import '../../core/utils/app_toast.dart';
+import '../../core/widgets/app_background.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
 import '../../data/repositories/collected_playlist_store.dart';
@@ -447,17 +448,18 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                           SliverAppBar(
                             expandedHeight: 280,
                             pinned: true,
-                            // pinned 后顶栏背景色：从透明渐变；开启壁纸时渐变到半透明
-                            // 背景图模式：顶栏恒透明（上划列表不压暗壁纸）；
+                            // 背景图模式：顶栏恒透明——flexibleSpace 是普通 Stack
+                            // （非 FlexibleSpaceBar，折叠时不产生视差位移，壁纸层顶部
+                            // 固定裁剪），任意滚动位置壁纸都与主体背景对齐、不透 UI；
                             // 非背景图：上划渐变到 surface（遮住列表不穿透）
-                            backgroundColor: Color.lerp(
-                          Colors.transparent,
-                          useBackgroundImage
-                              ? colorScheme.surface.withValues(alpha: 0.75)
-                              : colorScheme.surface,
-                          (_scrollOffset - (280 - kToolbarHeight))
-                              .clamp(0.0, 60.0) / 60,
-                        )!,
+                            backgroundColor: useBackgroundImage
+                                ? Colors.transparent
+                                : Color.lerp(
+                                    Colors.transparent,
+                                    colorScheme.surface,
+                                    (_scrollOffset - (280 - kToolbarHeight))
+                                        .clamp(0.0, 60.0) / 60,
+                                  )!,
                             surfaceTintColor: Colors.transparent,
                             scrolledUnderElevation: 0,
                             actions: [
@@ -545,8 +547,17 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                 style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
                               ),
                             ),
-                            flexibleSpace: FlexibleSpaceBar(
-                              background: Container(
+                            // 不用 FlexibleSpaceBar：折叠时不产生视差位移，壁纸层
+                            // 顶部固定裁剪，滚动中始终与主体背景对齐。
+                            // 显式 ClipRect：全屏壁纸层仅靠 Stack 默认 hardEdge
+                            // 裁剪可能失效，必须显式裁剪，否则壁纸会溢出覆盖歌曲列表
+                            flexibleSpace: ClipRect(
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  if (useBackgroundImage)
+                                    const WallpaperHeaderBackground(),
+                                  Container(
                                 decoration: BoxDecoration(
                                   gradient: LinearGradient(
                                     begin: Alignment.topCenter,
@@ -628,8 +639,10 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                   ),
                                 ),
                               ),
+                              ],
                             ),
                           ),
+                        ),
                           // 专辑介绍
                           if (description != null && description.isNotEmpty)
                             SliverToBoxAdapter(
