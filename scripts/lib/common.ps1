@@ -76,8 +76,23 @@ function Remove-ItemBypass([string]$Path) {
     if (Test-Path -LiteralPath $Path) {
         $item = Get-Item -LiteralPath $Path -Force
         if ($item -is [System.IO.DirectoryInfo]) {
+            # Directory.Delete throws AccessDenied on readonly members (e.g. git objects
+            # under a previously-initialized .public_export/.git). Strip ReadOnly first.
+            foreach ($f in (Get-ChildItem -LiteralPath $Path -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+                if ($f.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+                    $f.Attributes = $f.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+                }
+            }
+            foreach ($d in (Get-ChildItem -LiteralPath $Path -Recurse -Directory -Force -ErrorAction SilentlyContinue)) {
+                if ($d.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+                    $d.Attributes = $d.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+                }
+            }
             [System.IO.Directory]::Delete($item.FullName, $true)
         } else {
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReadOnly) {
+                $item.Attributes = $item.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly)
+            }
             [System.IO.File]::Delete($item.FullName)
         }
     }
