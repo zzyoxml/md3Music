@@ -2,7 +2,8 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:m3e_core/m3e_core.dart';
+import 'package:m3e_core/m3e_core.dart' hide M3EPullToRefreshIndicator;
+import '../../widgets/m3e_pull_to_refresh_fixed.dart';
 import '../../widgets/md3_pull_to_refresh.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -893,21 +894,21 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: () => _loadPlaylists(forceNoCache: true, showLoading: false),
-      child: NotificationListener<ScrollNotification>(
-        onNotification: (notification) {
-          if (notification is ScrollEndNotification &&
-              notification.metrics.maxScrollExtent > 0 &&
-              notification.metrics.pixels >=
-                  notification.metrics.maxScrollExtent - 200) {
-            _loadMorePlaylists();
-          }
-          return false;
-        },
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification &&
+            notification.metrics.maxScrollExtent > 0 &&
+            notification.metrics.pixels >=
+                notification.metrics.maxScrollExtent - 200) {
+          _loadMorePlaylists();
+        }
+        return false;
+      },
+      child: M3EPullToRefreshIndicator(
+        onRefresh: () => _loadPlaylists(forceNoCache: true, showLoading: false),
         child: ListView(
           controller: _scrollController,
-          // 内容不满一屏时也能下拉（原生 RefreshIndicator 依赖 overscroll）
+          // 内容不满一屏时也能下拉（M3EPullToRefreshIndicator 依赖 overscroll）
           physics: const AlwaysScrollableScrollPhysics(),
           // 底部叠加系统手势条（小横条）高度，避免末项被压住
           padding: EdgeInsets.only(
