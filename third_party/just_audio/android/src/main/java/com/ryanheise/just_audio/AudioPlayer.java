@@ -857,6 +857,9 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                     return UsbAudioSinkController.wrap(defaultSink, ctx);
                 }
             };
+            // MD3Music fork: 开启 float 输出，24/32bit 高规格音频走 float32 直通 AudioTrack，
+            // 避免 DefaultAudioSink 默认把非 16bit 整数 PCM 降位深（ToInt16PcmAudioProcessor）。
+            drf.setEnableAudioFloatOutput(true);
             RenderersFactory renderersFactory = (eventHandler, videoListener, audioListener, textOutput, metadataOutput) -> {
                 Renderer[] defaultRenderers = drf.createRenderers(
                         eventHandler, videoListener, audioListener, textOutput, metadataOutput);
