@@ -112,6 +112,9 @@ class AudioPlayer {
   StreamSubscription<void>? _currentIndexSubscription;
   StreamSubscription<void>? _errorsSubscription;
   StreamSubscription<void>? _errorsResetSubscription;
+  // MD3Music fork: Media3 AudioFocusManager 原始焦点事件（Android）
+  final _audioFocusSubject = BehaviorSubject<int>.seeded(0);
+  StreamSubscription<int>? _audioFocusSubscription;
 
   String? _id;
   final _proxy = _ProxyHttpServer();
@@ -540,6 +543,60 @@ class AudioPlayer {
 
   /// A stream of [PlayerState]s.
   Stream<PlayerState> get playerStateStream => _playerStateSubject.stream;
+
+  /// 音频焦点原始事件流（Android）：值为 AudioManager.AUDIOFOCUS_* 常量
+  /// （1=GAIN, -1=LOSS, -2=LOSS_TRANSIENT, -3=LOSS_TRANSIENT_CAN_DUCK）。
+  /// 事件由 Media3 AudioFocusManager 转发（先于其自动 duck/pause 处理发出），
+  /// 供上层按三模式策略决策（保持音量 / 降音量恢复 / 暂停恢复）。
+  /// 仅 Android 有效，其他平台恒为 0。
+  Stream<int> get audioFocusChangeStream {
+    _ensureAudioFocusSubscription();
+    return _audioFocusSubject.stream;
+  }
+
+  void _ensureAudioFocusSubscription() {
+    final id = _id;
+    if (!_isAndroid() || id == null) return;
+    // idle 平台（未播放）没有 native 实现，订阅与补发都会 MissingPlugin；
+    // 播放器真正激活（native 创建）后再订阅/补发。
+    if (_platformValue is _IdleAudioPlayer) return;
+    if (_audioFocusSubscription != null) return;
+    _audioFocusSubscription =
+        EventChannel('com.ryanheise.just_audio.focus_events.$id')
+            .receiveBroadcastStream()
+            .cast<int>()
+            .listen(_audioFocusSubject.add);
+    // MD3Music fork: 播放器就绪后补发启动阶段缓存的 forced willPauseWhenDucked
+    final pending = _pendingForceWillPauseWhenDucked;
+    if (pending != null) {
+      _pendingForceWillPauseWhenDucked = null;
+      // ignore: avoid_print
+      print('[AudioFocusFork] flush pending force=$pending id=$id');
+      // ignore: discarded_futures
+      MethodChannel('com.ryanheise.just_audio.methods.$id')
+          .invokeMethod('setForceWillPauseWhenDucked', {'force': pending});
+    }
+    // MD3Music fork: 补发缓存的 ignore 音频焦点标志（与 forced 同理）
+    final pendingIgnore = _pendingIgnoreAudioFocus;
+    if (pendingIgnore != null) {
+      _pendingIgnoreAudioFocus = null;
+      // ignore: avoid_print
+      print('[AudioFocusFork] flush pending ignore=$pendingIgnore id=$id');
+      // ignore: discarded_futures
+      MethodChannel('com.ryanheise.just_audio.methods.$id')
+          .invokeMethod('setIgnoreAudioFocus', {'ignore': pendingIgnore});
+    }
+    // MD3Music fork: 补发缓存的 keepPlaying 标志（与 forced 同理）
+    final pendingKeep = _pendingForceKeepPlaying;
+    if (pendingKeep != null) {
+      _pendingForceKeepPlaying = null;
+      // ignore: avoid_print
+      print('[AudioFocusFork] flush pending keep=$pendingKeep id=$id');
+      // ignore: discarded_futures
+      MethodChannel('com.ryanheise.just_audio.methods.$id')
+          .invokeMethod('setForceKeepPlaying', {'keepPlaying': pendingKeep});
+    }
+  }
 
   /// The current sequence of indexed audio sources.
   List<IndexedAudioSource> get sequence => _sequenceSubject.nvalue!;
@@ -1199,9 +1256,76 @@ class AudioPlayer {
     return null;
   }
 
+  /// MD3Music fork: 强制 Media3 的 willPauseWhenDucked。
+  /// true → duck 型中断按 pause 处理（音量不变，供「保持播放与音量」「暂停后自动恢复」）；
+  /// false → 恢复 Media3 默认（duck 型中断自动降音量，供「降低音量后自动恢复」）。
+  /// 仅 Android 有效。播放器未初始化（_id 为 null）时缓存，就绪后自动补发。
+  Future<void> setForceWillPauseWhenDucked(bool force) async {
+    if (_disposed) return;
+    if (!_isAndroid()) return;
+    // ignore: avoid_print
+    print('[AudioFocusFork] setForceWillPauseWhenDucked force=$force id=$_id');
+    _pendingForceWillPauseWhenDucked = force;
+    if (_id == null) return;
+    try {
+      final channel = MethodChannel('com.ryanheise.just_audio.methods.$_id');
+      await channel.invokeMethod('setForceWillPauseWhenDucked', {'force': force});
+    } catch (e) {
+      // ignore: avoid_print
+      print('[AudioFocusFork] setForceWillPauseWhenDucked failed: $e');
+    }
+  }
+
+  /// MD3Music fork: 播放器未初始化时缓存的 forced 值，_ensureAudioFocusSubscription 补发。
+  bool? _pendingForceWillPauseWhenDucked;
+
+  /// MD3Music fork: 忽略音频焦点（「允许与其他应用同时播放音频」）。
+  /// true → native 跳过 Media3 内置焦点处理（不 duck/不暂停/不 abandon），
+  /// 播放与音量完全保持；false → 恢复正常焦点响应（跟随三模式）。
+  /// 仅 Android 有效。播放器未初始化（_id 为 null）时缓存，就绪后自动补发。
+  Future<void> setIgnoreAudioFocus(bool ignore) async {
+    if (_disposed) return;
+    if (!_isAndroid()) return;
+    // ignore: avoid_print
+    print('[AudioFocusFork] setIgnoreAudioFocus ignore=$ignore id=$_id');
+    _pendingIgnoreAudioFocus = ignore;
+    if (_id == null) return;
+    try {
+      final channel = MethodChannel('com.ryanheise.just_audio.methods.$_id');
+      await channel.invokeMethod('setIgnoreAudioFocus', {'ignore': ignore});
+    } catch (e) {
+      // ignore: avoid_print
+      print('[AudioFocusFork] setIgnoreAudioFocus failed: $e');
+    }
+  }
+
+  /// MD3Music fork: 播放器未初始化时缓存的 ignore 标志，_ensureAudioFocusSubscription 补发。
+  bool? _pendingIgnoreAudioFocus;
+
+  /// MD3Music fork: 「保持播放与音量」模式（native 跳过 Media3 内置焦点处理，
+  /// 播放与进度完全保持，避免 suppression 无声导致 MediaSession 进度错开）。
+  /// 仅 Android 有效。播放器未初始化（_id 为 null）时缓存，就绪后自动补发。
+  Future<void> setForceKeepPlaying(bool keepPlaying) async {
+    if (_disposed) return;
+    if (!_isAndroid()) return;
+    // ignore: avoid_print
+    print('[AudioFocusFork] setForceKeepPlaying keep=$keepPlaying id=$_id');
+    _pendingForceKeepPlaying = keepPlaying;
+    if (_id == null) return;
+    try {
+      final channel = MethodChannel('com.ryanheise.just_audio.methods.$_id');
+      await channel.invokeMethod('setForceKeepPlaying', {'keepPlaying': keepPlaying});
+    } catch (e) {
+      // ignore: avoid_print
+      print('[AudioFocusFork] setForceKeepPlaying failed: $e');
+    }
+  }
+
+  /// MD3Music fork: 播放器未初始化时缓存的 keepPlaying 标志，_ensureAudioFocusSubscription 补发。
+  bool? _pendingForceKeepPlaying;
+
   /// 读取本曲累计传输字节与播放位置（歌曲信息页实时码率用）。仅 Android 有效。
-  Future<Map<String, dynamic>?> getTransferStats() async {
-    if (_disposed) return null;
+  Future<Map<String, dynamic>?> getTransferStats() async {    if (_disposed) return null;
     if (!_isAndroid()) return null;
     try {
       final channel = MethodChannel('com.ryanheise.just_audio.methods.$_id');
@@ -1694,6 +1818,8 @@ class AudioPlayer {
               ));
 
         _platformValue = platform;
+        // MD3Music fork: 平台 id 确定后建立焦点事件订阅（切换平台时自动重订阅）
+        _ensureAudioFocusSubscription();
         return platform;
       });
       if (checkInterruption() || _disposed) return inactiveResult(platform);
@@ -1816,6 +1942,9 @@ class AudioPlayer {
         await platform.dispose(DisposeRequest());
       } finally {
         _id = null;
+        // MD3Music fork: 取消焦点事件订阅（id 失效）
+        await _audioFocusSubscription?.cancel();
+        _audioFocusSubscription = null;
       }
     }
   }

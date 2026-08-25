@@ -9,6 +9,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/services/audio_service.dart';
+import '../core/services/audio_service_io.dart' hide AudioService, createAudioSource;
 import '../core/services/desktop_lyric_service.dart';
 import '../core/services/home_widget_service.dart';
 import '../core/services/lyricon_provider_service.dart';
@@ -240,6 +241,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _initStreams();
       await _loadDefaultQuality();
       await _syncIgnoreAudioFocus();
+      // 恢复「音频焦点中断策略」设置（重启后保留用户选择）
+      await _syncAudioFocusMode();
       // 恢复持久化的应用内音量（重启后保留）
       await _restoreVolume();
       // 恢复上次播放状态
@@ -286,8 +289,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _syncIgnoreAudioFocus() async {
     try {
       final ignore = await SettingsRepository().getIgnoreAudioFocus();
+      // 注意：必须调 setIgnoreAudioFocus 方法（内部会同步 native Media3 的
+      // ignore 标志）。AudioService 只有 getter ignoreAudioFocus、没有属性
+      // setter——属性赋值 `ignoreAudioFocus = ignore` 在 dynamic 上抛
+      // NoSuchMethodError 被 catch 吞掉，导致重启后开关状态从不恢复。
       // ignore: avoid_dynamic_calls
-      _audioService?.ignoreAudioFocus = ignore;
+      await _audioService?.setIgnoreAudioFocus(ignore);
     } catch (_) {}
   }
 
@@ -298,6 +305,25 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       await SettingsRepository().setIgnoreAudioFocus(value);
       // ignore: avoid_dynamic_calls
       await _audioService?.setIgnoreAudioFocus(value);
+    } catch (_) {}
+  }
+
+  /// 把「音频焦点中断策略」设置同步到 AudioService，使策略即时生效。
+  Future<void> _syncAudioFocusMode() async {
+    try {
+      final mode = await SettingsRepository().getAudioFocusInterruptionMode();
+      // ignore: avoid_dynamic_calls
+      _audioService?.setInterruptionMode(mode);
+    } catch (_) {}
+  }
+
+  /// 设置「音频焦点中断策略」：持久化 + 即时同步到播放器中断处理。
+  Future<void> setAudioFocusInterruptionMode(
+      AudioFocusInterruptionMode mode) async {
+    try {
+      await SettingsRepository().setAudioFocusInterruptionMode(mode);
+      // ignore: avoid_dynamic_calls
+      _audioService?.setInterruptionMode(mode);
     } catch (_) {}
   }
 
