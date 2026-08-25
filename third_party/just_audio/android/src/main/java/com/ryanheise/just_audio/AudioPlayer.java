@@ -497,6 +497,22 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                 AudioFocusManager.setForcedWillPauseWhenDucked(force);
                 result.success(new HashMap<String, Object>());
                 break;
+            case "setIgnoreAudioFocus":
+                // MD3Music fork: 「允许与其他应用同时播放音频」——跳过 Media3 内置
+                // 焦点处理（不 duck/不暂停/不 abandon），播放与音量完全保持。
+                Boolean ignore = (Boolean) call.argument("ignore");
+                android.util.Log.i("AudioFocusFork", "setIgnoreAudioFocus=" + ignore);
+                AudioFocusManager.setIgnoreAudioFocus(ignore);
+                result.success(new HashMap<String, Object>());
+                break;
+            case "setForceKeepPlaying":
+                // MD3Music fork: 「保持播放与音量」模式——同样跳过 Media3 内置焦点
+                // 处理（不 duck/不暂停），播放与进度完全保持。
+                Boolean keepPlaying = (Boolean) call.argument("keepPlaying");
+                android.util.Log.i("AudioFocusFork", "setForceKeepPlaying=" + keepPlaying);
+                AudioFocusManager.setForceKeepPlaying(keepPlaying);
+                result.success(new HashMap<String, Object>());
+                break;
             case "getSourceFormat":
                 result.success(getSourceFormat());
                 break;
@@ -857,6 +873,20 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                 builder.setLivePlaybackSpeedControl(livePlaybackSpeedControl);
             }
             player = builder.build();
+            // MD3Music fork: 固定 audioSessionId，使 Media3 MediaSession 与 AudioTrack
+            // 关联。系统（小米等）按「AudioTrack 的 audioSessionId 是否与 MediaSession
+            // 关联」判定播放器可识别性（hasUid）：未关联时独占型中断（如 B 站视频
+            // GAIN）会对本播放器强制 interruptMusicPlayback 直接暂停，忽略开关与
+            // 三模式均无法阻止。固定 id 须在 AudioTrack 创建前设置（此时尚未播放），
+            // MediaSession（下方创建）自动同步该 id 到系统。
+            try {
+                AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+                if (am != null && android.os.Build.VERSION.SDK_INT >= 21) {
+                    player.setAudioSessionId(am.generateAudioSessionId());
+                }
+            } catch (Exception e) {
+                android.util.Log.w("AudioFocusFork", "setAudioSessionId failed: " + e);
+            }
             player.setTrackSelectionParameters(
                 player.getTrackSelectionParameters()
                     .buildUpon()
@@ -1179,6 +1209,9 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             AudioFocusManager.removeAudioFocusEventListener(focusEventListener);
             focusEventListener = null;
         }
+        // MD3Music fork: 复位忽略/保持标志（避免影响其他播放器实例）
+        AudioFocusManager.setIgnoreAudioFocus(false);
+        AudioFocusManager.setForceKeepPlaying(false);
         focusEventChannel.endOfStream();
         // MD3Music fork: 释放 MediaSession（与 player 关联）
         if (mediaSession != null) {

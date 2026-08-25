@@ -192,6 +192,39 @@ public final class AudioFocusManager {
     forcedWillPauseWhenDucked = force;
   }
 
+  /** MD3Music fork: 全局忽略音频焦点标志（「允许与其他应用同时播放音频」）。 */
+  private static volatile boolean ignoreAudioFocus = false;
+
+  /** MD3Music fork: 设置忽略模式：true 时跳过 Media3 内置焦点处理（仅转发事件，不
+   *  duck / 不暂停 / 不 abandon），播放与音量完全由 Dart 层保持。 */
+  public static void setIgnoreAudioFocus(boolean ignore) {
+    ignoreAudioFocus = ignore;
+  }
+
+  /** MD3Music fork: 「保持播放与音量」模式标志：同样跳过 Media3 内置处理。 */
+  private static volatile boolean forceKeepPlaying = false;
+
+  /** MD3Music fork: 设置保持播放模式：true 时跳过 Media3 内置焦点处理（仅转发事件）。 */
+  public static void setForceKeepPlaying(boolean keepPlaying) {
+    forceKeepPlaying = keepPlaying;
+  }
+
+  /** MD3Music fork: 是否跳过 Media3 内置焦点处理（仅转发事件、不响应）。 */
+  private static boolean shouldSkipFocusHandling(int focusChange) {
+    if (ignoreAudioFocus) {
+      // 忽略模式（「允许与其他应用同时播放音频」）：完全跳过（含独占型 LOSS），
+      // 所有中断下播放与音量完全保持。
+      return true;
+    }
+    if (forceKeepPlaying) {
+      // 「保持播放与音量」：短暂中断（导航等 LOSS_TRANSIENT/CAN_DUCK）保持播放；
+      // 独占型 LOSS（B 站视频 / 来电）正常让路暂停——否则对方 app 拿不到焦点。
+      return focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT
+          || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK;
+    }
+    return false;
+  }
+
   private final AudioManager audioManager;
   private final AudioFocusListener focusListener;
   @Nullable private PlayerControl playerControl;
@@ -472,6 +505,13 @@ public final class AudioFocusManager {
     // Dart 层可据此覆盖 Media3 的默认行为（如「保持播放与音量」对抗 duck）。
     for (AudioFocusEventListener listener : audioFocusEventListeners) {
       listener.onAudioFocusChanged(focusChange);
+    }
+    // MD3Music fork: 忽略模式 / 保持播放模式（短暂中断）跳过 Media3 内置自动处理——
+    // 不 duck、不暂停、不 abandon 焦点（「允许与其他应用同时播放音频」/
+    // 「保持播放与音量」：系统事件到达但播放完全保持，进度与 MediaSession 一致）。
+    // 独占型中断（B 站视频 GAIN → 本端 LOSS）在保持播放模式下仍正常让路暂停。
+    if (shouldSkipFocusHandling(focusChange)) {
+      return;
     }
     // MD3Music fork: 排障日志
     android.util.Log.i("AudioFocusMgr",
