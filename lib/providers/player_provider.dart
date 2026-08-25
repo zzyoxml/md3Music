@@ -289,8 +289,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _syncIgnoreAudioFocus() async {
     try {
       final ignore = await SettingsRepository().getIgnoreAudioFocus();
+      // 注意：必须调 setIgnoreAudioFocus 方法（内部会同步 native Media3 的
+      // ignore 标志）。AudioService 只有 getter ignoreAudioFocus、没有属性
+      // setter——属性赋值 `ignoreAudioFocus = ignore` 在 dynamic 上抛
+      // NoSuchMethodError 被 catch 吞掉，导致重启后开关状态从不恢复。
       // ignore: avoid_dynamic_calls
-      _audioService?.ignoreAudioFocus = ignore;
+      await _audioService?.setIgnoreAudioFocus(ignore);
     } catch (_) {}
   }
 

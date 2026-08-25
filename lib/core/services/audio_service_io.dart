@@ -193,7 +193,16 @@ class AudioService {
   /// （来电 / 导航 / 拔耳机等），保持音量与播放状态不变。
   bool _ignoreAudioFocus = false;
   bool get ignoreAudioFocus => _ignoreAudioFocus;
-  void setIgnoreAudioFocus(bool value) => _ignoreAudioFocus = value;
+  void setIgnoreAudioFocus(bool value) {
+    _ignoreAudioFocus = value;
+    // native：忽略模式跳过 Media3 内置焦点处理（不 duck/不暂停/不 abandon），
+    // 播放与音量完全保持——否则独占型中断（如 B 站视频 GAIN → 本端 LOSS）
+    // 会被 Media3 强制暂停，忽略开关形同虚设。
+    // ignore: discarded_futures
+    _player.setIgnoreAudioFocus(value);
+    // 同步 forced / keepPlaying 标志（忽略时强制不自动 duck）
+    _syncNativeFocusFlags();
+  }
 
   /// 短暂失去音频焦点时的处理策略（默认：暂停后自动恢复）。
   AudioFocusInterruptionMode _interruptionMode =
@@ -201,13 +210,24 @@ class AudioService {
   AudioFocusInterruptionMode get interruptionMode => _interruptionMode;
   void setInterruptionMode(AudioFocusInterruptionMode mode) {
     _interruptionMode = mode;
-    // MD3Music fork: 同步 Media3 的 willPauseWhenDucked 强制值。
-    // - duckAndRestore：false → Media3 对 duck 自动降音量（0.2）并自动恢复
-    // - keepPlaying / pauseAndResume：true → duck 按 pause 语义处理（音量不变），
-    //   由 Media3 自动暂停并在焦点恢复时自动播放
+    _syncNativeFocusFlags();
+  }
+
+  /// 同步 native 焦点处理标志（Media3 AudioFocusManager）：
+  /// - [AudioFocusInterruptionMode.keepPlaying]（非忽略时）：skip Media3 内置处理，
+  ///   播放与进度完全保持——避免 suppression 无声导致 MediaSession 进度错开
+  /// - forced willPauseWhenDucked：忽略 / keepPlaying / pauseAndResume → true
+  ///   （系统派发 LOSS_TRANSIENT 事件而非自动 duck 音量）；duckAndRestore → false
+  ///   （系统级自动 duck 0.2 → 自动恢复）
+  void _syncNativeFocusFlags() {
+    final keepPlayingActive = !_ignoreAudioFocus &&
+        _interruptionMode == AudioFocusInterruptionMode.keepPlaying;
+    // ignore: discarded_futures
+    _player.setForceKeepPlaying(keepPlayingActive);
     // ignore: discarded_futures
     _player.setForceWillPauseWhenDucked(
-        mode != AudioFocusInterruptionMode.duckAndRestore);
+        _ignoreAudioFocus ||
+            _interruptionMode != AudioFocusInterruptionMode.duckAndRestore);
   }
 
   /// Media3 AudioFocusManager 原始焦点事件订阅（真实系统事件，先于 Media3
@@ -237,8 +257,27 @@ class AudioService {
   ///   GAIN 时恢复播放（不覆盖用户主动暂停）。
   /// - duckAndRestore：forced=false → 系统级自动 duck（VolumeShaper 0.2→恢复），无需干预。
   void _handleMedia3FocusChange(int focusChange) {
+    // 忽略模式：native 已跳过 Media3 内置处理（不 duck/不暂停/不 abandon），
+    // 播放与音量完全保持，此处不干预。独占型中断（B 站等）的系统级强制
+    // interruptMusicPlayback 依赖「播放器与 MediaSession 关联」（audioSessionId
+    // 固定已由 fork 处理）；不在此对抗 play()——实测会与对方 app 反复抢焦点
+    // 导致音频叠加错乱。
     if (_ignoreAudioFocus) return;
-    if (_interruptionMode == AudioFocusInterruptionMode.keepPlaying) return;
+    if (_interruptionMode == AudioFocusInterruptionMode.keepPlaying) {
+      // keepPlaying：短暂中断（导航等 transient/duck）native 已 skip（保持播放
+      // 有声、进度一致）。独占型 LOSS（B 站视频 / 来电等）主动暂停让路——
+      // native 对 LOSS 正常走 Media3 DO_NOT_PLAY；此处同步 Dart 状态并留痕，
+      // 确认独占中断事件是否可达（小米可能直接 interrupt AudioTrack 不派发事件）。
+      if (focusChange == -1) {
+        // ignore: avoid_print
+        print('[AudioFocus] keepPlaying LOSS, playing=${_player.playing}');
+        if (_player.playing) {
+          // ignore: discarded_futures
+          _player.pause();
+        }
+      }
+      return;
+    }
     if (_interruptionMode == AudioFocusInterruptionMode.pauseAndResume) {
       if (focusChange != 1) {
         if (_player.playing) {
