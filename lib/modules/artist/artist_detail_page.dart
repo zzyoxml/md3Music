@@ -178,7 +178,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     });
 
     const itemHeight = 72.0;
-    final targetOffset = index * itemHeight;
+    // 让目标项落在视口正中而非顶部：index*itemHeight 只对齐顶缘，
+    // 减去半个视口余量后当前播放歌曲会居中显示，便于快速锁定。
+    final viewport = _scrollController.position.viewportDimension;
+    final targetOffset = index * itemHeight - (viewport - itemHeight) / 2;
     _scrollController.animateTo(
       targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
       duration: const Duration(milliseconds: 300),
