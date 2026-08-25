@@ -89,6 +89,7 @@ class _UsbExclusiveSectionState extends State<UsbExclusiveSection> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // search: usb dac 独占 音频
         SwitchListTile(
           secondary: Icon(Icons.usb, color: colorScheme.primary),
           title: const Text('USB 独占输出'),
@@ -101,6 +102,7 @@ class _UsbExclusiveSectionState extends State<UsbExclusiveSection> {
           future: UsbAudioService.instance.getAutoDisableForMv(),
           builder: (context, snapshot) {
             final autoClose = snapshot.data ?? true;
+            // search: usb 独占 mv
             return SwitchListTile(
               secondary: Icon(Icons.movie_outlined, color: colorScheme.primary),
               title: const Text('播放 MV 时自动关闭独占'),

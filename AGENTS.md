@@ -17,6 +17,17 @@
    调试截图、临时脚本、测试数据、日志导出文件、验证用的临时 APK 等，禁止散落在项目根或其他目录；
    `tmp/` 之外的临时文件在提交前必须清理或移入 `tmp/`。
 
+3. **添加/改名/删除设置项后必须运行设置搜索索引生成脚本。**
+
+   ```powershell
+   dart run scripts/tools/gen_settings_search_index.dart
+   ```
+
+   产物 `lib/modules/settings/settings_search_index.g.dart` 需与源码改动一起提交（禁止手改产物）。
+   `scripts/md3.ps1 commit / android / windows` 会在流程开始时静默跑一次并在产物有变化时提示，
+   但不要依赖它兜底：改完设置项就手动跑一遍，索引不一致会被
+   `test/modules/settings/settings_search_index_test.dart` 判为失败。详见 3.3。
+
 ---
 
 ## 1. 项目架构概览
@@ -198,6 +209,20 @@ cargo +stable-x86_64-pc-windows-gnu clippy      # 静态检查（勿引入新 er
 ```
 
 Dart 侧：`flutter test`（`test/` 下 30 个测试文件）。**注意有预存失败基线**，见 8.3 末条——判断回归前先对照。
+
+设置页搜索索引由源码生成，改动设置项（新增/改名/删除 tile）后**必须**重新生成（见 0 节第 3 条），
+否则 `test/modules/settings/settings_search_index_test.dart` 会失败：
+
+```powershell
+dart run scripts/tools/gen_settings_search_index.dart   # 产出 lib/modules/settings/settings_search_index.g.dart
+```
+
+补充同义词写在 tile 上方注释 `// search: 别名1 别名2`；没有标题文本的控件
+（纯图标滑块等）用 `// search-item: 标签 | 别名1 别名2` 手写声明；`// search: -` 排除。
+
+`scripts/md3.ps1 commit / android / windows`（含直接调用 `scripts/tasks/*.ps1`）在流程开始时
+会通过 `Sync-SettingsSearchIndex`（`scripts/lib/common.ps1`）静默跑一次生成器：无变化不输出，
+有变化提示一行提醒一并提交；dart 缺失或生成失败只告警、不拦断构建与提交。
 
 ### 3.4 CI 流程（`.github/workflows/`）
 

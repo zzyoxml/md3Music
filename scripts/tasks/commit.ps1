@@ -8,7 +8,8 @@
 
     1. 列出工作区所有改动（含未跟踪文件），方向键 + 空格勾选本次要提交的文件
     2. 提交前跑否认清单闸门（scripts/public_deny.txt），命中私有符号即中止
-    3. 默认由 LLM 读 diff 一次起草提交标题、正文与 PR 描述，回车接受或直接改写；-NoLlm 退回模板候选
+    3. 默认由 LLM 读 diff 一次起草提交标题、正文、PR 描述与逐文件说明，四段分别回车接受或改写；
+       -NoLlm 退回模板候选
     4. 同步当前分支：先合并 upstream/<分支> 的新提交，再合并 origin/<分支>，最后推送 origin
        （首次推送自动 -u 建立跟踪；upstream 的提交因此经本地带到 origin，fork 不会越落越远）
     5. 可选：向 upstream 开 PR / 导出公开版本（覆盖推送或开 PR）
@@ -22,9 +23,10 @@
 
 .PARAMETER NoLlm
   不调 LLM，直接用按文件路径推断的模板候选信息（离线 / 不想耗额度时用）。
-  默认行为是让 LLM 读 diff 起草标题、提交正文与 PR 描述；配置见 scripts/lib/llm.ps1，
+  默认行为是让 LLM 读 diff 起草标题、提交正文、PR 描述与逐文件说明；配置见 scripts/lib/llm.ps1，
   可用 MD3_LLM_API_KEY / MD3_LLM_BASE_URL / MD3_LLM_MODEL 覆盖内置默认值。
-  接口按次计费，故每次提交只调一次、不重试，失败即回退模板候选，不影响提交。
+  接口按次计费，故每次提交只调一次、不重试，失败即回退模板候选，不影响提交；
+  结果按 diff 指纹缓存在 .git/md3-llm-commit.json，改动没变时重跑脚本直接复用，不再计费。
 
 .PARAMETER All
   跳过勾选界面，直接提交全部改动。
@@ -291,11 +293,12 @@ function New-CommitMessageCandidate {
 }
 
 # ---------- LLM 提交信息 ----------
-# 给模型的上下文：文件清单 + 增删行数 + 截断后的 unified diff。
-# 接口按次计费、只调一次，所以这一次尽量喂足：整体上限 $MaxChars，超出后按文件
-# 依次丢弃 diff，保证文件清单永远完整（清单本身就够写出一条合格标题）。
+# 给模型的上下文：文件清单 + 增删行数 + unified diff。
+# 接口按次计费、只调一次，所以这一次尽量喂足：整体上限 $MaxChars（放到 20 万字符，
+# 常规提交的完整 diff 都装得下），超出后按文件依次截断 / 丢弃 diff，
+# 保证文件清单永远完整（清单本身就够写出一条合格标题）。
 function Get-CommitDiffContext {
-    param([Parameter(Mandatory)][object[]]$Items, [int]$MaxChars = 48000, [int]$PerFileChars = 8000)
+    param([Parameter(Mandatory)][object[]]$Items, [int]$MaxChars = 200000, [int]$PerFileChars = 40000)
     $sb = New-Object System.Text.StringBuilder
     [void]$sb.AppendLine("文件清单（共 $($Items.Count) 个）：")
     foreach ($it in $Items) {
@@ -311,7 +314,7 @@ function Get-CommitDiffContext {
         $text = ''
         if ($it.Untracked) {
             $full = Join-Path $Root $it.Path
-            $head = @(Get-Content -LiteralPath $full -TotalCount 400 -ErrorAction SilentlyContinue)
+            $head = @(Get-Content -LiteralPath $full -TotalCount 3000 -ErrorAction SilentlyContinue)
             if ($head.Count) { $text = "新文件 $($it.Path) 内容（前 $($head.Count) 行）：`n" + ($head -join "`n") }
         } else {
             $d = @(Invoke-Git @('--no-pager', 'diff', 'HEAD', '--', $it.Path) -Quiet)
@@ -334,9 +337,59 @@ function Read-YesNo {
     if ([string]::IsNullOrWhiteSpace($a)) { return $Default }
     $a.Trim().ToLowerInvariant() -in @('y', 'yes', '是')
 }
+
+# ---------- 候选信息的展示与逐段修正 ----------
+# 起草结果按次计费，所以四段（标题 / 正文 / PR 描述 / 逐文件说明）一次拿回后完整展示，
+# 不做省略；每段单独确认，改一段不影响其它段（以前重敲标题会把正文和 PR 描述一起丢掉）。
+function Show-DraftSegment {
+    param([Parameter(Mandatory)][string]$Label, [AllowEmptyString()][string]$Text, [string]$Color = 'DarkYellow')
+    if (-not $Text) {
+        Write-Host "  $Label：（空）" -ForegroundColor DarkGray
+        return
+    }
+    $lines = @("$Text" -split "`r?`n")
+    if ($lines.Count -eq 1) {
+        Write-Host "  $Label：$($lines[0])" -ForegroundColor $Color
+        return
+    }
+    Write-Host "  $Label（$($lines.Count) 行）：" -ForegroundColor $Color
+    foreach ($l in $lines) { Write-Host "    $l" -ForegroundColor $Color }
+}
+
+<#
+  逐段确认：回车保留当前内容；输入新内容即替换；输入单个 - 清空该段。
+  多行段（正文 / PR 描述 / 逐文件说明）连续输入多行，空行结束。
+#>
+function Read-DraftSegment {
+    param(
+        [Parameter(Mandatory)][string]$Label,
+        [AllowEmptyString()][string]$Current = '',
+        [switch]$MultiLine
+    )
+    if (-not $MultiLine) {
+        $in = Read-Host "  $Label：回车保留，或输入新内容（- 清空）"
+        if ([string]::IsNullOrWhiteSpace($in)) { return $Current }
+        if ($in.Trim() -eq '-') { return '' }
+        return $in.Trim()
+    }
+    Write-Note "  $Label：回车保留；或逐行输入新内容，空行结束（首行输入 - 清空）"
+    $first = Read-Host '    >'
+    if ([string]::IsNullOrWhiteSpace($first)) { return $Current }
+    if ($first.Trim() -eq '-') { return '' }
+    $lines = @($first)
+    while ($true) {
+        $l = Read-Host '    >'
+        if ([string]::IsNullOrWhiteSpace($l)) { break }
+        $lines += $l
+    }
+    ($lines -join "`n").Trim()
+}
+
 # ---------- 主流程 ----------
 $exitCode = 0
 try {
+    # 设置搜索索引：收集改动前静默同步，避免提交里带着过期索引（有变化才提示）
+    Sync-SettingsSearchIndex
     Write-Step '收集工作区改动'
     $branch = "$(Invoke-Git @('rev-parse', '--abbrev-ref', 'HEAD'))".Trim()
     $items = @(Get-ChangeList)
@@ -387,6 +440,7 @@ try {
     # ---------- 提交信息 ----------
     $MessageBody = ''
     $LlmPrBody = ''
+    $LlmFileNotes = ''
     if (-not $Message) {
         Write-Step '提交信息'
         $cand = New-CommitMessageCandidate -Items $sel
@@ -397,26 +451,42 @@ try {
         } else {
             . (Join-Path $PSScriptRoot '..\lib\llm.ps1')
             $cfg = Get-LlmConfig
-            Write-Note "  调用 LLM 起草提交信息（$($cfg.Model) @ $($cfg.BaseUrl)，key 来源：$($cfg.Source)）…"
             try {
                 [void](Enable-AutoProxy)
                 $hints = @($sel | ForEach-Object { Get-PathScope $_.Path } | Select-Object -Unique)
                 $ctx = Get-CommitDiffContext -Items $sel
-                # 按次计费：只发这一次，失败即回退模板，不重试
-                $r = New-LlmCommitMessage -DiffText $ctx -ScopeHints $hints
+                # 按次计费：先查缓存（键 = 上下文 + 模型的指纹），diff 没变就直接复用上次结果
+                $gitDir = "$(Invoke-Git @('rev-parse', '--absolute-git-dir'))".Trim()
+                $cachePath = if ($gitDir) { Join-Path $gitDir 'md3-llm-commit.json' } else { '' }
+                $cacheKey = Get-LlmCommitCacheKey -DiffText $ctx -Model $cfg.Model
+                $r = if ($cachePath) { Get-CachedLlmCommitMessage -Path $cachePath -Key $cacheKey } else { $null }
+                if ($r) {
+                    Write-Ok "复用缓存的起草结果（$($r.At)，改动未变，未再调用 LLM）"
+                } else {
+                    Write-Note "  调用 LLM 起草提交信息（$($cfg.Model) @ $($cfg.BaseUrl)，key 来源：$($cfg.Source)）…"
+                    Write-Note "  上下文 $([int]($ctx.Length / 1000)) K 字符 / $($sel.Count) 个文件"
+                    # 按次计费：只发这一次，失败即回退模板，不重试
+                    $r = New-LlmCommitMessage -DiffText $ctx -ScopeHints $hints
+                    if ($cachePath) {
+                        try { Set-CachedLlmCommitMessage -Path $cachePath -Key $cacheKey -Result $r }
+                        catch { Write-Warn "起草结果写入缓存失败（不影响本次提交）：$($_.Exception.Message)" }
+                    }
+                }
                 $cand = $r.Title
                 $candBody = $r.Body
-                $LlmPrBody = $r.PrBody      # 同一次调用顺手拿回的 PR 描述，开 PR 时直接用
+                $LlmPrBody = $r.PrBody          # 同一次调用顺手拿回的 PR 描述，开 PR 时直接用
+                $LlmFileNotes = $r.FileNotes    # 逐文件说明，附在 PR 描述的折叠区里
                 $from = 'LLM 按 diff 生成'
             }
             catch {
                 Write-Warn "LLM 起草失败，回退到模板候选：$($_.Exception.Message)"
             }
         }
-        Write-Host "  候选（$from）：$cand" -ForegroundColor Yellow
-        if ($candBody) {
-            foreach ($l in @($candBody -split "`r?`n")) { Write-Host "    $l" -ForegroundColor DarkYellow }
-        }
+        Write-Host "  候选来源：$from" -ForegroundColor Yellow
+        Show-DraftSegment -Label '标题' -Text $cand -Color 'Yellow'
+        Show-DraftSegment -Label '正文' -Text $candBody
+        Show-DraftSegment -Label 'PR 描述' -Text $LlmPrBody
+        Show-DraftSegment -Label '逐文件说明' -Text $LlmFileNotes
         if ($Yes) {
             $Message = $cand
             $MessageBody = $candBody
@@ -424,14 +494,12 @@ try {
         } else {
             if ($from -eq 'LLM 按 diff 生成') { Write-Note '  （由模型阅读 diff 生成，仍请自行确认措辞是否准确）' }
             else { Write-Note '  （模板候选只按文件路径推断 type/scope，描述请按实际改动改写）' }
-            $in = Read-Host '  回车接受候选，或直接输入提交信息'
-            if ([string]::IsNullOrWhiteSpace($in)) {
-                $Message = $cand
-                $MessageBody = $candBody
-            } else {
-                $Message = $in.Trim()   # 自己写标题时不带上模型给的正文与 PR 描述
-                $LlmPrBody = ''
-            }
+            Write-Note '  下面逐段确认：回车保留该段，输入内容即替换'
+            $Message = Read-DraftSegment -Label '标题' -Current $cand
+            if (-not $Message) { $Message = $cand }   # 标题不能为空，清空则退回候选
+            $MessageBody = Read-DraftSegment -Label '正文' -Current $candBody -MultiLine
+            $LlmPrBody = Read-DraftSegment -Label 'PR 描述' -Current $LlmPrBody -MultiLine
+            $LlmFileNotes = Read-DraftSegment -Label '逐文件说明' -Current $LlmFileNotes -MultiLine
         }
     }
 
@@ -565,6 +633,11 @@ try {
         $base = if ($PrBase) { $PrBase } else { $branch }
         # PR 描述：优先用起草提交信息那一次调用顺手拿回的正文（已经付过费，不再多调一次）
         $prBody = if ($LlmPrBody) { $LlmPrBody } elseif ($MessageBody) { $MessageBody } else { '' }
+        # 逐文件说明同样来自那一次调用：放进折叠区，正文保持简洁
+        if ($LlmFileNotes) {
+            if ($prBody) { $prBody += "`n`n" }
+            $prBody += "<details>`n<summary>变更详情（逐文件）</summary>`n`n$LlmFileNotes`n`n</details>"
+        }
         if ($prBody) { $prBody += "`n`n---`n" }
         $prBody += "由 scripts/md3.ps1 commit 创建。`n`n- 提交：$sha`n- 分支：$head"
 

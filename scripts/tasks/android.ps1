@@ -58,6 +58,7 @@ $ABIs = @(
 
 # ---------- 1. 工具检测 ----------
 Write-Step '检查构建工具'
+Sync-SettingsSearchIndex          # 设置搜索索引：构建前静默同步（有变化才提示）
 Add-CargoToPath
 Assert-Command cargo   '请先安装 rustup（https://rustup.rs/）'
 Assert-Command flutter '请先安装并加入 PATH'
