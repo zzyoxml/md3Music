@@ -370,6 +370,18 @@ class _SettingsPageState extends State<SettingsPage>
     context.read<PlayerProvider>().setAudioFocusInterruptionMode(mode);
   }
 
+  /// 音频焦点三选一的当前模式说明文字（跟随选中项）。
+  String _audioFocusModeDescription(AudioFocusInterruptionMode mode) {
+    switch (mode) {
+      case AudioFocusInterruptionMode.keepPlaying:
+        return '中断时保持播放状态、音量不变（受系统限制可能无声）';
+      case AudioFocusInterruptionMode.pauseAndResume:
+        return '中断时暂停播放，结束后自动恢复';
+      case AudioFocusInterruptionMode.duckAndRestore:
+        return '中断时降低音量，结束后恢复原音量';
+    }
+  }
+
   Future<void> _loadVersion() async {
     try {
       final info = await PackageInfo.fromPlatform();
@@ -2042,30 +2054,56 @@ class _SettingsPageState extends State<SettingsPage>
             ],
           ),
         ),
-        RadioGroup<AudioFocusInterruptionMode>(
-          groupValue: _audioFocusInterruptionMode,
-          onChanged: (v) {
-            if (v != null) _onAudioFocusModeChanged(v);
-          },
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              RadioListTile<AudioFocusInterruptionMode>(
-                dense: true,
-                title: const Text('保持播放与音量'),
-                subtitle: const Text('如来电、导航等中断时不做任何响应'),
-                value: AudioFocusInterruptionMode.keepPlaying,
+              // 与「默认音质」同款 M3E 按钮组；横排 + xs 尺寸 + 紧凑密度，文字过长省略
+              M3EToggleButtonGroup(
+                actions: const [
+                  M3EToggleButtonGroupAction(
+                    label: Text(
+                      '保持播放',
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                  M3EToggleButtonGroupAction(
+                    label: Text(
+                      '暂停后恢复',
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                  M3EToggleButtonGroupAction(
+                    label: Text(
+                      '降音量恢复',
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
+                  ),
+                ],
+                direction: Axis.horizontal,
+                size: M3EButtonSize.xs,
+                density: M3EButtonGroupDensity.compact,
+                selectedIndex: AudioFocusInterruptionMode.values
+                    .indexOf(_audioFocusInterruptionMode),
+                onSelectedIndexChanged: (index) {
+                  if (index == null) return;
+                  _onAudioFocusModeChanged(
+                      AudioFocusInterruptionMode.values[index]);
+                },
               ),
-              RadioListTile<AudioFocusInterruptionMode>(
-                dense: true,
-                title: const Text('暂停后自动恢复'),
-                subtitle: const Text('来电等中断时暂停，结束后自动继续播放'),
-                value: AudioFocusInterruptionMode.pauseAndResume,
-              ),
-              RadioListTile<AudioFocusInterruptionMode>(
-                dense: true,
-                title: const Text('降低音量后自动恢复'),
-                subtitle: const Text('中断时降低音量不暂停，结束后恢复原音量'),
-                value: AudioFocusInterruptionMode.duckAndRestore,
+              const SizedBox(height: 8),
+              Text(
+                _audioFocusModeDescription(_audioFocusInterruptionMode),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
               ),
             ],
           ),
