@@ -17,7 +17,7 @@
   .\scripts\md3.ps1 windows              # Rust dll + Flutter Windows + 便携 zip
   .\scripts\md3.ps1 verify               # 否认清单闸门（只读自检）
   .\scripts\md3.ps1 export -PublicRemote <URL>
-  .\scripts\md3.ps1 commit               # TUI 一键提交（勾选改动 / 提交 / 推送 / PR）
+  .\scripts\md3.ps1 commit               # TUI 一键提交（勾选改动 / LLM 写提交信息 / 同步 / PR）
 #>
 # 刻意不声明 param()：PowerShell 会对已声明参数做严格绑定，未知的命名参数（-ForceRust /
 # -Message 等）会在绑定阶段直接报错。完全不声明参数时全部实参落进自动变量 $args，
@@ -35,7 +35,7 @@ $Tasks = [ordered]@{
     'windows' = @{ File = 'windows.ps1';       Desc = 'Rust dll + Flutter Windows + 便携版 zip';     Alias = @('win') }
     'verify'  = @{ File = 'verify_public.ps1'; Desc = '否认清单闸门：自检当前仓库公开面是否干净';   Alias = @('check') }
     'export'  = @{ File = 'export_public.ps1'; Desc = '导出公开版本（可选推送 / 开 PR）';           Alias = @('public') }
-    'commit'  = @{ File = 'commit.ps1';        Desc = 'TUI 一键提交：勾选改动 / 提交 / 推送 / 开 PR'; Alias = @('ci') }
+    'commit'  = @{ File = 'commit.ps1';        Desc = 'TUI 一键提交：勾选改动 / LLM 提交信息 / 同步 / 开 PR'; Alias = @('ci') }
     'token'   = @{ File = 'token.ps1';         Desc = '管理 GitHub token（开 PR / 自动合并用）';      Alias = @('auth') }
 }
 
@@ -67,6 +67,7 @@ function Get-TaskOptions([string]$Key) {
         ) }
         'commit' { @(
             (New-TaskOption -Name '-Message'      -Kind value -Desc '提交信息（不填=用候选信息确认环节）'),
+            (New-TaskOption -Name '-NoLlm'        -Desc '不调 LLM，用模板候选信息'),
             (New-TaskOption -Name '-All'          -Desc '跳过勾选界面，提交全部改动'),
             (New-TaskOption -Name '-NoPush'       -Desc '只提交，不做任何同步'),
             (New-TaskOption -Name '-NoUpstreamSync' -Desc '同步阶段跳过 upstream，只对齐 origin'),

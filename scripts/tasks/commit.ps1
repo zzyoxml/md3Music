@@ -8,7 +8,7 @@
 
     1. 列出工作区所有改动（含未跟踪文件），方向键 + 空格勾选本次要提交的文件
     2. 提交前跑否认清单闸门（scripts/public_deny.txt），命中私有符号即中止
-    3. 自动生成 conventional commit 候选信息，回车接受或直接改写
+    3. 默认由 LLM 读 diff 一次起草提交标题、正文与 PR 描述，回车接受或直接改写；-NoLlm 退回模板候选
     4. 同步当前分支：先合并 upstream/<分支> 的新提交，再合并 origin/<分支>，最后推送 origin
        （首次推送自动 -u 建立跟踪；upstream 的提交因此经本地带到 origin，fork 不会越落越远）
     5. 可选：向 upstream 开 PR / 导出公开版本（覆盖推送或开 PR）
@@ -19,6 +19,12 @@
 
 .PARAMETER Message
   提交信息。不传则进入候选信息确认/编辑环节。
+
+.PARAMETER NoLlm
+  不调 LLM，直接用按文件路径推断的模板候选信息（离线 / 不想耗额度时用）。
+  默认行为是让 LLM 读 diff 起草标题、提交正文与 PR 描述；配置见 scripts/lib/llm.ps1，
+  可用 MD3_LLM_API_KEY / MD3_LLM_BASE_URL / MD3_LLM_MODEL 覆盖内置默认值。
+  接口按次计费，故每次提交只调一次、不重试，失败即回退模板候选，不影响提交。
 
 .PARAMETER All
   跳过勾选界面，直接提交全部改动。
@@ -62,6 +68,7 @@
 
 .EXAMPLE
   .\scripts\md3.ps1 commit
+  .\scripts\md3.ps1 commit -NoLlm
   .\scripts\md3.ps1 commit -All -Message "fix(player): 修复切歌闪烁"
   .\scripts\md3.ps1 commit -Pr
   .\scripts\md3.ps1 commit -PublicPr
@@ -69,6 +76,7 @@
 [CmdletBinding()]
 param(
     [string]$Message = '',
+    [switch]$NoLlm,
     [switch]$All,
     [switch]$NoPush,
     [switch]$NoUpstreamSync,
@@ -225,7 +233,8 @@ function Show-ChangePicker {
 
 # ---------- 提交信息候选 ----------
 # 仓库沿用 conventional commit + 中文描述（如 feat(settings, android): ...）。
-# 这里只能从路径推断 type/scope，描述必须人工确认，因此候选只作为起草。
+# 默认由 LLM 读 diff 起草；这里的模板候选是 -NoLlm 或调用失败时的兜底，
+# 只能从路径推断 type/scope，描述仍需人工确认。
 function Get-PathScope([string]$Path) {
     $p = $Path -replace '\\', '/'
     switch -Regex ($p) {
@@ -279,6 +288,43 @@ function New-CommitMessageCandidate {
     # scope 与 type 同名时（如 docs(docs)）省掉 scope
     if ($scopes.Count -eq 1 -and $scopes[0] -eq $type) { "$($type): $desc" }
     else { "$type($($scopes -join ', ')): $desc" }
+}
+
+# ---------- LLM 提交信息 ----------
+# 给模型的上下文：文件清单 + 增删行数 + 截断后的 unified diff。
+# 接口按次计费、只调一次，所以这一次尽量喂足：整体上限 $MaxChars，超出后按文件
+# 依次丢弃 diff，保证文件清单永远完整（清单本身就够写出一条合格标题）。
+function Get-CommitDiffContext {
+    param([Parameter(Mandatory)][object[]]$Items, [int]$MaxChars = 48000, [int]$PerFileChars = 8000)
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine("文件清单（共 $($Items.Count) 个）：")
+    foreach ($it in $Items) {
+        $state = if ($it.Untracked) { '新增' } elseif ($it.Deleted) { '删除' } elseif ($it.Orig) { "重命名（原 $($it.Orig)）" } else { '修改' }
+        $stat = if ($it.Add -ne '' -or $it.Del -ne '') { "  +$($it.Add) -$($it.Del)" } else { '' }
+        [void]$sb.AppendLine("- $($it.Path)  [$state]$stat")
+    }
+    [void]$sb.AppendLine()
+    $budget = $MaxChars - $sb.Length
+    foreach ($it in $Items) {
+        if ($budget -le 200) { [void]$sb.AppendLine('（diff 过长，其余文件内容已省略）'); break }
+        if ($it.Deleted) { continue }
+        $text = ''
+        if ($it.Untracked) {
+            $full = Join-Path $Root $it.Path
+            $head = @(Get-Content -LiteralPath $full -TotalCount 400 -ErrorAction SilentlyContinue)
+            if ($head.Count) { $text = "新文件 $($it.Path) 内容（前 $($head.Count) 行）：`n" + ($head -join "`n") }
+        } else {
+            $d = @(Invoke-Git @('--no-pager', 'diff', 'HEAD', '--', $it.Path) -Quiet)
+            if ($d.Count) { $text = ($d -join "`n") }
+        }
+        if (-not $text) { continue }
+        $cap = [Math]::Min($PerFileChars, $budget - 100)
+        if ($text.Length -gt $cap) { $text = $text.Substring(0, $cap) + "`n…（此文件 diff 已截断）" }
+        [void]$sb.AppendLine($text)
+        [void]$sb.AppendLine()
+        $budget = $MaxChars - $sb.Length
+    }
+    $sb.ToString()
 }
 
 function Read-YesNo {
@@ -339,17 +385,53 @@ try {
         Write-Ok "闸门通过（$($gate.DenyCount) 条规则零命中）"
     }
     # ---------- 提交信息 ----------
+    $MessageBody = ''
+    $LlmPrBody = ''
     if (-not $Message) {
         Write-Step '提交信息'
         $cand = New-CommitMessageCandidate -Items $sel
-        Write-Host "  候选：$cand" -ForegroundColor Yellow
+        $candBody = ''
+        $from = '模板推断'
+        if ($NoLlm) {
+            Write-Note '  按 -NoLlm 跳过 LLM，使用模板候选'
+        } else {
+            . (Join-Path $PSScriptRoot '..\lib\llm.ps1')
+            $cfg = Get-LlmConfig
+            Write-Note "  调用 LLM 起草提交信息（$($cfg.Model) @ $($cfg.BaseUrl)，key 来源：$($cfg.Source)）…"
+            try {
+                [void](Enable-AutoProxy)
+                $hints = @($sel | ForEach-Object { Get-PathScope $_.Path } | Select-Object -Unique)
+                $ctx = Get-CommitDiffContext -Items $sel
+                # 按次计费：只发这一次，失败即回退模板，不重试
+                $r = New-LlmCommitMessage -DiffText $ctx -ScopeHints $hints
+                $cand = $r.Title
+                $candBody = $r.Body
+                $LlmPrBody = $r.PrBody      # 同一次调用顺手拿回的 PR 描述，开 PR 时直接用
+                $from = 'LLM 按 diff 生成'
+            }
+            catch {
+                Write-Warn "LLM 起草失败，回退到模板候选：$($_.Exception.Message)"
+            }
+        }
+        Write-Host "  候选（$from）：$cand" -ForegroundColor Yellow
+        if ($candBody) {
+            foreach ($l in @($candBody -split "`r?`n")) { Write-Host "    $l" -ForegroundColor DarkYellow }
+        }
         if ($Yes) {
             $Message = $cand
+            $MessageBody = $candBody
             Write-Ok '按 -Yes 直接采用候选信息'
         } else {
-            Write-Note '  （候选只按文件路径推断 type/scope，描述请按实际改动改写）'
+            if ($from -eq 'LLM 按 diff 生成') { Write-Note '  （由模型阅读 diff 生成，仍请自行确认措辞是否准确）' }
+            else { Write-Note '  （模板候选只按文件路径推断 type/scope，描述请按实际改动改写）' }
             $in = Read-Host '  回车接受候选，或直接输入提交信息'
-            $Message = if ([string]::IsNullOrWhiteSpace($in)) { $cand } else { $in.Trim() }
+            if ([string]::IsNullOrWhiteSpace($in)) {
+                $Message = $cand
+                $MessageBody = $candBody
+            } else {
+                $Message = $in.Trim()   # 自己写标题时不带上模型给的正文与 PR 描述
+                $LlmPrBody = ''
+            }
         }
     }
 
@@ -375,7 +457,9 @@ try {
     Write-Ok "已暂存 $($stagedNow.Count) 个文件"
 
     Write-Step '提交'
-    Invoke-Git @('commit', '-q', '-m', $Message) | Out-Null
+    $commitArgs = @('commit', '-q', '-m', $Message)
+    if ($MessageBody) { $commitArgs += @('-m', $MessageBody) }
+    Invoke-Git $commitArgs | Out-Null
     $sha = "$(Invoke-Git @('rev-parse', '--short', 'HEAD'))".Trim()
     Write-Ok "$sha  $Message"
 
@@ -479,7 +563,10 @@ try {
             "$(($originSlug -split '/')[0]):$branch"
         } else { $branch }
         $base = if ($PrBase) { $PrBase } else { $branch }
-        $prBody = "由 scripts/md3.ps1 commit 创建。`n`n- 提交：$sha`n- 分支：$head"
+        # PR 描述：优先用起草提交信息那一次调用顺手拿回的正文（已经付过费，不再多调一次）
+        $prBody = if ($LlmPrBody) { $LlmPrBody } elseif ($MessageBody) { $MessageBody } else { '' }
+        if ($prBody) { $prBody += "`n`n---`n" }
+        $prBody += "由 scripts/md3.ps1 commit 创建。`n`n- 提交：$sha`n- 分支：$head"
 
         if (-not $doMerge) {
             New-GitHubPr -RemoteUrl $upstreamUrl -Base $base -Head $head -Title $Message -Body $prBody -RepoDir $Root
