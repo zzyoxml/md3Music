@@ -68,7 +68,9 @@ function Get-TaskOptions([string]$Key) {
         'commit' { @(
             (New-TaskOption -Name '-Message'      -Kind value -Desc '提交信息（不填=用候选信息确认环节）'),
             (New-TaskOption -Name '-All'          -Desc '跳过勾选界面，提交全部改动'),
-            (New-TaskOption -Name '-NoPush'       -Desc '只提交，不推送'),
+            (New-TaskOption -Name '-NoPush'       -Desc '只提交，不做任何同步'),
+            (New-TaskOption -Name '-NoUpstreamSync' -Desc '同步阶段跳过 upstream，只对齐 origin'),
+            (New-TaskOption -Name '-UpstreamBranch' -Kind value -Desc '从 upstream 拉取的分支（默认同名）'),
             (New-TaskOption -Name '-Pr'           -Desc '推送后向 upstream 开 PR'),
             (New-TaskOption -Name '-PrMerge'      -Desc '开 PR 并直接合并到 upstream（需 token）'),
             (New-TaskOption -Name '-PrBase'       -Kind value -Desc 'upstream PR 的 base 分支'),
