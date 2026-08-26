@@ -78,6 +78,13 @@ class AppleLyricsView extends StatefulWidget {
   /// 非当前行保持默认白色不变。
   final Color? accentColor;
 
+  /// 歌曲 BPM（节拍/分钟），可空。
+  ///
+  /// 用于按快慢歌区分辉光触发阈值：非空时优先使用（BPM>=100 快歌→500ms，
+  /// 否则慢歌→1000ms）；为空则回落 KRC 歌词字长统计推断（见
+  /// [EmphasizeEffect.resolveThresholdMs]）。
+  final int? songBpm;
+
   const AppleLyricsView({
     super.key,
     required this.lines,
@@ -89,6 +96,7 @@ class AppleLyricsView extends StatefulWidget {
     this.enableInterludeDots = true,
     this.doubleTapToJump = false,
     this.accentColor,
+    this.songBpm,
   });
 
   /// 找到当前应高亮的行索引：最后一个 `startTime <= currentTimeMs` 的行。
@@ -176,6 +184,12 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   final LineScaleController _scaleController = LineScaleController();
   final InterludeDots _interludeDots = InterludeDots();
   final EmphasizeEffect _emphasizeEffect = EmphasizeEffect();
+
+  /// 当前歌曲的辉光触发阈值（ms）：500=快歌，1000=慢歌。
+  ///
+  /// 由歌曲 BPM / KRC 歌词字长推断（[EmphasizeEffect.resolveThresholdMs]），
+  /// 切歌（lines / songBpm 变化）时重算，并同步到每个 [WordRenderer]。
+  int _glowThresholdMs = 500;
 
   /// 每行独立的 [WordRenderer] 缓存（按行索引）。
   ///
@@ -585,6 +599,11 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   @override
   void initState() {
     super.initState();
+    // 初值：按歌曲 BPM / 歌词字长解析辉光触发阈值（切歌时 didUpdateWidget 重算）
+    _glowThresholdMs = EmphasizeEffect.resolveThresholdMs(
+      lines: widget.lines,
+      songBpm: widget.songBpm,
+    );
     // createTicker 由 SingleTickerProviderStateMixin 提供，
     // 在 widget 不可见时自动暂停（muted），节省 CPU。
     _ticker = createTicker(_onTick);
@@ -749,7 +768,13 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       }
     }
     // v3 优化：切歌（lines 引用变化）时重启驱动，重新推进新行的 renderer
-    if (!identical(oldWidget.lines, widget.lines)) {
+    if (!identical(oldWidget.lines, widget.lines) ||
+        oldWidget.songBpm != widget.songBpm) {
+      // 快慢歌辉光阈值随歌曲变化：重算并同步到渲染器（renderer 在渲染循环设置）
+      _glowThresholdMs = EmphasizeEffect.resolveThresholdMs(
+        lines: widget.lines,
+        songBpm: widget.songBpm,
+      );
       // P2-K: 清理按行索引缓存的弹簧与延迟记录——它们只增不减，
       // 长歌曲 + 多次切歌会持续累积内存（Spring 对象虽小但按行数增长）。
       // 新歌行数不同，旧索引无意义，直接整体清空。
@@ -984,6 +1009,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       if (useWordRenderer) {
         final renderer = _wordRendererFor(i);
         renderer.emphasizeEffect = _emphasizeEffect;
+        // 快慢歌辉光阈值（切歌时重算），行绑定时据此判定强调字
+        renderer.thresholdMs = _glowThresholdMs;
         renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade, blurActive: blurActive, activeColorValue: _activeLineColorValue);
         // 用平滑时间驱动逐字动画（上浮/字内渐变），避免 positionStream 5fps 卡顿
         // isPlaying 用于冻结自驱动波浪：暂停时波浪不推进，防止辉光持续闪烁

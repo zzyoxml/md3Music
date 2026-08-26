@@ -110,10 +110,24 @@ class EmphasizeEffect {
 
   // ============== 触发条件常量 ==============
 
-  /// 触发阈值：字时长 >= 1000ms
-  static const int _durationThresholdMs = 1000;
+  /// 阈值换算系数：辉光触发阈值 = 单位字长 × 1.4。
+  ///
+  /// 单位字长 = KRC 歌词字长中位数；有显式 BPM 时按「一字一拍」换算
+  /// （60000/BPM）。阈值随歌曲节奏自适应，替代固定的「快歌 500 / 慢歌 1000」
+  /// 两档，快慢之间平滑过渡。
+  static const double _thresholdFactor = 1.4;
 
-  /// 非 CJK 字最大长度
+  /// 默认兜底阈值（ms）：无逐字歌词 / 无 BPM / 样本不足时使用。
+  static const int _durationThresholdMs = 500;
+
+  /// 逐字歌词统计所需的最小样本数（字）。样本过少时统计不可靠，交由兜底。
+  static const int _lyricsSampleMin = 20;
+
+  /// 触发阈值：字时长 >= 此值才触发辉光（默认兜底值，见 [resolveThresholdMs]）。
+  ///
+  /// 快歌（KRC 逐字歌词，字时长常见 300~800ms）固定阈值易造成快歌不触发、
+  /// 慢歌过密；改用 [resolveThresholdMs] 按歌曲 BPM / 歌词字长中位数 ×1.4
+  /// 自适应推断，再经 [shouldEmphasize] 的 [thresholdMs] 传入。
   static const int _nonCjkMaxLength = 7;
 
   // ============== 内容过滤常量 ==============
@@ -261,10 +275,54 @@ class EmphasizeEffect {
     return false;
   }
 
+  /// 解析整首歌的辉光触发阈值（ms）：**单位字长 × 1.4**，随节奏自适应。
+  ///
+  /// 单位字长来源（结合 BPM 真数据 + 歌词字长推断）：
+  /// 1. [songBpm] 非空（酷狗接口 / 本地音频 TBPM 标签）：按「一字一拍」
+  ///    换算 `60000 / BPM` 作为单位字长（如 BPM=120 → 500ms）。
+  /// 2. 歌词字长统计（KRC 逐字）：取所有字时长中位数作为单位字长；
+  ///    样本不足返回 null 交给兜底。
+  /// 3. 兜底返回 [fallback]（默认 [_durationThresholdMs]=500）。
+  ///
+  /// 例：字长中位数 400ms（快歌）→ 阈值 560ms；800ms（慢歌）→ 1120ms，
+  /// 快慢之间平滑过渡，不再使用固定两档。
+  static int resolveThresholdMs({
+    List<LyricLine>? lines,
+    int? songBpm,
+    int fallback = _durationThresholdMs,
+  }) {
+    // 1. 显式 BPM：一字一拍换算单位字长，再 ×1.4
+    if (songBpm != null && songBpm > 0) {
+      final double beatMs = 60000 / songBpm;
+      return (beatMs * _thresholdFactor).round();
+    }
+    // 2. KRC 逐字歌词字长中位数 ×1.4
+    if (lines != null) {
+      final int? median = _lyricsMedianMs(lines);
+      if (median != null) return (median * _thresholdFactor).round();
+    }
+    // 3. 兜底
+    return fallback;
+  }
+
+  /// 由 KRC 逐字歌词统计字长中位数（ms）；无逐字或样本不足返回 null。
+  static int? _lyricsMedianMs(List<LyricLine> lines) {
+    final List<int> durations = <int>[];
+    for (final line in lines) {
+      if (!line.hasWordTiming) continue;
+      for (final w in line.words) {
+        durations.add(w.duration);
+      }
+    }
+    if (durations.length < _lyricsSampleMin) return null;
+    durations.sort();
+    return durations[durations.length ~/ 2];
+  }
+
   /// 判断 word 是否触发辉光。
   ///
   /// 触发条件（spec.md "Requirement: 强调辉光（emphasize）效果" + 内容过滤）：
-  /// - 字时长 [LyricWord.duration] >= 1000ms
+  /// - 字时长 [LyricWord.duration] >= [thresholdMs]（快慢歌阈值，见 [resolveThresholdMs]）
   /// - 文本非空
   /// - 【新增】非纯符号/标点（_ - \ 、 @ * . , … — 等）
   /// - 【新增】非歌手标签（男：/女：/(男)/合唱 等）
@@ -274,8 +332,8 @@ class EmphasizeEffect {
   /// 片假名 / CJK 标点 / 韩文 任一 Unicode 范围内，即视为 CJK 字符。
   ///
   /// 结果仅依赖 [LyricWord.text] 与 [LyricWord.duration]（行绑定后不变），可安全缓存。
-  static bool shouldEmphasize(LyricWord word) {
-    if (word.duration < _durationThresholdMs) return false;
+  static bool shouldEmphasize(LyricWord word, {int thresholdMs = _durationThresholdMs}) {
+    if (word.duration < thresholdMs) return false;
     final text = word.text;
     if (text.isEmpty) return false;
 
@@ -369,14 +427,12 @@ class EmphasizeEffect {
         ? -sin(pi * floatPhase) * _floatAmpEm * _floatEdgeFade(bumpActive, bumpPhase)
         : 0;
 
-    // amount 计算（spec.md 公式）
-    // amount = (duration / 2000)，>1 时取 sqrt，<=1 时取立方，再 *0.6，封顶 1.2
-    double amount = word.duration / 2000;
-    if (amount > 1) {
-      amount = sqrt(amount);
-    } else {
-      amount = amount * amount * amount; // ^3
-    }
+    // amount 计算（spec.md 公式，快歌优化）
+    // amount = sqrt(duration / 2000)，再 *0.6，封顶 1.2
+    // 原公式短字（≤1）取立方会把 1000ms 字压到 0.075，快歌辉光几乎不可见；
+    // 统一取 sqrt：短字（快歌）强度显著提升（500ms→0.3、1000ms→0.42），
+    // 长字（>2000ms 慢歌）保持原样（原本就 sqrt），不影响慢歌观感。
+    double amount = sqrt(word.duration / 2000);
     amount *= _amountScale;
     if (amount > _amountCap) amount = _amountCap;
 

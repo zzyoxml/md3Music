@@ -41,13 +41,13 @@ void main() {
       expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
     });
 
-    test('CJK 字时长 500ms → false（duration < 1000）', () {
+    test('CJK 字时长 500ms → true（快歌优化：阈值降至 500ms）', () {
       final word = makeWord(duration: 500, text: '运');
-      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
     });
 
-    test('CJK 字时长刚好 999ms → false（边界）', () {
-      final word = makeWord(duration: 999, text: '运');
+    test('CJK 字时长 499ms → false（duration < 500 边界）', () {
+      final word = makeWord(duration: 499, text: '运');
       expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
     });
 
@@ -66,9 +66,9 @@ void main() {
       expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
     });
 
-    test('非 CJK 字 7 字符 500ms → false（duration 不够）', () {
+    test('非 CJK 字 7 字符 500ms → true（快歌优化：阈值降至 500ms）', () {
       final word = makeWord(duration: 500, text: 'abcdefg');
-      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
     });
 
     test('CJK 多字符 2000ms → true（任意长度）', () {
@@ -733,6 +733,112 @@ void main() {
       expect(str.contains('1.1'), isTrue);
       expect(str.contains('0.5'), isTrue);
       expect(str.contains('0.2'), isTrue);
+    });
+  });
+
+  group('resolveThresholdMs - 快慢歌阈值', () {
+    /// 构造带逐字时间戳的行。
+    LyricLine makeKrcLine(List<int> durations) {
+      final words = List<LyricWord>.generate(
+        durations.length,
+        (i) => LyricWord(
+          startTime: 0,
+          duration: durations[i],
+          text: '运',
+        ),
+      );
+      return LyricLine(
+        startTime: 0,
+        duration: 1000,
+        text: '运' * durations.length,
+        words: words,
+      );
+    }
+
+    /// 构造 LRC 行（无逐字时间戳）。
+    LyricLine makeLrcLine(String text) => LyricLine(
+          startTime: 0,
+          duration: 1000,
+          text: text,
+        );
+
+    test('songBpm=120 → 阈值 700（一字一拍 500ms × 1.4）', () {
+      expect(
+        EmphasizeEffect.resolveThresholdMs(songBpm: 120),
+        700,
+      );
+    });
+
+    test('songBpm=80 → 阈值 1050（一字一拍 750ms × 1.4）', () {
+      expect(
+        EmphasizeEffect.resolveThresholdMs(songBpm: 80),
+        1050,
+      );
+    });
+
+    test('无 BPM，KRC 字长中位数 400 → 阈值 560（快歌自适应）', () {
+      final lines = [makeKrcLine(List.filled(30, 400))];
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines), 560);
+    });
+
+    test('无 BPM，KRC 字长中位数 800 → 阈值 1120（慢歌自适应）', () {
+      final lines = [makeKrcLine(List.filled(30, 800))];
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines), 1120);
+    });
+
+    test('阈值随字长连续变化（无固定档位）', () {
+      final lines500 = [makeKrcLine(List.filled(30, 500))];
+      final lines600 = [makeKrcLine(List.filled(30, 600))];
+      final lines700 = [makeKrcLine(List.filled(30, 700))];
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines500), 700);
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines600), 840);
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines700), 980);
+    });
+
+    test('无 BPM 且纯 LRC（无逐字）→ 兜底默认 500', () {
+      final lines = [
+        makeLrcLine('第一行'),
+        makeLrcLine('第二行'),
+      ];
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines), 500);
+    });
+
+    test('无 BPM 且逐字样本不足（< 20 字）→ 兜底默认 500', () {
+      final lines = [makeKrcLine(List.filled(10, 300))];
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines), 500);
+    });
+
+    test('songBpm 优先于歌词统计', () {
+      // 歌词字长中位数 800（本应得 1120），但显式 BPM=120 → 700 优先
+      final lines = [makeKrcLine(List.filled(30, 800))];
+      expect(
+        EmphasizeEffect.resolveThresholdMs(lines: lines, songBpm: 120),
+        700,
+      );
+    });
+  });
+
+  group('shouldEmphasize - thresholdMs 参数', () {
+    test('thresholdMs=1000 时 500ms 字不触发、1000ms 字触发', () {
+      final fast = makeWord(duration: 500, text: '运');
+      final slow = makeWord(duration: 1000, text: '运');
+      expect(
+        EmphasizeEffect.shouldEmphasize(fast, thresholdMs: 1000),
+        isFalse,
+      );
+      expect(
+        EmphasizeEffect.shouldEmphasize(slow, thresholdMs: 1000),
+        isTrue,
+      );
+    });
+
+    test('thresholdMs=500（默认）时 500ms 字触发', () {
+      final word = makeWord(duration: 500, text: '运');
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
+      expect(
+        EmphasizeEffect.shouldEmphasize(word, thresholdMs: 500),
+        isTrue,
+      );
     });
   });
 }

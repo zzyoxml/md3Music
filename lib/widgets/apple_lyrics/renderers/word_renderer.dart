@@ -185,8 +185,22 @@ class WordRenderer {
   /// 仅强调字有内容；非强调字为常量空列表。
   List<List<ui.Image?>> _charGlowSprites = const <List<ui.Image?>>[];
 
-  /// 正在异步渲染辉光精灵的 (wordIndex, charIndex) 集合（避免重复请求）。
-  final Set<String> _charGlowSpritePending = <String>{};
+  /// 正在异步渲染辉光精灵的 (wordIndex:charIndex → rowHeight) 映射。
+  ///
+  /// 记录每个渲染任务对应的行盒，用于行盒竞态保护：旧行盒渲染未完成时，
+  /// 若同一字被按新行盒重新请求，回调通过 [_glowSpriteRowHeight] 校验丢弃
+  /// 过期结果，避免误用行盒不匹配（偏下）的精灵。
+  final Map<String, double> _glowSpritePendingRow = <String, double>{};
+
+  /// 每个辉光精灵生成时使用的行盒（wordIndex:charIndex → rowHeight）。
+  ///
+  /// 辉光精灵按绘制时的行盒（[LyricLayout.lineHeight] 或换行行的 0.8x）渲染，
+  /// 与正文字形同盒顶对齐；行盒变化（换行行 ⇄ 非换行行）时据此释放旧精灵
+  /// 并强制重新渲染，保证光晕始终贴合文字。
+  final Map<String, double> _glowSpriteRowHeight = <String, double>{};
+
+  /// 辉光行盒诊断日志去重标记：仅打印状态变化的换行行辉光记录。
+  String _lastGlowDebug = '';
 
   /// 精灵渲染代数：_ensureBound / reset 时递增，
   /// 异步回调用代数校验，丢弃过期（renderer 已重置/切行）的渲染结果。
@@ -332,6 +346,12 @@ class WordRenderer {
   /// 设置强调辉光效果计算器。
   set emphasizeEffect(EmphasizeEffect? effect) => _emphasizeEffect = effect;
 
+  /// 辉光触发阈值（ms）：500=快歌，1000=慢歌。
+  ///
+  /// 由歌曲 BPM / KRC 歌词字长推断（见 EmphasizeEffect.resolveThresholdMs），
+  /// 切歌时由 AppleLyricsView 设置；_ensureBound 行绑定时据此判定强调字。
+  int thresholdMs = 500;
+
   // ============== 动画推进 ==============
 
   /// 推进动画。
@@ -475,7 +495,13 @@ class WordRenderer {
           for (int k = 0; k < runes.length; k++) {
             final String charText = String.fromCharCode(runes[k]);
             _requestCharImage(i, k, charText, _boundFontSize);
-            _requestCharGlowSprite(i, k, charText, _boundFontSize);
+            // 预热阶段尚未布局，默认按整行行盒渲染；
+            // 若该字实际位于换行行（0.8x 行盒），绘制时会检测行盒变化并重渲染。
+            // rebuildOnMismatch: false —— 预热不干预已建立的正确精灵/进行中的
+            // 渲染任务，避免每帧预热与换行行绘制反复释放重建导致光晕闪烁。
+            _requestCharGlowSprite(
+                i, k, charText, _boundFontSize, LyricLayout.lineHeight,
+                rebuildOnMismatch: false);
           }
         }
       }
@@ -775,6 +801,7 @@ class WordRenderer {
           wordY: wordY,
           fontSize: fontSize,
           lineHeight: lineHeight,
+          rowHeight: rowHeight,
           wordIndex: i,
           textRed: textRed,
           textGreen: textGreen,
@@ -947,6 +974,7 @@ class WordRenderer {
     required double wordY,
     required double fontSize,
     required double lineHeight,
+    required double rowHeight,
     required int wordIndex,
     required int textRed,
     required int textGreen,
@@ -1001,7 +1029,7 @@ class WordRenderer {
       if (needEmphasis) {
         canvas.save();
         final double centerX = charX + cw / 2;
-        final double centerY = charY + fontSize * lineHeight / 2;
+        final double centerY = charY + fontSize * rowHeight / 2;
         canvas.translate(centerX, centerY);
         canvas.scale(st.scale, st.scale);
         canvas.translate(-centerX, -centerY);
@@ -1017,14 +1045,43 @@ class WordRenderer {
         final double blurSigma = st.shadowBlurEm * fontSize * 0.8;
         if (blurSigma > 0) {
           final glowRect = Rect.fromLTWH(
-            charX - blurSigma * 2, charY - blurSigma * 2,
-            cw + blurSigma * 4, fontSize * lineHeight + blurSigma * 4,
+            charX - blurSigma * 3, charY - blurSigma * 3,
+            cw + blurSigma * 6, fontSize * rowHeight + blurSigma * 6,
           );
           // 优先用预渲染辉光精灵贴图（透明度经 ColorFilter 跟随 glowLevel）
+          // 行盒失效检测：精灵可能是预热阶段按整行行盒（lineHeight）生成的，
+          // 若当前为换行行（rowHeight=0.8x），旧精灵字形偏下、光晕错位。
+          // 这里在绘制前主动核对行盒，不一致则释放并强制按当前 rowHeight 重生成
+          // （_requestCharGlowSprite 只在精灵为 null 时才请求，故必须在此先释放）。
+          final String glowKey = '$wordIndex:$k';
+          final double? cachedGlowRow = _glowSpriteRowHeight[glowKey];
+          if (cachedGlowRow != null &&
+              (cachedGlowRow - rowHeight).abs() > 1e-6) {
+            _glowSpriteRowHeight.remove(glowKey);
+            final old = k < glowSprites.length ? glowSprites[k] : null;
+            old?.dispose();
+            if (wordIndex < _charGlowSprites.length &&
+                k < _charGlowSprites[wordIndex].length) {
+              _charGlowSprites[wordIndex][k] = null;
+            }
+          }
           final ui.Image? sprite =
               k < glowSprites.length ? glowSprites[k] : null;
+          // 换行行辉光诊断日志（节流：仅状态变化时打印一次，供真机抓 log 定位）
+          if ((rowHeight - lineHeight).abs() > 1e-6) {
+            final String dbg =
+                'w$wordIndex:c$k row=${rowHeight.toStringAsFixed(3)} '
+                'cached=${cachedGlowRow?.toStringAsFixed(3) ?? 'null'} '
+                'sprite=${sprite != null} y=${charY.toStringAsFixed(1)}';
+            if (dbg != _lastGlowDebug) {
+              _lastGlowDebug = dbg;
+              // ignore: avoid_print
+              print('[GlowDbg] $dbg');
+            }
+          }
           if (sprite != null) {
-            final double pad = _maxGlowSigma(fontSize) * 2;
+            // 与精灵生成侧一致：上下各 3σ 余量（见 _requestCharGlowSprite 注释）
+            final double pad = _maxGlowSigma(fontSize) * 3;
             _glowImagePaint.colorFilter = ColorFilter.matrix(<double>[
               1, 0, 0, 0, 0,
               0, 1, 0, 0, 0,
@@ -1041,6 +1098,7 @@ class WordRenderer {
               k,
               painter.text?.toPlainText() ?? '',
               fontSize,
+              rowHeight,
             );
             _glowBlurPaint.imageFilter = ImageFilter.blur(
               sigmaX: blurSigma, sigmaY: blurSigma,
@@ -1063,7 +1121,13 @@ class WordRenderer {
       // 闪烁、无放大马赛克），经 ColorFilter.matrix 上色为文字色 + mask alpha，
       // drawImageRect 缩放到原生字符尺寸；图片未就绪时降级 TextPainter 均匀
       // alpha 路径（量化缓存），视觉等价。
-      final ui.Image? charImg = k < charImages.length ? charImages[k] : null;
+      //
+      // 换行行（rowHeight < lineHeight，0.8x 行盒）：字形图按 1.5 行盒生成，
+      // 直接缩放到 0.8x 行盒会把字形垂直压扁变形 → 换行行改用 TextPainter
+      // （按 rowHeight 行盒渲染），与整词路径行盒一致，避免激活/idle 切换瞬移。
+      final bool sameRowBox = (rowHeight - lineHeight).abs() < 1e-6;
+      final ui.Image? charImg =
+          sameRowBox && k < charImages.length ? charImages[k] : null;
       if (charImg != null) {
         _charImagePaint.colorFilter = ColorFilter.matrix(<double>[
           textRed / 255, 0, 0, 0, 0,
@@ -1086,7 +1150,7 @@ class WordRenderer {
             style: TextStyle(
               color: Color.fromRGBO(textRed, textGreen, textBlue, charAlpha),
               fontSize: fontSize,
-              height: lineHeight,
+              height: rowHeight,
               fontFamily: LyricLayout.fontFamily,
               fontWeight: LyricLayout.fontWeight,
             ),
@@ -1222,30 +1286,73 @@ class WordRenderer {
   /// 幂等保护：key（wordIndex:charIndex）已在缓存或渲染中时直接返回。
   /// 异步回调用 [_spriteEpoch] 校验，renderer 已重置/切行时丢弃结果。
   void _requestCharGlowSprite(
-      int wordIndex, int charIndex, String text, double fontSize) {
+      int wordIndex, int charIndex, String text, double fontSize,
+      double rowHeight,
+      {bool rebuildOnMismatch = true}) {
     final String key = '$wordIndex:$charIndex';
-    if (_charGlowSpritePending.contains(key)) return;
+    // 行盒变化（换行行 ⇄ 非换行行）时旧精灵行盒与当前文字不一致：
+    // 释放旧精灵，强制按新行盒重新渲染，保证光晕始终贴合文字。
+    // 仅【绘制路径】允许重建；预热路径不干预，避免预热（lineHeight）每帧
+    // 与绘制（rowHeight）反复互相释放重建 → 光晕闪烁。
+    if (rebuildOnMismatch) {
+      final double? cachedRow = _glowSpriteRowHeight[key];
+      if (cachedRow != null && (cachedRow - rowHeight).abs() > 1e-6) {
+        _glowSpriteRowHeight.remove(key);
+        if (wordIndex < _charGlowSprites.length &&
+            charIndex < _charGlowSprites[wordIndex].length) {
+          _charGlowSprites[wordIndex][charIndex]?.dispose();
+          _charGlowSprites[wordIndex][charIndex] = null;
+        }
+      }
+    } else {
+      // 预热：已有精灵（无论行盒）或已有渲染任务（无论行盒）都直接返回，
+      // 不破坏绘制已按正确行盒建立的精灵。
+      if (wordIndex < _charGlowSprites.length &&
+          charIndex < _charGlowSprites[wordIndex].length &&
+          _charGlowSprites[wordIndex][charIndex] != null) {
+        return;
+      }
+      if (_glowSpritePendingRow.containsKey(key)) return;
+    }
     if (wordIndex < _charGlowSprites.length &&
         charIndex < _charGlowSprites[wordIndex].length &&
         _charGlowSprites[wordIndex][charIndex] != null) {
-      return;
+      return; // 已有匹配当前行盒的精灵
     }
-    _charGlowSpritePending.add(key);
+    // 行盒竞态保护：旧行盒（如预热 lineHeight）的渲染可能仍在异步进行。
+    // 仅当"正在渲染的行盒与当前 rowHeight 相同"时才复用该渲染任务；
+    // 否则重新请求，并用回调行盒校验丢弃过期结果。
+    final double? pendingRow = _glowSpritePendingRow[key];
+    if (pendingRow != null && (pendingRow - rowHeight).abs() < 1e-6) {
+      return; // 同行盒渲染中
+    }
+    _glowSpritePendingRow[key] = rowHeight;
+    _glowSpriteRowHeight[key] = rowHeight;
     final int epoch = _spriteEpoch;
     final double sigma = _maxGlowSigma(fontSize);
-    final double pad = sigma * 2;
-    final double wordH = fontSize * LyricLayout.lineHeight;
+    // 上下各 3σ 余量：blur 光晕实际扩散约 3σ，仅留 2σ 会在换行行
+    // （0.8x 行盒，字形更靠上）把向上光晕裁切，光晕只剩下方、像垫在文字底下。
+    final double pad = sigma * 3;
+    final double wordH = fontSize * rowHeight;
     // 空字符安全保护
     if (text.isEmpty || wordH <= 0) {
-      _charGlowSpritePending.remove(key);
+      _glowSpritePendingRow.remove(key);
+      _glowSpriteRowHeight.remove(key);
       return;
     }
     // 异步渲染（toImage 在光栅线程执行，回调回 UI 线程）
-    _renderGlowSpriteImage(text, fontSize, sigma, pad).then((image) {
-      _charGlowSpritePending.remove(key);
+    _renderGlowSpriteImage(text, fontSize, sigma, pad, rowHeight).then((image) {
+      _glowSpritePendingRow.remove(key);
       if (image == null) return;
       if (epoch != _spriteEpoch) {
         // renderer 已重置/切行：过期结果直接释放
+        image.dispose();
+        return;
+      }
+      // 行盒校验：回调时若记录的行盒已不是本次渲染的行盒
+      // （被换行行重新请求覆盖），丢弃本次结果，避免误用偏下精灵。
+      final double? curRow = _glowSpriteRowHeight[key];
+      if (curRow == null || (curRow - rowHeight).abs() > 1e-6) {
         image.dispose();
         return;
       }
@@ -1259,10 +1366,14 @@ class WordRenderer {
 
   /// 渲染单张辉光精灵图（纯白字符 + blur，异步）。
   ///
+  /// 按绘制时的行盒 [rowHeight] 渲染，与正文字形同盒顶对齐：
+  /// 换行行（0.8x 行盒）用 rowHeight，非换行行等于 lineHeight，
+  /// 保证光晕与文字上下完全贴合，不再需要额外垂直偏移补偿。
   /// 内部 try-catch 兜底：任何渲染失败（如 GPU 资源紧张）返回 null，
   /// 下次 _requestCharGlowSprite 会重新尝试。
   Future<ui.Image?> _renderGlowSpriteImage(
-      String text, double fontSize, double sigma, double pad) async {
+      String text, double fontSize, double sigma, double pad,
+      double rowHeight) async {
     try {
       final textPainter = TextPainter(textDirection: TextDirection.ltr)
         ..text = TextSpan(
@@ -1271,14 +1382,14 @@ class WordRenderer {
             // 与渐变路径 painter 一致：plain white，blur 后即白色辉光
             color: const Color.fromRGBO(255, 255, 255, 1.0),
             fontSize: fontSize,
-            height: LyricLayout.lineHeight,
+            height: rowHeight,
             fontFamily: LyricLayout.fontFamily,
             fontWeight: LyricLayout.fontWeight,
           ),
         )
         ..layout();
       final int imgW = (textPainter.width + pad * 2).ceil();
-      final int imgH = (fontSize * LyricLayout.lineHeight + pad * 2).ceil();
+      final int imgH = (fontSize * rowHeight + pad * 2).ceil();
       if (imgW <= 0 || imgH <= 0) {
         textPainter.dispose();
         return null;
@@ -1472,7 +1583,8 @@ class WordRenderer {
         img?.dispose();
       }
     }
-    _charGlowSpritePending.clear();
+    _glowSpritePendingRow.clear();
+    _glowSpriteRowHeight.clear();
     // v7：释放旧行逐字符字形图
     for (final charList in _charImages) {
       for (final img in charList) {
@@ -1522,7 +1634,10 @@ class WordRenderer {
     for (int i = 0; i < line.words.length; i++) {
       // 缓存该 word 的辉光判定结果（含正则匹配，仅在此执行一次）
       // tick 中通过 _wordEmphasisFlags[i] O(1) 读取，避免每帧重复正则匹配
-      _wordEmphasisFlags[i] = EmphasizeEffect.shouldEmphasize(line.words[i]);
+      _wordEmphasisFlags[i] = EmphasizeEffect.shouldEmphasize(
+        line.words[i],
+        thresholdMs: thresholdMs,
+      );
       // === 整词 painter：所有字都创建 ===
       // 强调字在 idle（未进入激活窗口）时走整词渲染路径（单次 layout/渐变），
       // 避免逐字符渲染的每帧开销导致卡顿；仅激活窗口内才切逐字符。
@@ -1648,7 +1763,8 @@ class WordRenderer {
       }
     }
     _charGlowSprites = const <List<ui.Image?>>[];
-    _charGlowSpritePending.clear();
+    _glowSpritePendingRow.clear();
+    _glowSpriteRowHeight.clear();
     // v7：释放逐字符字形图
     for (final charList in _charImages) {
       for (final img in charList) {
