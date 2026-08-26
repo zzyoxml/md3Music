@@ -23,8 +23,6 @@ import 'services/kugou_server.dart';
 import 'widgets/apple_lyrics/layout/lyric_preferences.dart';
 import 'widgets/md3_lyric_preferences.dart';
 
-const String _kBatteryPromptShownKey = 'battery_prompt_shown';
-
 /// 顶级 Navigator 的 GlobalKey，预留供后续扩展使用。
 final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -214,7 +212,7 @@ void handleShortcut(String shortcutType) {
   shortcutTabRequest.value = tabId;
 }
 
-/// 请求运行时权限（通知 / 媒体 / 管理外部存储 / 忽略电池优化）。
+/// 请求运行时权限（通知 / 媒体 / 管理外部存储）。
 /// 公开入口与私有入口共用；私有入口的下载功能依赖其中的存储权限。
 Future<void> requestPermissions() async {
   // Web 平台不支持 permission_handler，跳过所有权限请求
@@ -246,15 +244,4 @@ Future<void> requestPermissions() async {
       print('Manage external storage permission request failed: $e');
     }
   }
-  // 忽略电池优化：只弹一次（不管用户选什么都标记为已弹）
-  try {
-    final prefs = await SharedPreferences.getInstance();
-    final alreadyShown = prefs.getBool(_kBatteryPromptShownKey) ?? false;
-    if (!alreadyShown) {
-      if (await Permission.ignoreBatteryOptimizations.isDenied) {
-        await Permission.ignoreBatteryOptimizations.request();
-      }
-      await prefs.setBool(_kBatteryPromptShownKey, true);
-    }
-  } catch (_) {}
 }

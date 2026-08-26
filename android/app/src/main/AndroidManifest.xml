@@ -22,7 +22,6 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 悬浮窗识曲：拖拽悬浮窗到底部删除时提供震动反馈 -->
     <uses-permission android:name="android.permission.VIBRATE" />
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.MEDIA_AUDIO_UPLOAD" />
     <uses-permission android:name="android.permission.MEDIA_VIDEO_UPLOAD" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
