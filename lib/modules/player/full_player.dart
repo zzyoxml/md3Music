@@ -3573,6 +3573,9 @@ class _FullPlayerState extends State<FullPlayer>
               final json = item as Map<String, dynamic>;
               final brief = KugouPlaylistBrief.fromJson(json);
               if (brief.type != 0) continue;
+              // 排除「我喜欢」默认收藏歌单：收藏走红心机制，不走添加到歌单
+              // （判定与 FavoritesProvider 一致：name == '我喜欢' || is_def == 2）
+              if (brief.name == '我喜欢' || json['is_def'] == 2) continue;
               // 将模型数据转回 Map 以便 UI 使用（包含正确的字段值）
               playlists.add({
                 'name': brief.name,

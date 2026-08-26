@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 import 'package:provider/provider.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
@@ -41,7 +42,7 @@ class _SignInCalendarPageState extends State<SignInCalendarPage> {
               _showVerifyCaptchaDialog(context, kugou, pending);
             });
           }
-          return M3EPullToRefreshIndicator(
+          return Md3PullToRefresh(
             onRefresh: () async {
               await kugou.getVipMonthRecord();
             },

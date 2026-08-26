@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/player_provider.dart';
@@ -52,8 +53,8 @@ class _ChannelStoryDetailPageState extends State<ChannelStoryDetailPage> {
     });
   }
 
-  Future<void> _load() async {
-    if (mounted) setState(() => _isLoading = true);
+  Future<void> _load({bool showLoading = true}) async {
+    if (showLoading && mounted) setState(() => _isLoading = true);
     Map<String, dynamic>? r;
     try {
       r = await KugouApiClient().getYouthChannelSongDetail(
@@ -166,8 +167,8 @@ class _ChannelStoryDetailPageState extends State<ChannelStoryDetailPage> {
       bottomNavigationBar: const MiniPlayer(),
       body: _isLoading
           ? const Center(child: M3ELoadingIndicator())
-          : M3EPullToRefreshIndicator(
-              onRefresh: _load,
+          : Md3PullToRefresh(
+              onRefresh: () => _load(showLoading: false),
               child: ListView(
                 controller: _scrollController,
                 padding: const EdgeInsets.only(bottom: 24),

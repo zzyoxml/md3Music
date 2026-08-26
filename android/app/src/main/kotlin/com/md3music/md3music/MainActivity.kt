@@ -137,11 +137,20 @@ class MainActivity : FlutterActivity() {
                 lp.preferredDisplayModeId = best.modeId
             }
             window.attributes = lp // 重新 setAttributes 使偏好生效
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                window.frameRateBoostOnTouchEnabled = true
+            // frameRateBoostOnTouchEnabled 为 API 34（Android 14）引入，低于此版本
+            // 调用会抛 NoSuchMethodError（Error 而非 Exception），曾致低版本设备启动崩溃。
+            // 门槛必须用 VANILLA_ICE_CREAM(34)，不能用 UPSIDE_DOWN_CAKE(33)。
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+                try {
+                    window.frameRateBoostOnTouchEnabled = true
+                } catch (_: Throwable) {
+                    // 个别 ROM 即便到达 API 34 仍可能不支持，单独吞掉（高刷非致命）
+                }
             }
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             // 个别 ROM 可能不支持，忽略即可（高刷非致命）
+            // 用 Throwable 而非 Exception：NoSuchMethodError/LinkageError 是 Error，
+            // 低版本设备调用高版本方法抛出的崩溃必须被吞掉而非上抛。
         }
     }
 

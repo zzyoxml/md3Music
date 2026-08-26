@@ -146,8 +146,23 @@ class _SearchPageState extends State<SearchPage>
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final useBackgroundImage =
-        context.watch<ThemeProvider>().useBackgroundImage;
+    final themeProvider = context.watch<ThemeProvider>();
+    final useBackgroundImage = themeProvider.useBackgroundImage;
+    // 预计算背景图 provider（与 SliverAppBar flexibleSpace 用同一 cacheWidth →
+    // ImageCache 同 key 共享解码），作为参数传入 _TabBarDelegate，
+    // 避免在 SliverPersistentHeaderDelegate.build 内 watch ThemeProvider
+    // 污染 NestedScrollView 的 sliver 链（导致 TabBarView 结果区被异常重建/覆盖）。
+    ImageProvider? tabBarBackgroundImage;
+    if (useBackgroundImage) {
+      final size = MediaQuery.sizeOf(context);
+      final cacheWidth = (size.width * MediaQuery.devicePixelRatioOf(context))
+          .round()
+          .clamp(540, 1440);
+      tabBarBackgroundImage = backgroundImageProvider(
+        themeProvider,
+        cacheWidth: cacheWidth,
+      );
+    }
 
     return Scaffold(
       body: Column(
@@ -281,7 +296,7 @@ class _SearchPageState extends State<SearchPage>
                     SliverPersistentHeader(
                       pinned: true,
                       delegate: _TabBarDelegate(
-                        TabBar(
+                        tabBar: TabBar(
                           controller: _tabController,
                           tabs: const [
                             Tab(text: '歌曲'),
@@ -292,6 +307,10 @@ class _SearchPageState extends State<SearchPage>
                             Tab(text: '歌词'),
                           ],
                         ),
+                        useBackgroundImage: useBackgroundImage,
+                        backgroundOpacity: themeProvider.backgroundOpacity,
+                        backgroundBlur: themeProvider.backgroundBlur,
+                        backgroundImage: tabBarBackgroundImage,
                       ),
                     ),
                 ];
@@ -1265,8 +1284,22 @@ class _LyricSearchResultItem extends StatelessWidget {
 
 class _TabBarDelegate extends SliverPersistentHeaderDelegate {
   final TabBar tabBar;
+  /// 是否启用壁纸背景（与顶部 SliverAppBar 的 flexibleSpace 联动）。
+  final bool useBackgroundImage;
+  final double backgroundOpacity;
+  final double backgroundBlur;
+  /// 预计算的背景图 [ImageProvider]（由 SearchPage.build 传入，
+  /// 与 SliverAppBar flexibleSpace 共享 ImageCache 同 key 解码结果）。
+  /// 不在 delegate.build 内 watch ThemeProvider，避免污染 sliver 链。
+  final ImageProvider? backgroundImage;
 
-  _TabBarDelegate(this.tabBar);
+  _TabBarDelegate({
+    required this.tabBar,
+    required this.useBackgroundImage,
+    required this.backgroundOpacity,
+    required this.backgroundBlur,
+    required this.backgroundImage,
+  });
 
   @override
   double get minExtent => tabBar.preferredSize.height;
@@ -1276,7 +1309,11 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
 
   @override
   bool shouldRebuild(covariant _TabBarDelegate oldDelegate) {
-    return tabBar != oldDelegate.tabBar;
+    return tabBar != oldDelegate.tabBar ||
+        useBackgroundImage != oldDelegate.useBackgroundImage ||
+        backgroundOpacity != oldDelegate.backgroundOpacity ||
+        backgroundBlur != oldDelegate.backgroundBlur ||
+        backgroundImage != oldDelegate.backgroundImage;
   }
 
   @override
@@ -1285,9 +1322,54 @@ class _TabBarDelegate extends SliverPersistentHeaderDelegate {
     double shrinkOffset,
     bool overlapsContent,
   ) {
-    return Container(
-      color: Theme.of(context).colorScheme.surface,
-      child: tabBar,
+    final colorScheme = Theme.of(context).colorScheme;
+    if (!useBackgroundImage || backgroundImage == null) {
+      return Container(color: colorScheme.surface, child: tabBar);
+    }
+    // 有壁纸：与顶部 SliverAppBar flexibleSpace 同结构（surface 打底 +
+    // 模糊 + 透明度 + 全屏 cover 背景图 topCenter 裁剪），tab 栏与
+    // 搜索框背景视觉连续。ClipRect 把 OverflowBox 溢出内容裁到本 sliver
+    // 区域，避免盖住下方 TabBarView 结果区。
+    final size = MediaQuery.sizeOf(context);
+    return ClipRect(
+      child: Stack(
+        children: [
+          Positioned.fill(
+            child: OverflowBox(
+              alignment: Alignment.topCenter,
+              minWidth: size.width,
+              maxWidth: size.width,
+              minHeight: size.height,
+              maxHeight: size.height,
+              child: SizedBox(
+                width: size.width,
+                height: size.height,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    ColoredBox(color: colorScheme.surface),
+                    Opacity(
+                      opacity: backgroundOpacity,
+                      child: ImageFiltered(
+                        imageFilter: ui.ImageFilter.blur(
+                          sigmaX: backgroundBlur,
+                          sigmaY: backgroundBlur,
+                        ),
+                        child: Image(
+                          image: backgroundImage!,
+                          fit: BoxFit.cover,
+                          gaplessPlayback: true,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          tabBar,
+        ],
+      ),
     );
   }
 }

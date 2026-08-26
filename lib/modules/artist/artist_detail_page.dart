@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'package:m3e_core/m3e_core.dart';
 
 import '../../core/utils/app_toast.dart';
+import '../../core/widgets/app_background.dart';
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../providers/theme_provider.dart';
@@ -178,7 +179,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     });
 
     const itemHeight = 72.0;
-    final targetOffset = index * itemHeight;
+    // 让目标项落在视口正中而非顶部：index*itemHeight 只对齐顶缘，
+    // 减去半个视口余量后当前播放歌曲会居中显示，便于快速锁定。
+    final viewport = _scrollController.position.viewportDimension;
+    final targetOffset = index * itemHeight - (viewport - itemHeight) / 2;
     _scrollController.animateTo(
       targetOffset.clamp(0.0, _scrollController.position.maxScrollExtent),
       duration: const Duration(milliseconds: 300),
@@ -490,14 +494,18 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                             ],
                           ),
                       ],
-                      backgroundColor: Color.lerp(
-                          Colors.transparent,
-                          useBackgroundImage
-                              ? colorScheme.surface.withValues(alpha: 0.75)
-                              : colorScheme.surface,
-                          (_scrollOffset - (240 - kToolbarHeight))
-                              .clamp(0.0, 60.0) / 60,
-                        )!,
+                      // 背景图模式：顶栏恒透明——flexibleSpace 是普通 Stack
+                      // （非 FlexibleSpaceBar，折叠时不产生视差位移，壁纸层顶部
+                      // 固定裁剪），任意滚动位置壁纸都与主体背景对齐、不透 UI；
+                      // 非背景图：上划渐变到 surface（遮住列表不穿透）
+                      backgroundColor: useBackgroundImage
+                          ? Colors.transparent
+                          : Color.lerp(
+                              Colors.transparent,
+                              colorScheme.surface,
+                              (_scrollOffset - (240 - kToolbarHeight))
+                                  .clamp(0.0, 60.0) / 60,
+                            )!,
                       surfaceTintColor: Colors.transparent,
                       scrolledUnderElevation: 0,
                       // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示歌手名
@@ -512,8 +520,17 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                           style: const TextStyle(fontWeight: FontWeight.bold),
                         ),
                       ),
-                      flexibleSpace: FlexibleSpaceBar(
-                        background: Container(
+                      // 不用 FlexibleSpaceBar：折叠时不产生视差位移，壁纸层
+                      // 顶部固定裁剪，滚动中始终与主体背景对齐。
+                      // 显式 ClipRect：全屏壁纸层仅靠 Stack 默认 hardEdge 裁剪
+                      // 可能失效，必须显式裁剪，否则壁纸会溢出覆盖下方歌曲列表
+                      flexibleSpace: ClipRect(
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (useBackgroundImage)
+                              const WallpaperHeaderBackground(),
+                            Container(
                           decoration: BoxDecoration(
                             gradient: LinearGradient(
                               begin: Alignment.topCenter,
@@ -613,8 +630,10 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                             ),
                           ),
                         ),
+                        ],
                       ),
                     ),
+                  ),
                     SliverToBoxAdapter(
                       child: Padding(
                         padding: const EdgeInsets.all(16),

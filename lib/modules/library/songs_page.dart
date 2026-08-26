@@ -21,14 +21,58 @@ class _SongsPageState extends State<SongsPage> {
   // 排序方向：true=倒序(Z→A)，false=正序(A→Z)
   bool _sortDescending = false;
   final ScrollController _scrollController = ScrollController();
-  // SongListItem 行高安全估计：封面 52 + padding(6+6)=12 + 行间留白 ≈ 76。
-  // 这里使用 const 而不是 const 表达式，避免运行时计算。
-  static const double _itemHeight = 76.0;
+  // 定位目标项的索引与 GlobalKey：滚到位后用 ensureVisible 精确对齐。
+  GlobalKey? _targetItemKey;
+  int _targetScrollIndex = -1;
 
   @override
   void dispose() {
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 定位当前播放歌曲并在视口中居中。
+  ///
+  /// 行高不是常量：SongListItem 的高度取封面（52）与文字列（随 uiScale
+  /// 0.5~2.0 变化）中较高者，故不能用固定值换算偏移。这里改为从
+  /// ScrollPosition 反推实测行高——本列表所有项等高，此时 Flutter 对
+  /// SliverChildBuilderDelegate 的 extent 估算恰好精确——再用 GlobalKey +
+  /// ensureVisible 做最终对齐，消除任何残余偏差。
+  Future<void> _scrollToCurrentSong(int index) async {
+    if (!_scrollController.hasClients) return;
+
+    setState(() {
+      // 每次定位新建 GlobalKey，避免旧 key 残留导致重复 GlobalKey 冲突
+      _targetItemKey = GlobalKey();
+      _targetScrollIndex = index;
+    });
+    // 等一帧让 GlobalKey 挂到目标项上（目标项已在视口内时可直接命中）
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || !_scrollController.hasClients) return;
+
+    final pos = _scrollController.position;
+    final viewport = pos.viewportDimension;
+    // 实测行高：内容总高 ÷ 项数（ListView 无 padding，所有项等高）
+    final rowHeight = (pos.maxScrollExtent + viewport) / widget.songs.length;
+    // 让目标项落在视口正中，而非按屏幕高度取比例
+    final target = index * rowHeight - (viewport - rowHeight) / 2;
+    await _scrollController.animateTo(
+      target.clamp(pos.minScrollExtent, pos.maxScrollExtent),
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+    if (!mounted) return;
+
+    // 滚动后目标项已构建：精确居中
+    final targetContext = _targetItemKey?.currentContext;
+    if (targetContext != null && targetContext.mounted) {
+      await Scrollable.ensureVisible(
+        targetContext,
+        duration: const Duration(milliseconds: 150),
+        curve: Curves.easeOut,
+        alignment: 0.5,
+      );
+    }
   }
 
   List<Song> get _sortedSongs {
@@ -158,8 +202,9 @@ class _SongsPageState extends State<SongsPage> {
     final currentIndex = (currentId == null || songs.isEmpty)
         ? -1
         : songs.indexWhere((s) => s.id == currentId);
-    final canLocate =
-        currentIndex >= 0 && _scrollController.hasClients;
+    // hasClients 在首帧 build 时必为 false，不能作为按钮可用性的依据，
+    // 否则定位按钮会先显示为禁用；该检查已移入 _scrollToCurrentSong。
+    final canLocate = currentIndex >= 0;
 
     if (songs.isEmpty) {
       return Center(
@@ -199,18 +244,7 @@ class _SongsPageState extends State<SongsPage> {
                 icon: const Icon(Icons.my_location),
                 tooltip: '定位当前播放',
                 onPressed: canLocate
-                    ? () {
-                        final target = (currentIndex * _itemHeight) -
-                            MediaQuery.of(context).size.height * 0.4;
-                        _scrollController.animateTo(
-                          target.clamp(
-                              0.0,
-                              _scrollController.position
-                                  .maxScrollExtent),
-                          duration: const Duration(milliseconds: 300),
-                          curve: Curves.easeOutCubic,
-                        );
-                      }
+                    ? () => _scrollToCurrentSong(currentIndex)
                     : null,
               ),
               IconButton(
@@ -232,6 +266,8 @@ class _SongsPageState extends State<SongsPage> {
             itemCount: songs.length,
             itemBuilder: (context, index) {
               return SongListItem(
+                // 定位目标项挂 GlobalKey，供 ensureVisible 精确对齐
+                key: index == _targetScrollIndex ? _targetItemKey : null,
                 song: songs[index],
                 onTap: () {
                   context.read<PlayerProvider>().playPlaylist(songs, index);

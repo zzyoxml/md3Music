@@ -64,10 +64,10 @@ class AppTheme {
   // 1) Web 浏览器(Windows + Edge) 优先用系统自带的 "Microsoft YaHei" (无需下载)
   // 2) macOS / iOS: PingFang SC
   // 3) Linux: WenQuanYi Micro Hei
-  // 4) 打包的 SimHei (assets/fonts/simhei.ttf) 兜底
-  // 5) 通用 sans-serif
-  // 注意: fontFamilyFallback 在 Flutter Web 里会映射为 CSS font-family 链,
-  // 浏览器会按顺序查找已安装的字体, 命中即用. 所以系统字体优先能避免走 Google CDN.
+  // 4) 通用 sans-serif（Android 上解析为系统默认字体，含系统 CJK 支持）
+  // 注意：打包的 SimHei 不放入全局回退链——否则「系统默认」模式下 CJK 也会
+  // 回退到打包 SimHei，导致与「内置 SimHei」选项显示一致（用户反馈过此问题）。
+  // SimHei 仅由「内置 SimHei」模式（fontFamily='SimHei'）作为主字体使用。
   static const List<String> _cjkFontFallback = [
     'Microsoft YaHei',
     'Microsoft YaHei UI',
@@ -78,7 +78,6 @@ class AppTheme {
     'Source Han Sans SC',
     'Noto Sans CJK SC',
     'Noto Sans SC',
-    'SimHei',
     'sans-serif',
   ];
 

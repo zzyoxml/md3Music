@@ -396,7 +396,7 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int totalByte
 extern "C" {
 
 JNIEXPORT jlong JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioCreate(
+Java_com_md3music_md3music_UsbAudioStream_nativeUsbAudioCreate(
         JNIEnv *, jobject, jint fd, jint ifId, jint epOut, jint epFb,
         jint rate, jint ch, jint bits, jint maxPkt) {
     LOGI("Create: fd=%d ep=0x%02x rate=%d ch=%d bits=%d maxPkt=%d",
@@ -446,7 +446,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioCreate(
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioSetAltSetting(
+Java_com_md3music_md3music_UsbAudioStream_nativeUsbAudioSetAltSetting(
         JNIEnv *, jobject, jlong h, jint alt) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return JNI_FALSE;
@@ -459,7 +459,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioSetAltSetting(
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioSetSampleRate(
+Java_com_md3music_md3music_UsbAudioStream_nativeUsbAudioSetSampleRate(
         JNIEnv *, jobject, jlong h, jint rate, jint csId) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return JNI_FALSE;
@@ -468,7 +468,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioSetSampleRate(
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioStart(
+Java_com_md3music_md3music_UsbAudioStream_nativeUsbAudioStart(
         JNIEnv *, jobject, jlong h) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return JNI_FALSE;
@@ -511,7 +511,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioStart(
 }
 
 JNIEXPORT void JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioWrite(
+Java_com_md3music_md3music_UsbAudioStream_nativeUsbAudioWrite(
         JNIEnv *env, jobject, jlong h, jfloatArray pcm) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx || !ctx->running.load()) return;
@@ -567,7 +567,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioWrite(
 }
 
 JNIEXPORT void JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioStop(
+Java_com_md3music_md3music_UsbAudioStream_nativeUsbAudioStop(
         JNIEnv *, jobject, jlong h) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return;
@@ -577,7 +577,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioStop(
 }
 
 JNIEXPORT void JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeFlush(
+Java_com_md3music_md3music_UsbAudioStream_nativeFlush(
         JNIEnv *, jobject, jlong h) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return;
@@ -588,7 +588,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeFlush(
 }
 
 JNIEXPORT jint JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeDrainUrbs(
+Java_com_md3music_md3music_UsbAudioStream_nativeDrainUrbs(
         JNIEnv *, jobject, jlong h) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return 0;
@@ -597,7 +597,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeDrainUrbs(
 }
 
 JNIEXPORT void JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioDestroy(
+Java_com_md3music_md3music_UsbAudioStream_nativeUsbAudioDestroy(
         JNIEnv *, jobject, jlong h) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return;
@@ -616,7 +616,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioDestroy(
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeIsRunning(
+Java_com_md3music_md3music_UsbAudioStream_nativeIsRunning(
         JNIEnv *, jobject, jlong h) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return JNI_FALSE;
@@ -624,7 +624,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeIsRunning(
 }
 
 JNIEXPORT jlong JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeGetFramesWritten(
+Java_com_md3music_md3music_UsbAudioStream_nativeGetFramesWritten(
         JNIEnv *, jobject, jlong h) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx) return 0;
@@ -632,7 +632,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeGetFramesWritten(
 }
 
 JNIEXPORT jint JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbReset(
+Java_com_md3music_md3music_UsbAudioStream_nativeUsbReset(
         JNIEnv *, jclass, jint fd) {
     LOGI("USBDEVFS_RESET fd=%d", fd);
     int ret = ioctl(fd, USBDEVFS_RESET, 0);
@@ -664,7 +664,7 @@ Java_com_md3music_premium_UsbAudioStream_nativeUsbReset(
  * 注意：必须在后台线程调用（本函数对廉价设备可能阻塞数百 ms）。
  */
 JNIEXPORT jint JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbReconfigure(
+Java_com_md3music_md3music_UsbAudioStream_nativeUsbReconfigure(
         JNIEnv *, jclass, jint fd) {
     // 读取设备当前配置值（标准控制请求 GET_CONFIGURATION，返回 bConfigurationValue）
     struct usbdevfs_ctrltransfer ctrl = {};
@@ -877,7 +877,7 @@ void submitPcmToUrbs(UsbAudioContext *ctx, const uint8_t *pcmData, int totalByte
 extern "C" {  // resume JNI functions
 
 JNIEXPORT void JNICALL
-Java_com_md3music_premium_UsbAudioStream_nativeUsbAudioWriteRaw(
+Java_com_md3music_md3music_UsbAudioStream_nativeUsbAudioWriteRaw(
         JNIEnv *env, jobject, jlong h, jbyteArray pcm, jint inputBitDepth) {
     auto *ctx = reinterpret_cast<UsbAudioContext *>(h);
     if (!ctx || !ctx->running.load()) return;

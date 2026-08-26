@@ -319,7 +319,14 @@ class _SongInfoPageState extends State<SongInfoPage> {
           _buildFormatRow('采样频率', hasData ? _formatRate(rate) : '—'),
           _buildFormatRow('位深', hasData ? '$bits-bit' : '—'),
           if (!exclusiveEnabled)
-            _buildFormatRow('解码输出', hasData ? '${_encodingBits(decEnc)}-bit(解码)' : '—'),
+            _buildFormatRow(
+              '解码输出',
+              hasData
+                  ? (decRate > 0
+                      ? '${_formatRate(decRate)} · ${_encodingBits(decEnc)}-bit'
+                      : '${_encodingBits(decEnc)}-bit')
+                  : '—',
+            ),
           if (dacBits > 0) _buildFormatRow('USB 输出', '$dacBits-bit(USB输出)'),
           if (fileSize != null) _buildFormatRow('文件大小', _formatFileSize(fileSize)),
           _buildFormatRow('声道', hasData ? _formatChannels(ch) : '—'),

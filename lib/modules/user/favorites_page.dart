@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:m3e_core/m3e_core.dart';
+import 'package:m3e_core/m3e_core.dart' hide M3EPullToRefreshIndicator;
+import '../../widgets/m3e_pull_to_refresh_fixed.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -59,6 +61,11 @@ class _FavoritesPageState extends State<FavoritesPage>
   bool _createdExpanded = true;
   bool _collectedExpanded = true;
 
+  // 分组手动排序方向（按歌单名称）：null=默认顺序（不主动排序）；
+  // true=升序（A→Z）；false=降序（Z→A）。分组标题右侧按钮循环切换。
+  bool? _createdSortAsc;
+  bool? _collectedSortAsc;
+
   // 歌单访问排序：歌单 ID → 最后访问时间戳（毫秒）
   // 点击歌单后记录时间，列表按最近访问排序（最近访问的排最前）
   Map<String, int> _playlistAccessOrder = {};
@@ -76,7 +83,13 @@ class _FavoritesPageState extends State<FavoritesPage>
   final Set<int> _selectedIndices = {};
 
   /// 顶栏渐变 ScrollController：与 ScrollAwareAppBar 共享
-  final ScrollController _scrollController = ScrollController();
+  ///
+  /// `keepScrollOffset: false` —— 关闭跨重建的位置恢复。TabBarView 切换
+  /// tab 时非活动 tab 的 ListView 会被 PageView 销毁/重建，默认的
+  /// `keepScrollOffset = true` 会让重建后的 ListView 恢复旧 offset，
+  /// `extentBefore > 0` 致 M3E 下拉条件（extentBefore == 0）不满足、
+  /// 歌单 tab 无法下拉刷新；专辑/歌手 tab 用临时 controller 不受影响。
+  final ScrollController _scrollController = ScrollController(keepScrollOffset: false);
 
   @override
   void initState() {
@@ -97,6 +110,12 @@ class _FavoritesPageState extends State<FavoritesPage>
       await _loadAccessOrder();
       _sortByLatestClick = await _settingsRepository
           .getSortCollectedByLatestClick();
+      _createdSortAsc = await _loadPlaylistSort(
+        _settingsRepository.getCreatedPlaylistSort,
+      );
+      _collectedSortAsc = await _loadPlaylistSort(
+        _settingsRepository.getCollectedPlaylistSort,
+      );
       if (!mounted) return;
       setState(() {});
       _loadAllData();
@@ -105,6 +124,21 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     });
   }
+
+  /// 读取持久化的分组排序方向并转成 bool?：0=默认顺序(null)，1=升序，2=降序。
+  Future<bool?> _loadPlaylistSort(Future<int> Function() getter) async {
+    switch (await getter()) {
+      case 1:
+        return true;
+      case 2:
+        return false;
+      default:
+        return null;
+    }
+  }
+
+  /// 分组排序方向转持久化值：null=0，升序=1，降序=2。
+  int _sortToInt(bool? sortAsc) => sortAsc == null ? 0 : (sortAsc ? 1 : 2);
 
   /// 轻量级网络探测：用 /server/now 接口。结果通过 dio 拦截器自动
   /// 反映到 KugouApiClient.networkReachable。
@@ -207,9 +241,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     // 全部走 noCache：绕过本地代理 apicache，收藏/取消收藏后
     // 进入页面即可看到最新数据（否则需手动下拉或重启 App 才生效）
     await Future.wait([
-      _loadPlaylists(forceNoCache: true),
-      _loadAlbums(noCache: true),
-      _loadArtists(noCache: true),
+      _loadPlaylists(forceNoCache: true, showLoading: false),
+      _loadAlbums(noCache: true, showLoading: false),
+      _loadArtists(noCache: true, showLoading: false),
     ]);
   }
 
@@ -230,25 +264,36 @@ class _FavoritesPageState extends State<FavoritesPage>
   int _getAccessTime(KugouPlaylistBrief p) =>
       _playlistAccessOrder[p.globalCollectionId ?? p.id] ?? 0;
 
-  List<KugouPlaylistBrief> get _createdPlaylists {
-    final list = _playlists.where(_isCreated).toList();
-    if (_sortByLatestClick) {
+  /// 对分组列表应用排序：手动排序（按名称升/降）优先，
+  /// 未启用时退回「最近点击」排序逻辑（_sortByLatestClick）。
+  void _applySort(List<KugouPlaylistBrief> list, bool? sortAsc) {
+    if (sortAsc != null) {
+      list.sort(
+        (a, b) => sortAsc ? a.name.compareTo(b.name) : b.name.compareTo(a.name),
+      );
+    } else if (_sortByLatestClick) {
       list.sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
     }
+  }
+
+  List<KugouPlaylistBrief> get _createdPlaylists {
+    final list = _playlists.where(_isCreated).toList();
+    _applySort(list, _createdSortAsc);
     return list;
   }
 
   List<KugouPlaylistBrief> get _collectedPlaylists {
     final list = _playlists.where((p) => !_isCreated(p)).toList();
-    if (_sortByLatestClick) {
-      list.sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
-    }
+    _applySort(list, _collectedSortAsc);
     return list;
   }
 
   // ==================== 数据加载 ====================
 
-  Future<void> _loadPlaylists({bool forceNoCache = false}) async {
+  Future<void> _loadPlaylists({
+    bool forceNoCache = false,
+    bool showLoading = true,
+  }) async {
     if (!mounted) return;
     // 重置分页状态
     _playlistPage = 1;
@@ -256,7 +301,7 @@ class _FavoritesPageState extends State<FavoritesPage>
     // 刷新时重新读取「最近点击排序」开关，使设置改动无需重启即可生效
     _sortByLatestClick = await _settingsRepository
         .getSortCollectedByLatestClick();
-    setState(() => _isLoadingPlaylists = true);
+    if (showLoading) setState(() => _isLoadingPlaylists = true);
 
     try {
       final api = KugouApiClient();
@@ -381,9 +426,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
   }
 
-  Future<void> _loadAlbums({bool noCache = false}) async {
+  Future<void> _loadAlbums({bool noCache = false, bool showLoading = true}) async {
     if (!mounted) return;
-    setState(() => _isLoadingAlbums = true);
+    if (showLoading) setState(() => _isLoadingAlbums = true);
 
     try {
       final api = KugouApiClient();
@@ -466,9 +511,9 @@ class _FavoritesPageState extends State<FavoritesPage>
     }
   }
 
-  Future<void> _loadArtists({bool noCache = false}) async {
+  Future<void> _loadArtists({bool noCache = false, bool showLoading = true}) async {
     if (!mounted) return;
-    setState(() => _isLoadingArtists = true);
+    if (showLoading) setState(() => _isLoadingArtists = true);
 
     try {
       final api = KugouApiClient();
@@ -849,19 +894,22 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return M3EPullToRefreshIndicator(
-      onRefresh: () => _loadPlaylists(forceNoCache: true),
-      child: NotificationListener<ScrollNotification>(
-        onNotification: (notification) {
-          if (notification is ScrollEndNotification &&
-              notification.metrics.pixels >=
-                  notification.metrics.maxScrollExtent - 200) {
-            _loadMorePlaylists();
-          }
-          return false;
-        },
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification &&
+            notification.metrics.maxScrollExtent > 0 &&
+            notification.metrics.pixels >=
+                notification.metrics.maxScrollExtent - 200) {
+          _loadMorePlaylists();
+        }
+        return false;
+      },
+      child: M3EPullToRefreshIndicator(
+        onRefresh: () => _loadPlaylists(forceNoCache: true, showLoading: false),
         child: ListView(
           controller: _scrollController,
+          // 内容不满一屏时也能下拉（M3EPullToRefreshIndicator 依赖 overscroll）
+          physics: const AlwaysScrollableScrollPhysics(),
           // 底部叠加系统手势条（小横条）高度，避免末项被压住
           padding: EdgeInsets.only(
             top: 8,
@@ -877,14 +925,23 @@ class _FavoritesPageState extends State<FavoritesPage>
               playlists: _createdPlaylists,
               onBuildTile: (playlist) =>
                   _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
-              // 新建歌单：原顶栏右上角的 "+" 移到此处
+              // 新建歌单：原顶栏右上角的 "+" 移到此处；排序按钮靠最右
               trailing: _isManaging
                   ? null
-                  : IconButton(
-                      icon: const Icon(Icons.add, size: 20),
-                      visualDensity: VisualDensity.compact,
-                      tooltip: '新建歌单',
-                      onPressed: _showCreatePlaylistDialog,
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.add, size: 20),
+                          visualDensity: VisualDensity.compact,
+                          tooltip: '新建歌单',
+                          onPressed: _showCreatePlaylistDialog,
+                        ),
+                        _buildPlaylistSortButton(
+                          _createdSortAsc,
+                          _toggleCreatedSort,
+                        ),
+                      ],
                     ),
             ),
             if (_collectedPlaylists.isNotEmpty)
@@ -896,6 +953,12 @@ class _FavoritesPageState extends State<FavoritesPage>
                 playlists: _collectedPlaylists,
                 onBuildTile: (playlist) =>
                     _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
+                trailing: _isManaging
+                    ? null
+                    : _buildPlaylistSortButton(
+                        _collectedSortAsc,
+                        _toggleCollectedSort,
+                      ),
               ),
             // 底部加载更多指示器
             if (_isLoadingMorePlaylists)
@@ -920,6 +983,42 @@ class _FavoritesPageState extends State<FavoritesPage>
         ),
       ),
     );
+  }
+
+  /// 分组标题右侧的升降序切换按钮：未排序时显示 [Icons.sort]，
+  /// 点击后按歌单名称升序（↑）/降序（↓）循环切换。
+  Widget _buildPlaylistSortButton(bool? sortAsc, VoidCallback onToggle) {
+    final cs = Theme.of(context).colorScheme;
+    final IconData icon;
+    final String tooltip;
+    if (sortAsc == null) {
+      icon = Icons.sort;
+      tooltip = '按名称升序排序';
+    } else if (sortAsc) {
+      icon = Icons.arrow_upward;
+      tooltip = '切换为降序';
+    } else {
+      icon = Icons.arrow_downward;
+      tooltip = '切换为升序';
+    }
+    return IconButton(
+      icon: Icon(icon, size: 20, color: cs.onSurfaceVariant),
+      visualDensity: VisualDensity.compact,
+      tooltip: tooltip,
+      onPressed: onToggle,
+    );
+  }
+
+  /// 切换「我创建的歌单」排序方向（null→升序→降序→升序…），并持久化。
+  void _toggleCreatedSort() {
+    setState(() => _createdSortAsc = !(_createdSortAsc ?? false));
+    _settingsRepository.setCreatedPlaylistSort(_sortToInt(_createdSortAsc));
+  }
+
+  /// 切换「我收藏的歌单」排序方向（null→升序→降序→升序…），并持久化。
+  void _toggleCollectedSort() {
+    setState(() => _collectedSortAsc = !(_collectedSortAsc ?? false));
+    _settingsRepository.setCollectedPlaylistSort(_sortToInt(_collectedSortAsc));
   }
 
   Widget _buildPlaylistTile(KugouPlaylistBrief playlist, int index) {
@@ -1080,8 +1179,8 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return M3EPullToRefreshIndicator(
-      onRefresh: () => _loadAlbums(noCache: true),
+    return Md3PullToRefresh(
+      onRefresh: () => _loadAlbums(noCache: true, showLoading: false),
       child: ListView.builder(
         padding: EdgeInsets.only(
           top: 8,
@@ -1259,8 +1358,8 @@ class _FavoritesPageState extends State<FavoritesPage>
       );
     }
 
-    return M3EPullToRefreshIndicator(
-      onRefresh: () => _loadArtists(noCache: true),
+    return Md3PullToRefresh(
+      onRefresh: () => _loadArtists(noCache: true, showLoading: false),
       child: ListView.builder(
         padding: EdgeInsets.only(
           top: 8,

@@ -1,6 +1,7 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
+import '../../widgets/md3_pull_to_refresh.dart';
 
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../services/kugou_api/kugou_models.dart';
@@ -55,8 +56,8 @@ class _ChannelPageState extends State<ChannelPage> {
     await _load();
   }
 
-  Future<void> _load() async {
-    if (mounted) setState(() => _isLoading = true);
+  Future<void> _load({bool showLoading = true}) async {
+    if (showLoading && mounted) setState(() => _isLoading = true);
     Map<String, dynamic>? r;
     try {
       r = await KugouApiClient().getYouthChannels();
@@ -145,8 +146,8 @@ class _ChannelPageState extends State<ChannelPage> {
           ? const Center(child: M3ELoadingIndicator())
           : _channels.isEmpty
               ? _buildEmpty(cs)
-              : M3EPullToRefreshIndicator(
-                  onRefresh: _load,
+              : Md3PullToRefresh(
+                  onRefresh: () => _load(showLoading: false),
                   child: PinchableGridView(
                     controller: _scrollController,
                     itemCount: _channels.length,

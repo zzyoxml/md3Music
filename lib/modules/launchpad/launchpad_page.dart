@@ -16,8 +16,8 @@ import '../../widgets/scroll_aware_app_bar.dart';
 ///   启用并切换主 tab（交互参考 Zen 模式长按退出，松开即取消）。
 /// 点击/长按/滑动由 GestureDetector 手势竞技场裁决，滚动时不会误触。
 ///
-/// 右上角「编辑」进入编辑模式：列表形式，开关控制固定与否（增删固定项），
-/// 拖拽把手调整顺序（即底部导航栏顺序）。
+/// 右上角「编辑」弹出底部托盘（与设置页「主页管理」一致）：开关控制固定与否
+/// （增删固定项）、拖拽把手调整顺序（即底部导航栏顺序）。
 class LaunchPadPage extends StatefulWidget {
   /// 点击可见 tab 时回调其 id（_MainLayout 负责切换主 tab）。
   final ValueChanged<String> onTabSelected;
@@ -54,8 +54,6 @@ class _LaunchPadPageState extends State<LaunchPadPage> {
   bool _showHint = false;
   /// 长按识别后到启用前的剩余计时。
   Timer? _enableTimer;
-  /// 编辑模式：右上角「编辑」进入，列表可拖拽排序 + 开关固定状态。
-  bool _editing = false;
 
   @override
   void dispose() {
@@ -116,35 +114,38 @@ class _LaunchPadPageState extends State<LaunchPadPage> {
         tabId: 'launchpad',
         opaque: true,
         actions: [
-          if (_editing)
-            TextButton(
-              onPressed: () => setState(() => _editing = false),
-              child: const Text('完成'),
-            )
-          else
-            IconButton(
-              icon: const Icon(Icons.edit_outlined),
-              tooltip: '编辑固定项',
-              onPressed: () => setState(() => _editing = true),
-            ),
+          IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: '编辑固定项',
+            onPressed: _showEditSheet,
+          ),
         ],
       ),
-      body: _editing
-          ? _buildEditList(tabConfig, tabs)
-          : CustomScrollView(
-              slivers: [
-                // 未固定在前，已固定分区置底
-                if (unpinned.isNotEmpty) ...[
-                  _buildSectionHeader('未固定', unpinned.length),
-                  _buildGrid(tabConfig, unpinned, columns),
-                ],
-                if (pinned.isNotEmpty) ...[
-                  _buildSectionHeader('已固定', pinned.length),
-                  _buildGrid(tabConfig, pinned, columns),
-                ],
-                const SliverToBoxAdapter(child: SizedBox(height: 88)),
-              ],
-            ),
+      body: CustomScrollView(
+        slivers: [
+          // 未固定在前，已固定分区置底
+          if (unpinned.isNotEmpty) ...[
+            _buildSectionHeader('未固定', unpinned.length),
+            _buildGrid(tabConfig, unpinned, columns),
+          ],
+          if (pinned.isNotEmpty) ...[
+            _buildSectionHeader('已固定', pinned.length),
+            _buildGrid(tabConfig, pinned, columns),
+          ],
+          const SliverToBoxAdapter(child: SizedBox(height: 88)),
+        ],
+      ),
+    );
+  }
+
+  /// 右上角「编辑」：弹出底部托盘管理固定项（交互与设置页「主页管理」一致：
+  /// 拖拽排序 + 开关固定状态，点外部或下滑关闭）。
+  void _showEditSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => const _LaunchPadEditPanel(),
     );
   }
 
@@ -199,7 +200,7 @@ class _LaunchPadPageState extends State<LaunchPadPage> {
           final tab = items[i];
           final hidden = tabConfig.hiddenTabs.contains(tab.id);
           return _LaunchPadCard(
-            icon: _tabIcon(tab.id),
+            icon: _launchPadTabIcon(tab.id),
             label: tab.label,
             hidden: hidden,
             enabling: _enablingTabId == tab.id,
@@ -217,140 +218,169 @@ class _LaunchPadPageState extends State<LaunchPadPage> {
       ),
     );
   }
+}
 
-  /// 编辑模式：可拖拽排序的列表 + 固定/取消固定开关。
-  ///
-  /// 列表按 [TabConfigProvider.allTabs] 的全局顺序展示（不分区），
-  /// 拖动即所见位置；固定开关走 [TabConfigProvider.toggleTabVisibility]，
-  /// 底栏顺序 = allTabs 顺序过滤掉未固定项。
-  Widget _buildEditList(TabConfigProvider tabConfig, List<TabItem> items) {
-    final cs = Theme.of(context).colorScheme;
-    final tt = Theme.of(context).textTheme;
-
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: Row(
-            children: [
-              Icon(Icons.info_outline, size: 16, color: cs.onSurfaceVariant),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  '拖动排序，开关控制是否固定到底部导航栏',
-                  style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                ),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          child: ReorderableListView.builder(
-            padding: const EdgeInsets.only(bottom: 88),
-            itemCount: items.length,
-            onReorderItem: (oldIndex, newIndex) {
-              // newIndex 已按「移除 oldIndex 之后」调整过，是插入下标。
-              // items 是 allTabs 过滤掉 user/launchpad 的结果，下标不能直接用，
-              // 这里用「锚点元素」换算成 allTabs 下标。
-              final moved = items[oldIndex];
-              final rest = [...items]..removeAt(oldIndex);
-              if (rest.isEmpty) return;
-              final all = tabConfig.allTabs;
-              final from = all.indexWhere((t) => t.id == moved.id);
-              if (from < 0) return;
-              // 移除 moved 后，moved 在 allTabs 中的目标插入下标
-              final int desired;
-              if (newIndex == 0) {
-                // 排到最前：插在原第一项之前
-                final anchor = all.indexWhere((t) => t.id == rest.first.id);
-                if (anchor < 0) return;
-                desired = anchor > from ? anchor - 1 : anchor;
-              } else {
-                // 插在 rest[newIndex - 1] 之后
-                final anchor = all.indexWhere(
-                  (t) => t.id == rest[newIndex - 1].id,
-                );
-                if (anchor < 0) return;
-                desired = (anchor > from ? anchor - 1 : anchor) + 1;
-              }
-              if (desired == from) return;
-              // reorderTabs 内部对「向后移动」会再减 1，这里补偿回去
-              tabConfig.reorderTabs(from, desired > from ? desired + 1 : desired);
-            },
-            itemBuilder: (context, i) {
-              final tab = items[i];
-              final isPinned = !tabConfig.hiddenTabs.contains(tab.id);
-              return ListTile(
-                key: ValueKey(tab.id),
-                leading: Icon(_tabIcon(tab.id), color: cs.primary),
-                title: Text(tab.label, style: tt.bodyLarge),
-                subtitle: Text(
-                  isPinned ? '已固定到底部导航栏' : '未固定',
-                  style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Switch(
-                      value: isPinned,
-                      onChanged: (_) => tabConfig.toggleTabVisibility(tab.id),
-                    ),
-                    const SizedBox(width: 8),
-                    ReorderableDragStartListener(
-                      index: i,
-                      child: Icon(
-                        Icons.drag_handle,
-                        color: cs.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// Tab 图标映射，与 app.dart / 设置页的映射保持一致。
-  IconData _tabIcon(String tabId) {
-    switch (tabId) {
-      case 'discover':
-        return Icons.explore;
-      case 'coverflow':
-        return Icons.album;
-      case 'library':
-        return Icons.library_music;
-      case 'favorites':
-        return Icons.favorite;
-      case 'fm':
-        return Icons.radio;
-      case 'search':
-        return Icons.search;
-      case 'charts':
-        return Icons.leaderboard;
-      case 'ip':
-        return Icons.edit_note;
-      case 'recognition':
-        return Icons.mic;
-      case 'audiobook':
-        return Icons.auto_stories;
-      case 'scene':
-        return Icons.landscape;
-      case 'channel':
-        return Icons.dynamic_feed;
-      case 'brush':
-        return Icons.swipe;
-      case 'settings':
-        return Icons.settings;
-      default:
-        return Icons.circle;
-    }
+/// Tab 图标映射，与 app.dart / 设置页的映射保持一致。
+IconData _launchPadTabIcon(String tabId) {
+  switch (tabId) {
+    case 'discover':
+      return Icons.explore;
+    case 'coverflow':
+      return Icons.album;
+    case 'library':
+      return Icons.library_music;
+    case 'favorites':
+      return Icons.favorite;
+    case 'fm':
+      return Icons.radio;
+    case 'search':
+      return Icons.search;
+    case 'charts':
+      return Icons.leaderboard;
+    case 'ip':
+      return Icons.edit_note;
+    case 'recognition':
+      return Icons.mic;
+    case 'audiobook':
+      return Icons.auto_stories;
+    case 'scene':
+      return Icons.landscape;
+    case 'channel':
+      return Icons.dynamic_feed;
+    case 'brush':
+      return Icons.swipe;
+    case 'settings':
+      return Icons.settings;
+    default:
+      return Icons.circle;
   }
 }
 
-/// LaunchPad 网格卡片：图标 + 名称；隐藏的 tab 半透明显示。
+/// LaunchPad 编辑托盘（右上角「编辑」弹出）：可拖拽排序 + 固定/取消固定开关。
+///
+/// 交互与设置页「主页管理」面板一致：底部弹出、拖动手柄、点外部关闭。
+/// 列表按 [TabConfigProvider.allTabs] 的全局顺序展示（不分区），
+/// 拖动即所见位置；固定开关走 [TabConfigProvider.toggleTabVisibility]，
+/// 底栏顺序 = allTabs 顺序过滤掉未固定项。
+class _LaunchPadEditPanel extends StatelessWidget {
+  const _LaunchPadEditPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    final tabConfig = context.watch<TabConfigProvider>();
+    final items = tabConfig.allTabs
+        .where((t) => t.id != 'user' && t.id != 'launchpad')
+        .toList();
+
+    return SafeArea(
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.85,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'LaunchPad 管理',
+                      style: tt.titleMedium,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => tabConfig.resetToDefault(),
+                    child: const Text('重置'),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Text(
+                '拖动排序，开关控制是否固定到底部导航栏',
+                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ReorderableListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                itemCount: items.length,
+                onReorderItem: (oldIndex, newIndex) {
+                  // newIndex 已按「移除 oldIndex 之后」调整过，是插入下标。
+                  // items 是 allTabs 过滤掉 user/launchpad 的结果，下标不能直接用，
+                  // 这里用「锚点元素」换算成 allTabs 下标。
+                  final moved = items[oldIndex];
+                  final rest = [...items]..removeAt(oldIndex);
+                  if (rest.isEmpty) return;
+                  final all = tabConfig.allTabs;
+                  final from = all.indexWhere((t) => t.id == moved.id);
+                  if (from < 0) return;
+                  // 移除 moved 后，moved 在 allTabs 中的目标插入下标
+                  final int desired;
+                  if (newIndex == 0) {
+                    // 排到最前：插在原第一项之前
+                    final anchor = all.indexWhere((t) => t.id == rest.first.id);
+                    if (anchor < 0) return;
+                    desired = anchor > from ? anchor - 1 : anchor;
+                  } else {
+                    // 插在 rest[newIndex - 1] 之后
+                    final anchor = all.indexWhere(
+                      (t) => t.id == rest[newIndex - 1].id,
+                    );
+                    if (anchor < 0) return;
+                    desired = (anchor > from ? anchor - 1 : anchor) + 1;
+                  }
+                  if (desired == from) return;
+                  // reorderTabs 内部对「向后移动」会再减 1，这里补偿回去
+                  tabConfig.reorderTabs(
+                    from,
+                    desired > from ? desired + 1 : desired,
+                  );
+                },
+                itemBuilder: (context, i) {
+                  final tab = items[i];
+                  final isPinned = !tabConfig.hiddenTabs.contains(tab.id);
+                  return ListTile(
+                    key: ValueKey(tab.id),
+                    leading: Icon(
+                      _launchPadTabIcon(tab.id),
+                      color: isPinned ? cs.primary : cs.onSurfaceVariant,
+                    ),
+                    title: Text(tab.label, style: tt.bodyLarge),
+                    subtitle: Text(
+                      isPinned ? '已固定到底部导航栏' : '未固定',
+                      style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                    ),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Switch(
+                          value: isPinned,
+                          onChanged: (_) =>
+                              tabConfig.toggleTabVisibility(tab.id),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.drag_handle,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// LaunchPad 网格卡片：图标 + 名称（固定/未固定同样不透明显示）。
 ///
 /// 可见 tab 用 [InkWell] 点击切换；隐藏 tab 用 [GestureDetector] 注册
 /// onTap（跳二级页）+ onLongPress（启用），手势竞技场裁决点击/长按/滑动，
@@ -381,33 +411,30 @@ class _LaunchPadCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final content = Opacity(
-      opacity: hidden ? 0.45 : 1.0,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Material(
-          color: cs.surfaceContainerLow,
-          child: InkWell(
-            onTap: hidden ? null : onTap,
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, size: 36, color: cs.primary),
-                const SizedBox(height: 10),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w600,
-                      color: cs.onSurface,
-                    ),
+    final content = ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: Material(
+        color: cs.surfaceContainerLow,
+        child: InkWell(
+          onTap: hidden ? null : onTap,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 36, color: cs.primary),
+              const SizedBox(height: 10),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface,
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

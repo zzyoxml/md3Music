@@ -1934,10 +1934,13 @@ class _SettingsPageState extends State<SettingsPage>
                   M3EToggleButtonGroupAction(label: Text('无损')),
                   M3EToggleButtonGroupAction(label: Text('Hi-Res 无损')),
                 ],
-                selectedIndex: const ['128', 'hq', 'flac', 'high'].indexOf(_defaultQuality),
+                // 高音质码是 '320'（KuGou 合法值）；遗留 'hq' 归一化到 '320'
+                selectedIndex: const ['128', 'hq', 'flac', 'high'].indexOf(
+                  _defaultQuality == 'hq' ? '320' : _defaultQuality,
+                ),
                 onSelectedIndexChanged: (index) {
                   if (index == null) return;
-                  const q = ['128', 'hq', 'flac', 'high'];
+                  const q = ['128', '320', 'flac', 'high'];
                   setState(() {
                     _defaultQuality = q[index];
                   });
