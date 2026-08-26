@@ -8,6 +8,9 @@ import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 class SettingsRepository {
   static const String _keyThemeMode = 'settings_theme_mode';
   static const String _keyDefaultQuality = 'settings_default_quality';
+  // 按网络区分的音质（WiFi / 移动网络）；未设置时回退到 _keyDefaultQuality
+  static const String _keyQualityWifi = 'settings_default_quality_wifi';
+  static const String _keyQualityMobile = 'settings_default_quality_mobile';
   static const String _keyCacheSize = 'settings_cache_size';
   static const String _keyAutoPlay = 'settings_auto_play';
   static const String _keyShowLyrics = 'settings_show_lyrics';
@@ -59,10 +62,38 @@ class SettingsRepository {
     return prefs.getString(_keyDefaultQuality) ?? '128';
   }
 
-  Future<void> setDefaultQuality(String quality) async {
+  /// WiFi 网络下的默认音质。从未单独设置过时回退到旧的全局默认音质，
+  /// 保证老用户升级后两套音质默认值与之前一致。
+  Future<String> getWifiQuality() async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_keyDefaultQuality, quality);
+    final v = prefs.getString(_keyQualityWifi);
+    return v ?? await getDefaultQuality();
   }
+
+  Future<void> setWifiQuality(String quality) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyQualityWifi, quality);
+  }
+
+  /// 移动网络下的默认音质。从未单独设置过时回退到旧的全局默认音质。
+  Future<String> getMobileQuality() async {
+    final prefs = await SharedPreferences.getInstance();
+    final v = prefs.getString(_keyQualityMobile);
+    return v ?? await getDefaultQuality();
+  }
+
+  Future<void> setMobileQuality(String quality) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyQualityMobile, quality);
+  }
+
+  /// 按网络类型取对应音质。[isWifi] 为 true 用 WiFi 音质，否则用移动网络音质。
+  Future<String> getQualityForNetwork(bool isWifi) =>
+      isWifi ? getWifiQuality() : getMobileQuality();
+
+  /// 按网络类型写入对应音质（[isWifi] 为 true 写 WiFi 键，否则写移动网络键）。
+  Future<void> setQualityForNetwork(bool isWifi, String quality) =>
+      isWifi ? setWifiQuality(quality) : setMobileQuality(quality);
 
   Future<int> getCacheSize() async {
     final prefs = await SharedPreferences.getInstance();

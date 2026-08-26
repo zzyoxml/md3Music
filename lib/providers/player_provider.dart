@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/widgets.dart';
@@ -82,6 +83,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool _isResolvingUrl = false;
   String? _resolveError;
   AudioQuality _audioQuality = AudioQuality.standard;
+  // 当前网络是否为 WiFi（移动数据等非 Wi-Fi 视为 false）。默认 true：
+  // 启动瞬间网络未就绪/桌面开发环境等无蜂窝网时按 WiFi 音质取，随后由
+  // 网络探测/监听刷新。
+  bool _isWifiNetwork = true;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   // 当前在线歌曲实际播放的音质标签（降级后可能与用户设置不同）。
   // 每次成功获取播放链接时由 result.quality 更新；切歌或切换音质时重置。
   String? _actualPlayingQuality;
@@ -273,18 +279,69 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _loadDefaultQuality() async {
     try {
-      final settings = SettingsRepository();
-      final qualityValue = await settings.getDefaultQuality();
-      // 兼容旧版本存储的遗留值：hq→320, sq→flac, standard→128, hires→high
-      final mapped = _legacyQualityMap[qualityValue] ?? qualityValue;
-      _audioQuality = AudioQuality.values.firstWhere(
-        (q) => q.value == mapped,
-        orElse: () {
-          return AudioQuality.standard;
-        },
-      );
-      notifyListeners();
+      _isWifiNetwork = await _detectIsWifi();
+      await _loadQualityForNetwork();
+      await _initNetworkWatch();
     } catch (e) {}
+  }
+
+  /// 探测当前是否 WiFi：移动数据/蓝牙等一律按移动网络处理；无连接或探测
+  /// 失败时按 WiFi（桌面开发等场景无蜂窝网，WiFi 分支作为默认回退）。
+  Future<bool> _detectIsWifi() async {
+    try {
+      final results = await Connectivity().checkConnectivity();
+      return _resultsAreWifi(results);
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// connectivity_plus 返回的是连接类型列表：只要不含移动数据即按 WiFi 处理
+  /// （覆盖 wifi / ethernet / vpn / other / none）。
+  static bool _resultsAreWifi(List<ConnectivityResult> results) =>
+      !results.contains(ConnectivityResult.mobile);
+
+  /// 监听网络类型切换：仅刷新 [AudioQuality]，不重新解析当前歌曲，
+  /// 新音质在下一首播放时生效（切歌走 _resolveAndPlayCurrentSong 用新值）。
+  Future<void> _initNetworkWatch() async {
+    try {
+      _connectivitySub ??= Connectivity().onConnectivityChanged.listen(
+            (results) => _onNetworkChanged(_resultsAreWifi(results)),
+          );
+    } catch (_) {}
+  }
+
+  void _onNetworkChanged(bool isWifi) {
+    if (_isWifiNetwork == isWifi) return;
+    _isWifiNetwork = isWifi;
+    _loadQualityForNetwork();
+  }
+
+  /// 按当前网络类型从仓库读取对应音质并更新 [AudioQuality]。
+  Future<void> _loadQualityForNetwork() async {
+    final settings = SettingsRepository();
+    final qualityValue = await settings.getQualityForNetwork(_isWifiNetwork);
+    // 兼容旧版本存储的遗留值：hq→320, sq→flac, standard→128, hires→high
+    final mapped = _legacyQualityMap[qualityValue] ?? qualityValue;
+    final quality = AudioQuality.values.firstWhere(
+      (q) => q.value == mapped,
+      orElse: () {
+        return AudioQuality.standard;
+      },
+    );
+    if (_audioQuality != quality) {
+      _audioQuality = quality;
+      notifyListeners();
+    }
+  }
+
+  /// 设置页修改任一网络音质后调用：按当前网络重新读取音质，下一首播放生效。
+  /// 不打断正在播放的歌曲。
+  Future<void> refreshQualityForNetwork() async {
+    try {
+      _isWifiNetwork = await _detectIsWifi();
+      await _loadQualityForNetwork();
+    } catch (_) {}
   }
 
   /// 把「忽略音频焦点」设置同步到 AudioService，使播放器中断处理即时生效。
@@ -1913,7 +1970,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (_audioQuality == quality) return;
     _audioQuality = quality;
     _actualPlayingQuality = null;
-    SettingsRepository().setDefaultQuality(quality.value);
+    // 手动切换：写入当前网络对应的音质键（设置页两套音质模型）
+    SettingsRepository().setQualityForNetwork(_isWifiNetwork, quality.value);
     notifyListeners();
     _applyQualityToCurrent();
   }
@@ -2340,6 +2398,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     _saveState(); // 退出时立即保存
     _saveDebounce?.cancel();
+    _connectivitySub?.cancel();
+    _connectivitySub = null;
     WidgetsBinding.instance.removeObserver(this);
     removeListener(_handleLyriconSongChange);
     LyriconProviderService.instance.removeListener(_handleLyriconEnabledChanged);

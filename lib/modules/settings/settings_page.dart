@@ -71,7 +71,8 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage>
     with SingleTickerProviderStateMixin {
   final SettingsRepository _settingsRepository = SettingsRepository();
-  String _defaultQuality = '128';
+  String _wifiQuality = '128';
+  String _mobileQuality = '128';
   bool _autoReceiveVip = true;
   // 本地 API 服务器重启中（在线音乐区块显示加载态）
   bool _isRestarting = false;
@@ -256,7 +257,9 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   Future<void> _loadSettings() async {
-    final quality = await _settingsRepository.getDefaultQuality();
+    // 两套网络音质：从未单独设置过的网络回退到旧全局默认音质
+    final wifiQuality = await _settingsRepository.getWifiQuality();
+    final mobileQuality = await _settingsRepository.getMobileQuality();
     final autoReceiveVip = await _settingsRepository.getAutoReceiveVip();
     // 从 ThemeProvider 同步「使用系统主题色」开关状态
     final useDynamicColor = context.read<ThemeProvider>().useDynamicColor;
@@ -317,7 +320,8 @@ class _SettingsPageState extends State<SettingsPage>
         .getSortCollectedByLatestClick();
 
     setState(() {
-      _defaultQuality = quality;
+      _wifiQuality = wifiQuality;
+      _mobileQuality = mobileQuality;
       _autoReceiveVip = autoReceiveVip;
       _useDynamicColor = useDynamicColor;
       _useCoverSeedColor = useCoverSeedColor;
@@ -1905,6 +1909,45 @@ class _SettingsPageState extends State<SettingsPage>
     showToast(loaded ? '已应用自定义字体' : '字体加载失败，已降级为系统字体', long: true);
   }
 
+  /// 单个网络的音质四选一按钮组（WiFi / 移动网络共用）。
+  /// 加载时把遗留 'hq' 归一化到 '320'（高音质 API 码为 '320'）。
+  Widget _buildNetworkQualityGroup(String value, ValueChanged<String?> onPick) {
+    return M3EToggleButtonGroup(
+      actions: const [
+        M3EToggleButtonGroupAction(label: Text('标准')),
+        M3EToggleButtonGroupAction(label: Text('高品质')),
+        M3EToggleButtonGroupAction(label: Text('无损')),
+        M3EToggleButtonGroupAction(label: Text('Hi-Res 无损')),
+      ],
+      // 高音质码是 '320'（KuGou 合法值）；遗留 'hq' 归一化到 '320'
+      selectedIndex: const ['128', '320', 'flac', 'high'].indexOf(
+        value == 'hq' ? '320' : value,
+      ),
+      onSelectedIndexChanged: (index) {
+        if (index == null) return;
+        const q = ['128', '320', 'flac', 'high'];
+        onPick(q[index]);
+      },
+    );
+  }
+
+  /// 网络音质分组选择回调：写对应网络的音质键，并让播放器按当前网络刷新，
+  /// 新音质下一首播放生效（不打断当前播放）。
+  void _onNetworkQualityPicked(bool isWifi, String? quality) {
+    if (quality == null) return;
+    HapticFeedback.lightImpact();
+    setState(() {
+      if (isWifi) {
+        _wifiQuality = quality;
+        _settingsRepository.setWifiQuality(quality);
+      } else {
+        _mobileQuality = quality;
+        _settingsRepository.setMobileQuality(quality);
+      }
+    });
+    context.read<PlayerProvider>().refreshQualityForNetwork();
+  }
+
   /// 播放 section。
   ///
   /// 排列逻辑：音质与音效（音质 → 解锁高音质的 VIP → 输出音效）→ 播放行为
@@ -1915,37 +1958,42 @@ class _SettingsPageState extends State<SettingsPage>
         // ① 音质与音效
         _buildGroupLabel('音质与音效', colorScheme, first: true),
         // 标题与按钮组分离（非 ListTile），索引条目手写声明
-        // search-item: 默认音质 | 音质 清晰度
+        // search-item: 网络音质 | 音质 清晰度 wifi 移动
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '默认音质',
+                '网络音质',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
+              const SizedBox(height: 4),
+              Text(
+                '分别设置 WiFi 与移动网络下的播放音质，随当前网络自动生效',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'WiFi 网络下',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
               const SizedBox(height: 8),
-              // M3E 按钮组：去掉码率/格式后缀（高亮为小圆角）
-              M3EToggleButtonGroup(
-                actions: const [
-                  M3EToggleButtonGroupAction(label: Text('标准')),
-                  M3EToggleButtonGroupAction(label: Text('高品质')),
-                  M3EToggleButtonGroupAction(label: Text('无损')),
-                  M3EToggleButtonGroupAction(label: Text('Hi-Res 无损')),
-                ],
-                // 高音质码是 '320'（KuGou 合法值）；遗留 'hq' 归一化到 '320'
-                selectedIndex: const ['128', 'hq', 'flac', 'high'].indexOf(
-                  _defaultQuality == 'hq' ? '320' : _defaultQuality,
-                ),
-                onSelectedIndexChanged: (index) {
-                  if (index == null) return;
-                  const q = ['128', '320', 'flac', 'high'];
-                  setState(() {
-                    _defaultQuality = q[index];
-                  });
-                  _settingsRepository.setDefaultQuality(q[index]);
-                },
+              _buildNetworkQualityGroup(
+                _wifiQuality,
+                (q) => _onNetworkQualityPicked(true, q),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '移动网络下',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 8),
+              _buildNetworkQualityGroup(
+                _mobileQuality,
+                (q) => _onNetworkQualityPicked(false, q),
               ),
             ],
           ),
