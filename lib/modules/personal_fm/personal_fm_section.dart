@@ -8,10 +8,7 @@ import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/sliding_segmented_control.dart';
-import '../../widgets/wavy_playback_line.dart';
-import '../login/login_page.dart';
-import '../player/full_player_route.dart';
+import '_fm_refill.dart';
 
 /// 一个具名电台：把 API 的 (mode, songPoolId) 包成用户看得懂的一档。
 /// 接口共 9 种组合，这里只取 3 组，要全部组合的走完整 FM 页。
@@ -385,10 +382,7 @@ class _PersonalFmSectionState extends State<PersonalFmSection> {
     kugou.moveToFirst(song);
     final refill = _armRefill(kugou, player);
     await player.playOnlinePlaylist(kugou.personalFmAsSongs, 0);
-    // 起播后立刻先接一批（与完整 FM 页一致）。不这么做的话队列就只有起播那一批，
-    // 一路放到底才第一次补货，把「补货失败」和「队列见底」压进同一个窗口：那一次
-    // 要是没成，播放器当场停在最后一首。
-    refill?.append();
+    refill?.append(); // 立即补一批
   }
 
   /// 新建续播器占住 `onPlaylistEnd`，返回它（歌单为空时返回 null）。
