@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_cache_manager/flutter_cache_manager.dart';
@@ -175,6 +176,8 @@ class KugouProvider extends ChangeNotifier {
   List<KugouLongAudioAlbum> _longAudioVipAlbums = [];
   List<KugouLongAudioAlbum> _longAudioWeekAlbums = [];
   List<KugouLongAudioAudio> _longAudioAudios = [];
+  int _longAudioAudiosPage = 1;
+  bool _longAudioAudiosHasMore = false;
   Map<String, dynamic>? _longAudioAlbumDetail;
   Map<String, dynamic>? _serverNow;
 
@@ -348,6 +351,8 @@ class KugouProvider extends ChangeNotifier {
   List<KugouLongAudioAlbum> get longAudioVipAlbums => _longAudioVipAlbums;
   List<KugouLongAudioAlbum> get longAudioWeekAlbums => _longAudioWeekAlbums;
   List<KugouLongAudioAudio> get longAudioAudios => _longAudioAudios;
+  int get longAudioAudiosPage => _longAudioAudiosPage;
+  bool get longAudioAudiosHasMore => _longAudioAudiosHasMore;
   Map<String, dynamic>? get longAudioAlbumDetail => _longAudioAlbumDetail;
   Map<String, dynamic>? get serverNow => _serverNow;
 
@@ -2214,9 +2219,18 @@ class KugouProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
-  Future<void> getLongaudioAlbumAudios(String albumId) async {
+  Future<void> getLongaudioAlbumAudios(
+    String albumId, {
+    int page = 1,
+    int pageSize = 30,
+    bool append = false,
+  }) async {
     try {
-      final r = await _apiClient.getLongaudioAlbumAudios(albumId);
+      final r = await _apiClient.getLongaudioAlbumAudios(
+        albumId,
+        page: page,
+        pageSize: pageSize,
+      );
       if (r != null) {
         // Audios 响应结构：data 为顶层数组
         final data = r['data'];
@@ -2227,14 +2241,83 @@ class KugouProvider extends ChangeNotifier {
           final sub = data['audios'] ?? data['list'] ?? data['audio_list'];
           if (sub is List) list.addAll(sub);
         }
-        _longAudioAudios = list
+        final items = list
             .whereType<Map<String, dynamic>>()
             .map(KugouLongAudioAudio.fromJson)
             .toList();
+        if (append) {
+          _longAudioAudios = [..._longAudioAudios, ...items];
+          _longAudioAudiosPage = page;
+        } else {
+          _longAudioAudios = items;
+          _longAudioAudiosPage = 1;
+        }
+        _longAudioAudiosHasMore = items.length >= pageSize;
         notifyListeners();
       }
     } catch (_) {}
   }
+
+  /// 听书关键词搜索：请求 /search/audiobook（Rust 转发 /complexsearch/v4/search/song）。
+  /// 上游返回 data.lists 听书「章节」，这里按 AlbumID 去重成专辑，并清理 <em> 高亮与封面占位。
+  Future<List<KugouLongAudioAlbum>> searchLongAudio(String keyword) async {
+    try {
+      final r = await _apiClient.getLongaudioSearch(keyword);
+      if (r == null) {
+        // ignore: avoid_print
+        print('[AudiobookSearch] getLongaudioSearch 返回 null, keyword=$keyword');
+        return const [];
+      }
+      final data = r['data'];
+      final lists = data is Map<String, dynamic> ? data['lists'] : null;
+      if (lists is! List || lists.isEmpty) {
+        // ignore: avoid_print
+        print(
+          '[AudiobookSearch] data 无 lists, keyword=$keyword status=${r['status']} err=${r['error_code']}',
+        );
+        return const [];
+      }
+      final result = <KugouLongAudioAlbum>[];
+      final seen = <String>{};
+      for (final it in lists) {
+        if (it is! Map<String, dynamic>) continue;
+        final albumId = it['AlbumID']?.toString() ?? '';
+        if (albumId.isEmpty) continue;
+        if (!seen.add(albumId)) continue;
+        final name = _stripHtmlTags(it['AlbumName']?.toString() ?? '');
+        if (name.isEmpty) continue;
+        final coverRaw = (it['trans_param'] is Map<String, dynamic>
+                ? it['trans_param']!['union_cover']
+                : null) ??
+            it['Image'];
+        result.add(KugouLongAudioAlbum(
+          id: albumId,
+          name: name,
+          coverUrl: coverRaw == null
+              ? null
+              : _stripArtworkUrl(coverRaw.toString()),
+          author: _stripHtmlTags(it['SingerName']?.toString() ?? ''),
+        ));
+      }
+      // ignore: avoid_print
+      print(
+        '[AudiobookSearch] chapters=${lists.length} albums=${result.length}, keyword=$keyword',
+      );
+      return result;
+    } catch (e) {
+      // ignore: avoid_print
+      print('[AudiobookSearch] parse exception: $e');
+      return const [];
+    }
+  }
+
+  /// 移除标题中的 <em>/</em> 等 HTML 高亮标签。
+  static String _stripHtmlTags(String s) =>
+      s.replaceAll(RegExp(r'<[^>]*>'), '').trim();
+
+  /// 封面：去掉 imge.kugou.com 链接外侧的反引号，并替换 {size} 占位。
+  static String _stripArtworkUrl(String s) =>
+      s.replaceAll('`', '').replaceAll('{size}', '400');
 
   // ==================== Brush & AI ====================
 

@@ -39,7 +39,30 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-. (Join-Path $PSScriptRoot '..\lib\common.ps1')
+# 公开导出树只携带本任务脚本（不含 lib/common.ps1）：有公共库则照常点源；
+# 缺失时内联所需的最小辅助函数，保证脚本在公开树里也能独立运行。
+$script:Md3CommonPath = Join-Path $PSScriptRoot '..\lib\common.ps1'
+if (Test-Path $script:Md3CommonPath) {
+    . $script:Md3CommonPath
+} else {
+    $script:Md3RepoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+    function Get-RepoRoot { $script:Md3RepoRoot }
+    function Get-Utf8NoBom { New-Object System.Text.UTF8Encoding($false) }
+    function Write-Step([string]$M) { Write-Host "`n=== $M ===" -ForegroundColor Cyan }
+    function Write-Ok([string]$M)   { Write-Host "  [OK] $M" -ForegroundColor Green }
+    function Write-Warn([string]$M) { Write-Host "  [!!] $M" -ForegroundColor Yellow }
+    function Write-Fail([string]$M) { Write-Host "  [XX] $M" -ForegroundColor Red }
+    function Write-Note([string]$M) { Write-Host "  $M" -ForegroundColor DarkGray }
+    function Wait-Exit { Write-Host "`n按任意键退出..." -ForegroundColor Cyan; try { $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown') } catch { Start-Sleep -Seconds 2 } }
+    function Invoke-Native { param([Parameter(Mandatory)][scriptblock]$Command) $p = $ErrorActionPreference; $ErrorActionPreference = 'Continue'; try { & $Command; if ($LASTEXITCODE -ne 0) { throw "命令失败，退出码 $LASTEXITCODE" } } finally { $ErrorActionPreference = $p } }
+    function Assert-Command { param([Parameter(Mandatory)][string]$Name, [string]$Hint) if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) { throw "未找到 $Name$(if ($Hint) { "：$Hint" })" } }
+    function Test-HasCommand([string]$Name) { [bool](Get-Command $Name -ErrorAction SilentlyContinue) }
+    function Add-CargoToPath { $b = Join-Path $env:USERPROFILE '.cargo\bin'; if ((Test-Path $b) -and ($env:Path -notlike "*$b*")) { $env:Path = "$b;$env:Path" } }
+    function Test-RustDirty { $root = Get-RepoRoot; if (-not (Test-HasCommand git)) { return $false }; $st = & git -C $root status --porcelain -- kugou_api_server/rust/ 2>$null; ($LASTEXITCODE -eq 0) -and [bool]$st }
+    function Get-PubspecVersion { $pub = Get-Content (Join-Path (Get-RepoRoot) 'pubspec.yaml') | Select-String '^version:'; if ($pub) { ($pub.ToString() -replace '^version:\s*', '' -split '\+')[0] } else { '0.0.0' } }
+    function Remove-ItemBypass([string]$Path) { if (Test-Path -LiteralPath $Path) { $item = Get-Item -LiteralPath $Path -Force; if ($item -is [System.IO.DirectoryInfo]) { [System.IO.Directory]::Delete($item.FullName, $true) } else { [System.IO.File]::Delete($item.FullName) } } }
+    function Sync-SettingsSearchIndex { }   # 公开树无 scripts/tools，设置为搜索索引同步为空操作
+}
 
 $RepoRoot   = Get-RepoRoot
 $RustDir    = Join-Path $RepoRoot 'kugou_api_server\rust'

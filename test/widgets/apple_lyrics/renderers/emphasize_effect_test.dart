@@ -41,13 +41,13 @@ void main() {
       expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
     });
 
-    test('CJK 字时长 500ms → false（duration < 1000）', () {
+    test('CJK 字时长 500ms → true（快歌优化：阈值降至 500ms）', () {
       final word = makeWord(duration: 500, text: '运');
-      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
     });
 
-    test('CJK 字时长刚好 999ms → false（边界）', () {
-      final word = makeWord(duration: 999, text: '运');
+    test('CJK 字时长 499ms → false（duration < 500 边界）', () {
+      final word = makeWord(duration: 499, text: '运');
       expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
     });
 
@@ -66,9 +66,9 @@ void main() {
       expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
     });
 
-    test('非 CJK 字 7 字符 500ms → false（duration 不够）', () {
+    test('非 CJK 字 7 字符 500ms → true（快歌优化：阈值降至 500ms）', () {
       final word = makeWord(duration: 500, text: 'abcdefg');
-      expect(EmphasizeEffect.shouldEmphasize(word), isFalse);
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
     });
 
     test('CJK 多字符 2000ms → true（任意长度）', () {
@@ -445,11 +445,13 @@ void main() {
       // duration=1000ms, wordIndex=1：
       //   anchorCharCount=1：wordDe = 0 + (1000/2.5/1)*1 = 400
       //   anchorCharCount=4：wordDe = 0 + (1000/2.5/4)*1 = 100
-      // anchorCharCount=4 时字更早激活
+      // anchorCharCount=4 时凸起更早激活
       final word = makeWord(duration: 1000, text: '运');
       // 在 currentTimeMs=200：
-      //   anchorCharCount=1：t = (200-400)/1000 = -0.2（idle）
-      //   anchorCharCount=4：t = (200-100)/1000 = 0.1（激活）
+      //   anchorCharCount=1：bump t = (200-400)/1000 = -0.2（凸起未开始，scale=1.0）
+      //   anchorCharCount=4：bump t = (200-100)/1000 = 0.1（凸起已开始，scale>1.0）
+      // 注意：浮层带边缘渐隐（仅凸起窗口内可见），凸起未开始（bumpPhase<0）时
+      // 浮层为 0，不再有 lead-in 跳变上移。
       final state1 = effect.computeState(
         word: word,
         currentTimeMs: 200,
@@ -464,8 +466,112 @@ void main() {
         wordIndex: 1,
         anchorCharCount: 4,
       );
-      expect(state1, equals(EmphasizeState.idle));
-      expect(state4, isNot(equals(EmphasizeState.idle)));
+      // 大 anchorCharCount 的凸起更早开始：state4.scale > 1 且 > state1.scale
+      expect(state1.scale, closeTo(1.0, 1e-9));
+      expect(state1.glowLevel, closeTo(0.0, 1e-9));
+      expect(state4.scale, greaterThan(1.0));
+      expect(state4.scale, greaterThan(state1.scale));
+      // 凸起未开始时浮层为 0（边缘渐隐），无切入跳变上移
+      expect(state1.floatYEm, closeTo(0.0, 1e-9));
+    });
+  });
+
+  group('computeState - 逐字符波浪（v5）', () {
+    test('同一时刻 左字凸起先于右字（scale 递减）', () {
+      // duration=2000ms, anchorCharCount=3，在 currentTimeMs=1000：
+      //   wordIndex=0：wordDe=0,      bump t=0.5 → scale 峰值
+      //   wordIndex=1：wordDe=266.7,  bump t=(1000-266.7)/2000=0.367 → 未到峰值
+      //   wordIndex=2：wordDe=533.3,  bump t=(1000-533.3)/2000=0.233 → 更小
+      // → 从左到右 scale 依次递减（左字先放大，右字后放大）
+      final word = makeWord(duration: 2000, text: '运');
+      final double s0 = effect.computeState(
+        word: word, currentTimeMs: 1000, isLastWord: false,
+        wordIndex: 0, anchorCharCount: 3,
+      ).scale;
+      final double s1 = effect.computeState(
+        word: word, currentTimeMs: 1000, isLastWord: false,
+        wordIndex: 1, anchorCharCount: 3,
+      ).scale;
+      final double s2 = effect.computeState(
+        word: word, currentTimeMs: 1000, isLastWord: false,
+        wordIndex: 2, anchorCharCount: 3,
+      ).scale;
+      expect(s0, greaterThan(s1));
+      expect(s1, greaterThan(s2));
+    });
+
+    test('水平外扩：左字向左、右字向右（offsetXEm 符号相反）', () {
+      // anchorCharCount=3，currentTimeMs=1000（左字 t=0.5 达峰 transX=1）：
+      //   wordIndex=0：offsetXEm = -transX*0.03*amount*(3/2-0) < 0（向左）
+      //   wordIndex=2：offsetXEm = -transX*0.03*amount*(3/2-2) > 0（向右）
+      final word = makeWord(duration: 2000, text: '运');
+      final EmphasizeState s0 = effect.computeState(
+        word: word, currentTimeMs: 1000, isLastWord: false,
+        wordIndex: 0, anchorCharCount: 3,
+      );
+      final EmphasizeState s2 = effect.computeState(
+        word: word, currentTimeMs: 1000, isLastWord: false,
+        wordIndex: 2, anchorCharCount: 3,
+      );
+      expect(s0.offsetXEm, lessThan(0));
+      expect(s2.offsetXEm, greaterThan(0));
+    });
+
+    test('上浮随凸起涨落：t=0 无上浮、t=0.5 最大、t=1 回落', () {
+      final word = makeWord(duration: 2000, text: '运');
+      final EmphasizeState s0 = effect.computeState(
+        word: word, currentTimeMs: 0, isLastWord: false,
+        wordIndex: 0, anchorCharCount: 1,
+      );
+      final EmphasizeState sMid = effect.computeState(
+        word: word, currentTimeMs: 1000, isLastWord: false,
+        wordIndex: 0, anchorCharCount: 1,
+      );
+      final EmphasizeState sEnd = effect.computeState(
+        word: word, currentTimeMs: 2000, isLastWord: false,
+        wordIndex: 0, anchorCharCount: 1,
+      );
+      // 上浮为负值（向上），t=0.5 时最上
+      expect(s0.offsetYEm, closeTo(0.0, 1e-9));
+      expect(sMid.offsetYEm, lessThan(0));
+      expect(sEnd.offsetYEm, closeTo(0.0, 1e-9));
+    });
+
+    test('正弦浮层：floatX=0.5 时达最大上浮（-0.05em）', () {
+      // duration=1000ms, wordIndex=0, currentTimeMs=300：
+      //   floatDelay = wordDe - 400 = -400，floatDur = 1000*1.4 = 1400
+      //   floatX = (300-(-400))/1400 = 0.5 → floatYEm = -sin(π/2)*0.05 = -0.05（最大上浮）
+      final word = makeWord(duration: 1000, text: '运');
+      final EmphasizeState peak = effect.computeState(
+        word: word, currentTimeMs: 300, isLastWord: false,
+        wordIndex: 0, anchorCharCount: 1,
+      );
+      expect(peak.floatYEm, closeTo(-0.05, 1e-9));
+    });
+
+    test('浮层边缘渐隐：凸起起始段从 0 平滑过渡（消除切入跳变）', () {
+      // duration=1000ms, wordIndex=0, anchorCharCount=1：
+      //   bumpPhase=0 处：edgeFade=0 → floatYEm=0（切入不上跳）
+      //   bumpPhase=0.1（<0.15）：edgeFade=0.1/0.15≈0.667 → floatYEm 被缩放（小于峰值）
+      //   bumpPhase=0.2（≥0.15）：edgeFade=1 → 完整浮层
+      final word = makeWord(duration: 1000, text: '运');
+      final EmphasizeState s0 = effect.computeState(
+        word: word, currentTimeMs: 0, isLastWord: false,
+        wordIndex: 0, anchorCharCount: 1,
+      );
+      final EmphasizeState sFade = effect.computeState(
+        word: word, currentTimeMs: 100, isLastWord: false,
+        wordIndex: 0, anchorCharCount: 1,
+      );
+      final EmphasizeState sFull = effect.computeState(
+        word: word, currentTimeMs: 200, isLastWord: false,
+        wordIndex: 0, anchorCharCount: 1,
+      );
+      // 切入瞬间无跳变上移
+      expect(s0.floatYEm, closeTo(0.0, 1e-9));
+      // 渐隐段浮层幅度被缩放（小于满幅段）；满幅段恢复完整幅度
+      expect(sFade.floatYEm.abs(), lessThan(sFull.floatYEm.abs()));
+      expect(sFull.floatYEm.abs(), greaterThan(0.04));
     });
   });
 
@@ -627,6 +733,112 @@ void main() {
       expect(str.contains('1.1'), isTrue);
       expect(str.contains('0.5'), isTrue);
       expect(str.contains('0.2'), isTrue);
+    });
+  });
+
+  group('resolveThresholdMs - 快慢歌阈值', () {
+    /// 构造带逐字时间戳的行。
+    LyricLine makeKrcLine(List<int> durations) {
+      final words = List<LyricWord>.generate(
+        durations.length,
+        (i) => LyricWord(
+          startTime: 0,
+          duration: durations[i],
+          text: '运',
+        ),
+      );
+      return LyricLine(
+        startTime: 0,
+        duration: 1000,
+        text: '运' * durations.length,
+        words: words,
+      );
+    }
+
+    /// 构造 LRC 行（无逐字时间戳）。
+    LyricLine makeLrcLine(String text) => LyricLine(
+          startTime: 0,
+          duration: 1000,
+          text: text,
+        );
+
+    test('songBpm=120 → 阈值 700（一字一拍 500ms × 1.4）', () {
+      expect(
+        EmphasizeEffect.resolveThresholdMs(songBpm: 120),
+        700,
+      );
+    });
+
+    test('songBpm=80 → 阈值 1050（一字一拍 750ms × 1.4）', () {
+      expect(
+        EmphasizeEffect.resolveThresholdMs(songBpm: 80),
+        1050,
+      );
+    });
+
+    test('无 BPM，KRC 字长中位数 400 → 阈值 560（快歌自适应）', () {
+      final lines = [makeKrcLine(List.filled(30, 400))];
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines), 560);
+    });
+
+    test('无 BPM，KRC 字长中位数 800 → 阈值 1120（慢歌自适应）', () {
+      final lines = [makeKrcLine(List.filled(30, 800))];
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines), 1120);
+    });
+
+    test('阈值随字长连续变化（无固定档位）', () {
+      final lines500 = [makeKrcLine(List.filled(30, 500))];
+      final lines600 = [makeKrcLine(List.filled(30, 600))];
+      final lines700 = [makeKrcLine(List.filled(30, 700))];
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines500), 700);
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines600), 840);
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines700), 980);
+    });
+
+    test('无 BPM 且纯 LRC（无逐字）→ 兜底默认 500', () {
+      final lines = [
+        makeLrcLine('第一行'),
+        makeLrcLine('第二行'),
+      ];
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines), 500);
+    });
+
+    test('无 BPM 且逐字样本不足（< 20 字）→ 兜底默认 500', () {
+      final lines = [makeKrcLine(List.filled(10, 300))];
+      expect(EmphasizeEffect.resolveThresholdMs(lines: lines), 500);
+    });
+
+    test('songBpm 优先于歌词统计', () {
+      // 歌词字长中位数 800（本应得 1120），但显式 BPM=120 → 700 优先
+      final lines = [makeKrcLine(List.filled(30, 800))];
+      expect(
+        EmphasizeEffect.resolveThresholdMs(lines: lines, songBpm: 120),
+        700,
+      );
+    });
+  });
+
+  group('shouldEmphasize - thresholdMs 参数', () {
+    test('thresholdMs=1000 时 500ms 字不触发、1000ms 字触发', () {
+      final fast = makeWord(duration: 500, text: '运');
+      final slow = makeWord(duration: 1000, text: '运');
+      expect(
+        EmphasizeEffect.shouldEmphasize(fast, thresholdMs: 1000),
+        isFalse,
+      );
+      expect(
+        EmphasizeEffect.shouldEmphasize(slow, thresholdMs: 1000),
+        isTrue,
+      );
+    });
+
+    test('thresholdMs=500（默认）时 500ms 字触发', () {
+      final word = makeWord(duration: 500, text: '运');
+      expect(EmphasizeEffect.shouldEmphasize(word), isTrue);
+      expect(
+        EmphasizeEffect.shouldEmphasize(word, thresholdMs: 500),
+        isTrue,
+      );
     });
   });
 }

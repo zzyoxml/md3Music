@@ -44,7 +44,7 @@ const List<({String label, String category, String aliases})>
   (label: '锁屏歌词（实验性）', category: '歌词', aliases: '锁屏'),
   (label: '锁屏歌词字号', category: '歌词', aliases: '字号 大小'),
   (label: '锁屏歌词粗细', category: '歌词', aliases: '粗细 加粗'),
-  (label: '默认音质', category: '播放', aliases: '音质 清晰度'),
+  (label: '网络音质', category: '播放', aliases: '音质 清晰度 wifi 移动'),
   (label: '自动领取VIP', category: '播放', aliases: 'vip 会员 自动领取'),
   (label: '均衡器', category: '播放', aliases: 'eq 均衡'),
   (label: '暂停淡入淡出', category: '播放', aliases: '淡入淡出 渐变 音量'),

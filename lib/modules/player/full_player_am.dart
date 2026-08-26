@@ -1487,6 +1487,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                     ),
                                 doubleTapToJump: lyricDoubleTap,
                                 accentColor: _lyricAccentColor,
+                                // 歌曲 BPM（本地标签/接口，可空）：用于快慢歌辉光阈值
+                                songBpm: currentSong?.bpm,
                                 onSeek: (ms) => playerProvider.seek(
                                   Duration(milliseconds: ms),
                                 ),

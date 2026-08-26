@@ -37,6 +37,11 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
   List<KugouLongAudioAudio> _audios = [];
   List<Song> _songs = [];
 
+  // 分页：章节列表一次只返回 30 条，滚动到底自动加载后续页
+  int _audioPage = 1;
+  bool _hasMoreAudio = false;
+  bool _loadingMore = false;
+
   // 排序
   _SortBy _sortBy = _SortBy.time;
   bool _sortAscending = false;
@@ -87,6 +92,13 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
       _scrollOffset = offset;
       setState(() {});
     }
+    // 接近底部时自动加载下一页章节（自动翻页）
+    final pos = _scrollController.position;
+    if (pos != null &&
+        pos.maxScrollExtent > 0 &&
+        pos.pixels >= pos.maxScrollExtent - 200) {
+      _loadMoreAudios();
+    }
   }
 
   Future<void> _load() async {
@@ -98,12 +110,19 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
     try {
       await Future.wait([
         kugou.getLongaudioAlbumDetail(widget.album.id),
-        kugou.getLongaudioAlbumAudios(widget.album.id),
+        kugou.getLongaudioAlbumAudios(
+          widget.album.id,
+          page: 1,
+          pageSize: 30,
+        ),
       ]);
       if (!mounted) return;
       setState(() {
         _audios = List.of(kugou.longAudioAudios);
         _songs = _buildSongs(_audios);
+        _audioPage = kugou.longAudioAudiosPage;
+        _hasMoreAudio = kugou.longAudioAudiosHasMore;
+        _loadingMore = false;
         _isLoading = false;
         _invalidateDisplaySongs();
       });
@@ -114,6 +133,28 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
         _isLoading = false;
       });
     }
+  }
+
+  /// 滚动到底时加载下一页章节，追加到现有列表（自动翻页）。
+  Future<void> _loadMoreAudios() async {
+    if (_loadingMore || !_hasMoreAudio || _isLoading) return;
+    setState(() => _loadingMore = true);
+    final kugou = context.read<KugouProvider>();
+    await kugou.getLongaudioAlbumAudios(
+      widget.album.id,
+      page: _audioPage + 1,
+      pageSize: 30,
+      append: true,
+    );
+    if (!mounted) return;
+    setState(() {
+      _audios = List.of(kugou.longAudioAudios);
+      _songs = _buildSongs(_audios);
+      _audioPage = kugou.longAudioAudiosPage;
+      _hasMoreAudio = kugou.longAudioAudiosHasMore;
+      _loadingMore = false;
+      _invalidateDisplaySongs();
+    });
   }
 
   /// 将章节列表转换为可播放的 Song 列表。
@@ -421,6 +462,11 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                             childCount: displaySongs.length,
                           ),
                         ),
+                        // 加载更多 footer（滚动到底自动翻页）
+                        if (_audios.isNotEmpty)
+                          SliverToBoxAdapter(
+                            child: _buildLoadMoreFooter(cs, tt),
+                          ),
                     ],
                   ),
                 ),
@@ -686,6 +732,27 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// 加载更多 footer：加载中/已全部加载提示（滚动到底自动翻页用）。
+  Widget _buildLoadMoreFooter(ColorScheme cs, TextTheme tt) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Center(
+        child: _loadingMore
+            ? const SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : (!_hasMoreAudio)
+                ? Text(
+                    '已加载全部 ${_audios.length} 集',
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  )
+                : const SizedBox(height: 20),
       ),
     );
   }

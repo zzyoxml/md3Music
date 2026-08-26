@@ -2,10 +2,11 @@
 ///
 /// 参照 spec.md "Requirement: 强调辉光（emphasize）效果" 与 AMLL `lyric-line.ts:510-651` 实现。
 /// 当字时长 >= 1000ms 且符合字符长度要求（CJK 任意 / 非 CJK 1~7）时触发辉光：
-/// - 字内进度 0~0.5 用 bezIn 曲线渐入（缩放放大、辉光增强）
-/// - 字内进度 0.5~1 用 bezOut 曲线渐出（缩放回 1.0、辉光衰减）
-/// - 末尾字（isLastWord）amount/blur 加强 1.6/1.5 倍
-/// - 字符间错位 delay：wordIndex 越大，字活跃起始时间越晚
+/// - 逐字符波浪：每个字符按 `wordDe = de + (du/2.5/anchorCharCount)*wordIndex` 从左到右依次启动，
+///   字符内进度 t∈[0,1] 前段用 bezIn 渐入（放大、上浮、辉光增强），后段用 bezOut 渐出（回落、衰减），
+///   形成"依次放大上浮再下落"的海浪般视觉效果。
+/// - 正弦浮层：另叠加 `-sin(π·x)×0.05em` 的起伏（提前 400ms、时长 1.4×du），增强海浪脊感。
+/// - 末尾字（isLastWord）amount/blur 加强 1.6/1.5 倍。
 library;
 
 import 'dart:math';
@@ -14,11 +15,11 @@ import 'package:flutter/foundation.dart';
 
 import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 
-/// 强调辉光状态。
+/// 强调辉光状态（逐字符）。
 ///
 /// 不可变值对象，由 [EmphasizeEffect.computeState] 输出，供绘制层
-/// （如 CustomPainter）读取 scale、glowLevel、shadowBlurEm 三个参数
-/// 应用 transform 与 textShadow。
+/// （如 CustomPainter）读取 scale、glowLevel、shadowBlurEm、offsetXEm、
+/// offsetYEm、floatYEm 应用 transform 与 textShadow。
 @immutable
 class EmphasizeState {
   /// 缩放比例，1.0~1.12（含末尾字加强后可能略高）。
@@ -30,13 +31,25 @@ class EmphasizeState {
   /// 阴影模糊半径（em 单位），封顶 0.3。
   final double shadowBlurEm;
 
+  /// 水平外扩位移（em 单位）：左字向左、右字向右，随凸起涨落。
+  final double offsetXEm;
+
+  /// 上浮位移（em 单位，向上为负）：随凸起涨落（放大时上浮，回落时还原）。
+  final double offsetYEm;
+
+  /// 正弦浮层位移（em 单位，向上为负）：独立于凸起的海浪起伏。
+  final double floatYEm;
+
   const EmphasizeState({
     required this.scale,
     required this.glowLevel,
     required this.shadowBlurEm,
+    this.offsetXEm = 0,
+    this.offsetYEm = 0,
+    this.floatYEm = 0,
   });
 
-  /// 空闲状态：无辉光、无缩放、无阴影。
+  /// 空闲状态：无辉光、无缩放、无阴影、无位移。
   ///
   /// 当 word 未触发辉光（[EmphasizeEffect.shouldEmphasize] 返回 false），
   /// 或当前时间不在字内进度 [0, 1] 范围时返回此常量。
@@ -53,31 +66,68 @@ class EmphasizeState {
           runtimeType == other.runtimeType &&
           scale == other.scale &&
           glowLevel == other.glowLevel &&
-          shadowBlurEm == other.shadowBlurEm;
+          shadowBlurEm == other.shadowBlurEm &&
+          offsetXEm == other.offsetXEm &&
+          offsetYEm == other.offsetYEm &&
+          floatYEm == other.floatYEm;
 
   @override
-  int get hashCode => Object.hash(scale, glowLevel, shadowBlurEm);
+  int get hashCode => Object.hash(
+      scale, glowLevel, shadowBlurEm, offsetXEm, offsetYEm, floatYEm);
 
   @override
   String toString() =>
       'EmphasizeState(scale: $scale, glowLevel: $glowLevel, '
-      'shadowBlurEm: $shadowBlurEm)';
+      'shadowBlurEm: $shadowBlurEm, offsetXEm: $offsetXEm, '
+      'offsetYEm: $offsetYEm, floatYEm: $floatYEm)';
+}
+
+/// 某字符的波浪相位（自驱动动画状态）。
+///
+/// - [bumpPhase]：凸起进度，0~1 为激活窗口（0.5 达峰）。
+/// - [floatPhase]：正弦浮层进度，0~1 为激活窗口（0.5 达最大上浮）。
+/// 可为负/超 1（窗口外），由 [EmphasizeEffect.phasesAt] 在锚定时生成，
+/// 之后每帧由帧时钟 dt 推进（见 WordRenderer.tick）。
+@immutable
+class EmphasizePhases {
+  final double bumpPhase;
+  final double floatPhase;
+
+  const EmphasizePhases({
+    required this.bumpPhase,
+    required this.floatPhase,
+  });
 }
 
 /// 强调辉光效果计算器。
 ///
 /// 无状态工具类：所有计算基于入参，内部不持有可变状态。
 /// 通过 [shouldEmphasize] 判断 word 是否需要辉光，
-/// 通过 [computeState] 计算某时刻的辉光参数（scale / glowLevel / shadowBlurEm）。
+/// 通过 [computeState] / [computeStateFromPhases] 计算辉光参数
+/// （scale / glowLevel / shadowBlurEm / offsetXEm / offsetYEm / floatYEm）。
 class EmphasizeEffect {
   EmphasizeEffect();
 
   // ============== 触发条件常量 ==============
 
-  /// 触发阈值：字时长 >= 1000ms
-  static const int _durationThresholdMs = 1000;
+  /// 阈值换算系数：辉光触发阈值 = 单位字长 × 1.4。
+  ///
+  /// 单位字长 = KRC 歌词字长中位数；有显式 BPM 时按「一字一拍」换算
+  /// （60000/BPM）。阈值随歌曲节奏自适应，替代固定的「快歌 500 / 慢歌 1000」
+  /// 两档，快慢之间平滑过渡。
+  static const double _thresholdFactor = 1.4;
 
-  /// 非 CJK 字最大长度
+  /// 默认兜底阈值（ms）：无逐字歌词 / 无 BPM / 样本不足时使用。
+  static const int _durationThresholdMs = 500;
+
+  /// 逐字歌词统计所需的最小样本数（字）。样本过少时统计不可靠，交由兜底。
+  static const int _lyricsSampleMin = 20;
+
+  /// 触发阈值：字时长 >= 此值才触发辉光（默认兜底值，见 [resolveThresholdMs]）。
+  ///
+  /// 快歌（KRC 逐字歌词，字时长常见 300~800ms）固定阈值易造成快歌不触发、
+  /// 慢歌过密；改用 [resolveThresholdMs] 按歌曲 BPM / 歌词字长中位数 ×1.4
+  /// 自适应推断，再经 [shouldEmphasize] 的 [thresholdMs] 传入。
   static const int _nonCjkMaxLength = 7;
 
   // ============== 内容过滤常量 ==============
@@ -148,6 +198,47 @@ class EmphasizeEffect {
   /// shadowBlurEm 封顶（spec.md：textShadow: 0 0 min(0.3, blur*0.3)em）
   static const double _shadowBlurEmCap = 0.3;
 
+  // ============== 逐字符波浪常量（对齐 AMLL lyric-line.ts） ==============
+
+  /// 字符错位 spread 除数：所有字符起始时间跨度 = du / 2.5
+  static const double _staggerSpreadDivisor = 2.5;
+
+  /// 上浮位移系数（AMLL：offsetY = -transX * 0.025 * amount）
+  static const double _offsetYFactor = 0.025;
+
+  /// 水平外扩系数（AMLL：offsetX = -transX * 0.03 * amount * (n/2 - i)）
+  static const double _offsetXFactor = 0.03;
+
+  /// 正弦浮层幅度（em，AMLL：y = -sin(π·x) * 0.05em）
+  static const double _floatAmpEm = 0.05;
+
+  /// 正弦浮层相对凸起的提前量（ms，AMLL：delay = wordDe - 400）
+  static const double _floatLeadMs = 400;
+
+  /// 正弦浮层时长系数（AMLL：duration = du * 1.4）
+  static const double _floatDurationFactor = 1.4;
+
+  /// 浮层边缘渐隐宽度（占凸起窗口的比例）：起始/结束各 15% 内从 0 平滑过渡，
+  /// 消除字切换瞬间浮层跳变上移与字尾回落突兀。
+  static const double _floatEdgeFadeWidth = 0.15;
+
+  /// 基于凸起相位的浮层边缘渐隐系数（0~1）。
+  ///
+  /// - 凸起窗口外（未开始 / 已结束，含浮层尾巴）：返回 0，浮层不显示。
+  /// - 凸起起始 [0, width]：线性 0→1。
+  /// - 凸起结束 [1-width, 1]：线性 1→0。
+  /// - 中间：恒 1。
+  static double _floatEdgeFade(bool bumpActive, double bumpPhase) {
+    if (!bumpActive) return 0;
+    if (bumpPhase < _floatEdgeFadeWidth) {
+      return bumpPhase / _floatEdgeFadeWidth;
+    }
+    if (bumpPhase > 1 - _floatEdgeFadeWidth) {
+      return (1 - bumpPhase) / _floatEdgeFadeWidth;
+    }
+    return 1;
+  }
+
   // ============== bezier 控制点 ==============
   //
   // spec.md："bezIn = bezier(0.2, 0.4, 0.58, 1.0)"、"bezOut = bezier(0.3, 0.0, 0.58, 1.0)"
@@ -184,10 +275,54 @@ class EmphasizeEffect {
     return false;
   }
 
+  /// 解析整首歌的辉光触发阈值（ms）：**单位字长 × 1.4**，随节奏自适应。
+  ///
+  /// 单位字长来源（结合 BPM 真数据 + 歌词字长推断）：
+  /// 1. [songBpm] 非空（酷狗接口 / 本地音频 TBPM 标签）：按「一字一拍」
+  ///    换算 `60000 / BPM` 作为单位字长（如 BPM=120 → 500ms）。
+  /// 2. 歌词字长统计（KRC 逐字）：取所有字时长中位数作为单位字长；
+  ///    样本不足返回 null 交给兜底。
+  /// 3. 兜底返回 [fallback]（默认 [_durationThresholdMs]=500）。
+  ///
+  /// 例：字长中位数 400ms（快歌）→ 阈值 560ms；800ms（慢歌）→ 1120ms，
+  /// 快慢之间平滑过渡，不再使用固定两档。
+  static int resolveThresholdMs({
+    List<LyricLine>? lines,
+    int? songBpm,
+    int fallback = _durationThresholdMs,
+  }) {
+    // 1. 显式 BPM：一字一拍换算单位字长，再 ×1.4
+    if (songBpm != null && songBpm > 0) {
+      final double beatMs = 60000 / songBpm;
+      return (beatMs * _thresholdFactor).round();
+    }
+    // 2. KRC 逐字歌词字长中位数 ×1.4
+    if (lines != null) {
+      final int? median = _lyricsMedianMs(lines);
+      if (median != null) return (median * _thresholdFactor).round();
+    }
+    // 3. 兜底
+    return fallback;
+  }
+
+  /// 由 KRC 逐字歌词统计字长中位数（ms）；无逐字或样本不足返回 null。
+  static int? _lyricsMedianMs(List<LyricLine> lines) {
+    final List<int> durations = <int>[];
+    for (final line in lines) {
+      if (!line.hasWordTiming) continue;
+      for (final w in line.words) {
+        durations.add(w.duration);
+      }
+    }
+    if (durations.length < _lyricsSampleMin) return null;
+    durations.sort();
+    return durations[durations.length ~/ 2];
+  }
+
   /// 判断 word 是否触发辉光。
   ///
   /// 触发条件（spec.md "Requirement: 强调辉光（emphasize）效果" + 内容过滤）：
-  /// - 字时长 [LyricWord.duration] >= 1000ms
+  /// - 字时长 [LyricWord.duration] >= [thresholdMs]（快慢歌阈值，见 [resolveThresholdMs]）
   /// - 文本非空
   /// - 【新增】非纯符号/标点（_ - \ 、 @ * . , … — 等）
   /// - 【新增】非歌手标签（男：/女：/(男)/合唱 等）
@@ -197,8 +332,8 @@ class EmphasizeEffect {
   /// 片假名 / CJK 标点 / 韩文 任一 Unicode 范围内，即视为 CJK 字符。
   ///
   /// 结果仅依赖 [LyricWord.text] 与 [LyricWord.duration]（行绑定后不变），可安全缓存。
-  static bool shouldEmphasize(LyricWord word) {
-    if (word.duration < _durationThresholdMs) return false;
+  static bool shouldEmphasize(LyricWord word, {int thresholdMs = _durationThresholdMs}) {
+    if (word.duration < thresholdMs) return false;
     final text = word.text;
     if (text.isEmpty) return false;
 
@@ -218,20 +353,46 @@ class EmphasizeEffect {
     return runes.isNotEmpty && runes.length <= _nonCjkMaxLength;
   }
 
-  /// 计算某时刻的辉光状态。
+  /// 动画时长 du = max(1000, duration)（duration 已由 shouldEmphasize 保证 >= 1000）。
+  static double duMs(LyricWord word) => max(1000.0, word.duration.toDouble());
+
+  /// 正弦浮层时长系数（AMLL：duration = du * 1.4）。
+  static const double floatDurationFactor = _floatDurationFactor;
+
+  /// 计算某时刻、某字符的波浪相位（用于自驱动动画的【锚定】）。
   ///
-  /// [word] 目标字（含 startTime / duration）。
-  /// [currentTimeMs] 当前播放时间（毫秒，绝对时间）。
-  /// [isLastWord] 是否末尾字（影响 amount/blur 加强系数）。
-  /// [wordIndex] 字索引（用于字符错位 delay 计算）。
-  /// [anchorCharCount] 该字字符数（用于 delay 分母）。
-  ///
-  /// 返回 [EmphasizeState]：scale / glowLevel / shadowBlurEm。
-  /// - 当 currentTimeMs 不在 [wordDe, wordDe + duration] 区间时返回 [EmphasizeState.idle]
-  /// - 字内进度 t < 0.5 用 bezIn 曲线渐入；t >= 0.5 用 bezOut 曲线渐出
-  EmphasizeState computeState({
+  /// 返回字符错位后的凸起进度与正弦浮层进度（可为负/超 1，表示窗口外）。
+  /// 自驱动波浪在字切换 / seek 时用本方法初始化一次相位，之后每帧由帧时钟 dt
+  /// 推进（见 WordRenderer.tick），保证动画平滑且与音频对齐。
+  static EmphasizePhases phasesAt({
     required LyricWord word,
     required int currentTimeMs,
+    required int wordIndex,
+    required int anchorCharCount,
+  }) {
+    final double du = duMs(word);
+    final double charDelay =
+        (du / _staggerSpreadDivisor / anchorCharCount) * wordIndex;
+    final double wordDe = word.startTime + charDelay;
+    return EmphasizePhases(
+      bumpPhase: (currentTimeMs - wordDe) / du,
+      floatPhase:
+          (currentTimeMs - (wordDe - _floatLeadMs)) / (du * _floatDurationFactor),
+    );
+  }
+
+  /// 由【已推进的相位】计算某字符的辉光状态（逐字符波浪，自驱动核心）。
+  ///
+  /// [bumpPhase] 凸起进度（0~1 窗口内激活，t<0.5 用 bezIn 渐入、t>=0.5 用 bezOut 渐出）。
+  /// [floatPhase] 正弦浮层进度（-sin(π·x)·0.05em，与凸起独立）。
+  /// 其余参数同 [computeState]。
+  ///
+  /// 返回 [EmphasizeState]：scale / glowLevel / shadowBlurEm / offsetXEm /
+  /// offsetYEm / floatYEm。凸起与浮层都不在窗口内时返回 [EmphasizeState.idle]。
+  EmphasizeState computeStateFromPhases({
+    required LyricWord word,
+    required double bumpPhase,
+    required double floatPhase,
     required bool isLastWord,
     required int wordIndex,
     required int anchorCharCount,
@@ -240,37 +401,38 @@ class EmphasizeEffect {
     if (word.duration <= 0) return EmphasizeState.idle;
     if (anchorCharCount <= 0) return EmphasizeState.idle;
 
-    // 字起始时间
-    final int de = word.startTime;
+    final bool bumpActive = bumpPhase >= 0 && bumpPhase <= 1;
+    final bool floatActive = floatPhase >= 0 && floatPhase <= 1;
+    // 凸起与浮层都不在窗口内：未激活或已结束
+    if (!bumpActive && !floatActive) return EmphasizeState.idle;
 
-    // 字内进度 t（未 clamp，超出 [0,1] 视为未激活）
-    // 与上浮动画同步：从 word.startTime 开始即触发辉光
-    final double t = (currentTimeMs - de) / word.duration;
-
-    // 超出 [0, 1] 范围：字未激活或已结束，返回 idle
-    if (t < 0 || t > 1) return EmphasizeState.idle;
-
-    // 计算 transX：前 1/4 用 bezIn 渐入，后 1/4 用 bezOut 渐出，中间 1/2 保持满强度
-    // 渐入段 t∈[0, 0.25] → bezIn(t*4)，t=0 时 0，t=0.25 时 1
-    // 满强度段 t∈[0.25, 0.75] → 1
-    // 渐出段 t∈[0.75, 1] → bezOut((1-t)*4)，t=0.75 时 1，t=1 时 0
+    // transX：前段用 bezIn 渐入（t=0.5 达峰 1），后段用 bezOut 渐出（t=1 归 0）
     final double transX;
-    if (t < 0.25) {
-      transX = cubicBezier(t * 4, _bezInP1, _bezInP2, 0.58, 1.0);
-    } else if (t > 0.75) {
-      transX = cubicBezier((1 - t) * 4, _bezOutP1, _bezOutP2, 0.58, 1.0);
+    if (bumpActive) {
+      if (bumpPhase < 0.5) {
+        transX = cubicBezier(bumpPhase * 2, _bezInP1, _bezInP2, 0.58, 1.0);
+      } else {
+        transX =
+            1 - cubicBezier((bumpPhase - 0.5) * 2, _bezOutP1, _bezOutP2, 0.58, 1.0);
+      }
     } else {
-      transX = 1.0;
+      transX = 0;
     }
 
-    // amount 计算（spec.md 公式）
-    // amount = (duration / 2000)，>1 时取 sqrt，<=1 时取立方，再 *0.6，封顶 1.2
-    double amount = word.duration / 2000;
-    if (amount > 1) {
-      amount = sqrt(amount);
-    } else {
-      amount = amount * amount * amount; // ^3
-    }
+    // 正弦浮层高度（em，向上为负）：floatPhase=0.5 时达最大抬起。
+    // **边缘渐隐**：浮层只在凸起窗口内可见，且起始/结束各 _edgeFadeWidth 相位内
+    // 从 0 平滑过渡——消除字切换瞬间浮层跳变上移、与字尾浮层尾巴被截断的回落突兀
+    //（歌词较快、字切换频繁时更明显）。凸起窗口外（含浮层尾巴）直接置 0。
+    final double floatYEm = floatActive
+        ? -sin(pi * floatPhase) * _floatAmpEm * _floatEdgeFade(bumpActive, bumpPhase)
+        : 0;
+
+    // amount 计算（spec.md 公式，快歌优化）
+    // amount = sqrt(duration / 2000)，再 *0.6，封顶 1.2
+    // 原公式短字（≤1）取立方会把 1000ms 字压到 0.075，快歌辉光几乎不可见；
+    // 统一取 sqrt：短字（快歌）强度显著提升（500ms→0.3、1000ms→0.42），
+    // 长字（>2000ms 慢歌）保持原样（原本就 sqrt），不影响慢歌观感。
+    double amount = sqrt(word.duration / 2000);
     amount *= _amountScale;
     if (amount > _amountCap) amount = _amountCap;
 
@@ -287,18 +449,53 @@ class EmphasizeEffect {
       blur *= _lastWordBlurBoost;
     }
 
-    // 最终输出三参数
+    // 最终输出六参数
     // scale = 1 + transX * 0.1 * amount
     // glowLevel = transX * amount（作为 textShadow 的 alpha 通道）
     // shadowBlurEm = min(0.3, blur * 0.3)
+    // offsetXEm = -transX * 0.03 * amount * (n/2 - i)（左字向左、右字向右外扩）
+    // offsetYEm = -transX * 0.025 * amount（上浮）
     final double scale = 1 + transX * _scaleTransFactor * amount;
     final double glowLevel = transX * amount;
     final double shadowBlurEm = min(_shadowBlurEmCap, blur * 0.3);
+    final double offsetXEm =
+        -transX * _offsetXFactor * amount * (anchorCharCount / 2 - wordIndex);
+    final double offsetYEm = -transX * _offsetYFactor * amount;
 
     return EmphasizeState(
       scale: scale,
       glowLevel: glowLevel,
       shadowBlurEm: shadowBlurEm,
+      offsetXEm: offsetXEm,
+      offsetYEm: offsetYEm,
+      floatYEm: floatYEm,
+    );
+  }
+
+  /// 计算某时刻、某字符的辉光状态（绝对时间版）。
+  ///
+  /// 内部委托 [phasesAt] + [computeStateFromPhases]，行为与自驱动完全一致。
+  /// 保留供测试断言；渲染层已改用自驱动相位（见 WordRenderer.tick）。
+  EmphasizeState computeState({
+    required LyricWord word,
+    required int currentTimeMs,
+    required bool isLastWord,
+    required int wordIndex,
+    required int anchorCharCount,
+  }) {
+    final EmphasizePhases phases = phasesAt(
+      word: word,
+      currentTimeMs: currentTimeMs,
+      wordIndex: wordIndex,
+      anchorCharCount: anchorCharCount,
+    );
+    return computeStateFromPhases(
+      word: word,
+      bumpPhase: phases.bumpPhase,
+      floatPhase: phases.floatPhase,
+      isLastWord: isLastWord,
+      wordIndex: wordIndex,
+      anchorCharCount: anchorCharCount,
     );
   }
 

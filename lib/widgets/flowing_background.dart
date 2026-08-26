@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
-import 'package:palette_generator/palette_generator.dart';
+
+import '../core/utils/artwork_color_extractor.dart';
 
 /// 动态流光背景效果。
 ///
@@ -42,7 +42,14 @@ class _FlowingBackgroundState extends State<FlowingBackground>
   // 24fps 是电影工业标准帧率，对人眼缓慢色彩流动足够流畅；
   // 相比 60fps 减少 60% 帧数，CPU/GPU 工作量同步下降。
   static const double _frameInterval = 1 / 24;
-  List<Color> _colors = const [Colors.deepPurple, Colors.indigo, Colors.teal];
+  // 默认流光 3 色：中性蓝灰渐变（slate）。
+  // 原默认 deepPurple/indigo/teal 在黑白/低饱和封面兜底时呈现刺眼紫色，
+  // 改为主流灰蓝系，低调不抢眼，与黑白封面和谐。
+  List<Color> _colors = const [
+    Color(0xFF4A5568),
+    Color(0xFF5A6478),
+    Color(0xFF2F3A50),
+  ];
   String? _lastArtworkUrl;
   // dispose 标志：用于取消 _extractColors 异步任务，
   // 避免 setState 在 widget 销毁后被调用
@@ -178,16 +185,15 @@ class _FlowingBackgroundState extends State<FlowingBackground>
     }
 
     try {
-      // 用 CachedNetworkImageProvider 而非 NetworkImage：
-      // UI 封面走 CachedNetworkImage 的磁盘缓存，两者共用 cacheManager，
-      // 提取可命中 UI 已下载的封面，避免流光开启时每次进播放器 /
-      // 切歌都重新网络下载封面（与 UI 封面下载并发导致卡顿）。
-      final palette = await PaletteGenerator.fromImageProvider(
-        CachedNetworkImageProvider(url),
-        maximumColorCount: 12,
-      );
+      // 统一走 ArtworkColorExtractor.loadPalette：兼容 http(s) 网络封面与
+      // local:// / content:// / file:// 本地封面。此前只有网络分支，本地音乐
+      // （content:// / local://）与云盘歌曲（内嵌封面回填 file://）取色全部
+      // 失败，永远停留在默认靛蓝+青绿兜底色，导致流光画面发青发蓝。
+      // 网络封面经 CachedNetworkImageProvider 与 UI 封面共用磁盘缓存，
+      // 避免流光开启时每次进播放器都重新下载封面。
+      final palette = await ArtworkColorExtractor.loadPalette(url);
       // 双重检查：mounted（widget 还在树中）+ _disposed（State 未销毁）
-      if (!mounted || _disposed) return;
+      if (palette == null || !mounted || _disposed) return;
 
       // 有效候选色：palette.colors 按像素占比降序排列，
       // 过滤掉近黑、近白、低饱和的灰色，避免稀释色彩层次
@@ -202,7 +208,8 @@ class _FlowingBackgroundState extends State<FlowingBackground>
       // 其余尽量与已选色相拉开距离，保证冷暖对比、避免整体偏蓝绿
       final picked = _pickDiverseColors(candidates);
       if (picked.isEmpty) {
-        picked.add(Colors.deepPurple); // 极端情况兜底（封面近黑/近白）
+        // 黑白/低饱和封面兜底：用中性蓝灰（slate），不再用刺眼的紫色。
+        picked.add(const Color(0xFF4A5568));
       }
 
       // 候选不足 3 个时由主色派生补足（同色相、逐级压暗），不再回退固定色
@@ -216,10 +223,11 @@ class _FlowingBackgroundState extends State<FlowingBackground>
       // 与三层径向渐变的绘制角色（主色/强调/深色）一一对应
       picked.sort((a, b) =>
           HSLColor.fromColor(b).lightness.compareTo(HSLColor.fromColor(a).lightness));
-      // 饱和度温和归一化：低饱和封面避免灰扑扑，过高则收敛避免刺眼
+      // 饱和度温和归一化：低饱和封面保持灰调（不强制提饱和，避免黑白封面
+      // 被拉到高饱和而变成刺眼的紫/怪色），过高则收敛避免刺眼。
       final normalized = picked
           .map((c) => HSLColor.fromColor(c)
-              .withSaturation(HSLColor.fromColor(c).saturation.clamp(0.55, 0.9).toDouble())
+              .withSaturation(HSLColor.fromColor(c).saturation.clamp(0.25, 0.85).toDouble())
               .toColor())
           .toList();
       // 缓存成功结果，供播放器往返时复用

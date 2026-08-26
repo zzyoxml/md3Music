@@ -8,6 +8,7 @@ import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/smart_artwork_image.dart';
 import 'audiobook_album_detail_page.dart';
+import 'audiobook_search_page.dart';
 
 /// 听书 Tab 主页：聚合 每日推荐 / 排行榜推荐 / 每周推荐 / VIP 推荐 四个分区。
 class AudiobookPage extends StatefulWidget {
@@ -83,6 +84,19 @@ class _AudiobookPageState extends State<AudiobookPage> {
         // 有壁纸时顶栏完全透明（与发现页一致），无壁纸时恒不透明 surface
         opaque: true,
         scrollController: _scrollController,
+        actions: [
+          IconButton(
+            tooltip: '搜索听书',
+            icon: const Icon(Icons.search),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const AudiobookSearchPage(),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: M3ELoadingIndicator())

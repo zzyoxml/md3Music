@@ -20,6 +20,12 @@ class Song {
   final double? climaxStart;
   /// 高潮部分结束时间（秒），由酷狗 /song/climax 接口返回。
   final double? climaxEnd;
+  /// 歌曲 BPM（节拍/分钟），可空。
+  ///
+  /// 用于歌词辉光等按快慢歌区分效果的触发判定：
+  /// 酷狗公开接口暂不返回该字段，当前主要由本地音频标签（如 MP3 TBPM）
+  /// 或未来接口填充；缺失时上层回落 KRC 歌词字长统计推断快慢。
+  final int? bpm;
   /// 本地收藏标志位（区别于云端"我喜欢"）。
   /// true 表示用户在本机收藏过；旧 JSON 缺省时默认为 false，向后兼容。
   final bool isLocallyFavorited;
@@ -42,6 +48,7 @@ class Song {
     this.isCloud = false,
     this.climaxStart,
     this.climaxEnd,
+    this.bpm,
     this.isLocallyFavorited = false,
   });
 
@@ -81,6 +88,7 @@ class Song {
       isCloud: (json['isCloud'] as bool?) ?? false,
       climaxStart: (json['climaxStart'] as num?)?.toDouble(),
       climaxEnd: (json['climaxEnd'] as num?)?.toDouble(),
+      bpm: (json['bpm'] as num?)?.toInt(),
       isLocallyFavorited: (json['isLocallyFavorited'] as bool?) ?? false,
     );
   }
@@ -104,6 +112,7 @@ class Song {
       'isCloud': isCloud,
       'climaxStart': climaxStart,
       'climaxEnd': climaxEnd,
+      'bpm': bpm,
       'isLocallyFavorited': isLocallyFavorited,
     };
   }
@@ -126,6 +135,7 @@ class Song {
     bool? isCloud,
     double? climaxStart,
     double? climaxEnd,
+    int? bpm,
     bool? isLocallyFavorited,
   }) {
     return Song(
@@ -146,6 +156,7 @@ class Song {
       isCloud: isCloud ?? this.isCloud,
       climaxStart: climaxStart ?? this.climaxStart,
       climaxEnd: climaxEnd ?? this.climaxEnd,
+      bpm: bpm ?? this.bpm,
       isLocallyFavorited: isLocallyFavorited ?? this.isLocallyFavorited,
     );
   }
