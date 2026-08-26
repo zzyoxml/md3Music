@@ -69,8 +69,22 @@ $RustDir   = Join-Path $RepoRoot 'kugou_api_server\rust'
 $JniDir    = Join-Path $RepoRoot 'android\app\src\main\jniLibs'
 $Toolchain = 'stable-x86_64-pc-windows-gnu'               # msvc 缺 link.exe，用 GNU toolchain 交叉编译
 # host 侧 C 编译器（编译 build-script 用，如 ring 的 cc-rs）
-$HostGcc = 'C:\Program Files (x86)\Dev-Cpp\MinGW64\bin\gcc.exe'
-$HostAr  = 'C:\Program Files (x86)\Dev-Cpp\MinGW64\bin\ar.exe'
+# 允许用环境变量覆盖；否则在常见 Dev-Cpp 安装位自动探测（文档路径优先，实际机器可能在别处）
+$HostDir = $null
+if ($env:MD3_DEVCPP_BIN -and (Test-Path (Join-Path $env:MD3_DEVCPP_BIN 'gcc.exe'))) {
+    $HostDir = $env:MD3_DEVCPP_BIN
+} else {
+    foreach ($p in @(
+        'C:\Program Files (x86)\Dev-Cpp\MinGW64\bin',
+        'E:\Dev-Cpp\MinGW64\bin',
+        'C:\Program Files\Dev-Cpp\MinGW64\bin',
+        'C:\Dev-Cpp\MinGW64\bin'
+    )) {
+        if (Test-Path (Join-Path $p 'gcc.exe')) { $HostDir = $p; break }
+    }
+}
+$HostGcc = Join-Path $HostDir 'gcc.exe'
+$HostAr  = Join-Path $HostDir 'ar.exe'
 
 # target -> @{abi; clang 前缀; 链接时 --target（带 API 级别，否则 clang 找不到 crt 文件）}
 $ABIs = @(
