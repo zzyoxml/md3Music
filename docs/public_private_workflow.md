@@ -360,9 +360,9 @@ void installUiHooks() {
 | 新增**顶层文件**（如 `SECURITY.md`、`CONTRIBUTING.md`） | ✅ **要加** | 同上 |
 | 改动现有白名单项**内部**的文件（如 `android/`、`assets/`、`scripts/` 里的文件） | ❌ 不用 | 整目录拷贝，内部文件自动带上 |
 
-> ⚠️ **`scripts/` 目录例外**：`tasks/export_public.ps1`、`tasks/verify_public.ps1`、`tasks/commit.ps1`、`tasks/token.ps1`、`public_deny.txt` 五个**私有侧工具链文件**导出时会被步骤 4 明确删除，**不进公开仓库**（避免导出脚本自复制、否认清单外泄）。`md3.ps1` 总入口、`lib/common.ps1` / `lib/ui.ps1` 与 `tasks/android.ps1` / `tasks/windows.ps1` 保留在公开树（构建复用；被剥离的子命令在公开树里会提示"该任务属私有侧工具"）。新增导出相关脚本时，同样应加入该排除清单。
+> ⚠️ **`scripts/` 目录例外**：不作为整目录进白名单，导出时**只带出 `tasks/android.ps1` 与 `tasks/windows.ps1` 两个构建脚本**（脚本内已带「lib/common.ps1 缺失时自包含兜底」，可脱离公共库独立运行）。`md3.ps1` 入口、`lib/`（common/ui/llm）、`tools/`、`public_deny.txt` 及 `tasks/` 下其余任务脚本（export/verify/commit/changelog/token）都是**私有侧工具链，一律不进公开仓库**（避免导出脚本自复制、否认清单与 API key 外泄）。`scripts/` 目录内白名单之外的文件在导出时会按允许清单防御式清理。新增导出相关脚本时，同样保持「只允许列表白名单制」。
 >
-> ⚠️ **其他私有功能排除**：`windows/` 目录（私有版 Windows 桌面功能，公开版 Android-only）不在白名单；pubspec 的 `just_audio_windows`/`video_player_win` 依赖与 README 的「边边存」条目、`.github/workflows/build-windows.yml` 在导出时被剥离/删除；`CHANGELOG.md` 不在白名单（私有版 CHANGELOG 含私有功能记录且版本滞后，公开仓库自行维护自己的 CHANGELOG）。**新增私有功能时，同步检查这三处：依赖剥离、文档宣传清理、CI 排除。**
+> ⚠️ **其他私有功能排除**：`windows/` 目录（私有版 Windows 桌面功能，公开版 Android-only）不在白名单；pubspec 的 `just_audio_windows`/`video_player_win` 依赖与 README 的「边边存」条目、`.github/workflows/build-windows.yml` 在导出时被剥离/删除；`.trae/`（AI 计划/工作产物）白名单外且导出时防御性删除，**绝不导出**。`CHANGELOG.md` **在白名单内**（由 `md3.ps1 changelog` / `export -Changelog` 维护：总结提交记录、LLM 生成需确认后写入，随导出携带）。**新增私有功能时，同步检查这三处：依赖剥离、文档宣传清理、CI 排除；新增 plan/分析文档放 `.trae/` 或 `tmp/`，绝不进公开树。**
 
 **判断标准（一句话）**：这个文件/目录**该不该出现在公开仓库？**
 - 该 → 加进 `$whitelist`

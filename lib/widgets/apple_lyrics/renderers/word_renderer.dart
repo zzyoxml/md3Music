@@ -650,7 +650,12 @@ class WordRenderer {
       {double maxWidth = double.infinity,
       DuetAlignment alignment = DuetAlignment.defaultAlign,
       double viewportWidth = 0}) {
+    // 临时调试：行切换时打印换行分析（定位歌词重叠）
+    final bool isNewLine = !identical(_boundLine, line) || _boundFontSize != fontSize;
     _ensureBound(line, fontSize);
+    if (isNewLine) {
+      _debugLogWrap(line, fontSize, maxWidth);
+    }
 
     // 解析当前行实际文字颜色：动态字体颜色（仅当前行）优先，否则回退主题默认色。
     // 颜色变化时清空 alpha 缓存强制重建所有 word TextSpan。
@@ -699,9 +704,12 @@ class WordRenderer {
     double currentY = offset.dy; // 当前视觉行的 y 坐标
     final double dark = dynamicDarkAlpha;
     final double bright = dynamicBrightAlpha;
+    // 主行行高 = 主行高（完整行盒）；换行行盒模型与 measureLineHeight 一致：
+    // 主行完整行高，换行行 0.8x 行高、从主行底开始，行盒=行距避免相邻行重叠。
+    final double mainLineHeight = fontSize * LyricLayout.lineHeight;
     // 换行内部行高 = 主行高 × 0.8（与 LyricLayout.measureLineHeight 一致）
     final double wrapLineHeight =
-        fontSize * LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor;
+        mainLineHeight * LyricLayout.wrapLineHeightFactor;
     final double lineHeight = LyricLayout.lineHeight;
 
     // === 行级渐变参数（核心：行级 maskX 模型）===
@@ -731,7 +739,11 @@ class WordRenderer {
       // 自动换行：累计宽度超过 maxWidth 且本视觉行已有 word 时换行
       if (dx + width > maxWidth && dx > 0) {
         dx = 0;
-        currentY += wrapLineHeight;
+        // 第一个换行行从主行底部（offset.dy + mainLineHeight）开始，
+        // 后续换行行之间 0.8x 行高（与 measureLineHeight 一致，避免行盒重叠）
+        currentY = visualLineIndex == 0
+            ? offset.dy + mainLineHeight
+            : currentY + wrapLineHeight;
         // 换行后重算对齐 baseX
         visualLineIndex++;
         if (visualLineIndex < visualLineWidths.length) {
@@ -739,6 +751,11 @@ class WordRenderer {
               visualLineWidths[visualLineIndex], viewportWidth);
         }
       }
+
+      // 换行行用 0.8x 行盒（行盒=行距，避免行盒重叠）；主行用完整行高
+      final double rowHeight = visualLineIndex > 0
+          ? LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor
+          : LyricLayout.lineHeight;
 
       final double wordX = baseX + dx;
       final double wordY = currentY + yOffset;
@@ -813,7 +830,7 @@ class WordRenderer {
               style: TextStyle(
                 color: Color.fromRGBO(textRed, textGreen, textBlue, uniformAlpha),
                 fontSize: fontSize,
-                height: lineHeight,
+                height: rowHeight,
                 fontFamily: LyricLayout.fontFamily,
                 fontWeight: LyricLayout.fontWeight,
               ),
@@ -831,7 +848,7 @@ class WordRenderer {
               style: TextStyle(
                 color: const Color.fromRGBO(255, 255, 255, 1.0), // plain white
                 fontSize: fontSize,
-                height: lineHeight,
+                height: rowHeight,
                 fontFamily: LyricLayout.fontFamily,
                 fontWeight: LyricLayout.fontWeight,
               ),
@@ -839,7 +856,7 @@ class WordRenderer {
             painter.layout();
             _lastSetAlphas[i] = -1; // 标记 plain white 已缓存
           }
-          final Rect wordRect = Rect.fromLTWH(wordX, wordY, width, fontSize * lineHeight);
+          final Rect wordRect = Rect.fromLTWH(wordX, wordY, width, fontSize * rowHeight);
           canvas.saveLayer(wordRect, Paint());
           painter.paint(canvas, Offset(wordX, wordY)); // dst = 白色文字（layout 已缓存，不重算）
           // 复用 _gradientPaint 实例，只改 shader 和 blendMode。
@@ -870,9 +887,16 @@ class WordRenderer {
         auxText != null &&
         auxText.isNotEmpty) {
       final transFontSize = LyricLayout.translationFontSize(fontSize);
-      // currentY 是循环结束后的最后视觉行 Y；副行 Y = currentY + 主行高 + 0.3em 间隙
-      final transY =
-          currentY + fontSize * LyricLayout.lineHeight + transFontSize * 0.3;
+      // currentY 是循环结束后的最后视觉行 Y。
+      // 副行 Y = 最后视觉行底部 + 0.3em 间隙：单行用完整行高，
+      // 多行时最后一行是换行行（0.8x 行高），与 measureLineHeight 压缩模型一致，
+      // 避免翻译副行向下偏移与下一行歌词重叠。
+      final double lastRowHeight = visualLineIndex > 0
+          ? fontSize *
+              LyricLayout.lineHeight *
+              LyricLayout.wrapLineHeightFactor
+          : fontSize * LyricLayout.lineHeight;
+      final transY = currentY + lastRowHeight + transFontSize * 0.3;
       _translationPainter.text = TextSpan(
         text: auxText,
         style: TextStyle(
@@ -1354,6 +1378,48 @@ class WordRenderer {
     } catch (_) {
       return null;
     }
+  }
+
+  /// 临时调试：打印行换行分析（word 累加 vs TextPainter 行数），定位歌词重叠。
+  void _debugLogWrap(LyricLine line, double fontSize, double maxWidth) {
+    final StringBuffer sb = StringBuffer();
+    sb.write('[LyricWrap] WR hasWord=${line.hasWordTiming} '
+        'text="${line.text}" maxW=${maxWidth.toStringAsFixed(1)} fs=$fontSize');
+    if (line.hasWordTiming) {
+      // word 累加行数（与 paintLine / measureLineHeight 一致）
+      double dx = 0;
+      int rows = 1;
+      for (int i = 0; i < _wordWidths.length; i++) {
+        if (dx + _wordWidths[i] > maxWidth && dx > 0) {
+          dx = 0;
+          rows++;
+        }
+        dx += _wordWidths[i];
+      }
+      sb.write(' wordRows=$rows');
+      // TextPainter 整行自动换行行数
+      final TextPainter tp = TextPainter(
+        text: TextSpan(
+          text: line.text,
+          style: TextStyle(
+            fontSize: fontSize,
+            height: LyricLayout.lineHeight,
+            fontFamily: LyricLayout.fontFamily,
+            fontWeight: LyricLayout.fontWeight,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: maxWidth);
+      sb.write(' tpRows=${tp.computeLineMetrics().length}');
+      tp.dispose();
+      sb.write(' words[');
+      for (int i = 0; i < line.words.length; i++) {
+        sb.write('"${line.words[i].text}"(${_wordWidths[i].toStringAsFixed(1)}) ');
+      }
+      sb.write(']');
+    }
+    // ignore: avoid_print
+    print(sb.toString());
   }
 
   /// 检测 line 切换并重置 alpha map，同时测量并缓存所有 word 宽度。

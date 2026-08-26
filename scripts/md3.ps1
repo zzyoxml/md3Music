@@ -17,6 +17,7 @@
   .\scripts\md3.ps1 windows              # Rust dll + Flutter Windows + 便携 zip
   .\scripts\md3.ps1 verify               # 否认清单闸门（只读自检）
   .\scripts\md3.ps1 export -PublicRemote <URL>
+  .\scripts\md3.ps1 changelog -Version v5.4.0        # 总结提交并更新 CHANGELOG.md
   .\scripts\md3.ps1 commit               # TUI 一键提交（勾选改动 / LLM 写提交信息 / 同步 / PR）
 #>
 # 刻意不声明 param()：PowerShell 会对已声明参数做严格绑定，未知的命名参数（-ForceRust /
@@ -34,7 +35,8 @@ $Tasks = [ordered]@{
     'android' = @{ File = 'android.ps1';       Desc = 'Rust 交叉编译（按需）+ Flutter APK 分包打包'; Alias = @('apk') }
     'windows' = @{ File = 'windows.ps1';       Desc = 'Rust dll + Flutter Windows + 便携版 zip';     Alias = @('win') }
     'verify'  = @{ File = 'verify_public.ps1'; Desc = '否认清单闸门：自检当前仓库公开面是否干净';   Alias = @('check') }
-    'export'  = @{ File = 'export_public.ps1'; Desc = '导出公开版本（可选推送 / 开 PR）';           Alias = @('public') }
+    'export'  = @{ File = 'export_public.ps1'; Desc = '导出公开版本（可选推送 / 开 PR / 更新 CHANGELOG）'; Alias = @('public') }
+    'changelog' = @{ File = 'changelog.ps1'; Desc = '总结提交并更新 CHANGELOG.md（指定版本号与起始哈希）'; Alias = @('cl') }
     'commit'  = @{ File = 'commit.ps1';        Desc = 'TUI 一键提交：勾选改动 / LLM 提交信息 / 同步 / 开 PR'; Alias = @('ci') }
     'token'   = @{ File = 'token.ps1';         Desc = '管理 GitHub token（开 PR / 自动合并用）';      Alias = @('auth') }
 }
@@ -63,7 +65,17 @@ function Get-TaskOptions([string]$Key) {
             (New-TaskOption -Name '-PublicBranch' -Kind value -Desc '目标分支 / PR base（默认 main）'),
             (New-TaskOption -Name '-PrBranch'     -Kind value -Desc '-AsPr 的分支名（默认按时间戳生成）'),
             (New-TaskOption -Name '-OutDir'       -Kind value -Desc '导出目录（默认 .public_export）'),
+            (New-TaskOption -Name '-Changelog'    -Desc '导出前先更新 CHANGELOG.md（需确认）'),
+            (New-TaskOption -Name '-ChangelogVersion' -Kind value -Desc '配合 -Changelog 的新版本号'),
+            (New-TaskOption -Name '-ChangelogSince'   -Kind value -Desc '配合 -Changelog 的起始提交哈希'),
+            (New-TaskOption -Name '-ChangelogYes' -Desc '配合 -Changelog 自动确认生成结果'),
             (New-TaskOption -Name '-NoPause'      -Desc '结束后不等待按键')
+        ) }
+        'changelog' { @(
+            (New-TaskOption -Name '-Version'   -Kind value -Desc '新版本号（如 v5.4.0；不填则提示输入）'),
+            (New-TaskOption -Name '-SinceHash' -Kind value -Desc '起始提交哈希（不填则用上次记录）'),
+            (New-TaskOption -Name '-Yes'       -Desc '跳过确认，自动写入首次生成结果'),
+            (New-TaskOption -Name '-NoPause'   -Desc '结束后不等待按键')
         ) }
         'commit' { @(
             (New-TaskOption -Name '-Message'      -Kind value -Desc '提交信息（不填=用候选信息确认环节）'),

@@ -692,6 +692,83 @@ function Invoke-GitHubPrMerge {
     [pscustomobject]@{ Number = $num; Url = "$($pr.html_url)"; Merged = $false; Message = $why }
 }
 
+<#
+  用 gh CLI 开 PR 并直接合并（gh 已登录时无需 PAT）。触发顺序：建 PR（存在则复用）→
+  等 GitHub 算出 mergeable → gh pr merge。返回约定与 Invoke-GitHubPrMerge 对齐：
+    $null → gh 不可用（未安装 / 未登录 / 解析不出 slug），调用方应回退 REST 实现
+    Merged=$true  → 合并成功（Number/Url/Message=合并提交 sha）
+    Merged=$false → gh 已尝试但未成功（Message 为原因），调用方回退 REST 实现
+#>
+function Invoke-GhPrMerge {
+    param(
+        [Parameter(Mandatory)][string]$RemoteUrl,
+        [Parameter(Mandatory)][string]$Base,
+        [Parameter(Mandatory)][string]$Head,
+        [string]$Title = '',
+        [string]$Body = '',
+        [string]$RepoDir
+    )
+    if (-not (Test-HasCommand gh)) { return $null }
+    # gh 未登录时没有意义，直接交给 REST 路径（无需联网检查，auth status 走本地）
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & gh auth status 2>&1 | Out-Null
+    $authed = ($LASTEXITCODE -eq 0)
+    $ErrorActionPreference = $prevEap
+    if (-not $authed) { return $null }
+    $slug = ConvertTo-GitHubSlug $RemoteUrl
+    if (-not $slug) { return $null }
+
+    $prevEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        # 1) 复用已存在的同 head open PR，避免重复创建
+        $num = ''
+        $list = @(& gh pr list --repo $slug --head $Head --state open --json number --jq '.[].number' 2>&1)
+        if ($LASTEXITCODE -eq 0 -and $list) { $num = ($list[-1]).Trim() }
+        # 2) 没有就创建
+        if (-not $num) {
+            $createArgs = @('pr', 'create', '--repo', $slug, '--base', $Base, '--head', $Head)
+            if ($Title) { $createArgs += @('--title', $Title) } else { $createArgs += @('--title', "$Head -> $Base") }
+            if ($Body)  { $createArgs += @('--body', $Body) }
+            if ($RepoDir) { Push-Location $RepoDir }
+            try { $out = @(& gh @createArgs 2>&1); $createCode = $LASTEXITCODE }
+            finally { if ($RepoDir) { Pop-Location } }
+            if ($createCode -ne 0) {
+                return [pscustomobject]@{ Number = 0; Url = ''; Merged = $false; Message = "gh pr create 失败：$($out -join ' ')" }
+            }
+            $m = [regex]::Match(($out -join ' '), 'pull/(\d+)')
+            if ($m.Success) { $num = $m.Groups[1].Value }
+        }
+        if (-not $num) {
+            return [pscustomobject]@{ Number = 0; Url = ''; Merged = $false; Message = 'gh 未能确定 PR 编号' }
+        }
+        $prUrl = "https://github.com/$slug/pull/$num"
+        # 3) 等 GitHub 算出可合并性（刚建出来的 PR mergeable 是 null / UNKNOWN）
+        for ($i = 1; $i -le 6; $i++) {
+            $mv = @(& gh pr view $num --repo $slug --json mergeable --jq '.mergeable' 2>&1)
+            if ($LASTEXITCODE -eq 0 -and $mv) {
+                $v = ($mv[-1]).Trim()
+                if ($v -eq 'MERGEABLE') { break }
+                if ($v -eq 'CONFLICTING') {
+                    return [pscustomobject]@{ Number = $num; Url = $prUrl; Merged = $false; Message = '存在冲突（mergeable=CONFLICTING），无法自动合并' }
+                }
+            }
+            if ($i -lt 6) { Start-Sleep -Seconds 2 }
+        }
+        # 4) 合并（merge commit，与 REST 实现口径一致）
+        $mOut = @(& gh pr merge $num --repo $slug --merge 2>&1)
+        $mergeCode = $LASTEXITCODE
+        if ($mergeCode -eq 0) {
+            $mc = @(& gh pr view $num --repo $slug --json mergeCommit --jq '.mergeCommit.oid' 2>&1)
+            $sha = if ($LASTEXITCODE -eq 0 -and $mc) { ($mc[-1]).Trim() } else { '' }
+            return [pscustomobject]@{ Number = $num; Url = $prUrl; Merged = $true; Message = $sha }
+        }
+        return [pscustomobject]@{ Number = $num; Url = $prUrl; Merged = $false; Message = "gh pr merge 失败：$($mOut -join ' ')" }
+    }
+    finally { $ErrorActionPreference = $prevEap }
+}
+
 # ---------- 任务参数解析 ----------
 <#
   把命令行风格的参数数组（'-Switch'、'-Name','值'、'-Name:值'、裸位置值）解析成

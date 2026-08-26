@@ -648,9 +648,9 @@ flutter analyze                           # Dart 静态分析
 | 改动涉及下载/缓存/新增私有符号 | 提交前跑 `scripts/md3.ps1 verify`（必须零命中） | §4.4 步骤 1 |
 | 要**发布公开版本** | `md3.ps1 export`（自动：白名单拷贝→排除私有→剥离依赖→README 清理→闸门→可选推送）；导出后抽查导出树 analyze + 构建 | §4.4 |
 | **公开仓库**有新功能要带回私有库 | 拉取 → 挑 commit → `cherry-pick` → 冲突时保留私有依赖块 → 验证 | §4.3 |
-| 新增**顶层目录/文件**（如 docs/、新脚本） | 判断该不该公开 → 需要则加进导出白名单 `$whitelist`；**导出工具链（tasks/export_public、tasks/verify_public、tasks/commit、public_deny）与 CHANGELOG 永不导出** | §4.6 |
+| 新增**顶层目录/文件**（如 docs/、新脚本） | 判断该不该公开 → 需要则加进导出白名单 `$whitelist`；**导出工具链（tasks/export_public、tasks/verify_public、tasks/commit、tasks/changelog、tasks/token、public_deny 等）与 `.trae/` 永不导出** | §4.6 |
 | 新功能涉及 **Windows 桌面** 或 **README 功能宣传** | Windows 依赖需在导出脚本剥离、README 私有功能条目需清理、build-windows.yml 需排除（导出自动处理，但新增时确认覆盖） | §4.6 + 本文档 §8.1 |
 
 ### 9.4 导出脚本职责（改脚本前先看这）
 
-`scripts/md3.ps1 export` 一次完成：白名单拷贝（当前 15 项顶层）→ 排除 `lib/private/`、`pubspec.lock`、导出工具链 3 件、`build-windows.yml` → 剥离 pubspec 私有依赖（`md3_download_cache` 块 + `just_audio_windows`/`video_player_win`）→ README 删除「边听边存」条目 → deny 闸门（40 条）→ 可选 force push。**导出树应有且仅有：公开功能 + Android 平台**（无 `windows/`、无 CHANGELOG——公开仓库自行维护）。
+`scripts/md3.ps1 export` 一次完成：白名单拷贝（当前 16 项顶层，含 `CHANGELOG.md`）→ 排除 `lib/private/`、`pubspec.lock`、`.trae/`、`build-windows.yml` → `scripts/` 仅带出 android/windows 两个构建脚本（自带公共库缺失兜底，可独立运行）→ 剥离 pubspec 私有依赖（`md3_download_cache` 块 + `just_audio_windows`/`video_player_win`）→ README 删除「边听边存」条目 → 可选更新 CHANGELOG（`-Changelog`，LLM 总结需确认后写入）→ deny 闸门（40 条）→ 可选 force push。**导出树应有且仅有：公开功能 + Android 平台**（无 `windows/`；`scripts/` 仅两脚本；`CHANGELOG.md` 随导出携带；`.trae/` 与其余私有工具链绝不导出）。

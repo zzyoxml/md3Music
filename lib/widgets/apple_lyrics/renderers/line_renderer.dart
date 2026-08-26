@@ -64,6 +64,29 @@ class LineRenderer {
   final TextPainter _translationPainter =
       TextPainter(textDirection: TextDirection.ltr);
 
+  /// 最近一次多行绘制时的视觉行数（0 表示上次为单行/未多行）。
+  ///
+  /// 翻译副行定位需要"压缩后的主文本高度"（与 measureLineHeight 一致：
+  /// `mainLineHeight + (rowCount-1)*mainLineHeight*0.8`），而 TextPainter 整行
+  /// 高度是完整行高（每行 ≈ mainLineHeight），两者不一致会导致多行歌词的
+  /// 翻译副行向下偏移而与下一行歌词重叠——因此用该行数反推压缩高度。
+  int _lastMultiLineRowCount = 0;
+
+  /// KRC 行 word 宽度缓存（与 WordRenderer._wordWidths 同口径：同 TextStyle 单字 layout）。
+  ///
+  /// **换行一致性**：measureLineHeight 与 WordRenderer（当前行）都用"word 累加"
+  /// 判定换行（`dx + width > maxWidth && dx > 0`），而 LineRenderer（非当前 KRC 行）
+  /// 若用 TextPainter 整行自动换行，两者在含英文/空格/禁则时行数可能不同
+  /// （探针实测英文句差 1 行），导致非当前行高度与 _lineHeights 不匹配而重叠。
+  /// 因此 LineRenderer 对 KRC 行也用同一套 word 累加分块。
+  List<double> _wordWidths = const <double>[];
+
+  /// word 宽度缓存绑定的行（变化即重算）。
+  LyricLine? _wordWidthsLine;
+
+  /// word 宽度缓存绑定的字号（变化即重算）。
+  double _wordWidthsFontSize = -1;
+
   /// v4 优化：上次 set text + layout 时的 alpha。
   /// 仅在 alpha 变化 > 0.001 时才 set text + layout，避免每帧 N 次 layout。
   /// LineRenderer 每行独立实例（`Map<int, LineRenderer>`），无 v3 共享 painter bug 风险。
@@ -242,6 +265,10 @@ class LineRenderer {
     // _painter 缓存旧文本（带「男：」前缀）导致 alignment 计算用错误宽度
     final bool colorChanged = textColorValue != _lastTextColorValue;
     final bool lineChanged = !identical(_boundLine, line);
+    // 临时调试：行切换时打印换行分析（定位歌词重叠）
+    if (lineChanged) {
+      _debugLogWrap(line, fontSize, maxWidth);
+    }
     // alignment 变化时也强制重建（避免 _painter 缓存旧 textAlign 影响多行对齐）
     final bool alignChanged = _lastAlignment != alignment;
     // 字重变化时也强制重建（字重影响字形宽度/换行）
@@ -277,13 +304,18 @@ class LineRenderer {
     // 用 _alignX 计算文本起始 x，与 WordRenderer 一致。
     // 单行：直接用 _painter.width（layout 后的整体宽度）计算 x。
     // 多行：按视觉行拆分绘制，每行独立对齐。
-    final bool isMultiLine = _painter.height >
-        fontSize * LyricLayout.lineHeight * 1.5;
+    // 多行判定：KRC 行（有 word）用 word 累加行数（与 measureLineHeight 一致），
+    // 纯文本/LRC 行用 TextPainter 整行高度（与 measure 的 TextPainter 换行一致）。
+    final bool isMultiLine = line.hasWordTiming
+        ? _wordAccumulateRowStarts(line, fontSize, maxWidth).length > 1
+        : _painter.height > fontSize * LyricLayout.lineHeight * 1.5;
     if (!isMultiLine) {
       // 单行：直接用整体对齐 x
       final double x = _alignX(
           alignment, offset.dx, _painter.width, viewportWidth);
       _painter.paint(canvas, Offset(x, offset.dy));
+      // 单行重置多行行数（防上次多行残留影响翻译副行高度计算）
+      _lastMultiLineRowCount = 0;
     } else {
       // 多行：按行拆分绘制，每行独立对齐
       _paintMultiLineAligned(canvas, offset, line, fontSize, alignment,
@@ -301,8 +333,17 @@ class LineRenderer {
         auxText != null &&
         auxText.isNotEmpty) {
       final transFontSize = LyricLayout.translationFontSize(fontSize);
-      // 主文本实际高度（含换行）：用 _painter.height 获取上次 layout 结果
-      final mainHeight = _painter.height;
+      // 主文本实际高度（含换行）：与 measureLineHeight 的压缩模型一致。
+      // TextPainter 整行高度是完整行高（每行 ≈ mainLineHeight），而
+      // _lineHeights 对换行行按 0.8x 压缩，两者不一致会使翻译副行向下偏移
+      // 与下一行歌词重叠——多行时用压缩高度反推。
+      final double mainHeight = _lastMultiLineRowCount > 1
+          ? fontSize * LyricLayout.lineHeight +
+              (_lastMultiLineRowCount - 1) *
+                  fontSize *
+                  LyricLayout.lineHeight *
+                  LyricLayout.wrapLineHeightFactor
+          : _painter.height;
       // 主副行间留 0.3em 间隙，与 measureLineHeight 计算保持一致
       final transY = offset.dy + mainHeight + transFontSize * 0.3;
       _translationPainter.text = TextSpan(
@@ -327,6 +368,41 @@ class LineRenderer {
     }
   }
 
+  /// 临时调试：打印行换行分析（word 累加 vs TextPainter 行数），定位歌词重叠。
+  void _debugLogWrap(LyricLine line, double fontSize, double maxWidth) {
+    final StringBuffer sb = StringBuffer();
+    sb.write('[LyricWrap] LR hasWord=${line.hasWordTiming} '
+        'text="${line.text}" maxW=${maxWidth.toStringAsFixed(1)} fs=$fontSize');
+    if (line.hasWordTiming) {
+      final List<int> starts =
+          _wordAccumulateRowStarts(line, fontSize, maxWidth);
+      sb.write(' wordRows=${starts.length}');
+      final List<double> widths = _ensureWordWidths(line, fontSize);
+      sb.write(' words[');
+      for (int i = 0; i < line.words.length; i++) {
+        sb.write('"${line.words[i].text}"(${widths[i].toStringAsFixed(1)}) ');
+      }
+      sb.write(']');
+    } else {
+      final TextPainter tp = TextPainter(
+        text: TextSpan(
+          text: line.text,
+          style: TextStyle(
+            fontSize: fontSize,
+            height: LyricLayout.lineHeight,
+            fontFamily: LyricLayout.fontFamily,
+            fontWeight: LyricLayout.fontWeight,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: maxWidth);
+      sb.write(' tpRows=${tp.computeLineMetrics().length}');
+      tp.dispose();
+    }
+    // ignore: avoid_print
+    print(sb.toString());
+  }
+
   /// 多行文本按行独立对齐绘制：按视觉行拆分文本，每行用对应 x 偏移。
   void _paintMultiLineAligned(
       Canvas canvas, Offset offset, LyricLine line, double fontSize,
@@ -336,29 +412,65 @@ class LineRenderer {
     final int textRed = (textColorValue >> 16) & 0xFF;
     final int textGreen = (textColorValue >> 8) & 0xFF;
     final int textBlue = textColorValue & 0xFF;
-    // 拆分视觉行（与 _computeLineAlignOffsets 一致）
-    final List<int> lineStarts = <int>[0];
-    int pos = 0;
-    while (pos < text.length) {
-      final boundary = _painter.getLineBoundary(TextPosition(offset: pos));
-      final lineEnd = boundary.end;
-      if (lineEnd <= pos) break;
-      pos = lineEnd;
-      if (pos < text.length) lineStarts.add(pos);
+    // 拆分视觉行文本：
+    // - KRC 行（有 word）：按 word 累加换行（与 measureLineHeight / WordRenderer
+    //   完全一致的算法），保证非当前行行数与当前行、测量高度一致，避免重叠。
+    // - 纯文本/LRC 行（无 word）：用 TextPainter getLineBoundary 自动换行
+    //   （与 measure 的 TextPainter 换行一致）。
+    final List<String> rowTexts;
+    if (line.hasWordTiming) {
+      final List<int> rowStarts = _wordAccumulateRowStarts(line, fontSize, maxWidth);
+      rowTexts = <String>[];
+      for (int r = 0; r < rowStarts.length; r++) {
+        final ws = rowStarts[r];
+        final we =
+            r + 1 < rowStarts.length ? rowStarts[r + 1] : line.words.length;
+        final StringBuffer sb = StringBuffer();
+        for (int wi = ws; wi < we; wi++) {
+          sb.write(line.words[wi].text);
+        }
+        rowTexts.add(sb.toString());
+      }
+    } else {
+      final List<int> lineStarts = <int>[0];
+      int pos = 0;
+      while (pos < text.length) {
+        final boundary = _painter.getLineBoundary(TextPosition(offset: pos));
+        final lineEnd = boundary.end;
+        if (lineEnd <= pos) break;
+        pos = lineEnd;
+        if (pos < text.length) lineStarts.add(pos);
+      }
+      rowTexts = <String>[];
+      for (int r = 0; r < lineStarts.length; r++) {
+        final s = lineStarts[r];
+        final e = r + 1 < lineStarts.length ? lineStarts[r + 1] : text.length;
+        rowTexts.add(text.substring(s, e));
+      }
     }
-    // 每行独立绘制
+    // 每行独立绘制。
+    // 换行行盒模型（与 LyricLayout.measureLineHeight 一致）：
+    //   - 第 1 个视觉行（主行）：完整行高 mainLineHeight，从 offset.dy 开始；
+    //   - 换行行：0.8x 行高（height = lineHeight × wrapLineHeightFactor），
+    //     从主行底部（offset.dy + mainLineHeight）开始，后续每行再 +0.8x 行高。
+    // 旧实现把每行都画在 i * wrapLineHeight 且用完整行高：行盒（≈mainLineHeight）
+    // 大于 0.8x 间距导致相邻行盒重叠，且主行被压在 0.8x 位置与换行行错位。
+    final double mainLineHeight = fontSize * LyricLayout.lineHeight;
     final double wrapLineHeight =
-        fontSize * LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor;
-    for (int i = 0; i < lineStarts.length; i++) {
-      final start = lineStarts[i];
-      final end = i + 1 < lineStarts.length ? lineStarts[i + 1] : text.length;
-      final lineText = text.substring(start, end);
+        mainLineHeight * LyricLayout.wrapLineHeightFactor;
+    _lastMultiLineRowCount = rowTexts.length;
+    for (int i = 0; i < rowTexts.length; i++) {
+      final bool isFirstRow = i == 0;
+      // 第 1 行完整行高；换行行 0.8x 行高（行盒=行距，避免行盒重叠）
+      final double rowHeight = isFirstRow
+          ? LyricLayout.lineHeight
+          : LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor;
       _lineMeasurer.text = TextSpan(
-        text: lineText,
+        text: rowTexts[i],
         style: TextStyle(
           color: Color.fromRGBO(textRed, textGreen, textBlue, _currentAlpha),
           fontSize: fontSize,
-          height: LyricLayout.lineHeight,
+          height: rowHeight,
           fontFamily: LyricLayout.fontFamily,
           fontWeight: LyricLayout.fontWeight,
         ),
@@ -366,9 +478,60 @@ class LineRenderer {
       _lineMeasurer.layout(maxWidth: double.infinity);
       final double x = _alignX(
           alignment, offset.dx, _lineMeasurer.width, viewportWidth);
-      final double y = offset.dy + i * wrapLineHeight;
+      final double y = isFirstRow
+          ? offset.dy
+          : offset.dy + mainLineHeight + (i - 1) * wrapLineHeight;
       _lineMeasurer.paint(canvas, Offset(x, y));
     }
+  }
+
+  /// KRC 行 word 宽度测量（缓存，与 WordRenderer._wordWidths 同口径）。
+  List<double> _ensureWordWidths(LyricLine line, double fontSize) {
+    if (identical(_wordWidthsLine, line) &&
+        _wordWidthsFontSize == fontSize &&
+        _wordWidths.length == line.words.length) {
+      return _wordWidths;
+    }
+    final List<double> widths = List<double>.filled(line.words.length, 0);
+    for (int i = 0; i < line.words.length; i++) {
+      final TextPainter p = TextPainter(
+        text: TextSpan(
+          text: line.words[i].text,
+          style: TextStyle(
+            fontSize: fontSize,
+            height: LyricLayout.lineHeight,
+            fontFamily: LyricLayout.fontFamily,
+            fontWeight: LyricLayout.fontWeight,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      widths[i] = p.width;
+      p.dispose();
+    }
+    _wordWidths = widths;
+    _wordWidthsLine = line;
+    _wordWidthsFontSize = fontSize;
+    return _wordWidths;
+  }
+
+  /// 按 word 累加换行（与 measureLineHeight 逐字分支、WordRenderer 完全一致）：
+  /// 返回每视觉行的起始 word 索引（首元素 0）。
+  List<int> _wordAccumulateRowStarts(
+      LyricLine line, double fontSize, double maxWidth) {
+    final List<int> starts = <int>[0];
+    if (line.words.isEmpty || maxWidth == double.infinity) return starts;
+    final List<double> widths = _ensureWordWidths(line, fontSize);
+    double dx = 0;
+    for (int wi = 0; wi < line.words.length; wi++) {
+      final double ww = widths[wi];
+      if (dx + ww > maxWidth && dx > 0) {
+        starts.add(wi);
+        dx = 0;
+      }
+      dx += ww;
+    }
+    return starts;
   }
 
   /// 根据对唱对齐方式计算文本起始 x 坐标（与 [WordRenderer._alignX] 一致）。

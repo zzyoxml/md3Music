@@ -1777,11 +1777,26 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       );
       textPainter.layout(maxWidth: maxTextWidth);
 
-      // 使用 TextPainter 布局后的实际文本高度，而非 _lineHeights 中的值。
-      // _lineHeights 对换行行使用 wrapLineHeightFactor=0.8 压缩行距（显示紧凑），
-      // 但 TextPainter 用完整 lineHeight 渲染，两者不匹配会导致底部文字被裁断。
-      final double actualTextHeight = textPainter.height;
-      final double renderHeight = actualTextHeight + padding * 2;
+      // 渲染高度与清晰层/测量一致（避免模糊图与相邻行重叠）：
+      // - KRC 行（有 word）：用 word 累加行数 → 压缩高度
+      //   `mainLineHeight + (rows-1)*mainLineHeight*0.8`（与 _lineHeights 一致）
+      // - 无 word 行：TextPainter 整行自动换行的实际高度
+      final LyricLine blurLine = _cleanedLines[lineIndex];
+      final double mainLineHeight = fontSize * LyricLayout.lineHeight;
+      final double renderHeight;
+      if (blurLine.hasWordTiming) {
+        final int rows = _blurWordAccumulateRows(
+            blurLine, fontSize, maxTextWidth);
+        renderHeight = (rows <= 1
+                ? mainLineHeight
+                : mainLineHeight +
+                    (rows - 1) *
+                        mainLineHeight *
+                        LyricLayout.wrapLineHeightFactor) +
+            padding * 2;
+      } else {
+        renderHeight = textPainter.height + padding * 2;
+      }
 
       // 对画布应用模糊
       final blurPaint = Paint()
@@ -1791,7 +1806,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         blurPaint,
       );
       // 判断是否为多行文本（自动换行）
-      final bool isMultiLine = actualTextHeight >
+      final bool isMultiLine = renderHeight - padding * 2 >
           fontSize * LyricLayout.lineHeight * 1.5;
       if (!isMultiLine) {
         // 单行：用 _alignX 计算起始 x
@@ -1800,7 +1815,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         textPainter.paint(canvas, Offset(x, padding));
       } else {
         // 多行：按视觉行拆分，每行独立 _alignX 对齐绘制
-        _paintBlurMultiLineAligned(canvas, textPainter, alignment,
+        _paintBlurMultiLineAligned(canvas, textPainter, blurLine, alignment,
             leftPadding, padding, fontSize, _viewportWidth);
       }
       canvas.restore();
@@ -1834,39 +1849,116 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
   /// 模糊层多行文本按视觉行拆分，每行独立对齐绘制。
   /// 与 LineRenderer._paintMultiLineAligned 逻辑一致。
   void _paintBlurMultiLineAligned(
-      Canvas canvas, TextPainter painter, DuetAlignment alignment,
+      Canvas canvas, TextPainter painter, LyricLine line, DuetAlignment alignment,
       double leftPadding, double padding, double fontSize, double viewportWidth) {
     final String text = painter.text?.toPlainText() ?? '';
     if (text.isEmpty) return;
-    // 通过 getLineBoundary 拆分视觉行
-    final List<int> lineStarts = <int>[0];
-    int pos = 0;
-    while (pos < text.length) {
-      final boundary = painter.getLineBoundary(TextPosition(offset: pos));
-      final lineEnd = boundary.end;
-      if (lineEnd <= pos) break;
-      pos = lineEnd;
-      if (pos < text.length) lineStarts.add(pos);
+    // 拆分视觉行文本：
+    // - KRC 行（有 word）：按 word 累加换行（与清晰层 LineRenderer / 测量一致），
+    //   避免模糊图行数与清晰层不同导致错位重叠。
+    // - 无 word 行：TextPainter getLineBoundary 自动换行。
+    final List<String> rowTexts;
+    if (line.hasWordTiming) {
+      final double maxWidth = viewportWidth - 2 * fontSize;
+      final List<double> widths = <double>[];
+      for (final w in line.words) {
+        final TextPainter p = TextPainter(
+          text: TextSpan(text: w.text, style: painter.text!.style!),
+          textDirection: TextDirection.ltr,
+        )..layout();
+        widths.add(p.width);
+        p.dispose();
+      }
+      final List<int> rowWordStarts = <int>[0];
+      double dx = 0;
+      for (int wi = 0; wi < line.words.length; wi++) {
+        if (dx + widths[wi] > maxWidth && dx > 0) {
+          rowWordStarts.add(wi);
+          dx = 0;
+        }
+        dx += widths[wi];
+      }
+      rowTexts = <String>[];
+      for (int r = 0; r < rowWordStarts.length; r++) {
+        final ws = rowWordStarts[r];
+        final we =
+            r + 1 < rowWordStarts.length ? rowWordStarts[r + 1] : line.words.length;
+        final StringBuffer sb = StringBuffer();
+        for (int wi = ws; wi < we; wi++) {
+          sb.write(line.words[wi].text);
+        }
+        rowTexts.add(sb.toString());
+      }
+    } else {
+      final List<int> lineStarts = <int>[0];
+      int pos = 0;
+      while (pos < text.length) {
+        final boundary = painter.getLineBoundary(TextPosition(offset: pos));
+        final lineEnd = boundary.end;
+        if (lineEnd <= pos) break;
+        pos = lineEnd;
+        if (pos < text.length) lineStarts.add(pos);
+      }
+      rowTexts = <String>[];
+      for (int r = 0; r < lineStarts.length; r++) {
+        final s = lineStarts[r];
+        final e = r + 1 < lineStarts.length ? lineStarts[r + 1] : text.length;
+        rowTexts.add(text.substring(s, e));
+      }
     }
-    // 每行独立绘制
+    // 每行独立绘制（与 LineRenderer._paintMultiLineAligned 一致）：
+    // 主行完整行高从 padding 起，换行行 0.8x 行高从主行底起，行盒=行距避免重叠
+    final double mainLineHeight = fontSize * LyricLayout.lineHeight;
     final double wrapLineHeight =
-        fontSize * LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor;
+        mainLineHeight * LyricLayout.wrapLineHeightFactor;
     final lineMeasurer = TextPainter(textDirection: TextDirection.ltr);
-    for (int i = 0; i < lineStarts.length; i++) {
-      final start = lineStarts[i];
-      final end = i + 1 < lineStarts.length ? lineStarts[i + 1] : text.length;
-      final lineText = text.substring(start, end);
+    for (int i = 0; i < rowTexts.length; i++) {
+      final bool isFirstRow = i == 0;
+      final double rowHeight = isFirstRow
+          ? LyricLayout.lineHeight
+          : LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor;
       lineMeasurer.text = TextSpan(
-        text: lineText,
-        style: painter.text!.style,
+        text: rowTexts[i],
+        style: painter.text!.style!.copyWith(height: rowHeight),
       );
       lineMeasurer.layout(maxWidth: double.infinity);
       final double x = _blurAlignX(
           alignment, leftPadding, lineMeasurer.width, viewportWidth);
-      final double y = padding + i * wrapLineHeight;
+      final double y = isFirstRow
+          ? padding
+          : padding + mainLineHeight + (i - 1) * wrapLineHeight;
       lineMeasurer.paint(canvas, Offset(x, y));
     }
     lineMeasurer.dispose();
+  }
+
+  /// 模糊层 KRC 行 word 累加行数（与 LineRenderer/measureLineHeight 一致）。
+  int _blurWordAccumulateRows(
+      LyricLine line, double fontSize, double maxWidth) {
+    if (line.words.isEmpty || maxWidth <= 0) return 1;
+    double dx = 0;
+    int rows = 1;
+    for (final w in line.words) {
+      final TextPainter p = TextPainter(
+        text: TextSpan(
+          text: w.text,
+          style: TextStyle(
+            fontSize: fontSize,
+            height: LyricLayout.lineHeight,
+            fontFamily: LyricLayout.fontFamily,
+            fontWeight: LyricLayout.fontWeight,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      if (dx + p.width > maxWidth && dx > 0) {
+        dx = 0;
+        rows++;
+      }
+      dx += p.width;
+      p.dispose();
+    }
+    return rows;
   }
 }
 

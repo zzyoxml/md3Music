@@ -1,5 +1,6 @@
 import 'dart:ui' as ui;
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:md3music/widgets/apple_lyrics/layout/lyric_layout.dart';
 import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
@@ -334,4 +335,114 @@ void main() {
       expect(r3.currentAlpha, closeTo(0.6, 0.01));
     });
   });
+
+  // ==================== 8. 多行自动换行 ====================
+  group('多行自动换行', () {
+    test('换行行从主行底开始且用 0.8x 行高（不重叠）', () {
+      renderer.setLineState(isActive: true, scale: LyricLayout.activeScale);
+      // 窄视口强制换行成多行：Ahem 测试字体每字符宽 = fontSize = 15，
+      // maxWidth=60 → 每视觉行 4 字，14 字 → 4 行
+      const longLine = LyricLine(
+        startTime: 0,
+        duration: 4000,
+        text: '这是一段足够长的中文歌词用于测试自动换行',
+        words: [],
+      );
+      final canvas = RecordingCanvas();
+      renderer.paintLine(canvas, ui.Offset.zero, longLine, 15, maxWidth: 60);
+      final ys = canvas.drawParagraphOffsets.map((o) => o.dy).toList();
+      // 确认确实换行成多行
+      expect(ys.length, greaterThanOrEqualTo(3),
+          reason: '长文本在窄视口下应自动换行为多行');
+      final double mainLineHeight = 15 * LyricLayout.lineHeight;
+      final double wrapLineHeight =
+          mainLineHeight * LyricLayout.wrapLineHeightFactor;
+      // 第 1 行（主行）：完整行高，从 offset.dy=0 开始
+      expect(ys[0], closeTo(0, 1e-6));
+      // 第 2 行：从主行底开始（不再是 0.8x 处，避免与主行行盒重叠）
+      expect(ys[1], closeTo(mainLineHeight, 1e-6),
+          reason: '第 2 行应从主行底部开始');
+      // 第 3 行：再 +0.8x 行高（换行行之间紧凑但不重叠）
+      if (ys.length > 2) {
+        expect(ys[2], closeTo(mainLineHeight + wrapLineHeight, 1e-6),
+            reason: '第 3 行应在第 2 行基础上加 0.8x 行高');
+      }
+    });
+
+    test('KRC 行按 word 累加换行（与当前行行数一致）', () {
+      // 构造含英文/空格的 KRC 行：Ahem 下每字符宽 = fontSize = 15，
+      // maxWidth=90 时逐字 6 字/行；该行 18 字符 → word 累加与 TextPainter 均 3 行
+      // （用单词更宽的中英混合验证 word 累加路径生效）。
+      const krcLine = LyricLine(
+        startTime: 0,
+        duration: 4000,
+        text: 'I love you forever and always my dear',
+        words: [
+          LyricWord(startTime: 0, duration: 100, text: 'I '),
+          LyricWord(startTime: 100, duration: 100, text: 'love'),
+          LyricWord(startTime: 200, duration: 100, text: ' you'),
+          LyricWord(startTime: 300, duration: 100, text: ' forever'),
+          LyricWord(startTime: 400, duration: 100, text: ' and'),
+          LyricWord(startTime: 500, duration: 100, text: ' always'),
+          LyricWord(startTime: 600, duration: 100, text: ' my'),
+          LyricWord(startTime: 700, duration: 100, text: ' dear'),
+        ],
+      );
+      renderer.setLineState(isActive: true, scale: LyricLayout.activeScale);
+      // maxWidth=90：word 累加与 TextPainter 在空格/多词场景行数可能不同，
+      // LineRenderer 必须与 measureLineHeight（word 累加）一致。
+      final canvas = RecordingCanvas();
+      renderer.paintLine(canvas, ui.Offset.zero, krcLine, 15, maxWidth: 90);
+      final ys = canvas.drawParagraphOffsets.map((o) => o.dy).toList();
+      // 逐 word 拼接行（word 累加），与 _wordAccumulateRowStarts 相同的逻辑：
+      // 每行文本在窄宽度下拆行，断言行数 >= 2 且第 2 行从主行底开始
+      expect(ys.length, greaterThanOrEqualTo(2),
+          reason: 'KRC 长行应自动换行为多行');
+      final double mainLineHeight = 15 * LyricLayout.lineHeight;
+      expect(ys[1], closeTo(mainLineHeight, 1e-6),
+          reason: 'KRC 行第 2 行也应从主行底开始');
+      // 关键断言：与 WordRenderer 当前行行数一致（此处用 word 累加行数直接断言）
+      final int wordRows = _wordAccumulateForTest(krcLine, 15, 90);
+      expect(ys.length, wordRows,
+          reason: 'LineRenderer 非当前行行数必须等于 word 累加行数（当前行/测量）');
+    });
+  });
+}
+
+/// 测试用：复刻 measureLineHeight 的 word 累加行数计算（与渲染一致）。
+int _wordAccumulateForTest(LyricLine line, double fontSize, double maxWidth) {
+  double dx = 0;
+  int rows = 1;
+  for (final w in line.words) {
+    final tp = TextPainter(
+      text: TextSpan(
+        text: w.text,
+        style: TextStyle(
+            fontSize: fontSize, height: LyricLayout.lineHeight),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
+    final ww = tp.width;
+    if (dx + ww > maxWidth && dx > 0) {
+      dx = 0;
+      rows++;
+    }
+    dx += ww;
+  }
+  return rows;
+}
+
+/// 记录 [ui.Canvas.drawParagraph] 位置的测试画布（其余方法走 noSuchMethod 兜底）。
+///
+/// 用于断言自动换行时每个视觉行的绘制 y 位置，验证行盒模型不重叠。
+class RecordingCanvas implements ui.Canvas {
+  final List<ui.Offset> drawParagraphOffsets = <ui.Offset>[];
+
+  @override
+  void drawParagraph(ui.Paragraph paragraph, ui.Offset offset) {
+    drawParagraphOffsets.add(offset);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
 }
