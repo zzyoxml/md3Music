@@ -45,7 +45,7 @@ $script:Md3CommonPath = Join-Path $PSScriptRoot '..\lib\common.ps1'
 if (Test-Path $script:Md3CommonPath) {
     . $script:Md3CommonPath
 } else {
-    $script:Md3RepoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+    $script:Md3RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
     function Get-RepoRoot { $script:Md3RepoRoot }
     function Get-Utf8NoBom { New-Object System.Text.UTF8Encoding($false) }
     function Write-Step([string]$M) { Write-Host "`n=== $M ===" -ForegroundColor Cyan }
@@ -74,14 +74,23 @@ $HostDir = $null
 if ($env:MD3_DEVCPP_BIN -and (Test-Path (Join-Path $env:MD3_DEVCPP_BIN 'gcc.exe'))) {
     $HostDir = $env:MD3_DEVCPP_BIN
 } else {
-    foreach ($p in @(
-        'C:\Program Files (x86)\Dev-Cpp\MinGW64\bin',
-        'E:\Dev-Cpp\MinGW64\bin',
-        'C:\Program Files\Dev-Cpp\MinGW64\bin',
-        'C:\Dev-Cpp\MinGW64\bin'
-    )) {
-        if (Test-Path (Join-Path $p 'gcc.exe')) { $HostDir = $p; break }
+    $pathGcc = Get-Command gcc -ErrorAction SilentlyContinue
+    if ($pathGcc -and (Test-Path (Join-Path (Split-Path -Parent $pathGcc.Source) 'ar.exe'))) {
+        $HostDir = Split-Path -Parent $pathGcc.Source
+    } else {
+        foreach ($p in @(
+            'C:\Program Files (x86)\Dev-Cpp\MinGW64\bin',
+            'E:\Dev-Cpp\MinGW64\bin',
+            'C:\Program Files\Dev-Cpp\MinGW64\bin',
+            'C:\Dev-Cpp\MinGW64\bin'
+        )) {
+            if ((Test-Path $p) -and (Test-Path (Join-Path $p 'gcc.exe'))) { $HostDir = $p; break }
+        }
     }
+}
+if (-not $HostDir) {
+    $HostDir = 'C:\Program Files (x86)\Dev-Cpp\MinGW64\bin'
+    Write-Host "  [!!] 未探测到 host gcc，退回默认路径 $HostDir（可用 MD3_DEVCPP_BIN 环境变量或 PATH 覆盖）" -ForegroundColor Yellow
 }
 $HostGcc = Join-Path $HostDir 'gcc.exe'
 $HostAr  = Join-Path $HostDir 'ar.exe'

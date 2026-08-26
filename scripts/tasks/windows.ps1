@@ -45,7 +45,7 @@ $script:Md3CommonPath = Join-Path $PSScriptRoot '..\lib\common.ps1'
 if (Test-Path $script:Md3CommonPath) {
     . $script:Md3CommonPath
 } else {
-    $script:Md3RepoRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
+    $script:Md3RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
     function Get-RepoRoot { $script:Md3RepoRoot }
     function Get-Utf8NoBom { New-Object System.Text.UTF8Encoding($false) }
     function Write-Step([string]$M) { Write-Host "`n=== $M ===" -ForegroundColor Cyan }
@@ -79,7 +79,7 @@ function Get-DllToolchainStamp {
 
 # ---------- 1. 检测 Visual Studio（硬前提） ----------
 Write-Step '检测 Visual Studio（Flutter Windows 构建必需）'
-$vsWhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+$vsWhere = if ($env:MD3_VSWHERE) { $env:MD3_VSWHERE } else { 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe' }
 $vsInstalled = $false
 if (Test-Path $vsWhere) {
     # 注意：必须带 `-products *`，否则 vswhere 默认只匹配 Visual Studio IDE 实例，
