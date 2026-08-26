@@ -1972,16 +1972,30 @@ class KugouLongAudioAlbum {
 
   factory KugouLongAudioAlbum.fromJson(Map<String, dynamic> json) {
     return KugouLongAudioAlbum(
-      id: _str(json['id'] ?? json['album_id'] ?? ''),
-      name: _str(json['name'] ?? json['album_name'] ?? json['title'] ?? ''),
+      id: _str(json['id'] ?? json['album_id'] ?? json['albumid'] ?? ''),
+      name: _str(
+        json['name'] ??
+            json['album_name'] ??
+            json['albumname'] ??
+            json['title'] ??
+            '',
+      ),
       coverUrl: _resolveArtworkUri(
         json['sizable_cover'] ??
             json['img'] ??
             json['imgurl'] ??
             json['cover'],
       ),
-      author: _strNull(json['author'] ?? json['author_name']),
-      audioCount: _parseInt(json['audio_count'] ?? json['audiocount'] ?? json['audio_total'] ?? 0),
+      author: _strNull(
+        json['author'] ?? json['author_name'] ?? json['singer'],
+      ),
+      audioCount: _parseInt(
+        json['audio_count'] ??
+            json['audiocount'] ??
+            json['audio_total'] ??
+            json['songcount'] ??
+            0,
+      ),
       intro: _strNull(json['intro'] ?? json['mix_intro'] ?? json['full_intro']),
     );
   }

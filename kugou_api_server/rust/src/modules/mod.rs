@@ -228,6 +228,7 @@ pub fn register(routes: &mut Vec<(&'static str, ModuleFn)>) {
     routes.push(("/artist/detail", artist::handle_detail));
     routes.push(("/search/suggest", search_suggest::handle));
     routes.push(("/search/mixed", search_mixed::handle));
+    routes.push(("/search/audiobook", search_mixed::handle_audiobook));
     routes.push(("/search", search::handle));
     routes.push(("/song/url/new", song_url_new::handle));
     routes.push(("/song/url", song_url::handle));

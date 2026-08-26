@@ -253,12 +253,12 @@ class KugouApiClient {
         }
       }
       print(
-        '[API _get] Non-200 or non-map: status=${response.statusCode} data=${response.data}',
+        '[API _get] Non-200 or non-map: path=$path status=${response.statusCode} data=${response.data}',
       );
       return null;
     } on DioException catch (e) {
       print(
-        '[API _get] DioException: ${e.type} ${e.message} response=${e.response?.statusCode} ${e.response?.data}',
+        '[API _get] DioException: url=${e.requestOptions.uri} err=${e.type} response=${e.response?.statusCode} ${e.response?.data}',
       );
       return null;
     } catch (e) {
@@ -3165,10 +3165,25 @@ class KugouApiClient {
     );
   }
 
-  Future<Map<String, dynamic>?> getLongaudioAlbumAudios(String albumId) async {
+  Future<Map<String, dynamic>?> getLongaudioAlbumAudios(
+    String albumId, {
+    int page = 1,
+    int pageSize = 30,
+  }) async {
     return await _get(
       KugouEndpoints.longaudioAlbumAudios,
-      queryParameters: {'album_id': albumId},
+      queryParameters: {
+        'album_id': albumId,
+        'page': page,
+        'pagesize': pageSize,
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>?> getLongaudioSearch(String keyword) async {
+    return await _get(
+      KugouEndpoints.longaudioSearch,
+      queryParameters: {'keyword': keyword},
     );
   }
 
