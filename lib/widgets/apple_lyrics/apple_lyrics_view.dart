@@ -986,7 +986,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
         renderer.emphasizeEffect = _emphasizeEffect;
         renderer.setLineState(isActive: true, scale: scale, blurFade: _blurFade, blurActive: blurActive, activeColorValue: _activeLineColorValue);
         // 用平滑时间驱动逐字动画（上浮/字内渐变），避免 positionStream 5fps 卡顿
-        renderer.tick(dt, _smoothPosMs.round());
+        // isPlaying 用于冻结自驱动波浪：暂停时波浪不推进，防止辉光持续闪烁
+        renderer.tick(dt, _smoothPosMs.round(), isPlaying: widget.isPlaying);
         if (!renderer.isConverged) anyRendererAnimating = true;
       } else {
         final renderer = _lineRendererFor(i);
