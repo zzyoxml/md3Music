@@ -39,27 +39,42 @@ class ArtworkColorExtractor {
     if (url == null || url.isEmpty) return null;
     final cached = _cache[url];
     if (cached != null) return cached;
+    final palette = await loadPalette(url);
+    if (palette == null) return null;
+    return _analyzePalette(palette, url);
+  }
+
+  /// 加载封面并生成 [PaletteGenerator]，供「封面动态取色」与「流光背景」共用。
+  ///
+  /// 支持三种封面来源：
+  /// - **网络封面**（http/https）：走 [CachedNetworkImageProvider]，与 UI
+  ///   封面共用磁盘缓存，避免动态取色开启时每次切歌重新下载封面。
+  /// - **本地内嵌封面**（`local://<filePath>` / `content://`）：通过
+  ///   [LocalArtworkCache] 在 Isolate 中懒加载音频文件内嵌封面。
+  /// - **本地磁盘封面**（`file://<path>`）：直接读取封面文件字节。
+  ///
+  /// 本地封面统一经 [ResizeImage] 缩到 480 宽再解码：背景图/本地大图取色
+  /// 时避免全尺寸解码的内存峰值（高清照片解码可达上百 MB，低内存设备会
+  /// 闪退）；取色分析的是色彩分布，缩到 480 宽足够且结果几乎不变。
+  /// 任一来源加载/解码失败都返回 null（内部已捕获异常）。
+  static Future<PaletteGenerator?> loadPalette(String url) async {
     try {
       if (url.startsWith('http://') || url.startsWith('https://')) {
-        final palette = await PaletteGenerator.fromImageProvider(
+        return PaletteGenerator.fromImageProvider(
           CachedNetworkImageProvider(url),
           maximumColorCount: 12,
         );
-        return _analyzePalette(palette, url);
       }
-      // 本地封面：统一「读字节 → MemoryImage → PaletteGenerator」
+      // 本地封面：统一「读字节 → ResizeImage(MemoryImage) → PaletteGenerator」
       final bytes = await _loadLocalBytes(url);
       if (bytes == null) return null;
-      // ResizeImage 限制解码宽度：背景图/本地大图取色时避免全尺寸解码
-      // 造成的内存峰值（高清照片解码可达上百 MB，低内存设备会闪退）。
-      // 取色分析的是色彩分布，缩到 480 宽足够且结果几乎不变。
-      final palette = await PaletteGenerator.fromImageProvider(
+      return PaletteGenerator.fromImageProvider(
         ResizeImage(MemoryImage(bytes), width: 480),
         maximumColorCount: 12,
       );
-      return _analyzePalette(palette, url);
-    } catch (_) {}
-    return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// 读取本地封面字节；无法解析 / 文件不存在 / 无内嵌封面时返回 null。

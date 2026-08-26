@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
-import 'package:palette_generator/palette_generator.dart';
+
+import '../core/utils/artwork_color_extractor.dart';
 
 /// 动态流光背景效果。
 ///
@@ -178,16 +178,15 @@ class _FlowingBackgroundState extends State<FlowingBackground>
     }
 
     try {
-      // 用 CachedNetworkImageProvider 而非 NetworkImage：
-      // UI 封面走 CachedNetworkImage 的磁盘缓存，两者共用 cacheManager，
-      // 提取可命中 UI 已下载的封面，避免流光开启时每次进播放器 /
-      // 切歌都重新网络下载封面（与 UI 封面下载并发导致卡顿）。
-      final palette = await PaletteGenerator.fromImageProvider(
-        CachedNetworkImageProvider(url),
-        maximumColorCount: 12,
-      );
+      // 统一走 ArtworkColorExtractor.loadPalette：兼容 http(s) 网络封面与
+      // local:// / content:// / file:// 本地封面。此前只有网络分支，本地音乐
+      // （content:// / local://）与云盘歌曲（内嵌封面回填 file://）取色全部
+      // 失败，永远停留在默认靛蓝+青绿兜底色，导致流光画面发青发蓝。
+      // 网络封面经 CachedNetworkImageProvider 与 UI 封面共用磁盘缓存，
+      // 避免流光开启时每次进播放器都重新下载封面。
+      final palette = await ArtworkColorExtractor.loadPalette(url);
       // 双重检查：mounted（widget 还在树中）+ _disposed（State 未销毁）
-      if (!mounted || _disposed) return;
+      if (palette == null || !mounted || _disposed) return;
 
       // 有效候选色：palette.colors 按像素占比降序排列，
       // 过滤掉近黑、近白、低饱和的灰色，避免稀释色彩层次
