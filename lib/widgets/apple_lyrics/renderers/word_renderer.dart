@@ -141,6 +141,10 @@ class WordRenderer {
   /// seek 跳变检测容差（ms）：当前播放位置与自驱动预期位置偏差超过此值即重锚。
   static const double _waveReanchorToleranceMs = 150;
 
+  /// 图片懒预生成提前量（ms）：强调字开始前多久请求字形图/辉光精灵，
+  /// 把 toImage 从行切换一次性突发摊到各字激活前（P1 时序拆分）。
+  static const double _imagePrewarmLeadMs = 250;
+
   /// 行级元数据判定缓存（行绑定期计算一次）。
   /// true 表示该行为元数据行（作词/作曲 等），整行禁用辉光。
   /// 仅依赖 [LyricLine.text]，在 [_ensureBound] 时计算，避免每帧重复正则匹配。
@@ -459,6 +463,22 @@ class WordRenderer {
     // 性能优化：内联 target 计算 + early-exit 已收敛字 + 预计算 decay
     // 90% 的字在任意时刻已收敛到目标值，跳过乘法运算可大幅降低 CPU 开销
     for (int i = 0; i < wordCount; i++) {
+      // P1 时序拆分：图片懒预生成——强调字临近开始（提前 _imagePrewarmLeadMs）
+      // 才请求字形图与辉光精灵。toImage 为异步，提前 250ms 触发足够在字激活前
+      // 就绪；把行切换瞬间的一次性 N 个并发 toImage 摊到各字激活前逐字生成，
+      // 消除行切换时刻 raster/GPU 突发造成的掉帧。
+      if (_wordEmphasisFlags[i]) {
+        final LyricWord w = words[i];
+        if (currentTimeMs >= w.startTime - _imagePrewarmLeadMs &&
+            currentTimeMs < w.startTime + w.duration) {
+          final List<int> runes = w.text.runes.toList();
+          for (int k = 0; k < runes.length; k++) {
+            final String charText = String.fromCharCode(runes[k]);
+            _requestCharImage(i, k, charText, _boundFontSize);
+            _requestCharGlowSprite(i, k, charText, _boundFontSize);
+          }
+        }
+      }
       // === Alpha 动画 ===
       final double target;
       if (i < currentWordIdx) {
@@ -1494,14 +1514,10 @@ class WordRenderer {
         // v8：每字符波浪相位分配，初始 1.0（已完成=idle），字成为当前字时再锚定
         _waveBumpPhases[i] = List<double>.filled(n, 1.0);
         _waveFloatPhases[i] = List<double>.filled(n, 1.0);
-        // v6 性能：行绑定即预生成该字全部字符辉光精灵与字形图（异步），
-        // 使每个字进入波浪窗口时图片已就绪——消除字激活瞬间 N 次 toImage
-        // 批量触发造成的逐字卡顿（每个字激活时不再有 GPU 渲染突发）。
-        for (int k = 0; k < n; k++) {
-          final String charText = String.fromCharCode(runes[k]);
-          _requestCharGlowSprite(i, k, charText, fontSize);
-          _requestCharImage(i, k, charText, fontSize);
-        }
+        // P1 时序拆分：字形图与辉光精灵改为【懒预生成】——不再行绑定批量 toImage，
+        // 而是在 tick 中检测"即将成为当前字的强调字"（提前 _imagePrewarmLeadMs）
+        // 才请求，把行切换瞬间的一次性 N 个并发 toImage 分摊到各字激活前逐字生成，
+        // 消除行切换时刻 raster/GPU 突发造成的掉帧。
       }
       _wordStartXs[i] = accumWidth;
       accumWidth += _wordWidths[i];
