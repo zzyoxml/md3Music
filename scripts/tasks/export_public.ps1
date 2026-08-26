@@ -35,6 +35,19 @@
 .PARAMETER PrBranch
   -AsPr 模式的分支名（默认 public-export-<yyyyMMdd-HHmm>）。
 
+.PARAMETER Changelog
+  导出前先更新 CHANGELOG.md：总结上次记录哈希之后的提交（LLM 生成，需用户确认后才写入，
+  或配合 -ChangelogYes 自动确认），以指定/提示的新版本号写入私有仓库根 CHANGELOG.md 并记录状态。
+
+.PARAMETER ChangelogVersion
+  配合 -Changelog 的新版本号（如 v5.4.0）；不填且交互环境时在 changelog 任务里提示输入。
+
+.PARAMETER ChangelogSince
+  配合 -Changelog 的起始提交哈希；不填时自动使用上次记录的哈希（无记录则交互提示）。
+
+.PARAMETER ChangelogYes
+  配合 -Changelog 跳过生成结果的确认（非交互自动化用）。
+
 .PARAMETER NoPause
   结束时不等待按键（CI/被其他脚本调用时使用）。
 
@@ -42,6 +55,7 @@
   .\scripts\md3.ps1 export                                     # 只导出 + 闸门校验
   .\scripts\md3.ps1 export -PublicRemote <URL>                 # 导出 + force push 覆盖 main
   .\scripts\md3.ps1 export -PublicRemote <URL> -AsPr           # 导出 + 推分支 + 开 PR
+  .\scripts\md3.ps1 export -Changelog -ChangelogVersion v5.4.0 # 更新 CHANGELOG 后随导出携带
   .\scripts\md3.ps1 export -PublicRemote <URL> -NoPause        # CI/非交互环境
 #>
 [CmdletBinding()]
@@ -51,6 +65,10 @@ param(
     [string]$PublicBranch = 'main',
     [switch]$AsPr,
     [string]$PrBranch = '',
+    [switch]$Changelog,
+    [string]$ChangelogVersion = '',
+    [string]$ChangelogSince = '',
+    [switch]$ChangelogYes,
     [switch]$NoPause
 )
 
@@ -88,6 +106,20 @@ try {
         }
     }
 
+    # ---------- 1.5 可选：更新 CHANGELOG（在清空导出目录之前，避免失败时白清） ----------
+    if ($Changelog) {
+        Write-Step '更新 CHANGELOG（可选）'
+        # 哈希表 splat 才能按命名参数绑定（数组 splat 会按位置传参，开关会被当普通值）
+        $chgArgs = @{ NoPause = $true }
+        if ($ChangelogVersion) { $chgArgs.Version = $ChangelogVersion }
+        if ($ChangelogSince)   { $chgArgs.SinceHash = $ChangelogSince }
+        if ($ChangelogYes)     { $chgArgs.Yes = $true }
+        & (Join-Path $PSScriptRoot 'changelog.ps1') @chgArgs
+        if ($LASTEXITCODE -ne 0) { throw "CHANGELOG 更新失败（退出码 $LASTEXITCODE），中止导出" }
+        Write-Ok 'CHANGELOG 步骤结束（如选择放弃，则 CHANGELOG.md 维持原状）'
+        Write-Note '注意：CHANGELOG.md 与 scripts/changelog_state.json 可能已改动，请随本次发布一并提交'
+    }
+
     # ---------- 2. 清空旧导出目录 ----------
     Write-Step '清空旧导出目录'
     Remove-ItemBypass $OutDir
@@ -96,13 +128,13 @@ try {
 
     # ---------- 3. 白名单拷贝 ----------
     Write-Step '白名单拷贝公开文件'
-    # scripts/ 整体不进公开树：导出/闸门/一键提交/token 全是私有侧工具链，
-    # 且公开侧 CI 与 README 都不引用任何脚本，构建仅靠 flutter 原生命令即可。
+    # scripts/ 不作为整目录进白名单：只在「导出部分脚本」步骤里拷贝 android/windows 两个
+    # 构建脚本（自带对 lib/common.ps1 缺失的兜底，可独立运行）；其余全部是私有侧工具链。
     $whitelist = @(
         'lib', 'android', 'assets', 'web', 'test',
         'third_party', 'img', '.github',
         'pubspec.yaml', 'analysis_options.yaml', 'README.md',
-        'LICENSE', 'DISCLAIMER.md',
+        'CHANGELOG.md', 'LICENSE', 'DISCLAIMER.md',
         'devtools_options.yaml'
     )
     $copied = 0
@@ -127,11 +159,33 @@ try {
         Remove-ItemBypass $lockFile
         Write-Ok '已排除 pubspec.lock（公开侧重新生成，避免私有包记录）'
     }
-    # 防御：scripts/ 不在白名单内，但历史导出树或人工拷贝可能残留，一律清掉
-    $scriptsDir = Join-Path $OutDir 'scripts'
-    if (Test-Path $scriptsDir) {
-        Remove-ItemBypass $scriptsDir
-        Write-Ok '已排除 scripts/（私有侧工具链整体不进公开树）'
+    # scripts/：只导出 android / windows 两个构建脚本（脚本内已带「公共库缺失时自包含」
+    # 兜底，可脱离 lib/common.ps1 独立运行）。其余脚本（export/verify/commit/token/
+    # changelog 任务、lib/、tools/、public_deny.txt 等）都是私有侧工具链，一律不进公开树。
+    $scriptAllow = @('tasks\android.ps1', 'tasks\windows.ps1')
+    $outScripts = Join-Path $OutDir 'scripts'
+    New-Item -ItemType Directory -Force -Path (Join-Path $outScripts 'tasks') | Out-Null
+    foreach ($rel in $scriptAllow) {
+        $src = Join-Path $Root ('scripts\' + $rel)
+        if (Test-Path $src) {
+            Copy-Item $src (Join-Path $outScripts $rel) -Force
+            Write-Ok "已导出 scripts/$rel（公开侧构建脚本）"
+        }
+    }
+    # 防御：scripts/ 内不在允许清单的文件一律清掉（防止未来新任务脚本被误带进公开树）
+    foreach ($f in (Get-ChildItem $outScripts -Recurse -File -Force -ErrorAction SilentlyContinue)) {
+        $rel = $f.FullName.Substring($outScripts.Length + 1)
+        if ($rel -notin $scriptAllow) {
+            Remove-ItemBypass $f.FullName
+            Write-Warn "已清理 scripts/$rel（不在构建脚本允许清单内）"
+        }
+    }
+    # .trae/：AI 工具计划/工作产物。白名单本就不含（不会复制进来），这里再防御性删除，
+    # 杜绝未来白名单误加或历史导出树残留（.trae/ 下即使有内容也绝不进公开树）
+    $traeDir = Join-Path $OutDir '.trae'
+    if (Test-Path $traeDir) {
+        Remove-ItemBypass $traeDir
+        Write-Ok '已排除 .trae/（AI 计划/工作产物，绝不进公开树）'
     }
     # Windows 构建链为私有版功能（公开版 Android-only）：排除 windows 专用 CI
     $winCi = Join-Path (Join-Path $OutDir '.github') 'workflows\build-windows.yml'
@@ -322,6 +376,7 @@ try {
     Write-Host '    2) 覆盖式发布：.\scripts\md3.ps1 export -PublicRemote <公开仓库URL>'
     Write-Host '    3) 走 PR 审阅：.\scripts\md3.ps1 export -PublicRemote <公开仓库URL> -AsPr'
     Write-Host '    4) 公开入口构建验证：flutter build apk --debug（默认 lib/main.dart）'
+    Write-Host '    5) 更新发布日志：.\scripts\md3.ps1 changelog（总结提交并写入 CHANGELOG.md）'
 }
 catch {
     Write-Host "`n[ERROR] 导出失败：$($_.Exception.Message)" -ForegroundColor Red

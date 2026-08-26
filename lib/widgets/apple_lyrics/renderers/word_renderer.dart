@@ -62,7 +62,10 @@ class WordRenderer {
   /// **v4 解决方案**：每个 word 独占一个 TextPainter 实例，alpha 不变时跳过 set text + layout 是安全的。
   /// 10 word/行 × 60fps = 每秒 600 次 layout → 缓存后降到 ~100-200 次/秒
   /// （仅当前字 + 边界附近 word 在过渡）。
-  List<TextPainter> _wordPainters = const <TextPainter>[];
+  ///
+  /// **v5 波浪化**：仅【非强调字】使用整词 painter；【强调字】拆成逐字符 painter（[_charPainters]），
+  /// 该槽位为 null。
+  List<TextPainter?> _wordPainters = const <TextPainter?>[];
 
   /// v4 优化：每个 word index 上次设置的 alpha（量化步进值）。
   /// 仅在量化值变化时才 set text + layout，避免每帧 N 次 layout。
@@ -93,8 +96,54 @@ class WordRenderer {
   /// 强调辉光效果计算器（由外部注入）。
   EmphasizeEffect? _emphasizeEffect;
 
-  /// 每个 word index 的当前辉光状态。
-  final Map<int, EmphasizeState> _emphasizeStates = <int, EmphasizeState>{};
+  /// v5 逐字符波浪：每个 word 的【逐字符辉光状态】列表。
+  ///
+  /// 仅强调字（[_wordEmphasisFlags] 为 true）有内容，长度 = 该字字符数；
+  /// 非强调字为常量空列表。索引同 [_wordPainters]。
+  List<List<EmphasizeState>> _emphasizeCharStates =
+      const <List<EmphasizeState>>[];
+
+  /// v5 逐字符波浪：每个 word 的逐字符 TextPainter 列表（仅强调字）。
+  /// 字符宽度与相对起始 X 分别缓存在 [_charWidths] / [_charStartXs]。
+  List<List<TextPainter>> _charPainters = const <List<TextPainter>>[];
+
+  /// 每个强调字内每个字符的宽度（px）。
+  List<List<double>> _charWidths = const <List<double>>[];
+
+  /// 每个强调字内每个字符相对字首的起始 X（px）。
+  List<List<double>> _charStartXs = const <List<double>>[];
+
+  /// 每个强调字内每个字符上次设置的 alpha（量化步进值，同 [_lastSetAlphas]）。
+  List<List<int>> _lastSetCharAlphas = const <List<int>>[];
+
+  // ============== v6 自驱动波浪状态（逐字 per-word） ==============
+  //
+  // 波浪相位由帧时钟 dt 每帧推进（脱离播放位置流 _smoothPosMs），保证动画
+  // 平滑、与视图重绘门控解耦；字切换 / seek 跳变时用绝对时间重新锚定相位，
+  // 保持与音频对齐。
+  //
+  // **v8：逐字状态**。波浪不再只属于"当前字"：当前字唱完后，其错位启动的
+  // 后续字符波浪可能还没走完，改为继续推进（"尾巴"）直到所有字符相位完成再
+  // 消失——避免字尾整词被截断造成回落跳变。因此锚定/相位都按字索引独立存储。
+
+  /// 各字锚定时的播放位置（毫秒，-1 = 未锚定/已走完，用于 seek 跳变检测）。
+  List<double> _waveAnchorPosMs = const <double>[];
+
+  /// 各字锚定后由帧 dt 累计推进的毫秒数（用于判断当前播放位置是否应重锚）。
+  List<double> _waveAdvanceMs = const <double>[];
+
+  /// 各字每字符凸起进度（0~1，超出即 clamp；强调字初始为 1.0=已完成）。
+  List<List<double>> _waveBumpPhases = const <List<double>>[];
+
+  /// 各字每字符正弦浮层进度（0~1，超出即 clamp）。
+  List<List<double>> _waveFloatPhases = const <List<double>>[];
+
+  /// seek 跳变检测容差（ms）：当前播放位置与自驱动预期位置偏差超过此值即重锚。
+  static const double _waveReanchorToleranceMs = 150;
+
+  /// 图片懒预生成提前量（ms）：强调字开始前多久请求字形图/辉光精灵，
+  /// 把 toImage 从行切换一次性突发摊到各字激活前（P1 时序拆分）。
+  static const double _imagePrewarmLeadMs = 250;
 
   /// 行级元数据判定缓存（行绑定期计算一次）。
   /// true 表示该行为元数据行（作词/作曲 等），整行禁用辉光。
@@ -127,16 +176,31 @@ class WordRenderer {
   /// 辉光层复用的 Paint 实例（避免每帧新建 Paint + ImageFilter）。
   final Paint _glowBlurPaint = Paint();
 
-  /// P1-5 方案 1：辉光精灵缓存（wordIndex → 最大 blur 的模糊白字图）。
+  /// P1-5 方案 1：辉光精灵缓存（wordIndex × charIndex → 最大 blur 的模糊白字图）。
   ///
-  /// word 激活时用 [PictureRecorder] + [ui.Image] 异步渲染一次，
+  /// 字符激活时用 [PictureRecorder] + [ui.Image] 异步渲染一次，
   /// 之后每帧 [Canvas.drawImage] 贴图（透明度跟随 glowLevel），
   /// 替代每帧 `saveLayer + ImageFilter.blur` 的 GPU 开销。
   /// 仅在 _ensureBound 重置（切行/字号变化）与文字颜色变化时失效。
-  final Map<int, ui.Image> _glowSprites = <int, ui.Image>{};
+  /// 仅强调字有内容；非强调字为常量空列表。
+  List<List<ui.Image?>> _charGlowSprites = const <List<ui.Image?>>[];
 
-  /// 正在异步渲染辉光精灵的 wordIndex 集合（避免重复请求）。
-  final Set<int> _glowSpritePending = <int>{};
+  /// 正在异步渲染辉光精灵的 (wordIndex:charIndex → rowHeight) 映射。
+  ///
+  /// 记录每个渲染任务对应的行盒，用于行盒竞态保护：旧行盒渲染未完成时，
+  /// 若同一字被按新行盒重新请求，回调通过 [_glowSpriteRowHeight] 校验丢弃
+  /// 过期结果，避免误用行盒不匹配（偏下）的精灵。
+  final Map<String, double> _glowSpritePendingRow = <String, double>{};
+
+  /// 每个辉光精灵生成时使用的行盒（wordIndex:charIndex → rowHeight）。
+  ///
+  /// 辉光精灵按绘制时的行盒（[LyricLayout.lineHeight] 或换行行的 0.8x）渲染，
+  /// 与正文字形同盒顶对齐；行盒变化（换行行 ⇄ 非换行行）时据此释放旧精灵
+  /// 并强制重新渲染，保证光晕始终贴合文字。
+  final Map<String, double> _glowSpriteRowHeight = <String, double>{};
+
+  /// 辉光行盒诊断日志去重标记：仅打印状态变化的换行行辉光记录。
+  String _lastGlowDebug = '';
 
   /// 精灵渲染代数：_ensureBound / reset 时递增，
   /// 异步回调用代数校验，丢弃过期（renderer 已重置/切行）的渲染结果。
@@ -144,6 +208,21 @@ class WordRenderer {
 
   /// 辉光精灵贴图复用的 Paint（透明度由 glowLevel 经 ColorFilter 驱动）。
   final Paint _glowImagePaint = Paint();
+
+  /// v7 逐字符预渲染图片缓存（wordIndex × charIndex → 纯白字形图）。
+  ///
+  /// 波浪激活窗口内逐字符缩放/位移时，若直接用 TextPainter 每帧绘制文字，
+  /// 字形会被重新栅格化到亚像素尺寸 → 边缘闪烁抖动（"缩放不够无极"）。
+  /// 改为行绑定时把字符预渲染成图片，每帧只做 canvas 变换（GPU 双线性采样）
+  /// + ColorFilter.matrix 上色（文字色 + mask alpha），画面平滑且成本更低。
+  /// 仅强调字有内容；非强调字为常量空列表。
+  List<List<ui.Image?>> _charImages = const <List<ui.Image?>>[];
+
+  /// 正在异步渲染字符图片的 (wordIndex, charIndex) 集合（避免重复请求）。
+  final Set<String> _charImagePending = <String>{};
+
+  /// 字符图片绘制复用的 Paint（文字色 + alpha 经 ColorFilter 驱动）。
+  final Paint _charImagePaint = Paint();
 
   /// 最大辉光 blur sigma：shadowBlurEm 封顶 0.3em × 0.8 = 0.24 × fontSize。
   static double _maxGlowSigma(double fontSize) => 0.24 * fontSize;
@@ -199,6 +278,11 @@ class WordRenderer {
   /// 当前演唱字索引（供测试断言）。
   @visibleForTesting
   int get currentWordIdx => _currentWordIdx;
+
+  /// 指定字的逐字符强调状态引用（供测试断言波浪尾巴行为）。
+  @visibleForTesting
+  List<EmphasizeState> debugCharStatesRef(int wordIndex) =>
+      _emphasizeCharStates[wordIndex];
 
   /// 过渡区半宽固定值（供测试断言字切换时的稳定性）。
   @visibleForTesting
@@ -262,6 +346,12 @@ class WordRenderer {
   /// 设置强调辉光效果计算器。
   set emphasizeEffect(EmphasizeEffect? effect) => _emphasizeEffect = effect;
 
+  /// 辉光触发阈值（ms）：500=快歌，1000=慢歌。
+  ///
+  /// 由歌曲 BPM / KRC 歌词字长推断（见 EmphasizeEffect.resolveThresholdMs），
+  /// 切歌时由 AppleLyricsView 设置；_ensureBound 行绑定时据此判定强调字。
+  int thresholdMs = 500;
+
   // ============== 动画推进 ==============
 
   /// 推进动画。
@@ -279,7 +369,7 @@ class WordRenderer {
   /// - 非激活行快速路径：跳过 currentWordIdx 计算、smoothstep、per-word target 分支，
   ///   所有 word 统一 target=dark / Y=0 / emphasis=idle
   /// - early-exit 已收敛字：90% 的字已收敛，跳过乘法运算
-  void tick(double dt, int currentTimeMs) {
+  void tick(double dt, int currentTimeMs, {bool isPlaying = true}) {
     if (dt <= 0) return;
     if (_boundLine == null || _boundLine!.words.isEmpty) return;
 
@@ -320,8 +410,12 @@ class WordRenderer {
           _wordYOffsets[i] = nextY;
           anyChanged = true;
         }
-        // Emphasis: 非当前行一律 idle
-        _emphasizeStates[i] = EmphasizeState.idle;
+        // Emphasis: 非当前行一律 idle（逐字符）；自驱动波浪一并复位
+        if (_waveAnchorPosMs.isNotEmpty) _waveAnchorPosMs[i] = -1;
+        final List<EmphasizeState> charStates = _emphasizeCharStates[i];
+        for (int k = 0; k < charStates.length; k++) {
+          charStates[k] = EmphasizeState.idle;
+        }
       }
       _isConverged = !anyChanged;
       _currentWordIdx = -1;
@@ -389,6 +483,28 @@ class WordRenderer {
     // 性能优化：内联 target 计算 + early-exit 已收敛字 + 预计算 decay
     // 90% 的字在任意时刻已收敛到目标值，跳过乘法运算可大幅降低 CPU 开销
     for (int i = 0; i < wordCount; i++) {
+      // P1 时序拆分：图片懒预生成——强调字临近开始（提前 _imagePrewarmLeadMs）
+      // 才请求字形图与辉光精灵。toImage 为异步，提前 250ms 触发足够在字激活前
+      // 就绪；把行切换瞬间的一次性 N 个并发 toImage 摊到各字激活前逐字生成，
+      // 消除行切换时刻 raster/GPU 突发造成的掉帧。
+      if (_wordEmphasisFlags[i]) {
+        final LyricWord w = words[i];
+        if (currentTimeMs >= w.startTime - _imagePrewarmLeadMs &&
+            currentTimeMs < w.startTime + w.duration) {
+          final List<int> runes = w.text.runes.toList();
+          for (int k = 0; k < runes.length; k++) {
+            final String charText = String.fromCharCode(runes[k]);
+            _requestCharImage(i, k, charText, _boundFontSize);
+            // 预热阶段尚未布局，默认按整行行盒渲染；
+            // 若该字实际位于换行行（0.8x 行盒），绘制时会检测行盒变化并重渲染。
+            // rebuildOnMismatch: false —— 预热不干预已建立的正确精灵/进行中的
+            // 渲染任务，避免每帧预热与换行行绘制反复释放重建导致光晕闪烁。
+            _requestCharGlowSprite(
+                i, k, charText, _boundFontSize, LyricLayout.lineHeight,
+                rebuildOnMismatch: false);
+          }
+        }
+      }
       // === Alpha 动画 ===
       final double target;
       if (i < currentWordIdx) {
@@ -446,24 +562,91 @@ class WordRenderer {
         anyChanged = true;
       }
 
-      // === 强调辉光效果 ===
+      // === 强调辉光效果（v6 自驱动逐字符波浪） ===
+      // 相位由帧时钟 dt 每帧推进，脱离播放位置流，天然平滑且不依赖视图重绘门控：
+      // 波浪进行中标记 anyChanged（isConverged=false）→ 重绘持续；完成即收敛，
+      // Ticker 可正常停止（性能零空闲开销）。字切换 / seek 跳变时用绝对时间
+      // [EmphasizeEffect.phasesAt] 锚定一次初始相位，保持与音频对齐。
       // 字级判定（含正则匹配）在 _ensureBound 时已缓存，此处仅 O(1) 数组读取。
-      // computeState 是纯函数，仅当 t=(now-start)/duration ∈ [0,1] 时返回非 idle，
-      // 即只有当前字可能非 idle（其余字 t 必在 [0,1] 外、必然返回 idle）。
-      // 故仅对当前字调用 computeState，其余直接置 idle，避免每帧 N-1 次无效
-      // bezier/sqrt/pow 计算与对象分配。字切换进入新字窗口的那一帧该字恰为
-      // currentWordIdx，仍会正常计算，无辉光丢失（行为逐帧等价）。
+      //
+      // **v8：波浪按字独立锚定/推进**。当前字唱完（isCurrentWord 转移到下一字）
+      // 后，其错位启动的后续字符波浪可能还没走完——此处继续推进（"尾巴"）直到
+      // 所有字符相位完成再消失，避免字尾整词被截断造成回落跳变。
       final bool isCurrentWord = i == currentWordIdx;
-      if (!skipLineEmphasis && _wordEmphasisFlags[i] && isCurrentWord) {
-        _emphasizeStates[i] = _emphasizeEffect!.computeState(
-          word: words[i],
-          currentTimeMs: currentTimeMs,
-          isLastWord: i == wordCount - 1,
-          wordIndex: i,
-          anchorCharCount: words[i].text.runes.length,
-        );
-      } else {
-        _emphasizeStates[i] = EmphasizeState.idle;
+      final List<EmphasizeState> charStates = _emphasizeCharStates[i];
+      if (charStates.isNotEmpty) {
+        final LyricWord w = words[i];
+        final int anchorCharCount = w.text.runes.length;
+        final double du = EmphasizeEffect.duMs(w);
+        // 当前字：锚定 / 重锚（字进入当前、或 seek 前后跳变）
+        if (!skipLineEmphasis && isCurrentWord) {
+          final bool wasAnchored = _waveAnchorPosMs[i] >= 0;
+          final bool needReanchor = !wasAnchored ||
+              (currentTimeMs - (_waveAnchorPosMs[i] + _waveAdvanceMs[i])).abs() >
+                  _waveReanchorToleranceMs;
+          if (needReanchor) {
+            _waveAnchorPosMs[i] = currentTimeMs.toDouble();
+            _waveAdvanceMs[i] = 0;
+            for (int k = 0; k < charStates.length; k++) {
+              final EmphasizePhases phases = EmphasizeEffect.phasesAt(
+                word: w,
+                currentTimeMs: currentTimeMs,
+                wordIndex: k,
+                anchorCharCount: anchorCharCount,
+              );
+              _waveBumpPhases[i][k] = phases.bumpPhase;
+              _waveFloatPhases[i][k] = phases.floatPhase;
+            }
+          }
+        }
+        final bool anchored = _waveAnchorPosMs[i] >= 0;
+        if (anchored) {
+          // 推进相位（当前字与已播完的尾巴都推进）。
+          // **暂停时冻结**：相位与 _waveAdvanceMs 都不推进、也不标记动画 → 波浪
+          // 静止并收敛停 Ticker，避免暂停后辉光仍在持续涨落造成边缘闪烁。
+          if (isPlaying) {
+            _waveAdvanceMs[i] += dt * 1000;
+            final double bumpStep = dt * 1000 / du;
+            final double floatStep =
+                dt * 1000 / (du * EmphasizeEffect.floatDurationFactor);
+            for (int k = 0; k < charStates.length; k++) {
+              _waveBumpPhases[i][k] = min(1.0, _waveBumpPhases[i][k] + bumpStep);
+              _waveFloatPhases[i][k] = min(1.0, _waveFloatPhases[i][k] + floatStep);
+            }
+          }
+          // 由（推进后 / 冻结的）相位计算状态；波浪进行中标记动画保证重绘
+          bool waveAnimating = false;
+          for (int k = 0; k < charStates.length; k++) {
+            if (_waveBumpPhases[i][k] < 1.0 || _waveFloatPhases[i][k] < 1.0) {
+              waveAnimating = true;
+            }
+            final EmphasizeState next =
+                _emphasizeEffect!.computeStateFromPhases(
+              word: w,
+              bumpPhase: _waveBumpPhases[i][k],
+              floatPhase: _waveFloatPhases[i][k],
+              isLastWord: i == wordCount - 1,
+              wordIndex: k,
+              anchorCharCount: anchorCharCount,
+            );
+            if (next != charStates[k]) anyChanged = true;
+            charStates[k] = next;
+          }
+          // 尾巴走完后的复位：仅【非当前字】的尾巴走完才复位锚定标记；
+          // 当前字即使波浪走完也保持锚定，避免字还在唱时被误判重锚导致波浪重播。
+          if (!waveAnimating && !isCurrentWord) {
+            _waveAnchorPosMs[i] = -1;
+          }
+          // 波浪进行中必须持续重绘（防止被视图"无视觉变化"门控冻结）；暂停时不标记，
+          // 让画面静止、Ticker 正常停止。
+          if (isPlaying && waveAnimating) anyChanged = true;
+        } else {
+          // 未锚定（从未进入当前字 / 波浪已走完）：整词 idle，走整词渲染路径
+          for (int k = 0; k < charStates.length; k++) {
+            if (charStates[k] != EmphasizeState.idle) anyChanged = true;
+            charStates[k] = EmphasizeState.idle;
+          }
+        }
       }
     }
     // v3 优化：跟踪 alpha/Y offset 是否仍在变化（用于 AppleLyricsView 判断停止 Ticker）
@@ -493,7 +676,12 @@ class WordRenderer {
       {double maxWidth = double.infinity,
       DuetAlignment alignment = DuetAlignment.defaultAlign,
       double viewportWidth = 0}) {
+    // 临时调试：行切换时打印换行分析（定位歌词重叠）
+    final bool isNewLine = !identical(_boundLine, line) || _boundFontSize != fontSize;
     _ensureBound(line, fontSize);
+    if (isNewLine) {
+      _debugLogWrap(line, fontSize, maxWidth);
+    }
 
     // 解析当前行实际文字颜色：动态字体颜色（仅当前行）优先，否则回退主题默认色。
     // 颜色变化时清空 alpha 缓存强制重建所有 word TextSpan。
@@ -503,13 +691,23 @@ class WordRenderer {
             : LyricLayout.textColorValue;
     if (textColorValue != _lastTextColorValue) {
       _lastSetAlphas = List<int>.filled(_lastSetAlphas.length, -1);
+      // v5：逐字符 alpha 缓存一并失效
+      for (int i = 0; i < _lastSetCharAlphas.length; i++) {
+        _lastSetCharAlphas[i] =
+            List<int>.filled(_lastSetCharAlphas[i].length, -1);
+      }
       _lastTextColorValue = textColorValue;
       // P1-5：辉光精灵颜色跟随文字色（当前行渐变路径下为白色），
-      // 颜色变化（主题/动态字体色切换）时失效所有精灵缓存。
-      for (final img in _glowSprites.values) {
-        img.dispose();
+      // 颜色变化（主题/动态字体色切换）时失效所有精灵缓存（逐字符）。
+      for (final charList in _charGlowSprites) {
+        for (final img in charList) {
+          img?.dispose();
+        }
       }
-      _glowSprites.clear();
+      for (int i = 0; i < _charGlowSprites.length; i++) {
+        _charGlowSprites[i] =
+            List<ui.Image?>.filled(_charGlowSprites[i].length, null);
+      }
     }
     final int textRed = (textColorValue >> 16) & 0xFF;
     final int textGreen = (textColorValue >> 8) & 0xFF;
@@ -532,9 +730,12 @@ class WordRenderer {
     double currentY = offset.dy; // 当前视觉行的 y 坐标
     final double dark = dynamicDarkAlpha;
     final double bright = dynamicBrightAlpha;
+    // 主行行高 = 主行高（完整行盒）；换行行盒模型与 measureLineHeight 一致：
+    // 主行完整行高，换行行 0.8x 行高、从主行底开始，行盒=行距避免相邻行重叠。
+    final double mainLineHeight = fontSize * LyricLayout.lineHeight;
     // 换行内部行高 = 主行高 × 0.8（与 LyricLayout.measureLineHeight 一致）
     final double wrapLineHeight =
-        fontSize * LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor;
+        mainLineHeight * LyricLayout.wrapLineHeightFactor;
     final double lineHeight = LyricLayout.lineHeight;
 
     // === 行级渐变参数（核心：行级 maskX 模型）===
@@ -558,15 +759,17 @@ class WordRenderer {
       final LyricWord word = line.words[i];
       // AMLL 上浮特效：当前字 Y 偏移（上浮）
       final double yOffset = i < _wordYOffsets.length ? _wordYOffsets[i] : 0;
-      // 强调辉光状态
-      final EmphasizeState emState = _emphasizeStates[i] ?? EmphasizeState.idle;
       // 用缓存宽度做换行判断（避免每帧 TextPainter.layout 测量）
       final double width =
           i < _wordWidths.length ? _wordWidths[i] : 0;
       // 自动换行：累计宽度超过 maxWidth 且本视觉行已有 word 时换行
       if (dx + width > maxWidth && dx > 0) {
         dx = 0;
-        currentY += wrapLineHeight;
+        // 第一个换行行从主行底部（offset.dy + mainLineHeight）开始，
+        // 后续换行行之间 0.8x 行高（与 measureLineHeight 一致，避免行盒重叠）
+        currentY = visualLineIndex == 0
+            ? offset.dy + mainLineHeight
+            : currentY + wrapLineHeight;
         // 换行后重算对齐 baseX
         visualLineIndex++;
         if (visualLineIndex < visualLineWidths.length) {
@@ -575,166 +778,127 @@ class WordRenderer {
         }
       }
 
+      // 换行行用 0.8x 行盒（行盒=行距，避免行盒重叠）；主行用完整行高
+      final double rowHeight = visualLineIndex > 0
+          ? LyricLayout.lineHeight * LyricLayout.wrapLineHeightFactor
+          : LyricLayout.lineHeight;
+
       final double wordX = baseX + dx;
       final double wordY = currentY + yOffset;
-      final Offset wordPos = Offset(wordX, wordY);
 
-      // === 计算渲染 alpha ===
-      // 行级 maskX 模型：基于 word 在行内的累计 X 坐标计算边缘 alpha。
-      // 已播区（maskX 左侧远端）= bright，未播区（maskX 右侧远端）= dark，
-      // 过渡区内线性插值，实现跨字平滑渐变。
-      final double leftAlpha;
-      final double rightAlpha;
-      if (!useGradient) {
-        leftAlpha = rightAlpha = i < _wordAlphas.length ? _wordAlphas[i] : dark;
+      // === 逐字符 vs 整词渲染分支 ===
+      // v5 波浪化：强调字（_charPainters 非空）且【处于激活窗口】（任一字符非 idle）
+      // 才逐字符渲染（逐字符 scale/位移/辉光）；idle 时走整词渲染，避免逐字符
+      // layout/渐变 shader 每帧开销导致位移与缩放卡顿。
+      final List<TextPainter> charPainters =
+          i < _charPainters.length ? _charPainters[i] : const <TextPainter>[];
+      final bool charModeActive =
+          charPainters.isNotEmpty && _hasActiveEmphasis(i);
+      if (charModeActive) {
+        _paintEmphasizedWord(
+          canvas,
+          wordX: wordX,
+          wordY: wordY,
+          fontSize: fontSize,
+          lineHeight: lineHeight,
+          rowHeight: rowHeight,
+          wordIndex: i,
+          textRed: textRed,
+          textGreen: textGreen,
+          textBlue: textBlue,
+          bright: bright,
+          dark: dark,
+          transitionStart: transitionStart,
+          transitionSpan: transitionSpan,
+          useGradient: useGradient,
+        );
       } else {
-        final double wordStartX = i < _wordStartXs.length ? _wordStartXs[i] : 0;
-        final double wordEndX = wordStartX + width;
-        leftAlpha = _alphaAtX(wordStartX, transitionStart, transitionSpan, bright, dark);
-        rightAlpha = _alphaAtX(wordEndX, transitionStart, transitionSpan, bright, dark);
-      }
-
-      final painter = _wordPainters[i];
-
-      // === 强调辉光：save + scale（公共路径）===
-      final bool needEmphasis = emState.scale != 1.0 || emState.glowLevel > 0;
-      if (needEmphasis) {
-        canvas.save();
-        final double centerX = wordX + width / 2;
-        final double centerY = wordY + fontSize * lineHeight / 2;
-        canvas.translate(centerX, centerY);
-        canvas.scale(emState.scale, emState.scale);
-        canvas.translate(-centerX, -centerY);
-      }
-
-      // === 渲染文字 ===
-      // 性能优化（核心）：左右 alpha 几乎一致时用均匀绘制（量化缓存，跳过 layout）。
-      // 过渡区内的 word 走渐变路径，用 saveLayer + BlendMode.modulate 应用渐变。
-      //
-      // **layout 复用原理**：
-      // - 渐变路径保持 painter.text 为 plain white（color=white, alpha=1.0）
-      // - TextSpan.== 比较时 plain white 的 color/fontSize/fontFamily 不变 → 不触发 relayout
-      // - 渐变通过 saveLayer + drawRect(modulate) 事后应用，不影响 layout
-      // - 稳态下 0 次 layout/帧（仅路径切换时 1 次 layout）
-      //
-      // **BlendMode.modulate 公式**：result = src × dst（逐分量含 alpha）
-      // - dst = 白色文字（color=white, alpha=文字形状）
-      // - src = 渐变（color=white, alpha=leftAlpha→rightAlpha）
-      // - result.color = white × white = white
-      // - result.alpha = 渐变alpha × 文字形状 ✓
-      final bool isUniform = (leftAlpha - rightAlpha).abs() < 0.01;
-      if (isUniform) {
-        // === 均匀路径 ===
-        final double uniformAlpha = (leftAlpha + rightAlpha) * 0.5;
-        final int alphaStep = (uniformAlpha * 20).round();
-        if (_lastSetAlphas[i] != alphaStep) {
-          // 量化值变化或从渐变路径切换过来：重新 set text + layout
-          painter.text = TextSpan(
-            text: word.text,
-            style: TextStyle(
-              color: Color.fromRGBO(textRed, textGreen, textBlue, uniformAlpha),
-              fontSize: fontSize,
-              height: lineHeight,
-              fontFamily: LyricLayout.fontFamily,
-              fontWeight: LyricLayout.fontWeight,
-            ),
-          );
-          painter.layout();
-          _lastSetAlphas[i] = alphaStep;
+        // === 非强调字：整词渲染（原 alpha 路径）===
+        // 行级 maskX 模型：基于 word 在行内的累计 X 坐标计算边缘 alpha。
+        // 已播区（maskX 左侧远端）= bright，未播区（maskX 右侧远端）= dark，
+        // 过渡区内线性插值，实现跨字平滑渐变。
+        final double leftAlpha;
+        final double rightAlpha;
+        if (!useGradient) {
+          leftAlpha = rightAlpha = i < _wordAlphas.length ? _wordAlphas[i] : dark;
+        } else {
+          final double wordStartX = i < _wordStartXs.length ? _wordStartXs[i] : 0;
+          final double wordEndX = wordStartX + width;
+          leftAlpha = _alphaAtX(wordStartX, transitionStart, transitionSpan, bright, dark);
+          rightAlpha = _alphaAtX(wordEndX, transitionStart, transitionSpan, bright, dark);
         }
-      } else {
-        // === 渐变路径（saveLayer + modulate，复用 layout）===
-        // 确保 painter 处于 plain white 状态（只在切换时 set text + layout）
-        if (_lastSetAlphas[i] != -1) {
-          painter.text = TextSpan(
-            text: word.text,
-            style: TextStyle(
-              color: const Color.fromRGBO(255, 255, 255, 1.0), // plain white
-              fontSize: fontSize,
-              height: lineHeight,
-              fontFamily: LyricLayout.fontFamily,
-              fontWeight: LyricLayout.fontWeight,
-            ),
-          );
-          painter.layout();
-          _lastSetAlphas[i] = -1; // 标记 plain white 已缓存
-        }
-      }
 
-      // === 辉光层 + 正常文字层绘制 ===
-      // 辉光逻辑为公共路径，均匀和渐变共用
-      if (needEmphasis && emState.glowLevel > 0) {
-        final double blurSigma = emState.shadowBlurEm * fontSize * 0.8;
-        if (blurSigma > 0) {
-          final glowRect = Rect.fromLTWH(
-            wordX - blurSigma * 2, wordY - blurSigma * 2,
-            width + blurSigma * 4, fontSize * lineHeight + blurSigma * 4,
-          );
-          // P1-5 方案 1：优先用预渲染辉光精灵贴图。
-          // 精灵 = 固定最大 blur 的模糊白字图，透明度经 ColorFilter 跟随
-          // glowLevel 平滑变化；每帧成本从「saveLayer + blur」降为「一次贴图」。
-          // 视觉差异：blur 半径不再随字内进度连续变化，改为恒定最大 + 透明度动画
-          // （主要区间——满强度段 blur 本就是最大——与现状一致）。
-          final ui.Image? sprite = _glowSprites[i];
-          if (sprite != null) {
-            final double pad = _maxGlowSigma(fontSize) * 2;
-            // 辉光整体透明度随 glowLevel 平滑变化，避免辉光开关式突兀出现/消失
-            _glowImagePaint.colorFilter = ColorFilter.matrix(<double>[
-              1, 0, 0, 0, 0,
-              0, 1, 0, 0, 0,
-              0, 0, 1, 0, 0,
-              0, 0, 0, emState.glowLevel.clamp(0.0, 1.0), 0,
-            ]);
-            canvas.drawImage(
-              sprite,
-              Offset(wordX - pad, wordY - pad),
-              _glowImagePaint,
+        final TextPainter painter = _wordPainters[i]!;
+
+        // === 渲染文字 ===
+        // 性能优化（核心）：左右 alpha 几乎一致时用均匀绘制（量化缓存，跳过 layout）。
+        // 过渡区内的 word 走渐变路径，用 saveLayer + BlendMode.modulate 应用渐变。
+        //
+        // **layout 复用原理**：
+        // - 渐变路径保持 painter.text 为 plain white（color=white, alpha=1.0）
+        // - TextSpan.== 比较时 plain white 的 color/fontSize/fontFamily 不变 → 不触发 relayout
+        // - 渐变通过 saveLayer + drawRect(modulate) 事后应用，不影响 layout
+        // - 稳态下 0 次 layout/帧（仅路径切换时 1 次 layout）
+        //
+        // **BlendMode.modulate 公式**：result = src × dst（逐分量含 alpha）
+        // - dst = 白色文字（color=white, alpha=文字形状）
+        // - src = 渐变（color=white, alpha=leftAlpha→rightAlpha）
+        // - result.color = white × white = white
+        // - result.alpha = 渐变alpha × 文字形状 ✓
+        final bool isUniform = (leftAlpha - rightAlpha).abs() < 0.01;
+        if (isUniform) {
+          // === 均匀路径 ===
+          final double uniformAlpha = (leftAlpha + rightAlpha) * 0.5;
+          final int alphaStep = (uniformAlpha * 20).round();
+          if (_lastSetAlphas[i] != alphaStep) {
+            // 量化值变化或从渐变路径切换过来：重新 set text + layout
+            painter.text = TextSpan(
+              text: word.text,
+              style: TextStyle(
+                color: Color.fromRGBO(textRed, textGreen, textBlue, uniformAlpha),
+                fontSize: fontSize,
+                height: rowHeight,
+                fontFamily: LyricLayout.fontFamily,
+                fontWeight: LyricLayout.fontWeight,
+              ),
             );
-          } else {
-            // 精灵未就绪（word 激活早期，glowLevel≈0 几乎不可见）：
-            // 异步请求渲染，本帧降级旧 saveLayer 路径保证视觉连续。
-            _requestGlowSprite(i, word, fontSize);
-            _glowBlurPaint.imageFilter = ImageFilter.blur(
-              sigmaX: blurSigma, sigmaY: blurSigma,
-            );
-            // 辉光整体透明度随 glowLevel 平滑变化，避免辉光开关式突兀出现/消失
-            _glowBlurPaint.colorFilter = ColorFilter.matrix(<double>[
-              1, 0, 0, 0, 0,
-              0, 1, 0, 0, 0,
-              0, 0, 1, 0, 0,
-              0, 0, 0, emState.glowLevel.clamp(0.0, 1.0), 0,
-            ]);
-            canvas.saveLayer(glowRect, _glowBlurPaint);
-            painter.paint(canvas, wordPos);
-            canvas.restore();
+            painter.layout();
+            _lastSetAlphas[i] = alphaStep;
           }
+          painter.paint(canvas, Offset(wordX, wordY));
+        } else {
+          // === 渐变路径（saveLayer + modulate，复用 layout）===
+          // 确保 painter 处于 plain white 状态（只在切换时 set text + layout）
+          if (_lastSetAlphas[i] != -1) {
+            painter.text = TextSpan(
+              text: word.text,
+              style: TextStyle(
+                color: const Color.fromRGBO(255, 255, 255, 1.0), // plain white
+                fontSize: fontSize,
+                height: rowHeight,
+                fontFamily: LyricLayout.fontFamily,
+                fontWeight: LyricLayout.fontWeight,
+              ),
+            );
+            painter.layout();
+            _lastSetAlphas[i] = -1; // 标记 plain white 已缓存
+          }
+          final Rect wordRect = Rect.fromLTWH(wordX, wordY, width, fontSize * rowHeight);
+          canvas.saveLayer(wordRect, Paint());
+          painter.paint(canvas, Offset(wordX, wordY)); // dst = 白色文字（layout 已缓存，不重算）
+          // 复用 _gradientPaint 实例，只改 shader 和 blendMode。
+          // 注意：不要对渐变 alpha 做量化缓存（曾引入 5% 可见阶跃闪烁 + 频繁清空重建反而卡顿）。
+          _gradientPaint.shader = LinearGradient(
+            colors: [
+              Color.fromRGBO(textRed, textGreen, textBlue, leftAlpha),
+              Color.fromRGBO(textRed, textGreen, textBlue, rightAlpha),
+            ],
+            stops: const <double>[0.0, 1.0],
+          ).createShader(wordRect);
+          _gradientPaint.blendMode = BlendMode.modulate;
+          canvas.drawRect(wordRect, _gradientPaint); // src = 渐变
+          canvas.restore();
         }
-      }
-
-      if (isUniform) {
-        // 均匀路径：直接 paint（text 的 color 已是目标 alpha）
-        painter.paint(canvas, wordPos);
-      } else {
-        // 渐变路径：saveLayer + paint(plain white) + drawRect(modulate) 应用渐变
-        final Rect wordRect = Rect.fromLTWH(wordX, wordY, width, fontSize * lineHeight);
-        canvas.saveLayer(wordRect, Paint());
-        painter.paint(canvas, wordPos); // dst = 白色文字（layout 已缓存，不重算）
-        // 复用 _gradientPaint 实例，只改 shader 和 blendMode。
-        // 注意：不要对渐变 alpha 做量化缓存（曾引入 5% 可见阶跃闪烁 + 频繁清空重建反而卡顿）。
-        _gradientPaint.shader = LinearGradient(
-          colors: [
-            Color.fromRGBO(textRed, textGreen, textBlue, leftAlpha),
-            Color.fromRGBO(textRed, textGreen, textBlue, rightAlpha),
-          ],
-          stops: const <double>[0.0, 1.0],
-        ).createShader(wordRect);
-        _gradientPaint.blendMode = BlendMode.modulate;
-        canvas.drawRect(wordRect, _gradientPaint); // src = 渐变
-        canvas.restore();
-      }
-
-      if (needEmphasis) {
-        canvas.restore();
       }
 
       dx += width;
@@ -750,9 +914,16 @@ class WordRenderer {
         auxText != null &&
         auxText.isNotEmpty) {
       final transFontSize = LyricLayout.translationFontSize(fontSize);
-      // currentY 是循环结束后的最后视觉行 Y；副行 Y = currentY + 主行高 + 0.3em 间隙
-      final transY =
-          currentY + fontSize * LyricLayout.lineHeight + transFontSize * 0.3;
+      // currentY 是循环结束后的最后视觉行 Y。
+      // 副行 Y = 最后视觉行底部 + 0.3em 间隙：单行用完整行高，
+      // 多行时最后一行是换行行（0.8x 行高），与 measureLineHeight 压缩模型一致，
+      // 避免翻译副行向下偏移与下一行歌词重叠。
+      final double lastRowHeight = visualLineIndex > 0
+          ? fontSize *
+              LyricLayout.lineHeight *
+              LyricLayout.wrapLineHeightFactor
+          : fontSize * LyricLayout.lineHeight;
+      final transY = currentY + lastRowHeight + transFontSize * 0.3;
       _translationPainter.text = TextSpan(
         text: auxText,
         style: TextStyle(
@@ -773,6 +944,226 @@ class WordRenderer {
       // 单行时 textAlign 不影响，_alignX 已计算正确 x
       _translationPainter.textAlign = _duetToTextAlign(alignment);
       _translationPainter.paint(canvas, Offset(transX, transY));
+    }
+  }
+
+  /// 该字是否处于强调激活窗口（任一字符状态非 idle）。
+  ///
+  /// idle 判定基于 [EmphasizeState.idle] 常量（scale=1、无辉光、无位移）。
+  /// 仅当前演唱字内的字符在各自错位窗口内可能非 idle，因此该判断绝大多数
+  /// 时间为 false → 走整词渲染，避免逐字符渲染的每帧开销。
+  bool _hasActiveEmphasis(int wordIndex) {
+    final List<EmphasizeState> states = _emphasizeCharStates[wordIndex];
+    for (final s in states) {
+      if (s != EmphasizeState.idle) return true;
+    }
+    return false;
+  }
+
+  /// v5 逐字符波浪：逐字符绘制强调字。
+  ///
+  /// 每个字符独立应用 [EmphasizeState] 的 scale（绕字符中心缩放）、水平外扩
+  /// offsetXEm、上浮 offsetYEm + 正弦浮层 floatYEm，以及逐字符辉光精灵与
+  /// 行级 mask 渐变采样。整词上浮（[_wordYOffsets]）已含在 [wordY] 中，所有
+  /// 字符统一叠加，保留 AMLL 的 float-word 与逐字 float 双层效果。
+  ///
+  /// [wordIndex] 该字在行内的索引（用于取逐字符缓存与行内起始 X）。
+  void _paintEmphasizedWord(
+    Canvas canvas, {
+    required double wordX,
+    required double wordY,
+    required double fontSize,
+    required double lineHeight,
+    required double rowHeight,
+    required int wordIndex,
+    required int textRed,
+    required int textGreen,
+    required int textBlue,
+    required double bright,
+    required double dark,
+    required double transitionStart,
+    required double transitionSpan,
+    required bool useGradient,
+  }) {
+    final List<TextPainter> charPainters = _charPainters[wordIndex];
+    final List<double> charWidths = _charWidths[wordIndex];
+    final List<double> charStartXs = _charStartXs[wordIndex];
+    final List<EmphasizeState> charStates = _emphasizeCharStates[wordIndex];
+    final List<int> lastSetAlphas = _lastSetCharAlphas[wordIndex];
+    final List<ui.Image?> glowSprites = _charGlowSprites[wordIndex];
+    final List<ui.Image?> charImages = _charImages[wordIndex];
+    final double wordStartX =
+        wordIndex < _wordStartXs.length ? _wordStartXs[wordIndex] : 0;
+    // 非渐变（maskX 无效）时逐字符共用整词 alpha
+    final double solidAlpha =
+        wordIndex < _wordAlphas.length ? _wordAlphas[wordIndex] : dark;
+
+    for (int k = 0; k < charPainters.length; k++) {
+      final double cw = k < charWidths.length ? charWidths[k] : 0;
+      final double charStartX = k < charStartXs.length ? charStartXs[k] : 0;
+      final EmphasizeState st =
+          k < charStates.length ? charStates[k] : EmphasizeState.idle;
+      final TextPainter painter = charPainters[k];
+
+      // 行级 maskX 模型按字符中心采样单一 alpha（uniform）。
+      // **P6 优化**：激活窗口内逐字符不再用 saveLayer + 渐变 shader（单字内渐变
+      // 肉眼不可辨），改为中心采样均匀 alpha 直接写入文字颜色，消除每帧
+      // saveLayer/shader 创建的 GPU 开销，避免真机掉帧导致缩放位移卡顿。
+      final double charGlobalCenter = wordStartX + charStartX + cw / 2;
+      final double charAlpha;
+      if (!useGradient) {
+        charAlpha = solidAlpha;
+      } else {
+        charAlpha = _alphaAtX(
+            charGlobalCenter, transitionStart, transitionSpan, bright, dark);
+      }
+
+      final double charX = wordX + charStartX;
+      final double charY = wordY;
+      final Offset charPos = Offset(charX, charY);
+
+      // === 逐字符强调 transform ===
+      // scale 绕字符中心缩放；位移在缩放后应用，避免被 scale 放大。
+      final bool needEmphasis = st.scale != 1.0 || st.glowLevel > 0 ||
+          st.offsetXEm != 0 || st.offsetYEm != 0 || st.floatYEm != 0;
+      if (needEmphasis) {
+        canvas.save();
+        final double centerX = charX + cw / 2;
+        final double centerY = charY + fontSize * rowHeight / 2;
+        canvas.translate(centerX, centerY);
+        canvas.scale(st.scale, st.scale);
+        canvas.translate(-centerX, -centerY);
+        // em → px：水平外扩 offsetXEm，上浮 offsetYEm + 正弦浮层 floatYEm
+        canvas.translate(
+          st.offsetXEm * fontSize,
+          (st.offsetYEm + st.floatYEm) * fontSize,
+        );
+      }
+
+      // === 逐字符辉光层 ===
+      if (st.glowLevel > 0) {
+        final double blurSigma = st.shadowBlurEm * fontSize * 0.8;
+        if (blurSigma > 0) {
+          final glowRect = Rect.fromLTWH(
+            charX - blurSigma * 3, charY - blurSigma * 3,
+            cw + blurSigma * 6, fontSize * rowHeight + blurSigma * 6,
+          );
+          // 优先用预渲染辉光精灵贴图（透明度经 ColorFilter 跟随 glowLevel）
+          // 行盒失效检测：精灵可能是预热阶段按整行行盒（lineHeight）生成的，
+          // 若当前为换行行（rowHeight=0.8x），旧精灵字形偏下、光晕错位。
+          // 这里在绘制前主动核对行盒，不一致则释放并强制按当前 rowHeight 重生成
+          // （_requestCharGlowSprite 只在精灵为 null 时才请求，故必须在此先释放）。
+          final String glowKey = '$wordIndex:$k';
+          final double? cachedGlowRow = _glowSpriteRowHeight[glowKey];
+          if (cachedGlowRow != null &&
+              (cachedGlowRow - rowHeight).abs() > 1e-6) {
+            _glowSpriteRowHeight.remove(glowKey);
+            final old = k < glowSprites.length ? glowSprites[k] : null;
+            old?.dispose();
+            if (wordIndex < _charGlowSprites.length &&
+                k < _charGlowSprites[wordIndex].length) {
+              _charGlowSprites[wordIndex][k] = null;
+            }
+          }
+          final ui.Image? sprite =
+              k < glowSprites.length ? glowSprites[k] : null;
+          // 换行行辉光诊断日志（节流：仅状态变化时打印一次，供真机抓 log 定位）
+          if ((rowHeight - lineHeight).abs() > 1e-6) {
+            final String dbg =
+                'w$wordIndex:c$k row=${rowHeight.toStringAsFixed(3)} '
+                'cached=${cachedGlowRow?.toStringAsFixed(3) ?? 'null'} '
+                'sprite=${sprite != null} y=${charY.toStringAsFixed(1)}';
+            if (dbg != _lastGlowDebug) {
+              _lastGlowDebug = dbg;
+              // ignore: avoid_print
+              print('[GlowDbg] $dbg');
+            }
+          }
+          if (sprite != null) {
+            // 与精灵生成侧一致：上下各 3σ 余量（见 _requestCharGlowSprite 注释）
+            final double pad = _maxGlowSigma(fontSize) * 3;
+            _glowImagePaint.colorFilter = ColorFilter.matrix(<double>[
+              1, 0, 0, 0, 0,
+              0, 1, 0, 0, 0,
+              0, 0, 1, 0, 0,
+              0, 0, 0, st.glowLevel.clamp(0.0, 1.0), 0,
+            ]);
+            canvas.drawImage(
+                sprite, Offset(charX - pad, charY - pad), _glowImagePaint);
+          } else {
+            // 精灵未就绪（字符激活早期，glowLevel≈0 几乎不可见）：
+            // 异步请求渲染，本帧降级 saveLayer + blur 保证视觉连续。
+            _requestCharGlowSprite(
+              wordIndex,
+              k,
+              painter.text?.toPlainText() ?? '',
+              fontSize,
+              rowHeight,
+            );
+            _glowBlurPaint.imageFilter = ImageFilter.blur(
+              sigmaX: blurSigma, sigmaY: blurSigma,
+            );
+            _glowBlurPaint.colorFilter = ColorFilter.matrix(<double>[
+              1, 0, 0, 0, 0,
+              0, 1, 0, 0, 0,
+              0, 0, 1, 0, 0,
+              0, 0, 0, st.glowLevel.clamp(0.0, 1.0), 0,
+            ]);
+            canvas.saveLayer(glowRect, _glowBlurPaint);
+            painter.paint(canvas, charPos);
+            canvas.restore();
+          }
+        }
+      }
+
+      // === 文字绘制 ===
+      // v7：优先用预渲染纯白字形图（3× 超采样，图片变换平滑缩放，无文字重栅格化
+      // 闪烁、无放大马赛克），经 ColorFilter.matrix 上色为文字色 + mask alpha，
+      // drawImageRect 缩放到原生字符尺寸；图片未就绪时降级 TextPainter 均匀
+      // alpha 路径（量化缓存），视觉等价。
+      //
+      // 换行行（rowHeight < lineHeight，0.8x 行盒）：字形图按 1.5 行盒生成，
+      // 直接缩放到 0.8x 行盒会把字形垂直压扁变形 → 换行行改用 TextPainter
+      // （按 rowHeight 行盒渲染），与整词路径行盒一致，避免激活/idle 切换瞬移。
+      final bool sameRowBox = (rowHeight - lineHeight).abs() < 1e-6;
+      final ui.Image? charImg =
+          sameRowBox && k < charImages.length ? charImages[k] : null;
+      if (charImg != null) {
+        _charImagePaint.colorFilter = ColorFilter.matrix(<double>[
+          textRed / 255, 0, 0, 0, 0,
+          0, textGreen / 255, 0, 0, 0,
+          0, 0, textBlue / 255, 0, 0,
+          0, 0, 0, charAlpha, 0,
+        ]);
+        canvas.drawImageRect(
+          charImg,
+          Rect.fromLTWH(
+              0, 0, charImg.width.toDouble(), charImg.height.toDouble()),
+          Rect.fromLTWH(charX, charY, cw, fontSize * lineHeight),
+          _charImagePaint,
+        );
+      } else {
+        final int alphaStep = (charAlpha * 20).round();
+        if (k >= lastSetAlphas.length || lastSetAlphas[k] != alphaStep) {
+          painter.text = TextSpan(
+            text: painter.text?.toPlainText(),
+            style: TextStyle(
+              color: Color.fromRGBO(textRed, textGreen, textBlue, charAlpha),
+              fontSize: fontSize,
+              height: rowHeight,
+              fontFamily: LyricLayout.fontFamily,
+              fontWeight: LyricLayout.fontWeight,
+            ),
+          );
+          painter.layout();
+          if (k < lastSetAlphas.length) lastSetAlphas[k] = alphaStep;
+        }
+        painter.paint(canvas, charPos);
+      }
+
+      if (needEmphasis) {
+        canvas.restore();
+      }
     }
   }
 
@@ -886,63 +1277,119 @@ class WordRenderer {
     painter.dispose();
   }
 
-  /// P1-5 方案 1：异步渲染 word 的最大 blur 辉光精灵图并缓存。
+  /// P1-5 方案 1：异步渲染单个字符的最大 blur 辉光精灵图并缓存。
   ///
-  /// 渲染内容 = 纯白文字 + 恒定最大 blur（sigma = 0.24 × fontSize），
+  /// 渲染内容 = 纯白字符 + 恒定最大 blur（sigma = 0.24 × fontSize），
   /// 与现状「当前字渐变路径（painter=plain white）下的辉光」颜色一致；
-  /// 透明度由每帧 [emState.glowLevel] 经 ColorFilter 控制，不参与精灵内容。
+  /// 透明度由每帧 [EmphasizeState.glowLevel] 经 ColorFilter 控制，不参与精灵内容。
   ///
-  /// 幂等保护：wordIndex 已在缓存或渲染中时直接返回。
+  /// 幂等保护：key（wordIndex:charIndex）已在缓存或渲染中时直接返回。
   /// 异步回调用 [_spriteEpoch] 校验，renderer 已重置/切行时丢弃结果。
-  void _requestGlowSprite(int wordIndex, LyricWord word, double fontSize) {
-    if (_glowSpritePending.contains(wordIndex)) return;
-    if (_glowSprites.containsKey(wordIndex)) return;
-    _glowSpritePending.add(wordIndex);
+  void _requestCharGlowSprite(
+      int wordIndex, int charIndex, String text, double fontSize,
+      double rowHeight,
+      {bool rebuildOnMismatch = true}) {
+    final String key = '$wordIndex:$charIndex';
+    // 行盒变化（换行行 ⇄ 非换行行）时旧精灵行盒与当前文字不一致：
+    // 释放旧精灵，强制按新行盒重新渲染，保证光晕始终贴合文字。
+    // 仅【绘制路径】允许重建；预热路径不干预，避免预热（lineHeight）每帧
+    // 与绘制（rowHeight）反复互相释放重建 → 光晕闪烁。
+    if (rebuildOnMismatch) {
+      final double? cachedRow = _glowSpriteRowHeight[key];
+      if (cachedRow != null && (cachedRow - rowHeight).abs() > 1e-6) {
+        _glowSpriteRowHeight.remove(key);
+        if (wordIndex < _charGlowSprites.length &&
+            charIndex < _charGlowSprites[wordIndex].length) {
+          _charGlowSprites[wordIndex][charIndex]?.dispose();
+          _charGlowSprites[wordIndex][charIndex] = null;
+        }
+      }
+    } else {
+      // 预热：已有精灵（无论行盒）或已有渲染任务（无论行盒）都直接返回，
+      // 不破坏绘制已按正确行盒建立的精灵。
+      if (wordIndex < _charGlowSprites.length &&
+          charIndex < _charGlowSprites[wordIndex].length &&
+          _charGlowSprites[wordIndex][charIndex] != null) {
+        return;
+      }
+      if (_glowSpritePendingRow.containsKey(key)) return;
+    }
+    if (wordIndex < _charGlowSprites.length &&
+        charIndex < _charGlowSprites[wordIndex].length &&
+        _charGlowSprites[wordIndex][charIndex] != null) {
+      return; // 已有匹配当前行盒的精灵
+    }
+    // 行盒竞态保护：旧行盒（如预热 lineHeight）的渲染可能仍在异步进行。
+    // 仅当"正在渲染的行盒与当前 rowHeight 相同"时才复用该渲染任务；
+    // 否则重新请求，并用回调行盒校验丢弃过期结果。
+    final double? pendingRow = _glowSpritePendingRow[key];
+    if (pendingRow != null && (pendingRow - rowHeight).abs() < 1e-6) {
+      return; // 同行盒渲染中
+    }
+    _glowSpritePendingRow[key] = rowHeight;
+    _glowSpriteRowHeight[key] = rowHeight;
     final int epoch = _spriteEpoch;
     final double sigma = _maxGlowSigma(fontSize);
-    final double pad = sigma * 2;
-    final double wordH = fontSize * LyricLayout.lineHeight;
-    // 空字安全保护
-    if (word.text.isEmpty || wordH <= 0) {
-      _glowSpritePending.remove(wordIndex);
+    // 上下各 3σ 余量：blur 光晕实际扩散约 3σ，仅留 2σ 会在换行行
+    // （0.8x 行盒，字形更靠上）把向上光晕裁切，光晕只剩下方、像垫在文字底下。
+    final double pad = sigma * 3;
+    final double wordH = fontSize * rowHeight;
+    // 空字符安全保护
+    if (text.isEmpty || wordH <= 0) {
+      _glowSpritePendingRow.remove(key);
+      _glowSpriteRowHeight.remove(key);
       return;
     }
     // 异步渲染（toImage 在光栅线程执行，回调回 UI 线程）
-    _renderGlowSpriteImage(word, fontSize, sigma, pad).then((image) {
-      _glowSpritePending.remove(wordIndex);
+    _renderGlowSpriteImage(text, fontSize, sigma, pad, rowHeight).then((image) {
+      _glowSpritePendingRow.remove(key);
       if (image == null) return;
       if (epoch != _spriteEpoch) {
         // renderer 已重置/切行：过期结果直接释放
         image.dispose();
         return;
       }
-      _glowSprites[wordIndex]?.dispose();
-      _glowSprites[wordIndex] = image;
+      // 行盒校验：回调时若记录的行盒已不是本次渲染的行盒
+      // （被换行行重新请求覆盖），丢弃本次结果，避免误用偏下精灵。
+      final double? curRow = _glowSpriteRowHeight[key];
+      if (curRow == null || (curRow - rowHeight).abs() > 1e-6) {
+        image.dispose();
+        return;
+      }
+      if (wordIndex < _charGlowSprites.length &&
+          charIndex < _charGlowSprites[wordIndex].length) {
+        _charGlowSprites[wordIndex][charIndex]?.dispose();
+        _charGlowSprites[wordIndex][charIndex] = image;
+      }
     });
   }
 
-  /// 渲染单张辉光精灵图（纯白文字 + blur，异步）。
+  /// 渲染单张辉光精灵图（纯白字符 + blur，异步）。
   ///
+  /// 按绘制时的行盒 [rowHeight] 渲染，与正文字形同盒顶对齐：
+  /// 换行行（0.8x 行盒）用 rowHeight，非换行行等于 lineHeight，
+  /// 保证光晕与文字上下完全贴合，不再需要额外垂直偏移补偿。
   /// 内部 try-catch 兜底：任何渲染失败（如 GPU 资源紧张）返回 null，
-  /// 下次 _requestGlowSprite 会重新尝试。
+  /// 下次 _requestCharGlowSprite 会重新尝试。
   Future<ui.Image?> _renderGlowSpriteImage(
-      LyricWord word, double fontSize, double sigma, double pad) async {
+      String text, double fontSize, double sigma, double pad,
+      double rowHeight) async {
     try {
       final textPainter = TextPainter(textDirection: TextDirection.ltr)
         ..text = TextSpan(
-          text: word.text,
+          text: text,
           style: TextStyle(
             // 与渐变路径 painter 一致：plain white，blur 后即白色辉光
             color: const Color.fromRGBO(255, 255, 255, 1.0),
             fontSize: fontSize,
-            height: LyricLayout.lineHeight,
+            height: rowHeight,
             fontFamily: LyricLayout.fontFamily,
             fontWeight: LyricLayout.fontWeight,
           ),
         )
         ..layout();
       final int imgW = (textPainter.width + pad * 2).ceil();
-      final int imgH = (fontSize * LyricLayout.lineHeight + pad * 2).ceil();
+      final int imgH = (fontSize * rowHeight + pad * 2).ceil();
       if (imgW <= 0 || imgH <= 0) {
         textPainter.dispose();
         return null;
@@ -965,6 +1412,125 @@ class WordRenderer {
     } catch (_) {
       return null;
     }
+  }
+
+  /// v7：异步渲染单个字符的纯白字形图（无 blur）并缓存。
+  ///
+  /// 波浪激活窗口内逐字符缩放/位移改用该图片 + canvas 变换绘制，
+  /// 避免 TextPainter 每帧重新栅格化字形导致的亚像素闪烁。
+  /// **按 [_charImageSupersample] 超采样渲染**：绘制时经 drawImageRect 缩放到
+  /// 原生尺寸，波浪放大到 1.12× 仍保持清晰，避免低分辨率图片放大出现马赛克。
+  /// 幂等保护同 [_requestCharGlowSprite]，异步回调用 [_spriteEpoch] 校验。
+  void _requestCharImage(
+      int wordIndex, int charIndex, String text, double fontSize) {
+    final String key = '$wordIndex:$charIndex';
+    if (_charImagePending.contains(key)) return;
+    if (wordIndex < _charImages.length &&
+        charIndex < _charImages[wordIndex].length &&
+        _charImages[wordIndex][charIndex] != null) {
+      return;
+    }
+    _charImagePending.add(key);
+    final int epoch = _spriteEpoch;
+    final double charH = fontSize * LyricLayout.lineHeight;
+    if (text.isEmpty || charH <= 0) {
+      _charImagePending.remove(key);
+      return;
+    }
+    _renderCharImage(text, fontSize).then((image) {
+      _charImagePending.remove(key);
+      if (image == null) return;
+      if (epoch != _spriteEpoch) {
+        image.dispose();
+        return;
+      }
+      if (wordIndex < _charImages.length &&
+          charIndex < _charImages[wordIndex].length) {
+        _charImages[wordIndex][charIndex]?.dispose();
+        _charImages[wordIndex][charIndex] = image;
+      }
+    });
+  }
+
+  /// 字符图片超采样倍数：以 3× 分辨率渲染字形，绘制时缩放到原生尺寸，
+  /// 波浪放大（最高 1.12×）仍保持清晰锐利。
+  static const int _charImageSupersample = 3;
+
+  /// 渲染单个字符的纯白字形图（异步，尺寸 = 字符宽 × 行高 × 超采样倍数）。
+  Future<ui.Image?> _renderCharImage(String text, double fontSize) async {
+    try {
+      final double renderFontSize = fontSize * _charImageSupersample;
+      final textPainter = TextPainter(textDirection: TextDirection.ltr)
+        ..text = TextSpan(
+          text: text,
+          style: TextStyle(
+            // 纯白字形：绘制时经 ColorFilter 上色为文字色 + mask alpha
+            color: const Color.fromRGBO(255, 255, 255, 1.0),
+            fontSize: renderFontSize,
+            height: LyricLayout.lineHeight,
+            fontFamily: LyricLayout.fontFamily,
+            fontWeight: LyricLayout.fontWeight,
+          ),
+        )
+        ..layout();
+      final int imgW = textPainter.width.ceil();
+      final int imgH = (renderFontSize * LyricLayout.lineHeight).ceil();
+      if (imgW <= 0 || imgH <= 0) {
+        textPainter.dispose();
+        return null;
+      }
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      textPainter.paint(canvas, Offset.zero);
+      textPainter.dispose();
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(imgW, imgH);
+      return image;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 临时调试：打印行换行分析（word 累加 vs TextPainter 行数），定位歌词重叠。
+  void _debugLogWrap(LyricLine line, double fontSize, double maxWidth) {
+    final StringBuffer sb = StringBuffer();
+    sb.write('[LyricWrap] WR hasWord=${line.hasWordTiming} '
+        'text="${line.text}" maxW=${maxWidth.toStringAsFixed(1)} fs=$fontSize');
+    if (line.hasWordTiming) {
+      // word 累加行数（与 paintLine / measureLineHeight 一致）
+      double dx = 0;
+      int rows = 1;
+      for (int i = 0; i < _wordWidths.length; i++) {
+        if (dx + _wordWidths[i] > maxWidth && dx > 0) {
+          dx = 0;
+          rows++;
+        }
+        dx += _wordWidths[i];
+      }
+      sb.write(' wordRows=$rows');
+      // TextPainter 整行自动换行行数
+      final TextPainter tp = TextPainter(
+        text: TextSpan(
+          text: line.text,
+          style: TextStyle(
+            fontSize: fontSize,
+            height: LyricLayout.lineHeight,
+            fontFamily: LyricLayout.fontFamily,
+            fontWeight: LyricLayout.fontWeight,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+      )..layout(maxWidth: maxWidth);
+      sb.write(' tpRows=${tp.computeLineMetrics().length}');
+      tp.dispose();
+      sb.write(' words[');
+      for (int i = 0; i < line.words.length; i++) {
+        sb.write('"${line.words[i].text}"(${_wordWidths[i].toStringAsFixed(1)}) ');
+      }
+      sb.write(']');
+    }
+    // ignore: avoid_print
+    print(sb.toString());
   }
 
   /// 检测 line 切换并重置 alpha map，同时测量并缓存所有 word 宽度。
@@ -993,32 +1559,43 @@ class WordRenderer {
     _boundFontWeight = LyricPreferences.instance.fontWeightValue;
     // 注意：_wordAlphas/_wordYOffsets/_lastSetAlphas 不能用 .clear()，
     // 因为它们可能被 const <T>[] 初始化（不可修改）。后面会直接重新赋值，无需 clear。
-    _emphasizeStates.clear();
 
     // 行级元数据判定缓存：作词/作曲/编曲 等元数据行整行禁用辉光。
     // 仅依赖 line.text（行绑定后不变），此处计算一次，tick 中仅读取字段。
     _isMetadataLine = EmphasizeEffect.shouldSkipEmphasizeForLine(line);
 
-    // 释放旧 _wordPainters（line 缩短时避免泄漏）
+    // 释放旧 per-word painter 与 per-char painter（line 缩短时避免泄漏）
     for (final painter in _wordPainters) {
-      painter.dispose();
+      painter?.dispose();
+    }
+    for (final charList in _charPainters) {
+      for (final p in charList) {
+        p.dispose();
+      }
     }
 
     final double dark = dynamicDarkAlpha;
     // P1-5：行绑定切换（切行/字号变化）时失效辉光精灵缓存——
     // 旧行的 word 文本/字号不同，精灵图不再匹配；异步渲染中的结果也丢弃。
     _spriteEpoch++;
-    for (final img in _glowSprites.values) {
-      img.dispose();
+    for (final charList in _charGlowSprites) {
+      for (final img in charList) {
+        img?.dispose();
+      }
     }
-    _glowSprites.clear();
-    _glowSpritePending.clear();
-    // 测量所有 word 宽度并初始化 per-word TextPainter
+    _glowSpritePendingRow.clear();
+    _glowSpriteRowHeight.clear();
+    // v7：释放旧行逐字符字形图
+    for (final charList in _charImages) {
+      for (final img in charList) {
+        img?.dispose();
+      }
+    }
+    _charImagePending.clear();
+    // 测量所有 word 宽度并初始化 per-word / per-char TextPainter
     _wordWidths = List<double>.filled(line.words.length, 0);
-    _wordPainters = List<TextPainter>.generate(
-      line.words.length,
-      (_) => TextPainter(textDirection: TextDirection.ltr),
-    );
+    // v5：非强调字用整词 painter（槽位），强调字该槽位为 null（改用逐字符）
+    _wordPainters = List<TextPainter?>.filled(line.words.length, null);
     // 预分配辉光判定缓存数组（与 _wordPainters 同长度同索引）
     _wordEmphasisFlags = List<bool>.filled(line.words.length, false);
     // 预计算 word 起始 X 坐标（避免每帧 O(n²) 循环累加）
@@ -1027,28 +1604,104 @@ class WordRenderer {
     _wordAlphas = List<double>.filled(line.words.length, dark);
     _wordYOffsets = List<double>.filled(line.words.length, 0);
     _lastSetAlphas = List<int>.filled(line.words.length, -1);
-    
+    // v5 逐字符缓存：仅强调字有内容
+    _charPainters =
+        List.generate(line.words.length, (_) => const <TextPainter>[]);
+    _charWidths =
+        List.generate(line.words.length, (_) => const <double>[]);
+    _charStartXs =
+        List.generate(line.words.length, (_) => const <double>[]);
+    _lastSetCharAlphas =
+        List.generate(line.words.length, (_) => const <int>[]);
+    _emphasizeCharStates =
+        List.generate(line.words.length, (_) => const <EmphasizeState>[]);
+    _charGlowSprites =
+        List.generate(line.words.length, (_) => const <ui.Image?>[]);
+    // v7：逐字符纯白字形图缓存（仅强调字有内容）
+    _charImages =
+        List.generate(line.words.length, (_) => const <ui.Image?>[]);
+    _charImagePending.clear();
+    // v8：行绑定切换时复位逐字波浪状态（锚定位置/推进按字；每字符相位在
+    // 强调字构建时分配，见下方循环）
+    _waveAnchorPosMs = List<double>.filled(line.words.length, -1);
+    _waveAdvanceMs = List<double>.filled(line.words.length, 0);
+    _waveBumpPhases =
+        List.generate(line.words.length, (_) => const <double>[]);
+    _waveFloatPhases =
+        List.generate(line.words.length, (_) => const <double>[]);
+
     double accumWidth = 0;
     for (int i = 0; i < line.words.length; i++) {
-      _wordPainters[i].text = TextSpan(
-        text: line.words[i].text,
-        style: TextStyle(
-          fontSize: fontSize,
-          height: LyricLayout.lineHeight,
-          // 显式注入歌词 fontFamily，必须与 paintLine 渲染路径一致，
-          // 否则 word 宽度测量会出错导致换行错位
-          fontFamily: LyricLayout.fontFamily,
-          fontWeight: LyricLayout.fontWeight,
-        ),
-      );
-      _wordPainters[i].layout();
-      _wordWidths[i] = _wordPainters[i].width;
-      _wordStartXs[i] = accumWidth;
-      accumWidth += _wordPainters[i].width;
       // 缓存该 word 的辉光判定结果（含正则匹配，仅在此执行一次）
       // tick 中通过 _wordEmphasisFlags[i] O(1) 读取，避免每帧重复正则匹配
-      _wordEmphasisFlags[i] = EmphasizeEffect.shouldEmphasize(line.words[i]);
-      // _lastSetAlphas[i] 不设置（默认 null），下次 paintLine 会重新 set text + layout
+      _wordEmphasisFlags[i] = EmphasizeEffect.shouldEmphasize(
+        line.words[i],
+        thresholdMs: thresholdMs,
+      );
+      // === 整词 painter：所有字都创建 ===
+      // 强调字在 idle（未进入激活窗口）时走整词渲染路径（单次 layout/渐变），
+      // 避免逐字符渲染的每帧开销导致卡顿；仅激活窗口内才切逐字符。
+      _wordPainters[i] = TextPainter(textDirection: TextDirection.ltr)
+        ..text = TextSpan(
+          text: line.words[i].text,
+          style: TextStyle(
+            fontSize: fontSize,
+            height: LyricLayout.lineHeight,
+            // 显式注入歌词 fontFamily，必须与 paintLine 渲染路径一致，
+            // 否则 word 宽度测量会出错导致换行错位
+            fontFamily: LyricLayout.fontFamily,
+            fontWeight: LyricLayout.fontWeight,
+          ),
+        )
+        ..layout();
+      _wordWidths[i] = _wordPainters[i]!.width;
+      if (_wordEmphasisFlags[i]) {
+        // === 强调字：额外拆成逐字符 TextPainter（仅激活窗口内使用） ===
+        // 逐字符波浪需要每字符独立缩放/位移/辉光，整词 painter 无法实现。
+        final List<int> runes = line.words[i].text.runes.toList();
+        final int n = runes.length;
+        final List<TextPainter> chars =
+            List.generate(n, (_) => TextPainter(textDirection: TextDirection.ltr));
+        final List<double> widths = List<double>.filled(n, 0);
+        final List<double> starts = List<double>.filled(n, 0);
+        double charAccum = 0;
+        for (int k = 0; k < n; k++) {
+          final String charText = String.fromCharCode(runes[k]);
+          chars[k].text = TextSpan(
+            text: charText,
+            style: TextStyle(
+              // 初始纯白占位：首次绘制时均匀路径会用目标 alpha 重新 set text + layout
+              color: const Color.fromRGBO(255, 255, 255, 1.0),
+              fontSize: fontSize,
+              height: LyricLayout.lineHeight,
+              fontFamily: LyricLayout.fontFamily,
+              fontWeight: LyricLayout.fontWeight,
+            ),
+          );
+          chars[k].layout();
+          widths[k] = chars[k].width;
+          starts[k] = charAccum;
+          charAccum += chars[k].width;
+        }
+        _charPainters[i] = chars;
+        _charWidths[i] = widths;
+        _charStartXs[i] = starts;
+        _lastSetCharAlphas[i] = List<int>.filled(n, -1);
+        _emphasizeCharStates[i] =
+            List<EmphasizeState>.filled(n, EmphasizeState.idle);
+        _charGlowSprites[i] = List<ui.Image?>.filled(n, null);
+        // v7：逐字符纯白字形图缓存（激活窗口内用图片变换绘制，避免文字重栅格化闪烁）
+        _charImages[i] = List<ui.Image?>.filled(n, null);
+        // v8：每字符波浪相位分配，初始 1.0（已完成=idle），字成为当前字时再锚定
+        _waveBumpPhases[i] = List<double>.filled(n, 1.0);
+        _waveFloatPhases[i] = List<double>.filled(n, 1.0);
+        // P1 时序拆分：字形图与辉光精灵改为【懒预生成】——不再行绑定批量 toImage，
+        // 而是在 tick 中检测"即将成为当前字的强调字"（提前 _imagePrewarmLeadMs）
+        // 才请求，把行切换瞬间的一次性 N 个并发 toImage 分摊到各字激活前逐字生成，
+        // 消除行切换时刻 raster/GPU 突发造成的掉帧。
+      }
+      _wordStartXs[i] = accumWidth;
+      accumWidth += _wordWidths[i];
     }
     // 过渡区半宽固定为行内平均字宽（稳定，不随当前字变化，避免字切换闪烁）
     if (_wordWidths.isEmpty) {
@@ -1083,21 +1736,47 @@ class WordRenderer {
     // 清理辉光判定缓存
     _wordEmphasisFlags = const <bool>[];
     _isMetadataLine = false;
-    // v4 优化：dispose per-word TextPainter 实例
+    // v4 优化：dispose per-word TextPainter 实例；v5 追加 per-char 实例
     for (final painter in _wordPainters) {
-      painter.dispose();
+      painter?.dispose();
     }
-    _wordPainters = const <TextPainter>[];
+    for (final charList in _charPainters) {
+      for (final p in charList) {
+        p.dispose();
+      }
+    }
+    _wordPainters = const <TextPainter?>[];
     _wordAlphas = const <double>[];
     _wordYOffsets = const <double>[];
     _lastSetAlphas = const <int>[];
-    _emphasizeStates.clear();
+    // v5 逐字符缓存复位
+    _emphasizeCharStates = const <List<EmphasizeState>>[];
+    _charPainters = const <List<TextPainter>>[];
+    _charWidths = const <List<double>>[];
+    _charStartXs = const <List<double>>[];
+    _lastSetCharAlphas = const <List<int>>[];
     // P1-5：reset 时失效辉光精灵缓存（dispose 图片 + 代数递增丢弃异步结果）
     _spriteEpoch++;
-    for (final img in _glowSprites.values) {
-      img.dispose();
+    for (final charList in _charGlowSprites) {
+      for (final img in charList) {
+        img?.dispose();
+      }
     }
-    _glowSprites.clear();
-    _glowSpritePending.clear();
+    _charGlowSprites = const <List<ui.Image?>>[];
+    _glowSpritePendingRow.clear();
+    _glowSpriteRowHeight.clear();
+    // v7：释放逐字符字形图
+    for (final charList in _charImages) {
+      for (final img in charList) {
+        img?.dispose();
+      }
+    }
+    _charImages = const <List<ui.Image?>>[];
+    _charImagePending.clear();
+    // v8：复位逐字波浪状态
+    _waveAnchorPosMs = const <double>[];
+    _waveAdvanceMs = const <double>[];
+    _waveBumpPhases = const <List<double>>[];
+    _waveFloatPhases = const <List<double>>[];
   }
 }

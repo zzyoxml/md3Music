@@ -46,7 +46,8 @@
 
 .PARAMETER PrMerge
   推送后向 upstream 开 PR **并直接合并**（merge commit 策略），合并后默认把结果拉回本地并同步 origin。
-  走 GitHub REST API，需要对 upstream 有写权限的 PAT（用 md3.ps1 token 管理）。
+  优先用 gh CLI（gh 登录即可，无需 PAT）；gh 不可用或失败时回退 GitHub REST API，
+  此时需要对 upstream 有写权限的 PAT（用 md3.ps1 token 管理）。
 
 .PARAMETER NoSyncBack
   -PrMerge 合并成功后不拉回 upstream 的合并结果（默认会 fetch + merge + 推 origin）。
@@ -716,13 +717,31 @@ try {
         }
         else {
             if (-not $upstreamSlug) { throw "无法从 upstream 地址解析 owner/repo：$upstreamUrl" }
-            # -Yes 或非控制台环境下不能交互要 token（Read-Host 会直接阻塞）
-            $noPrompt = $Yes -or -not (Test-InteractiveConsole)
-            $token = Get-GitHubToken -NoPrompt:$noPrompt
-            if (-not $token) { throw '没有可用的 GitHub token，无法自动合并（md3.ps1 token -Set 设置，或改用 -Pr 只开 PR）' }
-            $r = Invoke-WithRetry -What '开 PR 并合并' -Action {
-                Invoke-GitHubPrMerge -RepoSlug $upstreamSlug -Base $base -Head $head -Token $token `
-                    -Title $Message -Body $prBody -MergeMethod 'merge'
+            # 优先用 gh CLI（gh 已登录即可，无需 PAT）；gh 不可用 / 尝试失败时回退原 REST 实现
+            $r = $null
+            if (Test-HasCommand gh) {
+                try {
+                    $r = Invoke-WithRetry -What 'gh 开 PR 并合并' -Action {
+                        Invoke-GhPrMerge -RemoteUrl $upstreamUrl -Base $base -Head $head -Title $Message -Body $prBody -RepoDir $Root
+                    }
+                } catch {
+                    Write-Warn "gh 开 PR 并合并异常：$($_.Exception.Message)"
+                    $r = [pscustomobject]@{ Number = 0; Url = ''; Merged = $false; Message = 'gh 流程异常' }
+                }
+            } else {
+                Write-Note 'gh 未安装，直接走 REST 实现'
+            }
+            if ($null -eq $r -or -not $r.Merged) {
+                if ($null -ne $r) { Write-Warn "gh 开 PR 并合并未成功（$($r.Message)），回退 REST 实现" }
+                else { Write-Note '已回退 REST 实现（需要 GitHub token）' }
+                # -Yes 或非控制台环境下不能交互要 token（Read-Host 会直接阻塞）
+                $noPrompt = $Yes -or -not (Test-InteractiveConsole)
+                $token = Get-GitHubToken -NoPrompt:$noPrompt
+                if (-not $token) { throw '没有可用的 GitHub token，无法自动合并（md3.ps1 token -Set 设置，或改用 -Pr 只开 PR）' }
+                $r = Invoke-WithRetry -What '开 PR 并合并' -Action {
+                    Invoke-GitHubPrMerge -RepoSlug $upstreamSlug -Base $base -Head $head -Token $token `
+                        -Title $Message -Body $prBody -MergeMethod 'merge'
+                }
             }
             if ($r.Merged) {
                 Write-Ok "PR #$($r.Number) 已合并到 $upstreamSlug/$base（合并提交 $($r.Message.Substring(0, [Math]::Min(8, $r.Message.Length)))）"

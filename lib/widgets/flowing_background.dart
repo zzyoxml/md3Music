@@ -42,7 +42,14 @@ class _FlowingBackgroundState extends State<FlowingBackground>
   // 24fps 是电影工业标准帧率，对人眼缓慢色彩流动足够流畅；
   // 相比 60fps 减少 60% 帧数，CPU/GPU 工作量同步下降。
   static const double _frameInterval = 1 / 24;
-  List<Color> _colors = const [Colors.deepPurple, Colors.indigo, Colors.teal];
+  // 默认流光 3 色：中性蓝灰渐变（slate）。
+  // 原默认 deepPurple/indigo/teal 在黑白/低饱和封面兜底时呈现刺眼紫色，
+  // 改为主流灰蓝系，低调不抢眼，与黑白封面和谐。
+  List<Color> _colors = const [
+    Color(0xFF4A5568),
+    Color(0xFF5A6478),
+    Color(0xFF2F3A50),
+  ];
   String? _lastArtworkUrl;
   // dispose 标志：用于取消 _extractColors 异步任务，
   // 避免 setState 在 widget 销毁后被调用
@@ -201,7 +208,8 @@ class _FlowingBackgroundState extends State<FlowingBackground>
       // 其余尽量与已选色相拉开距离，保证冷暖对比、避免整体偏蓝绿
       final picked = _pickDiverseColors(candidates);
       if (picked.isEmpty) {
-        picked.add(Colors.deepPurple); // 极端情况兜底（封面近黑/近白）
+        // 黑白/低饱和封面兜底：用中性蓝灰（slate），不再用刺眼的紫色。
+        picked.add(const Color(0xFF4A5568));
       }
 
       // 候选不足 3 个时由主色派生补足（同色相、逐级压暗），不再回退固定色
@@ -215,10 +223,11 @@ class _FlowingBackgroundState extends State<FlowingBackground>
       // 与三层径向渐变的绘制角色（主色/强调/深色）一一对应
       picked.sort((a, b) =>
           HSLColor.fromColor(b).lightness.compareTo(HSLColor.fromColor(a).lightness));
-      // 饱和度温和归一化：低饱和封面避免灰扑扑，过高则收敛避免刺眼
+      // 饱和度温和归一化：低饱和封面保持灰调（不强制提饱和，避免黑白封面
+      // 被拉到高饱和而变成刺眼的紫/怪色），过高则收敛避免刺眼。
       final normalized = picked
           .map((c) => HSLColor.fromColor(c)
-              .withSaturation(HSLColor.fromColor(c).saturation.clamp(0.55, 0.9).toDouble())
+              .withSaturation(HSLColor.fromColor(c).saturation.clamp(0.25, 0.85).toDouble())
               .toColor())
           .toList();
       // 缓存成功结果，供播放器往返时复用

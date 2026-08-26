@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:md3music/widgets/apple_lyrics/layout/lyric_layout.dart';
 import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
+import 'package:md3music/widgets/apple_lyrics/renderers/emphasize_effect.dart';
 import 'package:md3music/widgets/apple_lyrics/renderers/word_renderer.dart';
 
 /// WordRenderer 单元测试
@@ -432,6 +433,49 @@ void main() {
       for (final a in renderer.wordAlphas.values) {
         expect(a, closeTo(0.4, 1e-9));
       }
+    });
+  });
+
+  group('强调波浪 - 字尾尾巴（v8）', () {
+    test('字唱完后波浪继续推进不被截断，走完才 idle', () {
+      // 双字强调字 '命运'（时长 2000ms）：错位启动使第二个字符波浪
+      // 比字尾晚 400ms 结束，字切换后应继续推进（尾巴）直至走完。
+      const line2 = LyricLine(
+        startTime: 0,
+        duration: 4000,
+        text: '命运华',
+        words: [
+          LyricWord(startTime: 0, duration: 2000, text: '命运'),
+          LyricWord(startTime: 2000, duration: 1000, text: '华'),
+        ],
+      );
+      renderer.emphasizeEffect = EmphasizeEffect();
+      renderer.setLineState(isActive: true, scale: LyricLayout.activeScale);
+      renderer.paintLine(makeCanvas(), ui.Offset.zero, line2, 24);
+
+      // 从 t=0 逐帧推进到 t=2000（dt 与 currentTimeMs 一致递增，避免触发重锚）
+      for (int t = 0; t <= 2000; t += 16) {
+        renderer.tick(0.016, t, isPlaying: true);
+      }
+      // t=2000：字 0 唱完、字 1 成为当前字；字 0 的第二个字符波浪应在尾巴中（未截断）
+      final tail = renderer.debugCharStatesRef(0);
+      expect(renderer.currentWordIdx, 1);
+      expect(
+        tail.any((s) => s != EmphasizeState.idle),
+        isTrue,
+        reason: '字0尾巴应继续推进，不应被整词截断',
+      );
+
+      // 继续推进到 t=3000（尾巴在 t≈2400 走完），字 0 应全部 idle
+      for (int t = 2016; t <= 3000; t += 16) {
+        renderer.tick(0.016, t, isPlaying: true);
+      }
+      final done = renderer.debugCharStatesRef(0);
+      expect(
+        done.every((s) => s == EmphasizeState.idle),
+        isTrue,
+        reason: '尾巴走完后字0应回到 idle',
+      );
     });
   });
 }
