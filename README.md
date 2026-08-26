@@ -1,8 +1,8 @@
 # MD3Music - Material Design 3 音乐播放器
 
 <div align="center">
-注意：本项目 V5之前的所有版本和分支已经废弃并彻底删除，请勿使用过时版本 请前往 [GitHub](https://github.com/zzyoxml/md3Music/releases) 获取最新版本。
-
+注意：本项目 V5之前的所有版本和分支已经废弃并彻底删除，请勿使用过时版本 请前往 https://github.com/zzyoxml/md3Music/releases  获取最新版本。
+由于该项目 每次从私有库开发的代码同步总是功能被覆盖，公开库代码 现在改为由脚本 全量推送 至公开库 rust-local-force 分支。  
 基于酷狗音乐 API 的 Flutter 音乐播放器，采用 Material Design 3 设计规范，自带嵌入式 Rust API 服务器。
 支持手机/平板自适应，提供 Apple Music 风格播放页与逐字歌词，并内置 LaunchPad 导航（聚合编辑精选/听书/场景音乐/频道等扩展功能）。
 本项目仅供学习使用，请勿用于商业用途，详情请参阅 [免责声明](DISCLAIMER.md)。
