@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
+import '../../core/utils/app_haptics.dart';
 import '../../providers/dlna_provider.dart';
 
 /// 投屏遥控页面：从悬浮窗点击进入，提供完整的传输控制。
@@ -156,7 +157,10 @@ class _DlnaRemotePageState extends State<DlnaRemotePage> {
                       IconButton(
                         iconSize: 48,
                         icon: const Icon(Icons.skip_previous),
-                        onPressed: () => dlna.castPreviousSong(context),
+                        onPressed: () {
+                          AppHaptics.click();
+                          dlna.castPreviousSong(context);
+                        },
                       ),
                       if (dlna.canPause) ...[
                         const SizedBox(width: 24),
@@ -178,7 +182,10 @@ class _DlnaRemotePageState extends State<DlnaRemotePage> {
                       IconButton(
                         iconSize: 48,
                         icon: const Icon(Icons.skip_next),
-                        onPressed: () => dlna.castNextSong(context),
+                        onPressed: () {
+                          AppHaptics.click();
+                          dlna.castNextSong(context);
+                        },
                       ),
                     ],
                   ),

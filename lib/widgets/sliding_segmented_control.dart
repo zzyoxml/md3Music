@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../core/theme/app_theme.dart';
 import '../core/theme/motion_constants.dart';
+import '../core/utils/app_haptics.dart';
 
 /// [SlidingSegmentedControl] 的一段。图标要给就每段都给。
 class SlidingSegment {
@@ -64,7 +64,7 @@ class _SlidingSegmentedControlState extends State<SlidingSegmentedControl> {
 
   void _select(int index) {
     if (index == widget.selectedIndex) return;
-    HapticFeedback.selectionClick();
+    AppHaptics.tick();
     widget.onSelected(index);
   }
 

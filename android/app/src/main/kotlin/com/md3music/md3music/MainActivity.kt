@@ -5,16 +5,22 @@ import android.app.NotificationManager
 import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.res.Configuration
+import android.annotation.TargetApi
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.Settings
+import android.util.Log
 import android.support.v4.media.session.MediaSessionCompat
 import android.util.Rational
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.embedding.engine.FlutterEngineCache
+import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import com.md3music.md3music.AudioPlaybackService
 import com.md3music.md3music.FloatingLyricService
@@ -772,6 +778,107 @@ class MainActivity : FlutterActivity() {
                 }
                 else -> result.notImplemented()
             }
+        }
+
+        // 注册原生震动通道：绕过 HyperOS 丢弃的 View.performHapticFeedback，
+        // 用 VibratorManager + VibrationEffect.createPredefined 直写马达。
+        // 同时实现 m3e_core 的 m3e_haptics/haptics channel（type: dragTexture/
+        // tickCrossing/bookendUpper/bookendLower），修复其全部震动点。
+        val hapticsChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "md3music/haptics"
+        )
+        hapticsChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "vibrate" -> handleHapticVibrate(call, result)
+                else -> result.notImplemented()
+            }
+        }
+
+        val m3eHapticsChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "m3e_haptics/haptics"
+        )
+        m3eHapticsChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "vibrate" -> handleHapticVibrate(call, result)
+                else -> result.notImplemented()
+            }
+        }
+    }
+
+    /// 原生震动分发：把 Dart/m3e_core 传入的语义 type 映射到系统预定义
+    /// VibrationEffect，直写马达。绝不回调 error（让 Dart 端走 fallback）。
+    ///
+    /// - SDK>=31：VibratorManager.defaultVibrator
+    /// - SDK 29~30：Vibrator.vibrate(effect)
+    /// - SDK<29：Vibrator.vibrate(30)（无 VibrationEffect 支持）
+    ///
+    /// 注意：VibrationEffect 仅在 API 29+ 存在，所有相关引用都收敛在 SDK 守卫分支内，
+    /// 低版本设备不会执行到（否则触发 NoClassDefFoundError）。
+    private fun handleHapticVibrate(call: MethodCall, result: MethodChannel.Result) {
+        val type = call.argument<String>("type") ?: ""
+        val amplitude = call.argument<Double>("amplitude") ?: 0.5
+        // 未知 type：直接返回 false（让 Dart 走 fallback），不触发马达
+        val knownTypes = setOf(
+            "click", "bookendLower", "tick", "dragTexture", "tickCrossing",
+            "heavy", "bookendUpper", "double", "longPress",
+        )
+        if (type !in knownTypes) {
+            Log.d("HapticDebug", "vibrate type=$type amp=$amplitude ok=false")
+            result.success(false)
+            return
+        }
+        var handled = false
+        try {
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                    val vibrator =
+                        getSystemService(VibratorManager::class.java).defaultVibrator
+                    vibrator.vibrate(buildHapticEffect(type, amplitude))
+                    handled = true
+                }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                    getSystemService(Vibrator::class.java)
+                        ?.vibrate(buildHapticEffect(type, amplitude))
+                    handled = true
+                }
+                else -> {
+                    @Suppress("DEPRECATION")
+                    getSystemService(Vibrator::class.java)?.vibrate(30)
+                    handled = true
+                }
+            }
+        } catch (_: Throwable) {
+            handled = false
+        }
+        Log.d("HapticDebug", "vibrate type=$type amp=$amplitude ok=$handled")
+        result.success(handled)
+    }
+
+    /// 仅 API 29+ 调用：把语义 type 映射为预定义 VibrationEffect。
+    /// 未知 type 回退到 EFFECT_TICK（仍算成功触发，避免 Dart 走失效 fallback）。
+    @TargetApi(Build.VERSION_CODES.Q)
+    private fun buildHapticEffect(type: String, amplitude: Double): VibrationEffect {
+        return when (type) {
+            "click", "bookendLower" ->
+                VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)
+            "tick", "dragTexture" ->
+                VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)
+            "tickCrossing" ->
+                if (amplitude >= 0.5) {
+                    VibrationEffect.createPredefined(VibrationEffect.EFFECT_CLICK)
+                } else {
+                    VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)
+                }
+            "heavy", "bookendUpper" ->
+                VibrationEffect.createPredefined(VibrationEffect.EFFECT_HEAVY_CLICK)
+            "double" ->
+                VibrationEffect.createPredefined(VibrationEffect.EFFECT_DOUBLE_CLICK)
+            "longPress" ->
+                VibrationEffect.createOneShot(25, VibrationEffect.DEFAULT_AMPLITUDE)
+            else ->
+                VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)
         }
     }
 

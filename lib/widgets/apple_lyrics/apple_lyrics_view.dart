@@ -18,6 +18,8 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
+
+import '../../core/utils/app_haptics.dart';
 import 'package:flutter/widgets.dart';
 
 import 'controllers/line_scale_controller.dart';
@@ -1379,6 +1381,7 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       index = (_lineTops.length - 1).clamp(0, widget.lines.length - 1);
     }
     if (index >= 0 && index < widget.lines.length) {
+      AppHaptics.tick();
       widget.onSeek?.call(widget.lines[index].startTime);
     }
   }

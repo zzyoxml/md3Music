@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../../core/services/desktop_lyric_service.dart';
 import '../../core/services/media_notification_service.dart';
 import '../../core/theme/motion_constants.dart';
+import '../../core/utils/app_haptics.dart';
 import '../../data/repositories/settings_repository.dart';
 import '../../providers/favorites_provider.dart';
 import '../../providers/player_provider.dart';
@@ -99,6 +100,7 @@ class _MiniPlayerState extends State<MiniPlayer>
       // 向左滑 → 下一首
       _switchDirection = 1;
       _dragOffset = 0.0;
+      AppHaptics.click();
       playerProvider.next();
       setState(() {});
     } else if (_dragOffset > distanceThreshold ||
@@ -106,6 +108,7 @@ class _MiniPlayerState extends State<MiniPlayer>
       // 向右滑 → 上一首
       _switchDirection = -1;
       _dragOffset = 0.0;
+      AppHaptics.click();
       playerProvider.previous();
       setState(() {});
     } else {
@@ -467,6 +470,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                           : Icons.play_arrow,
                     ),
                     onPressed: () {
+                      AppHaptics.click();
                       if (playerProvider.isPlaying) {
                         playerProvider.pause();
                       } else {
@@ -522,6 +526,7 @@ class _MiniPlayerState extends State<MiniPlayer>
                     visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.skip_next),
                     onPressed: () {
+                      AppHaptics.click();
                       playerProvider.next();
                     },
                   ),

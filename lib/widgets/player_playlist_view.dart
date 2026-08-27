@@ -14,6 +14,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../data/models/song.dart';
+import '../core/utils/app_haptics.dart';
 import '../providers/player_provider.dart';
 import 'player_artwork_image.dart';
 import 'playing_spectrum_indicator.dart';
@@ -525,7 +526,7 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
     final clamped = dx < 0 ? 0.0 : dx;
     if (dx >= _deleteThreshold) {
       if (_hapticTriggered[songId] != true) {
-        HapticFeedback.heavyImpact();
+        AppHaptics.heavy();
         _hapticTriggered[songId] = true;
       }
     } else {

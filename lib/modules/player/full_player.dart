@@ -15,6 +15,7 @@ import '../../core/services/media_notification_service.dart';
 import '../../core/services/spectrum_service.dart';
 import '../../core/services/usb_audio_service.dart';
 import '../../core/utils/audio_scanner.dart';
+import '../../core/utils/app_haptics.dart';
 import '../../core/utils/app_toast.dart';
 import '../../data/models/album.dart';
 import '../../data/models/song.dart';
@@ -37,6 +38,7 @@ import '../../services/kugou_api/kugou_models.dart';
 import 'comments_view.dart';
 import 'lyrics_view.dart';
 import '../../utils/landscape_immersive.dart';
+import '../../utils/playlist_order_utils.dart';
 import '../../widgets/md3_lyric_preferences_panel.dart';
 import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/md3e_transport_row.dart';
@@ -2118,6 +2120,7 @@ class _FullPlayerState extends State<FullPlayer>
                     playerProvider.seek(newPosition);
                   },
                   onChangeEnd: (value) async {
+                    AppHaptics.tick();
                     final newPosition = Duration(
                       milliseconds: (duration.inMilliseconds * value).round(),
                     );
@@ -2187,6 +2190,7 @@ class _FullPlayerState extends State<FullPlayer>
                 playerProvider.seek(newPosition);
               },
               onChangeEnd: (value) async {
+                AppHaptics.tick();
                 final newPosition = Duration(
                   milliseconds: (totalMs * value).round(),
                 );
@@ -2248,7 +2252,10 @@ class _FullPlayerState extends State<FullPlayer>
                 ? Icons.shuffle
                 : Icons.shuffle_outlined,
           ),
-          onPressed: () => playerProvider.toggleShuffle(),
+          onPressed: () {
+            AppHaptics.tick();
+            playerProvider.toggleShuffle();
+          },
         ),
         SizedBox(width: spacing),
         // Phase 5: 上一曲/暂停/下一曲联合动画控件（替代中间 3 个 IconButton）
@@ -2257,15 +2264,22 @@ class _FullPlayerState extends State<FullPlayer>
           sideButtonSize: sideButtonSize,
           playButtonSize: isExpanded ? 64.0 : 72.0,
           spacing: spacing,
-          onPrevious: () => playerProvider.previous(),
+          onPrevious: () {
+            AppHaptics.click();
+            playerProvider.previous();
+          },
           onPlayPause: () {
+            AppHaptics.click();
             if (playerProvider.isPlaying) {
               playerProvider.pause();
             } else {
               playerProvider.resume();
             }
           },
-          onNext: () => playerProvider.next(),
+          onNext: () {
+            AppHaptics.click();
+            playerProvider.next();
+          },
         ),
         SizedBox(width: spacing),
         // loop — 保留原 IconButton，不参与动画
@@ -2283,7 +2297,10 @@ class _FullPlayerState extends State<FullPlayer>
           icon: Icon(
             _getLoopModeIcon(playerProvider.loopMode),
           ),
-          onPressed: () => playerProvider.toggleLoopMode(),
+          onPressed: () {
+            AppHaptics.tick();
+            playerProvider.toggleLoopMode();
+          },
         ),
       ],
     );
@@ -2543,6 +2560,11 @@ class _FullPlayerState extends State<FullPlayer>
                 onTap: song != null
                     ? () {
                         // 本地歌曲走 LocalFavoritesProvider，在线走 FavoritesProvider
+                        if (isFavorited) {
+                          AppHaptics.click();
+                        } else {
+                          AppHaptics.heavy();
+                        }
                         if (isOnline) {
                           context.read<FavoritesProvider>().toggleFavorite(
                             song,
@@ -3527,8 +3549,8 @@ class _FullPlayerState extends State<FullPlayer>
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return FutureBuilder<Map<String, dynamic>?>(
-          future: api.getUserPlaylist(pagesize: 50),
+        return FutureBuilder<List<Map<String, dynamic>>?>(
+          future: _loadUserPlaylistsSorted(api),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const AlertDialog(
@@ -3557,37 +3579,7 @@ class _FullPlayerState extends State<FullPlayer>
               );
             }
 
-            final data = snapshot.data!['data'];
-            List<dynamic> rawPlaylists = [];
-            if (data is List) {
-              rawPlaylists = data;
-            } else if (data is Map) {
-              rawPlaylists =
-                  data['info'] ?? data['list'] ?? data['special_list'] ?? [];
-            }
-
-            // 使用 KugouPlaylistBrief 模型解析，确保字段名映射正确
-            // 只显示用户自己创建的歌单 (type=0)
-            final playlists = <Map<String, dynamic>>[];
-            for (final item in rawPlaylists) {
-              final json = item as Map<String, dynamic>;
-              final brief = KugouPlaylistBrief.fromJson(json);
-              if (brief.type != 0) continue;
-              // 排除「我喜欢」默认收藏歌单：收藏走红心机制，不走添加到歌单
-              // （判定与 FavoritesProvider 一致：name == '我喜欢' || is_def == 2）
-              if (brief.name == '我喜欢' || json['is_def'] == 2) continue;
-              // 将模型数据转回 Map 以便 UI 使用（包含正确的字段值）
-              playlists.add({
-                'name': brief.name,
-                'songCount': brief.songCount,
-                'listid': brief.listId.isEmpty ? brief.id : brief.listId,
-                'specialid': brief.id,
-                'global_collection_id': brief.globalCollectionId,
-                'type': brief.type,
-                // 保留原始 JSON 用于 API 调用
-                ...json,
-              });
-            }
+            final playlists = snapshot.data!;
 
             if (playlists.isEmpty) {
               return AlertDialog(
@@ -3645,6 +3637,49 @@ class _FullPlayerState extends State<FullPlayer>
         );
       },
     );
+  }
+
+  /// 拉取用户歌单并解析为「添加到歌单」对话框所需的 Map 列表，
+  /// 再按收藏页「创建的歌单」自定义顺序原地排序后返回。
+  /// 返回 null 表示请求失败（与旧逻辑中 snapshot.data == null 等价）。
+  Future<List<Map<String, dynamic>>?> _loadUserPlaylistsSorted(
+    KugouApiClient api,
+  ) async {
+    final resp = await api.getUserPlaylist(pagesize: 50);
+    if (resp == null) return null;
+    final data = resp['data'];
+    List<dynamic> rawPlaylists = [];
+    if (data is List) {
+      rawPlaylists = data;
+    } else if (data is Map) {
+      rawPlaylists = data['info'] ?? data['list'] ?? data['special_list'] ?? [];
+    }
+
+    // 使用 KugouPlaylistBrief 模型解析，确保字段名映射正确
+    // 只显示用户自己创建的歌单 (type=0)
+    final playlists = <Map<String, dynamic>>[];
+    for (final item in rawPlaylists) {
+      final json = item as Map<String, dynamic>;
+      final brief = KugouPlaylistBrief.fromJson(json);
+      if (brief.type != 0) continue;
+      // 排除「我喜欢」默认收藏歌单：收藏走红心机制，不走添加到歌单
+      // （判定与 FavoritesProvider 一致：name == '我喜欢' || is_def == 2）
+      if (brief.name == '我喜欢' || json['is_def'] == 2) continue;
+      // 将模型数据转回 Map 以便 UI 使用（包含正确的字段值）
+      playlists.add({
+        'name': brief.name,
+        'songCount': brief.songCount,
+        'listid': brief.listId.isEmpty ? brief.id : brief.listId,
+        'specialid': brief.id,
+        'global_collection_id': brief.globalCollectionId,
+        'type': brief.type,
+        // 保留原始 JSON 用于 API 调用
+        ...json,
+      });
+    }
+
+    await PlaylistOrderUtils.sortCreatedPlaylistMaps(playlists);
+    return playlists;
   }
 
   Future<void> _addSongToPlaylist(
