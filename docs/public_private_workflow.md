@@ -347,7 +347,7 @@ void installUiHooks() {
 
 ### 4.6 场景 F：导出白名单维护（新增文件/目录时）
 
-> 导出的白名单在 `scripts/md3.ps1 export` 的 `$whitelist` 数组（当前 17 项）。**白名单制 = 只有列出的顶层项才会被拷贝进公开树**，未列出的东西（包括意外创建的任何顶层目录/文件）一律不进公开仓库——这是隔离的**第一道闸**。
+> 导出的白名单在 `scripts/md3.ps1 export` 的 `$whitelist` 数组（当前 16 项）。**白名单制 = 只有列出的顶层项才会被拷贝进公开树**，未列出的东西（包括意外创建的任何顶层目录/文件）一律不进公开仓库——这是隔离的**第一道闸**。
 
 **新增功能时按落点分类处理：**
 
@@ -363,6 +363,8 @@ void installUiHooks() {
 > ⚠️ **`scripts/` 目录例外**：不作为整目录进白名单，导出时**只带出 `tasks/android.ps1` 与 `tasks/windows.ps1` 两个构建脚本**（脚本内已带「lib/common.ps1 缺失时自包含兜底」，可脱离公共库独立运行）。`md3.ps1` 入口、`lib/`（common/ui/llm）、`tools/`、`public_deny.txt` 及 `tasks/` 下其余任务脚本（export/verify/commit/changelog/token）都是**私有侧工具链，一律不进公开仓库**（避免导出脚本自复制、否认清单与 API key 外泄）。`scripts/` 目录内白名单之外的文件在导出时会按允许清单防御式清理。新增导出相关脚本时，同样保持「只允许列表白名单制」。
 >
 > ⚠️ **其他私有功能排除**：`windows/` 目录（私有版 Windows 桌面功能，公开版 Android-only）不在白名单；pubspec 的 `just_audio_windows`/`video_player_win` 依赖与 README 的「边边存」条目、`.github/workflows/build-windows.yml` 在导出时被剥离/删除；`.trae/`（AI 计划/工作产物）白名单外且导出时防御性删除，**绝不导出**。`CHANGELOG.md` **在白名单内**（由 `md3.ps1 changelog` / `export -Changelog` 维护：总结提交记录、LLM 生成需确认后写入，随导出携带）。**新增私有功能时，同步检查这三处：依赖剥离、文档宣传清理、CI 排除；新增 plan/分析文档放 `.trae/` 或 `tmp/`，绝不进公开树。**
+>
+> ⚠️ **Rust API 服务器源码（已导出）**：`kugou_api_server/rust/` 在 `$whitelist` 内，随公开导出——含 `src/`、`tests/`、`Cargo.toml`/`Cargo.lock`、`build_android.sh`/`build_desktop.ps1`。但其**本地构建/工具链临时物绝不导出**：`target*` 系列（`target/`、`target-native/`、`target-wsl/` 等不定名 cargo 编译产物，Copy-Item 不认 gitignore 会一并复制）与 `.cargo/` 在导出步骤 4 被显式删除。旧 Node 时代的 `kugou_api_server/module|util|server.js|Dockerfile` 等**不在白名单**，天然排除。公开版仍用已提交的 `libkugou_server.so`（`android/jniLibs` 随 `android/` 导出）打包，Rust 源码供审阅/可重建。
 
 **判断标准（一句话）**：这个文件/目录**该不该出现在公开仓库？**
 - 该 → 加进 `$whitelist`
@@ -375,6 +377,7 @@ void installUiHooks() {
 $whitelist = @(
     'lib', 'android', 'assets', 'web', 'windows', 'test',
     'third_party', 'img', 'scripts', '.github',
+    'kugou_api_server/rust',        # ← Rust API 服务器源码（导出时剔除 target*/.cargo 本地物）
     'pubspec.yaml', 'analysis_options.yaml', 'README.md',
     'LICENSE', 'CHANGELOG.md', 'DISCLAIMER.md',
     'devtools_options.yaml',
@@ -496,6 +499,7 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 | `lib/`（不含 private/） | 公开 | 公开功能；只许中性钩子 |
 | `lib/private/` | 私有 | 6 文件：`cache_bridge.dart`、`enhanced_ui.dart`、`downloads_provider.dart`、`downloads_page.dart`、`private_settings.dart`、`main_private.dart` |
 | `packages/md3_download_cache/` | 私有 | 引擎包：`download/`（manager/repository/task）+ `cache/`（stream_cache_manager/repository/lyric_data） |
+| `kugou_api_server/rust/` | 公开 | Rust API 服务器源码（白名单内，随导出；剔除 `target*`/`.cargo` 本地物） |
 | `scripts/tasks/export_public.ps1` | 工具 | 过滤导出 + deny 闸门 + 可选推送/PR |
 | `scripts/tasks/verify_public.ps1` | 工具 | 闸门校验（pre-push/CI 用） |
 | `scripts/tasks/commit.ps1` | 工具 | 一键提交（TUI 勾选 + 闸门 + 推送 + PR/合并） |
