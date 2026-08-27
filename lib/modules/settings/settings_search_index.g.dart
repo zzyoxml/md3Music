@@ -26,6 +26,7 @@ const List<({String label, String category, String aliases})>
   (label: '歌词动态颜色', category: '播放页样式', aliases: '动态颜色 混色'),
   (label: '歌词高斯模糊', category: '播放页样式', aliases: '高斯模糊 模糊'),
   (label: '歌词辉光效果', category: '播放页样式', aliases: '辉光 发光'),
+  (label: '辉光触发阈值', category: '播放页样式', aliases: '辉光 发光 阈值 灵敏度'),
   (label: '背景动态流光', category: '播放页样式', aliases: '流光 背景'),
   (label: '歌词省电模式', category: '播放页样式', aliases: '省电 限帧'),
   (label: '音乐频谱环绕', category: '播放页样式', aliases: '频谱 环绕 可视化'),

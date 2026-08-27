@@ -92,6 +92,8 @@ class _SettingsPageState extends State<SettingsPage>
   bool _lyricEcoMode = true;
   // 歌词动态字体颜色开关（默认开启，仅 AM 播放器生效）
   bool _lyricDynamicColor = true;
+  // 辉光触发阈值系数（默认 1.4，范围 1.0~2.0）：触发阈值 = 歌词字长中位数 × 该系数
+  double _glowThresholdFactor = 1.4;
   String _appVersion = '';
   // 实时歌词推送协议选择（三选一 + 关闭）
   String _lyricPushProtocol = 'none';
@@ -343,6 +345,7 @@ class _SettingsPageState extends State<SettingsPage>
       _useDuetLayout = LyricPreferences.instance.useDuetLayout;
       _lyricEcoMode = LyricPreferences.instance.ecoMode;
       _lyricDynamicColor = LyricPreferences.instance.useDynamicLyricColor;
+      _glowThresholdFactor = LyricPreferences.instance.glowThresholdFactor;
       _bluetoothLyricEnabled = bluetoothLyricEnabled;
       _bluetoothLyricCompressArt = bluetoothLyricCompressArt;
       _lockScreenLyricEnabled = lockScreenLyricEnabled;
@@ -1568,6 +1571,36 @@ class _SettingsPageState extends State<SettingsPage>
                   LyricPreferences.instance.setUseGlowEffect(v);
                 }
               : null,
+        ),
+        // 辉光触发阈值系数：触发阈值 = 歌词字长中位数 × 该系数（越小越易触发）
+        // search: 辉光 发光 阈值 灵敏度
+        ListTile(
+          title: const Text('辉光触发阈值'),
+          subtitle: const Text('触发阈值 = 歌词字长中位数 × 系数，越小越容易触发'),
+          trailing: Text(_glowThresholdFactor.toStringAsFixed(1)),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          child: M3ESlider(
+            decoration: const M3ESliderDecoration(
+                haptic: M3EHapticFeedback.medium),
+            value: _glowThresholdFactor,
+            min: LyricPreferences.minGlowThresholdFactor,
+            max: LyricPreferences.maxGlowThresholdFactor,
+            divisions: 10,
+            label: _glowThresholdFactor.toStringAsFixed(1),
+            onChanged: _useAmStylePlayer
+                ? (v) {
+                    setState(() => _glowThresholdFactor = v);
+                  }
+                : null,
+            onChangeEnd: _useAmStylePlayer
+                ? (v) {
+                    setState(() => _glowThresholdFactor = v);
+                    LyricPreferences.instance.setGlowThresholdFactor(v);
+                  }
+                : null,
+          ),
         ),
         // search: 流光 背景
         SwitchListTile(

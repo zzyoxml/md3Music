@@ -56,6 +56,13 @@ class LyricScrollController {
   /// 外部（AppleLyricsView）可监听此回调来恢复歌词模糊效果。
   VoidCallback? onAutoReturn;
 
+  /// 是否已完成"首次定位瞬移"。
+  ///
+  /// 新建控制器（重新进入歌词页 / 切歌）时弹簧位置从 0（歌词顶部）出发，
+  /// 若直接 setTarget 会看到"从顶部一路滚动到当前行"的长动画。
+  /// 首次 setCurrentLine 且视口已就绪时用 setPosition 瞬移到位，避免该动画。
+  bool _initialJumpDone = false;
+
   /// 当前弹簧 stiffness（用于测试与外部诊断）
   double _currentStiffness = LyricLayout.posYSeekingStiffness;
 
@@ -149,8 +156,20 @@ class LyricScrollController {
     // 用户滚动期间不强制 setTarget，等 5s 倒计时结束后自动回弹到最新行
     if (!_isUserScrolling && _autoReturned) {
       final double targetY = targetYForLine(index, lineHeight, lineTop: lineTop);
-      _posYSpring.setTarget(targetY);
+      if (!_initialJumpDone && _viewportHeight > 0) {
+        // 首次定位：直接瞬移到当前行（setPosition 会把 target 同步为当前位置），
+        // 避免弹簧从顶部 0 一路滚动到当前行的动画
+        _initialJumpDone = true;
+        _posYSpring.setPosition(targetY, 0);
+      } else {
+        _posYSpring.setTarget(targetY);
+      }
     }
+  }
+
+  /// 切歌（lines 变化）后复位"首次定位"状态，让新歌的首次定位直接瞬移。
+  void resetInitialJump() {
+    _initialJumpDone = false;
   }
 
   /// 应用弹簧参数
@@ -309,5 +328,6 @@ class LyricScrollController {
     _currentLineTop = 0;
     _autoReturned = true;
     _autoReturnRemainingMs = 0;
+    _initialJumpDone = false;
   }
 }
