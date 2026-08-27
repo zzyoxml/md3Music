@@ -13,6 +13,7 @@ import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:md3music/widgets/apple_lyrics/layout/lyric_preferences.dart';
 import 'package:md3music/widgets/apple_lyrics/models/lyric_line.dart';
 
 /// 强调辉光状态（逐字符）。
@@ -110,13 +111,6 @@ class EmphasizeEffect {
 
   // ============== 触发条件常量 ==============
 
-  /// 阈值换算系数：辉光触发阈值 = 单位字长 × 1.4。
-  ///
-  /// 单位字长 = KRC 歌词字长中位数；有显式 BPM 时按「一字一拍」换算
-  /// （60000/BPM）。阈值随歌曲节奏自适应，替代固定的「快歌 500 / 慢歌 1000」
-  /// 两档，快慢之间平滑过渡。
-  static const double _thresholdFactor = 1.4;
-
   /// 默认兜底阈值（ms）：无逐字歌词 / 无 BPM / 样本不足时使用。
   static const int _durationThresholdMs = 500;
 
@@ -126,8 +120,9 @@ class EmphasizeEffect {
   /// 触发阈值：字时长 >= 此值才触发辉光（默认兜底值，见 [resolveThresholdMs]）。
   ///
   /// 快歌（KRC 逐字歌词，字时长常见 300~800ms）固定阈值易造成快歌不触发、
-  /// 慢歌过密；改用 [resolveThresholdMs] 按歌曲 BPM / 歌词字长中位数 ×1.4
-  /// 自适应推断，再经 [shouldEmphasize] 的 [thresholdMs] 传入。
+  /// 慢歌过密；改用 [resolveThresholdMs] 按歌曲 BPM / 歌词字长中位数 ×
+  /// [LyricPreferences.glowThresholdFactor] 自适应推断（设置页可调 1.0~2.0），
+  /// 再经 [shouldEmphasize] 的 [thresholdMs] 传入。
   static const int _nonCjkMaxLength = 7;
 
   // ============== 内容过滤常量 ==============
@@ -275,7 +270,7 @@ class EmphasizeEffect {
     return false;
   }
 
-  /// 解析整首歌的辉光触发阈值（ms）：**单位字长 × 1.4**，随节奏自适应。
+  /// 解析整首歌的辉光触发阈值（ms）：**单位字长 × 阈值系数**，随节奏自适应。
   ///
   /// 单位字长来源（结合 BPM 真数据 + 歌词字长推断）：
   /// 1. [songBpm] 非空（酷狗接口 / 本地音频 TBPM 标签）：按「一字一拍」
@@ -284,22 +279,28 @@ class EmphasizeEffect {
   ///    样本不足返回 null 交给兜底。
   /// 3. 兜底返回 [fallback]（默认 [_durationThresholdMs]=500）。
   ///
-  /// 例：字长中位数 400ms（快歌）→ 阈值 560ms；800ms（慢歌）→ 1120ms，
+  /// 阈值系数默认取 [LyricPreferences.glowThresholdFactor]（设置页可调
+  /// 1.0~2.0，默认 1.4），也可经 [thresholdFactor] 显式传入（供测试）。
+  ///
+  /// 例：字长中位数 400ms（快歌）× 1.4 → 阈值 560ms；800ms（慢歌）→ 1120ms，
   /// 快慢之间平滑过渡，不再使用固定两档。
   static int resolveThresholdMs({
     List<LyricLine>? lines,
     int? songBpm,
     int fallback = _durationThresholdMs,
+    double? thresholdFactor,
   }) {
-    // 1. 显式 BPM：一字一拍换算单位字长，再 ×1.4
+    final double factor =
+        thresholdFactor ?? LyricPreferences.instance.glowThresholdFactor;
+    // 1. 显式 BPM：一字一拍换算单位字长，再 × 系数
     if (songBpm != null && songBpm > 0) {
       final double beatMs = 60000 / songBpm;
-      return (beatMs * _thresholdFactor).round();
+      return (beatMs * factor).round();
     }
-    // 2. KRC 逐字歌词字长中位数 ×1.4
+    // 2. KRC 逐字歌词字长中位数 × 系数
     if (lines != null) {
       final int? median = _lyricsMedianMs(lines);
-      if (median != null) return (median * _thresholdFactor).round();
+      if (median != null) return (median * factor).round();
     }
     // 3. 兜底
     return fallback;

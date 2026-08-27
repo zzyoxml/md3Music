@@ -27,7 +27,7 @@ void main() {
       controller.dispose();
     });
 
-    test('2. setCurrentLine 后 Spring target 改变，posY 经 tick 收敛到目标', () {
+    test('2. setCurrentLine 首次定位直接瞬移到目标（不再从顶部滚动）', () {
       final controller = LyricScrollController();
       controller.setViewportSize(const Size(400, 600));
       // 第 0 行，行高 40，对齐位置 0.35
@@ -39,18 +39,13 @@ void main() {
         intervalMs: 500,
       );
 
-      // setTarget 后 spring 应处于待运动状态
+      // 新建控制器（相当于重新进入歌词页）：首次定位应瞬移，不产生滚动动画
       expect(controller.currentTarget, closeTo(190, 1e-9));
-      // 初始 posY 仍为 0，待 tick 推进
-      expect(controller.posY, equals(0));
-
-      // 模拟 5 秒（每步 16ms），应收敛到 target
-      bool needsRepaint = true;
-      for (int i = 0; i < 300; i++) {
-        needsRepaint = controller.tick(0.016);
-      }
+      expect(controller.posY, closeTo(190, 1e-9),
+          reason: '首次定位应瞬移到目标，避免"从顶部滚动到当前行"的动画');
+      // 弹簧已稳定，无需重绘
+      expect(controller.tick(0.016), isFalse);
       expect(controller.posY, closeTo(190, 0.5));
-      expect(needsRepaint, isFalse);
       controller.dispose();
     });
 
@@ -226,16 +221,24 @@ void main() {
     test('9. tick 在稳定后返回 false（无需重绘）', () {
       final controller = LyricScrollController();
       controller.setViewportSize(const Size(400, 600));
+      // 首次定位瞬移，立即稳定
       controller.setCurrentLine(
         0,
         isSeeking: false,
         lineHeight: 40,
         intervalMs: 500,
       );
+      expect(controller.tick(0.016), isFalse);
 
-      // 运动 1 步后应返回 true（仍需重绘）
+      // 行切换（index 0 → 1）：弹簧重新运动，需要重绘
+      controller.setCurrentLine(
+        1,
+        isSeeking: false,
+        lineHeight: 40,
+        intervalMs: 500,
+      );
       bool needsRepaint = controller.tick(0.016);
-      expect(needsRepaint, isTrue);
+      expect(needsRepaint, isTrue, reason: '行切换后弹簧运动，需要重绘');
 
       // 推进到稳定
       for (int i = 0; i < 500; i++) {
@@ -401,6 +404,32 @@ void main() {
       // 数百毫秒，避免弹簧"肉眼到目标后"仍长时间不锁回 60fps。
       expect(strictTick, greaterThan(visualTick),
           reason: '位移进入 0.5px 应先于严格收敛，省电模式才能及时锁回 60fps');
+      controller.dispose();
+    });
+
+    test('15. resetInitialJump 后再次 setCurrentLine 重新瞬移（切歌场景）', () {
+      final controller = LyricScrollController();
+      controller.setViewportSize(const Size(400, 600));
+      // 首次定位瞬移到第 0 行（targetY=190）
+      controller.setCurrentLine(
+        0,
+        isSeeking: false,
+        lineHeight: 40,
+        intervalMs: 500,
+      );
+      expect(controller.posY, closeTo(190, 1e-9), reason: '首次定位应瞬移');
+
+      // 切歌：复位首次定位状态后，新歌的首次定位也直接瞬移
+      controller.resetInitialJump();
+      controller.setCurrentLine(
+        5,
+        isSeeking: false,
+        lineHeight: 40,
+        intervalMs: 500,
+      );
+      // 第 5 行 targetY = -(200 + 20 - 210) = -10（见测试 3 targetYForLine）
+      expect(controller.posY, closeTo(-10, 1e-9),
+          reason: 'resetInitialJump 后应重新瞬移到位');
       controller.dispose();
     });
   });
