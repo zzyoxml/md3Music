@@ -816,6 +816,21 @@ void main() {
         700,
       );
     });
+
+    test('阈值系数可显式传入（设置项 1.0~2.0 映射到阈值）', () {
+      final lines = [makeKrcLine(List.filled(30, 400))];
+      // 系数 1.0 → 400；1.4（默认）→ 560；2.0 → 800
+      expect(
+        EmphasizeEffect.resolveThresholdMs(
+            lines: lines, thresholdFactor: 1.0),
+        400,
+      );
+      expect(
+        EmphasizeEffect.resolveThresholdMs(
+            lines: lines, thresholdFactor: 2.0),
+        800,
+      );
+    });
   });
 
   group('shouldEmphasize - thresholdMs 参数', () {

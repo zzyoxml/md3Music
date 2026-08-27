@@ -84,6 +84,17 @@ class LyricPreferences extends ChangeNotifier {
   /// 与当前未设置字重时的渲染外观（Flutter 默认 FontWeight.normal=400）一致。
   static const int defaultFontWeight = 400;
 
+  /// 辉光触发阈值系数最小值
+  ///
+  /// 触发阈值 = 歌词字长中位数 × 该系数；系数越小越容易触发辉光。
+  static const double minGlowThresholdFactor = 1.0;
+
+  /// 辉光触发阈值系数最大值
+  static const double maxGlowThresholdFactor = 2.0;
+
+  /// 辉光触发阈值系数默认值
+  static const double defaultGlowThresholdFactor = 1.4;
+
   // ============== 按设备类型的默认值（手机 / Pad） ==============
 
   /// 按设备类型的字号默认：手机 29px，Pad 40px。
@@ -118,6 +129,7 @@ class LyricPreferences extends ChangeNotifier {
   static const String _keyUseDuetLayout = 'lyric_use_duet_layout';
   static const String _keyEcoMode = 'lyric_eco_mode';
   static const String _keyUseDynamicLyricColor = 'lyric_dynamic_color';
+  static const String _keyGlowThresholdFactor = 'lyric_glow_threshold_factor';
 
   // ============== 当前值 ==============
 
@@ -136,6 +148,8 @@ class LyricPreferences extends ChangeNotifier {
   bool _ecoMode = true;
   // 动态字体颜色（默认开启，仅 AM 播放器可用）：当前行歌词颜色按「70% 白 + 30% 封面提取色」混色
   bool _useDynamicLyricColor = true;
+  // 辉光触发阈值系数（默认 1.4）：触发阈值 = 歌词字长中位数 × 该系数
+  double _glowThresholdFactor = defaultGlowThresholdFactor;
   // 运行时加载成功后填充的 family（仅 custom 模式且加载成功时非 null）
   String? _loadedCustomFontFamily;
   bool _loaded = false;
@@ -162,6 +176,11 @@ class LyricPreferences extends ChangeNotifier {
 
   /// 歌词动态字体颜色是否开启（默认开启，仅 AM 播放器生效）。
   bool get useDynamicLyricColor => _useDynamicLyricColor;
+
+  /// 辉光触发阈值系数（范围 [minGlowThresholdFactor]~[maxGlowThresholdFactor]）。
+  ///
+  /// 触发阈值 = 歌词字长中位数 × 该系数；系数越小越容易触发辉光。
+  double get glowThresholdFactor => _glowThresholdFactor;
 
   /// 当前生效的 fontFamily（传给 TextPainter 的 TextStyle）：
   /// - [LyricFontSource.system]：返回 null（让 Flutter 走系统字体链）
@@ -211,6 +230,9 @@ class LyricPreferences extends ChangeNotifier {
     _customFontPath = prefs.getString(_keyCustomFontPath);
     _ecoMode = prefs.getBool(_keyEcoMode) ?? true;
     _useDynamicLyricColor = prefs.getBool(_keyUseDynamicLyricColor) ?? true;
+    _glowThresholdFactor =
+        (prefs.getDouble(_keyGlowThresholdFactor) ?? defaultGlowThresholdFactor)
+            .clamp(minGlowThresholdFactor, maxGlowThresholdFactor);
     _loaded = true;
     notifyListeners();
     // 若已配置自定义字体，立即尝试加载（Fire-and-forget，加载完成后会 notifyListeners）
@@ -303,6 +325,21 @@ class LyricPreferences extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyUseDynamicLyricColor, enabled);
+  }
+
+  /// 设置辉光触发阈值系数并持久化。
+  ///
+  /// 触发阈值 = 歌词字长中位数 × 该系数，范围 [minGlowThresholdFactor]~
+  /// [maxGlowThresholdFactor]（默认 [defaultGlowThresholdFactor]=1.4）。
+  /// 系数越小越容易触发辉光。
+  Future<void> setGlowThresholdFactor(double value) async {
+    final clamped =
+        value.clamp(minGlowThresholdFactor, maxGlowThresholdFactor);
+    if (clamped == _glowThresholdFactor) return;
+    _glowThresholdFactor = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyGlowThresholdFactor, _glowThresholdFactor);
   }
 
   /// 设置歌词翻译副行显示开关并持久化。
@@ -416,6 +453,7 @@ class LyricPreferences extends ChangeNotifier {
     _loadedCustomFontFamily = null;
     _ecoMode = true;
     _useDynamicLyricColor = true;
+    _glowThresholdFactor = defaultGlowThresholdFactor;
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_keyFontSize, _fontSize);
@@ -429,6 +467,7 @@ class LyricPreferences extends ChangeNotifier {
     await prefs.setString(_keyDisplayMode, _displayMode.name);
     await prefs.remove(_keyEcoMode);
     await prefs.remove(_keyUseDynamicLyricColor);
+    await prefs.remove(_keyGlowThresholdFactor);
     await prefs.remove(_keyFontSource);
     await prefs.remove(_keyCustomFontPath);
   }
