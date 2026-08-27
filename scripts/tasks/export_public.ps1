@@ -55,6 +55,8 @@
   配合 -ForcePush：把私有仓库提交记录以「空树提交」历史一并推送到目标分支，
   顶端再叠加本次公开树快照，形成「提交记录完整、文件内容只在顶端」的分支。
   历史不含任何文件内容（无 blob），下载/缓存代码零残留，可追溯但不可看代码。
+  增量优先：目标分支上次导出的映射（公开树内 .md3/export-state）存在且早期历史
+  未改写时，只追加新提交记录并 fast-forward 推送（免 force）；否则回落到全量重建 + force。
   仅 force push 覆盖模式有效；PR 模式下本开关无效（被忽略）。
 
 .PARAMETER NoPause
@@ -64,7 +66,7 @@
   .\scripts\md3.ps1 export                                     # 只导出 + 闸门校验
   .\scripts\md3.ps1 export -PublicRemote <URL>                 # 导出 + 推分支 + 开 PR（默认）
   .\scripts\md3.ps1 export -PublicRemote <URL> -ForcePush      # 导出 + force push 覆盖 main（例外）
-  .\scripts\md3.ps1 export -PublicRemote <URL> -ForcePush -WithHistory  # 覆盖并携带提交记录历史（空树提交 + 顶端公开树）
+  .\scripts\md3.ps1 export -PublicRemote <URL> -ForcePush -WithHistory  # 覆盖并携带提交记录历史（增量优先：有 .md3/export-state 映射则免 force 追加，否则全量重建 + force）
   .\scripts\md3.ps1 export -Changelog -ChangelogVersion v5.4.0 # 更新 CHANGELOG 后随导出携带
   .\scripts\md3.ps1 export -PublicRemote <URL> -NoPause        # CI/非交互环境
 #>
@@ -103,13 +105,17 @@ try {
     if (-not (Test-Path $denyFile)) { throw "未找到否认清单 $denyFile" }
     Write-Ok "仓库根：$Root"
     if ($AsPr -and $ForcePush) { throw '-AsPr 与 -ForcePush 不能同时使用（开 PR 已是默认行为，-AsPr 仅为兼容保留）' }
+    # WithHistory：无论是否推送都给出明确提示（不只推送时才有文本）
+    if ($WithHistory) {
+        Write-Ok '已启用「携带提交记录历史」：私有提交记录将重建为空树提交（消息完整、无文件内容），公开树叠加在顶端'
+        if (-not $ForcePush) {
+            Write-Warn '-WithHistory 需要配合 -ForcePush 才能生效（PR 模式基于公开仓库现有历史，无法携带独立重建的提交记录）'
+        }
+    }
     if ($PublicRemote) {
         Assert-Command git '-PublicRemote 推送模式需要 git 在 PATH 中'
         if ($AsPr) { Write-Note '-AsPr 已为默认行为，无需显式指定（参数兼容保留）' }
-        if ($WithHistory -and -not $ForcePush) {
-            Write-Warn '-WithHistory 仅在 -ForcePush 覆盖模式下有效，本次忽略（PR 模式基于公开仓库现有历史，无法携带独立重建的提交记录）'
-        }
-        $mode = if ($ForcePush) { "-ForcePush：直接覆盖 $PublicBranch$(if ($WithHistory) { '（含提交记录历史）' } else { '' })" } else { "默认：开 PR 到 $PublicBranch" }
+        $mode = if ($ForcePush) { "-ForcePush：直接覆盖 $PublicBranch$(if ($WithHistory) { '（含提交记录历史，增量优先）' } else { '' })" } else { "默认：开 PR 到 $PublicBranch" }
         Write-Ok "目标仓库：$PublicRemote（$mode）"
         if ($ForcePush -and (Test-InteractiveConsole)) {
             if (-not (Read-YesNo "确认要 force push 直接覆盖 $PublicRemote 的 $PublicBranch 分支吗？公开仓库历史将被整段替换")) {
@@ -119,6 +125,7 @@ try {
         }
     } else {
         Write-Warn '未指定 -PublicRemote，仅导出不推送'
+        if ($WithHistory) { Write-Warn '已选 -WithHistory 但未推送：本次仅导出公开树，提交记录历史不会实际推送（需 -PublicRemote + -ForcePush）' }
         if ($AsPr -or $ForcePush) { Write-Warn '-AsPr / -ForcePush 需要 -PublicRemote，本次忽略' }
     }
     # 工作区未提交改动提示（不阻断导出）
@@ -344,24 +351,149 @@ try {
     # ---------- 7. 可选发布（默认开 PR；-ForcePush 才直推覆盖） ----------
     if ($PublicRemote -and $ForcePush) {
         if ($WithHistory) {
-            # 带提交记录模式：私有提交历史重建为空树提交 → 公开树叠加为顶端提交 → force push。
-            # 生成「消息完整、diff 全空」的历史，可追溯提交记录但看不到任何文件内容（无 blob）。
-            Write-Step "推送到公开仓库（force push 覆盖 $PublicBranch，含提交记录历史）"
-            $histDir = Join-Path $env:TEMP "md3music-public-messages-$(Get-Date -Format 'yyyyMMddHHmmss')"
-            $histArgs = @{ OutDir = $histDir; PublicBranch = $PublicBranch; NoPause = $true }
+            # 带提交记录模式：私有提交历史重建为空树提交 → 公开树叠加为顶端提交 → push。
+            # 增量优先：目标分支存在 .md3/export-state 映射且早期历史未改写时，
+            # 只追加新提交记录并 fast-forward 推送（免 force）；否则全量重建 + force。
+            # 历史「消息完整、diff 全空」，可追溯提交记录但看不到任何文件内容（无 blob）。
+            $EmptyTree = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
+            $stateRel = '.md3/export-state'
+            Write-Step "推送到公开仓库（$PublicBranch，含提交记录历史）"
+            Write-Note '空树提交历史 = 只保留每条提交的作者/日期/信息，无任何文件内容（无 blob）'
             [void](Enable-AutoProxy)
-            & (Join-Path $PSScriptRoot 'export_messages_history.ps1') @histArgs
-            if ($LASTEXITCODE -ne 0) { throw "提交记录历史重建失败（退出码 $LASTEXITCODE），中止发布" }
-            # 公开树（排除残留 .git）整体放入历史仓库，叠加为顶端提交
-            foreach ($item in (Get-ChildItem $OutDir -Force | Where-Object { $_.Name -ne '.git' })) {
-                Copy-Item $item.FullName (Join-Path $histDir $item.Name) -Recurse -Force
+            # —— 探测增量基线（独立临时仓库，避免污染最终历史仓库）——
+            Write-Note "探测 $PublicBranch 的增量基线（--filter=blob:none，仅拉取 commit/tree）…"
+            $probe = Join-Path $env:TEMP "md3music-history-probe-$(Get-Date -Format 'yyyyMMddHHmmss')"
+            New-Item -ItemType Directory -Path $probe | Out-Null
+            git -C $probe init -q
+            git -C $probe remote add origin $PublicRemote
+            $oldTip = $null; $prevPrivate = $null; $prevEmpty = $null; $incremental = $false
+            # 拉取远端现有分支与映射，尝试增量。--filter=blob:none：只拉 commit/tree，
+            # 公开树文件体量约 80MB，全量拉取会极慢；映射文件为小 blob，按需 lazily 拉取即可。
+            # 探测阶段 git 可能因「分支不存在 / 映射文件不存在」写 stderr（fatal），
+            # 5.1 下 $ErrorActionPreference='Stop' 会把 stderr 当 NativeCommandError 中断，
+            # 故这里临时放宽并检查退出码。
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            git -C $probe fetch -q --filter=blob:none origin $PublicBranch 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+                $oldTip = (& git -C $probe rev-parse FETCH_HEAD 2>$null).Trim()
             }
-            Invoke-Native { git -C $histDir add -A }
-            Invoke-Native { git -C $histDir -c user.name="md3music" -c user.email="md3music@local" commit -q -m "public export" }
-            Invoke-Native { git -C $histDir remote add origin $PublicRemote }
-            Invoke-WithRetry -What '推送公开仓库' -Action { Invoke-Native { git -C $histDir push -f origin HEAD:$PublicBranch } }
-            Write-Ok "已推送 $PublicRemote（分支 $PublicBranch，含提交记录历史）"
-            Write-Note "历史仓库（如需人工补救）：$histDir"
+            if ($oldTip) {
+                $stateLines = @(& git -C $probe show "${oldTip}:$stateRel" 2>&1)
+                if ($LASTEXITCODE -ne 0) { $stateLines = @() }
+                foreach ($line in $stateLines) {
+                    if ($line -match '^private_head=(\S+)') { $prevPrivate = $Matches[1] }
+                    elseif ($line -match '^empty_head=(\S+)') { $prevEmpty = $Matches[1] }
+                }
+                if ($prevPrivate -and $prevEmpty) {
+                    git -C $Root merge-base --is-ancestor $prevPrivate HEAD 2>&1 | Out-Null
+                    if ($LASTEXITCODE -eq 0) { $incremental = $true }
+                }
+            }
+            $ErrorActionPreference = $prevEAP
+            if ($oldTip) {
+                Write-Ok "已拉取远端历史（oldTip @$($oldTip.Substring(0,7))）"
+                if ($prevPrivate) { Write-Ok "找到上次导出映射（private @$($prevPrivate.Substring(0,7)) / empty @$($prevEmpty.Substring(0,7))）" }
+                else { Write-Note '远端历史中无 .md3/export-state 映射（首次或旧版导出），将全量重建' }
+            } else {
+                Write-Note "远端无分支 $PublicBranch，将全量重建"
+            }
+            if ($incremental) {
+                # ---------- 增量路径：追加新提交，fast-forward 免 force ----------
+                $histDir = $probe
+                Write-Ok "增量模式：复用现有历史，仅追加 private @$($prevPrivate.Substring(0,7)) 之后的新提交"
+                # 物化空树对象：PowerShell 管道会把空字符串当一行（含换行）传给 --stdin，
+                # git 收到无效 tree 数据报 "too-short tree object"；用空文件方式最稳。
+                $emptyFile = Join-Path $histDir '.empty-tree'
+                [System.IO.File]::WriteAllBytes($emptyFile, @())
+                $EmptyTree = (& git -C $histDir hash-object -t tree -w $emptyFile 2>$null | Out-String).Trim()
+                Remove-ItemBypass $emptyFile
+                if (-not $EmptyTree) { throw '物化空树对象失败' }
+                # 让 HEAD/main 指向 oldTip 但不检出其工作区（partial clone 下 checkout 会
+                # 按需拉取 80MB blob；增量重建只用本地公开树，无需远端 blob）
+                git -C $histDir symbolic-ref HEAD refs/heads/main
+                git -C $histDir update-ref refs/heads/main $oldTip
+                # 清空工作区（保留 .git），准备放入新公开树
+                foreach ($item in (Get-ChildItem $histDir -Force | Where-Object { $_.Name -ne '.git' })) {
+                    Remove-ItemBypass $item.FullName
+                }
+                # 线性重建新增私有提交为空树提交（父链：首条接 oldTip，后续接前一条）
+                $newLines = @(& git -C $Root rev-list --topo-order --reverse "$prevPrivate..HEAD" 2>$null)
+                Write-Ok "本次新增 $(@($newLines).Count) 条提交记录待重建为空树提交"
+                $parent = $oldTip
+                $msgFile = Join-Path $histDir '._msg.tmp'
+                $incTotal = [Math]::Max(1, @($newLines).Count)
+                $incIdx = 0
+                foreach ($orig in $newLines) {
+                    $incIdx++
+                    Write-Progress -Activity '重建新增提交记录（空树）' -Status "$incIdx/$(@($newLines).Count)" -PercentComplete (($incIdx * 100) / $incTotal)
+                    $meta = (& git -C $Root log -1 '--format=%an%x09%ae%x09%aD%x09%cn%x09%ce%x09%cD' $orig)
+                    $p = $meta -split "`t"
+                    if ($p.Count -lt 6) { throw "解析元数据失败：$orig" }
+                    $an,$ae,$ad,$cn,$ce,$cd = $p[0],$p[1],$p[2],$p[3],$p[4],$p[5]
+                    $msg = ( (& git -C $Root log -1 --format=%B $orig) -join "`n")
+                    if (-not $msg.EndsWith("`n")) { $msg += "`n" }
+                    [System.IO.File]::WriteAllText($msgFile, $msg, (New-Object System.Text.UTF8Encoding($false)))
+                    Set-Item 'Env:GIT_AUTHOR_NAME' $an;    Set-Item 'Env:GIT_AUTHOR_EMAIL' $ae;    Set-Item 'Env:GIT_AUTHOR_DATE' $ad
+                    Set-Item 'Env:GIT_COMMITTER_NAME' $cn; Set-Item 'Env:GIT_COMMITTER_EMAIL' $ce; Set-Item 'Env:GIT_COMMITTER_DATE' $cd
+                    $new = (& git -C $histDir commit-tree $EmptyTree -p $parent -F $msgFile 2>&1)
+                    foreach ($k in @('GIT_AUTHOR_NAME','GIT_AUTHOR_EMAIL','GIT_AUTHOR_DATE','GIT_COMMITTER_NAME','GIT_COMMITTER_EMAIL','GIT_COMMITTER_DATE')) {
+                        Remove-Item "Env:$k" -ErrorAction SilentlyContinue
+                    }
+                    if ($LASTEXITCODE -ne 0) { throw "commit-tree 失败：$($new -join ' ')" }
+                    $parent = ($new | Out-String).Trim()
+                }
+                Write-Progress -Activity '重建新增提交记录（空树）' -Completed
+                Remove-ItemBypass $msgFile
+                $emptyHead = if ($newLines.Count -gt 0) { $parent } else { $prevEmpty }
+                $privateHead = (& git -C $Root rev-parse HEAD 2>$null).Trim()
+                # 公开树（排除残留 .git）放入历史仓库
+                foreach ($item in (Get-ChildItem $OutDir -Force | Where-Object { $_.Name -ne '.git' })) {
+                    Copy-Item $item.FullName (Join-Path $histDir $item.Name) -Recurse -Force
+                }
+                # 更新映射文件（供下次增量）
+                $stateText = "private_head=$privateHead`nempty_head=$emptyHead`n"
+                $stateDir = Join-Path $histDir '.md3'
+                New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+                [System.IO.File]::WriteAllText((Join-Path $stateDir 'export-state'), $stateText, (New-Object System.Text.UTF8Encoding($false)))
+                Invoke-Native { git -C $histDir add -A }
+                # 无任何变更（公开树与提交记录均无新增）时 git commit 会报
+                # "nothing to commit" 退出码 1，先检查再决定是否提交与推送
+                $hasChanges = @(& git -C $histDir status --porcelain 2>$null)
+                if ($hasChanges.Count -gt 0) {
+                    Invoke-Native { git -C $histDir -c user.name="md3music" -c user.email="md3music@local" commit -q -m "public export" }
+                    Invoke-WithRetry -What '推送公开仓库（增量）' -Action { Invoke-Native { git -C $histDir push origin HEAD:$PublicBranch } }
+                    Write-Ok "已推送 $PublicRemote（分支 $PublicBranch，增量追加 $(@($newLines).Count) 条提交记录）"
+                } else {
+                    Write-Warn '无任何变更（公开树与提交记录均无新增），跳过提交与推送'
+                }
+                Write-Note "历史仓库（如需人工补救）：$histDir"
+            } else {
+                # ---------- 全量路径：全新重建 + force（无增量基线时） ----------
+                if ($oldTip) { Write-Warn '未找到增量基线（首次导出 / 映射缺失 / 早期历史被改写），执行全量重建（需 force push）' }
+                Remove-ItemBypass $probe
+                $histDir = Join-Path $env:TEMP "md3music-public-messages-$(Get-Date -Format 'yyyyMMddHHmmss')"
+                $histArgs = @{ OutDir = $histDir; PublicBranch = $PublicBranch; NoPause = $true }
+                & (Join-Path $PSScriptRoot 'export_messages_history.ps1') @histArgs
+                if ($LASTEXITCODE -ne 0) { throw "提交记录历史重建失败（退出码 $LASTEXITCODE），中止发布" }
+                Write-Ok '提交记录历史已全量重建（空树提交），接下来叠加公开树并推送'
+                foreach ($item in (Get-ChildItem $OutDir -Force | Where-Object { $_.Name -ne '.git' })) {
+                    Copy-Item $item.FullName (Join-Path $histDir $item.Name) -Recurse -Force
+                }
+                # 写入映射文件（全量后同样落盘，保证下次可增量）
+                $emptyHead = (& git -C $histDir rev-parse HEAD 2>$null).Trim()
+                $privateHead = (& git -C $Root rev-parse HEAD 2>$null).Trim()
+                $stateText = "private_head=$privateHead`nempty_head=$emptyHead`n"
+                $stateDir = Join-Path $histDir '.md3'
+                New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
+                [System.IO.File]::WriteAllText((Join-Path $stateDir 'export-state'), $stateText, (New-Object System.Text.UTF8Encoding($false)))
+                Invoke-Native { git -C $histDir add -A }
+                Invoke-Native { git -C $histDir -c user.name="md3music" -c user.email="md3music@local" commit -q -m "public export" }
+                Invoke-Native { git -C $histDir remote add origin $PublicRemote }
+                Invoke-WithRetry -What '推送公开仓库（全量）' -Action { Invoke-Native { git -C $histDir push -f origin HEAD:$PublicBranch } }
+                Write-Ok "已推送 $PublicRemote（分支 $PublicBranch，全量重建）"
+                Write-Note "历史仓库（如需人工补救）：$histDir"
+            }
         } else {
             # 覆盖模式：导出树是全新 git init 的单提交仓库，force push 直接覆盖目标分支
             Write-Step "推送到公开仓库（force push 覆盖 $PublicBranch）"
@@ -423,6 +555,9 @@ try {
 
     # ---------- 8. 完成总结 ----------
     Write-Step '导出完成'
+    if ($WithHistory -and $ForcePush -and $PublicRemote) {
+        Write-Ok "本次发布已携带提交记录历史（目标分支 $PublicBranch；如需人工补救：$histDir）"
+    }
     $size = (Get-ChildItem $OutDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
     Write-Ok "导出目录：$OutDir"
     Write-Ok "导出体量：约 $([math]::Round($size / 1MB, 1)) MB"
