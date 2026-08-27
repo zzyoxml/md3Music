@@ -220,9 +220,31 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// notifyListeners 在播放/暂停/切歌时触发（高频位置更新走 positionNotifier，
   /// 不触发全量通知），此方法开销极小。
   void _syncListeningGradeOnline() {
-    ListeningGradeService.instance.setListeningOnline(
-      (_currentSong?.isOnline ?? false) && _isPlaying,
-    );
+    final playingOnline = (_currentSong?.isOnline ?? false) && _isPlaying;
+    ListeningGradeService.instance.setListeningOnline(playingOnline);
+    // 真实播放上报：在线歌曲开始播放时上传一次播放历史（mxid=album_audio_id）。
+    // 背景：听歌等级/时长对部分账号按"真实播放统计"记账，/user/grade/info 的
+    // diff 差量上报不被服务器记账（实测 status=1/error_code=0 但服务器值不动）。
+    // 上传播放历史即是真实播放信号，让这类账号也能累计听歌时长。按 song.id 去重，
+    // 同一首歌只在重新开始播放时上报一次；best-effort，失败不影响播放。
+    if (playingOnline) {
+      _maybeUploadPlayHistory(_currentSong);
+    }
+  }
+
+  /// 最近一次已上报播放历史的歌曲 id（避免同一首歌重复上报）。
+  String? _lastUploadedPlaySongId;
+
+  /// 最佳努力上报一次该在线歌曲的播放历史（需要 album_audio_id 作为 mxid）。
+  void _maybeUploadPlayHistory(Song? song) {
+    if (song == null || _lastUploadedPlaySongId == song.id) return;
+    final audioId = song.albumAudioId;
+    if (audioId == null || audioId.isEmpty) return;
+    _lastUploadedPlaySongId = song.id;
+    // ignore: discarded_futures
+    KugouApiClient().uploadPlayHistory(audioId).catchError((_) => null);
+    // ignore: avoid_print
+    print('[PlayUpload] online 歌曲上报播放历史 song=${song.id} mxid=$audioId');
   }
 
   Future<void> _initAudioService() async {
