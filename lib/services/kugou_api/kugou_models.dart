@@ -1,4 +1,4 @@
-import '../../data/models/album.dart';
+﻿import '../../data/models/album.dart';
 import '../../data/models/artist.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/song.dart';
@@ -2011,6 +2011,9 @@ class KugouLongAudioAudio {
   final String? artworkUri;
   final String? albumAudioId;
   final String? albumId;
+  /// 是否限免可播：fail_process_128（默认 128k 播放音质）为 0；字段缺失时兜底 fail_process。
+  /// 非 0（酷狗惯例 4）= 需购买/仅试听（付费章节）。
+  final bool canPlay;
 
   const KugouLongAudioAudio({
     required this.id,
@@ -2020,6 +2023,7 @@ class KugouLongAudioAudio {
     this.artworkUri,
     this.albumAudioId,
     this.albumId,
+    this.canPlay = true,
   });
 
   factory KugouLongAudioAudio.fromJson(Map<String, dynamic> json) {
@@ -2046,12 +2050,15 @@ class KugouLongAudioAudio {
       ),
       author: _strNull(json['author_name'] ?? json['singer_name']),
       duration: Duration(
-        seconds: _parseInt(
-          json['timelength'] ??
-              json['timelength_128'] ??
-              json['timelength_320'] ??
-              json['timelength_high'] ??
-              0,
+        seconds: _normalizeDuration(
+          _parseInt(
+            json['timelength'] ??
+                json['timelength_128'] ??
+                json['timelength_320'] ??
+                json['timelength_high'] ??
+                json['duration'] ??
+                0,
+          ),
         ),
       ),
       artworkUri: _resolveArtworkUri(
@@ -2059,8 +2066,20 @@ class KugouLongAudioAudio {
       ),
       albumAudioId: _strNull(json['album_audio_id']),
       albumId: _strNull(json['album_id']),
+      canPlay: _isLongAudioCanPlay(json),
     );
   }
+}
+
+/// 限免/可播判定：`fail_process_128`（默认 128k 播放音质）为 0 即可播；
+/// 字段缺失时兜底顶层 `fail_process`；两者都无则默认可播（避免误杀）。
+/// 注意：不能用 privilege（限免章节 privilege_128 也是 4）。
+bool _isLongAudioCanPlay(Map<String, dynamic> json) {
+  final v128 = _parseIntOrNull(json['fail_process_128']);
+  if (v128 != null) return v128 == 0;
+  final v = _parseIntOrNull(json['fail_process']);
+  if (v != null) return v == 0;
+  return true;
 }
 
 /// 手机验证码登录的多账号候选（酷狗 `/v7/login_by_verifycode` 返回的

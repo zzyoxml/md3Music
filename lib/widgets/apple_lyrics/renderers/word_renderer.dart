@@ -690,11 +690,13 @@ class WordRenderer {
             ? _activeColorValue!
             : LyricLayout.textColorValue;
     if (textColorValue != _lastTextColorValue) {
-      _lastSetAlphas = List<int>.filled(_lastSetAlphas.length, -1);
+      // 哨兵 -2 = 未初始化：与渐变路径的白色缓存（-1）和 uniform 的
+      // alphaStep（0~20）都不同，保证首次绘制必定重新 set text + layout。
+      _lastSetAlphas = List<int>.filled(_lastSetAlphas.length, -2);
       // v5：逐字符 alpha 缓存一并失效
       for (int i = 0; i < _lastSetCharAlphas.length; i++) {
         _lastSetCharAlphas[i] =
-            List<int>.filled(_lastSetCharAlphas[i].length, -1);
+            List<int>.filled(_lastSetCharAlphas[i].length, -2);
       }
       _lastTextColorValue = textColorValue;
       // P1-5：辉光精灵颜色跟随文字色（当前行渐变路径下为白色），
@@ -1125,10 +1127,76 @@ class WordRenderer {
       // 换行行（rowHeight < lineHeight，0.8x 行盒）：字形图按 1.5 行盒生成，
       // 直接缩放到 0.8x 行盒会把字形垂直压扁变形 → 换行行改用 TextPainter
       // （按 rowHeight 行盒渲染），与整词路径行盒一致，避免激活/idle 切换瞬移。
+      //
+      // **方案 C：辉光字与普通字一致的渐变模型**。普通字整词路径按字左右边缘
+      // 采样行级渐变（maskX 左亮右暗，向右推进）；辉光字此前（P6）改为字符中心
+      // 采样 uniform，单字内无渐变，导致中文单字在 maskX 扫过时"整字变亮"、
+      // 渐变带凭空消失显得硬切。这里对每个字符按左右边缘采样，差异明显时
+      // saveLayer + LinearGradient modulate（与整词路径一致），恢复向右推进感。
       final bool sameRowBox = (rowHeight - lineHeight).abs() < 1e-6;
       final ui.Image? charImg =
           sameRowBox && k < charImages.length ? charImages[k] : null;
-      if (charImg != null) {
+      final double charLeftX = wordStartX + charStartX;
+      final double charRightX = charLeftX + cw;
+      double leftAlpha = charAlpha;
+      double rightAlpha = charAlpha;
+      if (useGradient) {
+        leftAlpha = _alphaAtX(
+            charLeftX, transitionStart, transitionSpan, bright, dark);
+        rightAlpha = _alphaAtX(
+            charRightX, transitionStart, transitionSpan, bright, dark);
+      }
+      final bool needGradient = (rightAlpha - leftAlpha).abs() >= 0.01;
+      if (needGradient) {
+        // 渐变路径：先画纯白字形，再 LinearGradient modulate（复用 _gradientPaint）。
+        final double charH =
+            fontSize * (charImg != null ? lineHeight : rowHeight);
+        final Rect charRect = Rect.fromLTWH(charX, charY, cw, charH);
+        canvas.saveLayer(charRect, Paint());
+        if (charImg != null) {
+          _charImagePaint.colorFilter = const ColorFilter.matrix(<double>[
+            1, 0, 0, 0, 0,
+            0, 1, 0, 0, 0,
+            0, 0, 1, 0, 0,
+            0, 0, 0, 1, 0,
+          ]); // 纯白字形（modulate 后由渐变着色）
+          canvas.drawImageRect(
+            charImg,
+            Rect.fromLTWH(
+                0, 0, charImg.width.toDouble(), charImg.height.toDouble()),
+            charRect,
+            _charImagePaint,
+          );
+        } else {
+          // 渐变路径 painter 保持纯白（lastSetAlphas = -1 标记白色已缓存）
+          if (k >= lastSetAlphas.length || lastSetAlphas[k] != -1) {
+            painter.text = TextSpan(
+              text: painter.text?.toPlainText(),
+              style: TextStyle(
+                color: const Color.fromRGBO(255, 255, 255, 1.0),
+                fontSize: fontSize,
+                height: rowHeight,
+                fontFamily: LyricLayout.fontFamily,
+                fontWeight: LyricLayout.fontWeight,
+              ),
+            );
+            painter.layout();
+            if (k < lastSetAlphas.length) lastSetAlphas[k] = -1;
+          }
+          painter.paint(canvas, charPos);
+        }
+        _gradientPaint.shader = LinearGradient(
+          colors: [
+            Color.fromRGBO(textRed, textGreen, textBlue, leftAlpha),
+            Color.fromRGBO(textRed, textGreen, textBlue, rightAlpha),
+          ],
+          stops: const <double>[0.0, 1.0],
+        ).createShader(charRect);
+        _gradientPaint.blendMode = BlendMode.modulate;
+        canvas.drawRect(charRect, _gradientPaint);
+        canvas.restore();
+      } else if (charImg != null) {
+        // uniform（差异可忽略）：现有字形图路径
         _charImagePaint.colorFilter = ColorFilter.matrix(<double>[
           textRed / 255, 0, 0, 0, 0,
           0, textGreen / 255, 0, 0, 0,
@@ -1143,6 +1211,7 @@ class WordRenderer {
           _charImagePaint,
         );
       } else {
+        // uniform：TextPainter 均匀 alpha（量化缓存）
         final int alphaStep = (charAlpha * 20).round();
         if (k >= lastSetAlphas.length || lastSetAlphas[k] != alphaStep) {
           painter.text = TextSpan(
@@ -1603,7 +1672,7 @@ class WordRenderer {
     // 预分配 alpha / Y offset / lastSetAlphas 数组
     _wordAlphas = List<double>.filled(line.words.length, dark);
     _wordYOffsets = List<double>.filled(line.words.length, 0);
-    _lastSetAlphas = List<int>.filled(line.words.length, -1);
+    _lastSetAlphas = List<int>.filled(line.words.length, -2);
     // v5 逐字符缓存：仅强调字有内容
     _charPainters =
         List.generate(line.words.length, (_) => const <TextPainter>[]);
@@ -1686,7 +1755,7 @@ class WordRenderer {
         _charPainters[i] = chars;
         _charWidths[i] = widths;
         _charStartXs[i] = starts;
-        _lastSetCharAlphas[i] = List<int>.filled(n, -1);
+        _lastSetCharAlphas[i] = List<int>.filled(n, -2);
         _emphasizeCharStates[i] =
             List<EmphasizeState>.filled(n, EmphasizeState.idle);
         _charGlowSprites[i] = List<ui.Image?>.filled(n, null);

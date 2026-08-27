@@ -141,6 +141,23 @@ class LockScreenLyricActivity : Activity() {
         }
         window.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
 
+        // 沉浸式系统栏：隐藏状态栏 + 导航栏，内容延伸到全屏，消除底部导航栏黑边。
+        // windowFullscreen 只隐藏状态栏；导航栏需在此显式隐藏并让 View 延伸覆盖。
+        // IMMERSIVE_STICKY：从边缘滑动时临时显示系统栏，配合 FLAG_NOT_TOUCHABLE 不会误触。
+        window.decorView.systemUiVisibility = (
+            View.SYSTEM_UI_FLAG_LOW_PROFILE
+                or View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+            )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            window.statusBarColor = 0x00000000
+            window.navigationBarColor = 0x00000000
+        }
+
         lyricView = LockScreenLyricView(this)
         setContentView(lyricView)
         runningActivity = this

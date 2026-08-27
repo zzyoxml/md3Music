@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../services/kugou_api/kugou_api_client.dart';
@@ -56,8 +57,24 @@ class ListeningGradeService {
     if (_started) return;
     _started = true;
     if (kIsWeb || !Platform.isAndroid) return;
-    if (PlatformDispatcher.instance.views.isEmpty) return; // 后台 headless isolate，跳过
-    _timer ??= Timer.periodic(_interval, (_) => _onTick());
+    _ensureTimerScheduled();
+  }
+
+  /// 确保在主 isolate 启动心跳定时器（view 就绪后再真正创建 Timer）。
+  ///
+  /// 修复：`init()` 在 `runApp` 之前调用，冷启动时 UI view 可能还没挂载，
+  /// 此时 `PlatformDispatcher.instance.views` 为空。若在 `init()` 里直接
+  /// `return`，`_started` 已置 true，主 isolate 的定时器就永远无法启动，
+  /// 表现为"听歌时长经常不累计/不上报"。故 view 未就绪时推迟到下一帧再
+  /// 重试；后台 headless isolate 没有 view 也不渲染帧，addPostFrameCallback
+  /// 不会回调，因此天然不会创建第二个定时器（与原有并发保护意图一致）。
+  void _ensureTimerScheduled() {
+    if (_timer != null) return;
+    if (PlatformDispatcher.instance.views.isEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _ensureTimerScheduled());
+      return;
+    }
+    _timer = Timer.periodic(_interval, (_) => _onTick());
   }
 
   /// PlayerProvider 推送：当前是否正在播放在线歌曲。
@@ -136,21 +153,34 @@ class ListeningGradeService {
     );
     // 兼容 status 为数字或字符串（上游偶发返回字符串）
     final status = resp?['status'];
-    final ok = status == 1 || status == '1';
+    final rawError = resp?['error_code'];
+    // error_code 兼容数字/字符串，缺失视为 0
+    final errorCode = rawError is num
+        ? rawError.toInt()
+        : rawError is String
+            ? (int.tryParse(rawError) ?? -1)
+            : 0;
+    // 判定"是否真的被服务器记账"：status==1 且 error_code==0。
+    // 只认 status 时，若上游返回 status=1 但 error_code!=0（本次上报未被记账），
+    // 会误判成功并清零 pending，导致服务器时长/等级一直不长——这正是听歌时长
+    // 上报排查的关键（[GradeReport] 日志据此区分"记账成功"与"未记账"）。
+    final ok = (status == 1 || status == '1') && errorCode == 0;
     if (ok) {
       _syncedDsec = dSec;
       _pendingDiff = 0;
       _failedReports = 0;
       _serverDsec = _parseServerDsec(resp); // 记录服务器返回的 d_sec（未上报时长用）
       await _save();
-      // 打印服务器完整返回（含 data.d_sec），用于确认服务器是否真的记账
+      // 打印服务器完整返回（含 error_code 与 data.d_sec），用于确认服务器是否真的记账
       // ignore: avoid_print
-      print('[GradeReport] 上报成功 d_sec=$dSec diff=$diff resp=$resp');
+      print(
+        '[GradeReport] 上报记账成功 d_sec=$dSec diff=$diff error_code=$errorCode synced=$_syncedDsec resp=$resp',
+      );
     } else {
       _failedReports++;
       // ignore: avoid_print
       print(
-        '[GradeReport] 上报失败 d_sec=$dSec diff=$diff resp=$resp failed=$_failedReports',
+        '[GradeReport] 上报未记账 d_sec=$dSec diff=$diff status=$status error_code=$errorCode synced=$_syncedDsec serverDsec=$_serverDsec resp=$resp failed=$_failedReports',
       );
       if (_failedReports >= _maxFailedReports) {
         // 连续失败（多为服务器值已领先本地）→ 查询重同步并丢弃 pending，防死循环
@@ -163,6 +193,11 @@ class ListeningGradeService {
   Future<void> _syncBaselineFromServer() async {
     final resp = await KugouApiClient().getGradeInfo();
     final serverDsec = _parseServerDsec(resp);
+    // 打印查询结果（含 status/error_code / data.d_sec），排查查询是否被拒或异常
+    // ignore: avoid_print
+    print(
+      '[GradeQuery] resp_status=${resp?['status']} error_code=${resp?['error_code']} serverDsec=$serverDsec',
+    );
     if (serverDsec > 0) _serverDsec = serverDsec;
     if (serverDsec > _syncedDsec) {
       _syncedDsec = serverDsec;
@@ -181,6 +216,10 @@ class ListeningGradeService {
     if (serverDsec > _syncedDsec) {
       _syncedDsec = serverDsec;
     }
+    // ignore: avoid_print
+    print(
+      '[GradeReport] 连续失败重同步：丢弃 pending=$_pendingDiff，抬升 synced=$_syncedDsec（serverDsec=$serverDsec resp=${resp?['status']}/${resp?['error_code']}）',
+    );
     _pendingDiff = 0;
     await _save();
   }
