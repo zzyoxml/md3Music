@@ -11,6 +11,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/services/usb_audio_service.dart';
 
 import '../../core/layout/page_title_alignment.dart';
 import '../../core/layout/ui_density.dart';
@@ -101,6 +102,9 @@ class _SettingsPageState extends State<SettingsPage>
   bool _lyricPushTranslation = true;
   bool _lyricPushRoma = false;
   bool _lyricPushPreferTranslation = true;
+  // 32bit 播放支持开关（默认关闭）。开启后无损(24/32bit)走高解析 float 输出；
+  // 部分设备 float 播放可能变速/变调，故默认关闭，需用户主动开启。
+  bool _enable32bitOutput = false;
   // 设备 Android SDK 版本（SuperLyricApi 3.4 要求 API 26+，低于此禁用该协议选项）
   int? _androidSdkVersion;
   /// SuperLyric 是否受支持：API 26+（Android 8.0+）。未知时默认放行，避免误禁用。
@@ -174,6 +178,7 @@ class _SettingsPageState extends State<SettingsPage>
     _loadVersion();
     _loadLyricPushSettings();
     _loadAndroidSdkVersion();
+    _initEnable32bit();
     LyriconProviderService.instance.addListener(_onLyriconStateChanged);
     // 桌面歌词状态变化（设置页开关 / 播放器长按 / 通知栏按钮）→ 刷新 UI
     DesktopLyricService.instance.addListener(_onDesktopLyricChanged);
@@ -2045,6 +2050,13 @@ class _SettingsPageState extends State<SettingsPage>
             _settingsRepository.setAutoReceiveVip(value);
           },
         ),
+        // search: 32bit 无损 高解析 音质 float
+        SwitchListTile(
+          title: const Text('32bit 播放支持'),
+          subtitle: const Text('无损(24/32bit)走高解析输出；部分设备开启后可能出现变调/变速，请在同一设备确认后可开启'),
+          value: _enable32bitOutput,
+          onChanged: (value) => _setEnable32bitOutput(value),
+        ),
         ListenableBuilder(
           listenable: EqualizerService.instance,
           builder: (context, _) {
@@ -2281,6 +2293,19 @@ class _SettingsPageState extends State<SettingsPage>
   }
 
   /// 本地持久化音频管理 section 未包含在公开版本中。
+
+  /// 恢复 32bit 播放开关并同步到字段（从 UsbAudioService 缓存读取，已持久化+下发原生）。
+  Future<void> _initEnable32bit() async {
+    await UsbAudioService.instance.initEnable32bit();
+    if (!mounted) return;
+    setState(() => _enable32bitOutput = UsbAudioService.instance.enable32bit);
+  }
+
+  Future<void> _setEnable32bitOutput(bool value) async {
+    HapticFeedback.lightImpact();
+    setState(() => _enable32bitOutput = value);
+    await UsbAudioService.instance.setEnable32bit(value);
+  }
 
   Widget _buildOnlineMusicSection(ColorScheme colorScheme) {
     return Column(

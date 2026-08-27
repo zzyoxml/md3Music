@@ -23,6 +23,7 @@ class UsbAudioService {
 
   static const String _tag = 'UsbAudioService';
   static const String _keyAutoDisableForMv = 'usb_auto_disable_for_mv';
+  static const String _keyEnable32bit = 'enable_32bit_output';
 
   final StreamController<Map<String, dynamic>> _statusController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -59,6 +60,8 @@ class UsbAudioService {
     _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _poll());
     // 恢复 USB 独占独立音量（App 重启后保留）
     initUsbVolume();
+    // 恢复 32bit 播放开关并下发原生（默认关闭，确保首次播放即按用户选择）
+    initEnable32bit();
   }
 
   /// 从 SharedPreferences 恢复 USB 音量并下发到原生（幂等，可重复调用）。
@@ -102,6 +105,36 @@ class UsbAudioService {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_keyAutoDisableForMv, value);
     } catch (_) {}
+  }
+
+  // ── 32bit 播放支持开关（默认关闭，无损坏风险） ─────────────────
+  /// 是否开启 32bit(float 高解析)输出。默认关闭；开启后部分设备可能变速/变调，需用户自担。
+  bool _enable32bit = false;
+  bool get enable32bit => _enable32bit;
+
+  /// 启动/进入设置页时恢复持久化的 32bit 开关并下发到原生（幂等）。
+  Future<void> initEnable32bit() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _enable32bit = prefs.getBool(_keyEnable32bit) ?? false;
+      await _channel.invokeMethod('setFloatOutputEnabled', {'enabled': _enable32bit});
+      _debug('initEnable32bit: $_enable32bit');
+    } catch (e) {
+      _debug('initEnable32bit failed: $e');
+    }
+  }
+
+  /// 设置 32bit 播放开关：持久化 + 下发原生。切歌后生效。
+  Future<void> setEnable32bit(bool value) async {
+    _enable32bit = value;
+    try {
+      await _channel.invokeMethod('setFloatOutputEnabled', {'enabled': value});
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_keyEnable32bit, value);
+      _debug('setEnable32bit: $value (persisted, next track applies)');
+    } catch (e) {
+      _debug('setEnable32bit failed: $e');
+    }
   }
 
   void dispose() {
