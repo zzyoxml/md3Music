@@ -157,9 +157,11 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
     });
   }
 
-  /// 将章节列表转换为可播放的 Song 列表。
+  /// 将章节列表转换为可播放的 Song 列表（过滤需要听书VIP的章节）。
   List<Song> _buildSongs(List<KugouLongAudioAudio> audios) {
-    return audios
+    final vipIgnored = audios.where((a) => a.payBlocked).length;
+    final list = audios
+        .where((a) => !a.payBlocked)
         .map(
           (a) => Song(
             id: a.id,
@@ -174,6 +176,11 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
           ),
         )
         .toList();
+    if (vipIgnored > 0) {
+      // ignore: avoid_print
+      print('[AudiobookVip] 详情页过滤需听书VIP章节 $vipIgnored 条，剩余 ${list.length} 条');
+    }
+    return list;
   }
 
   /// 简介：优先取列表接口解析出的 intro，兜底取详情接口原始数据。
@@ -645,7 +652,6 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                             if (widget.album.author != null &&
                                 widget.album.author!.isNotEmpty)
                               widget.album.author!,
-                            if (_audios.isNotEmpty) '${_audios.length} 集',
                           ].join(' · '),
                           style: tt.labelMedium?.copyWith(
                             color: cs.onSurfaceVariant,

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -2172,10 +2172,15 @@ class KugouProvider extends ChangeNotifier {
           final list = data['list'] ?? data['info'] ?? [];
           if (list is List) albums.addAll(list);
         }
-        _longAudioAlbums = albums
+        final allRank = albums
             .whereType<Map<String, dynamic>>()
             .map(KugouLongAudioAlbum.fromJson)
             .toList();
+        _longAudioAlbums = allRank.where((a) => !a.payBlocked).toList();
+        if (allRank.length != _longAudioAlbums.length) {
+          // ignore: avoid_print
+          print('[AudiobookVip] 排行榜推荐过滤需听书VIP ${allRank.length - _longAudioAlbums.length} 条，剩余 ${_longAudioAlbums.length}');
+        }
         notifyListeners();
       }
     } catch (_) {}
@@ -2187,9 +2192,14 @@ class KugouProvider extends ChangeNotifier {
       if (r != null) {
         final data = r['data'] as Map<String, dynamic>? ?? r;
         final list = data['list'] ?? data['info'] ?? [];
-        _longAudioVipAlbums = (list as List)
+        final allVip = (list as List)
             .map((e) => KugouLongAudioAlbum.fromJson(e as Map<String, dynamic>))
             .toList();
+        _longAudioVipAlbums = allVip.where((a) => !a.payBlocked).toList();
+        if (allVip.length != _longAudioVipAlbums.length) {
+          // ignore: avoid_print
+          print('[AudiobookVip] VIP推荐过滤需听书VIP ${allVip.length - _longAudioVipAlbums.length} 条，剩余 ${_longAudioVipAlbums.length}');
+        }
         notifyListeners();
       }
     } catch (_) {}
@@ -2201,9 +2211,14 @@ class KugouProvider extends ChangeNotifier {
       if (r != null) {
         final data = r['data'] as Map<String, dynamic>? ?? r;
         final list = data['list'] ?? data['info'] ?? [];
-        _longAudioWeekAlbums = (list as List)
+        final allWeek = (list as List)
             .map((e) => KugouLongAudioAlbum.fromJson(e as Map<String, dynamic>))
             .toList();
+        _longAudioWeekAlbums = allWeek.where((a) => !a.payBlocked).toList();
+        if (allWeek.length != _longAudioWeekAlbums.length) {
+          // ignore: avoid_print
+          print('[AudiobookVip] 每周推荐过滤需听书VIP ${allWeek.length - _longAudioWeekAlbums.length} 条，剩余 ${_longAudioWeekAlbums.length}');
+        }
         notifyListeners();
       }
     } catch (_) {}
@@ -2277,31 +2292,35 @@ class KugouProvider extends ChangeNotifier {
         );
         return const [];
       }
-      final result = <KugouLongAudioAlbum>[];
-      final seen = <String>{};
+      // 按专辑聚合：同专辑去重，任一章节需听书VIP则该专辑整张视为需VIP。
+      final titleMap = <String, KugouLongAudioAlbum>{};
+      final vipAlbum = <String>{};
       for (final it in lists) {
         if (it is! Map<String, dynamic>) continue;
         final albumId = it['AlbumID']?.toString() ?? '';
         if (albumId.isEmpty) continue;
-        if (!seen.add(albumId)) continue;
         final name = _stripHtmlTags(it['AlbumName']?.toString() ?? '');
         if (name.isEmpty) continue;
+        if (isKugouLongAudioVip(it)) vipAlbum.add(albumId);
+        if (titleMap.containsKey(albumId)) continue;
         final coverRaw = (it['trans_param'] is Map<String, dynamic>
                 ? it['trans_param']!['union_cover']
                 : null) ??
             it['Image'];
-        result.add(KugouLongAudioAlbum(
+        titleMap[albumId] = KugouLongAudioAlbum(
           id: albumId,
           name: name,
           coverUrl: coverRaw == null
               ? null
               : _stripArtworkUrl(coverRaw.toString()),
           author: _stripHtmlTags(it['SingerName']?.toString() ?? ''),
-        ));
+        );
       }
+      final result =
+          titleMap.values.where((a) => !vipAlbum.contains(a.id)).toList();
       // ignore: avoid_print
       print(
-        '[AudiobookSearch] chapters=${lists.length} albums=${result.length}, keyword=$keyword',
+        '[AudiobookSearch] chapters=${lists.length} albums=${titleMap.length} filterVip=${titleMap.length - result.length}, keyword=$keyword',
       );
       return result;
     } catch (e) {
