@@ -145,6 +145,7 @@ try {
     $whitelist = @(
         'lib', 'android', 'assets', 'web', 'test',
         'third_party', 'img', '.github',
+        'kugou_api_server/rust',
         'pubspec.yaml', 'analysis_options.yaml', 'README.md',
         'CHANGELOG.md', 'LICENSE', 'DISCLAIMER.md',
         'devtools_options.yaml'
@@ -219,6 +220,17 @@ try {
     foreach ($d in $forkGradle) {
         Remove-ItemBypass $d.FullName
         Write-Ok "已排除 $($d.FullName.Substring($OutDir.Length + 1))（fork Gradle 缓存）"
+    }
+    # Rust API 服务器源码（kugou_api_server/rust）随公开导出，但本地构建/工具链临时物不进公开树：
+    # target* 系列（target/、target-native/、target-wsl/ 等）是 cargo 交叉编译产物，名称不定，
+    # 且 Copy-Item 不认 .gitignore 会一并复制；.cargo/ 是本地 linker/CC 工具链配置。均须显式排除。
+    $rustSrc = Join-Path $OutDir 'kugou_api_server\rust'
+    if (Test-Path $rustSrc) {
+        foreach ($d in @(Get-ChildItem $rustSrc -Directory -Force -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -like 'target*' -or $_.Name -eq '.cargo' })) {
+            Remove-ItemBypass $d.FullName
+            Write-Ok "已排除 kugou_api_server/rust/$($d.Name)（本地构建/工具链临时物）"
+        }
     }
     # 下载元数据写入插件：Dart 端 metadata_writer 已隔离进 lib/private，
     # 原生端（Kotlin 插件 + MainActivity 注册）导出时一并移除
