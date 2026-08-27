@@ -35,7 +35,7 @@ $Tasks = [ordered]@{
     'android' = @{ File = 'android.ps1';       Desc = 'Rust 交叉编译（按需）+ Flutter APK 分包打包'; Alias = @('apk') }
     'windows' = @{ File = 'windows.ps1';       Desc = 'Rust dll + Flutter Windows + 便携版 zip';     Alias = @('win') }
     'verify'  = @{ File = 'verify_public.ps1'; Desc = '否认清单闸门：自检当前仓库公开面是否干净';   Alias = @('check') }
-    'export'  = @{ File = 'export_public.ps1'; Desc = '导出公开版本（可选推送 / 开 PR / 更新 CHANGELOG）'; Alias = @('public') }
+    'export'  = @{ File = 'export_public.ps1'; Desc = '导出公开版本（默认开 PR；可选 force push / 更新 CHANGELOG）'; Alias = @('public') }
     'changelog' = @{ File = 'changelog.ps1'; Desc = '总结提交并更新 CHANGELOG.md（指定版本号与起始哈希）'; Alias = @('cl') }
     'commit'  = @{ File = 'commit.ps1';        Desc = 'TUI 一键提交：勾选改动 / LLM 提交信息 / 同步 / 开 PR'; Alias = @('ci') }
     'token'   = @{ File = 'token.ps1';         Desc = '管理 GitHub token（开 PR / 自动合并用）';      Alias = @('auth') }
@@ -60,10 +60,10 @@ function Get-TaskOptions([string]$Key) {
             (New-TaskOption -Name '-Quiet' -Desc '只输出结论，不打印 deny 清单规模')
         ) }
         'export' { @(
-            (New-TaskOption -Name '-PublicRemote' -Kind value -Desc '公开仓库 URL（不填=只导出不推送）'),
-            (New-TaskOption -Name '-AsPr'         -Desc '推到临时分支并开 PR（否则 force push 覆盖）'),
+            (New-TaskOption -Name '-PublicRemote' -Kind value -Desc '公开仓库 URL（不填=只导出不推送；填了默认开 PR）'),
+            (New-TaskOption -Name '-ForcePush'    -Desc '例外：force push 直接覆盖目标分支（默认走 PR）'),
             (New-TaskOption -Name '-PublicBranch' -Kind value -Desc '目标分支 / PR base（默认 main）'),
-            (New-TaskOption -Name '-PrBranch'     -Kind value -Desc '-AsPr 的分支名（默认按时间戳生成）'),
+            (New-TaskOption -Name '-PrBranch'     -Kind value -Desc 'PR 分支名（默认按时间戳生成）'),
             (New-TaskOption -Name '-OutDir'       -Kind value -Desc '导出目录（默认 .public_export）'),
             (New-TaskOption -Name '-Changelog'    -Desc '导出前先更新 CHANGELOG.md（需确认）'),
             (New-TaskOption -Name '-ChangelogVersion' -Kind value -Desc '配合 -Changelog 的新版本号'),
@@ -88,8 +88,8 @@ function Get-TaskOptions([string]$Key) {
             (New-TaskOption -Name '-PrMerge'      -Desc '开 PR 并直接合并到 upstream（需 token）'),
             (New-TaskOption -Name '-PrBase'       -Kind value -Desc 'upstream PR 的 base 分支'),
             (New-TaskOption -Name '-NoSyncBack'   -Desc '合并后不把 upstream 结果拉回本地'),
-            (New-TaskOption -Name '-PublicPr'     -Desc '提交后导出公开版并开 PR'),
-            (New-TaskOption -Name '-PublicExport' -Desc '提交后导出公开版并 force push'),
+            (New-TaskOption -Name '-PublicExport' -Desc '提交后导出公开版并发布（默认开 PR）'),
+            (New-TaskOption -Name '-PublicForcePush' -Desc '例外：导出公开版后 force push 覆盖目标分支'),
             (New-TaskOption -Name '-SkipGate'     -Desc '跳过否认清单闸门'),
             (New-TaskOption -Name '-Yes'          -Desc '非交互：不询问后续动作')
         ) }

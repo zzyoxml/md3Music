@@ -102,6 +102,15 @@ function Test-InteractiveConsole {
     try { $null = $Host.UI.RawUI.KeyAvailable; return $true } catch { return $false }
 }
 
+# 交互式 y/n 确认（非交互环境请走显式参数，勿调用本函数——Read-Host 会阻塞）
+function Read-YesNo {
+    param([Parameter(Mandatory)][string]$Prompt, [bool]$Default = $false)
+    $hint = if ($Default) { '[Y/n]' } else { '[y/N]' }
+    $a = Read-Host "$Prompt $hint"
+    if ([string]::IsNullOrWhiteSpace($a)) { return $Default }
+    $a.Trim().ToLowerInvariant() -in @('y', 'yes', '是')
+}
+
 # ---------- 鼠标输入 ----------
 $script:UiMouseHandle = [IntPtr]::Zero
 $script:UiMouseSavedMode = $null

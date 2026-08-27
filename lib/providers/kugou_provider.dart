@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -178,6 +178,12 @@ class KugouProvider extends ChangeNotifier {
   List<KugouLongAudioAudio> _longAudioAudios = [];
   int _longAudioAudiosPage = 1;
   bool _longAudioAudiosHasMore = false;
+  List<KugouLongAudioAlbum> _longAudioFreeAlbums = [];
+  int _longAudioFreePage = 1;
+  bool _longAudioFreeHasMore = false;
+  bool _longAudioFreeLoading = false;
+  /// 听书分类（tag_id, 名称），来自 /longaudio/tag/list 的 son[]（按上游 sort 升序）。
+  List<(int, String)> _longAudioTags = [];
   Map<String, dynamic>? _longAudioAlbumDetail;
   Map<String, dynamic>? _serverNow;
 
@@ -353,6 +359,11 @@ class KugouProvider extends ChangeNotifier {
   List<KugouLongAudioAudio> get longAudioAudios => _longAudioAudios;
   int get longAudioAudiosPage => _longAudioAudiosPage;
   bool get longAudioAudiosHasMore => _longAudioAudiosHasMore;
+  List<KugouLongAudioAlbum> get longAudioFreeAlbums => _longAudioFreeAlbums;
+  int get longAudioFreePage => _longAudioFreePage;
+  bool get longAudioFreeHasMore => _longAudioFreeHasMore;
+  bool get longAudioFreeLoading => _longAudioFreeLoading;
+  List<(int, String)> get longAudioTags => _longAudioTags;
   Map<String, dynamic>? get longAudioAlbumDetail => _longAudioAlbumDetail;
   Map<String, dynamic>? get serverNow => _serverNow;
 
@@ -2172,10 +2183,11 @@ class KugouProvider extends ChangeNotifier {
           final list = data['list'] ?? data['info'] ?? [];
           if (list is List) albums.addAll(list);
         }
-        _longAudioAlbums = albums
+        final allRank = albums
             .whereType<Map<String, dynamic>>()
             .map(KugouLongAudioAlbum.fromJson)
             .toList();
+        _longAudioAlbums = allRank;
         notifyListeners();
       }
     } catch (_) {}
@@ -2187,9 +2199,10 @@ class KugouProvider extends ChangeNotifier {
       if (r != null) {
         final data = r['data'] as Map<String, dynamic>? ?? r;
         final list = data['list'] ?? data['info'] ?? [];
-        _longAudioVipAlbums = (list as List)
+        final allVip = (list as List)
             .map((e) => KugouLongAudioAlbum.fromJson(e as Map<String, dynamic>))
             .toList();
+        _longAudioVipAlbums = allVip;
         notifyListeners();
       }
     } catch (_) {}
@@ -2201,9 +2214,10 @@ class KugouProvider extends ChangeNotifier {
       if (r != null) {
         final data = r['data'] as Map<String, dynamic>? ?? r;
         final list = data['list'] ?? data['info'] ?? [];
-        _longAudioWeekAlbums = (list as List)
+        final allWeek = (list as List)
             .map((e) => KugouLongAudioAlbum.fromJson(e as Map<String, dynamic>))
             .toList();
+        _longAudioWeekAlbums = allWeek;
         notifyListeners();
       }
     } catch (_) {}
@@ -2258,6 +2272,96 @@ class KugouProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// 免费听书库列表（Rust 转发 /longaudio/v1/album/list）。
+  /// 响应：data.data_list[] + data.is_end（0=还有下一页）。
+  /// 该库本身即限免专辑（官方 App 均可播放），不做 VIP 过滤。
+  Future<void> getLongaudioFreeList({
+    int tagId = 906,
+    int sort = 0,
+    int gender = 0,
+    int status = 0,
+    int page = 1,
+    int pageSize = 20,
+    bool append = false,
+  }) async {
+    if (_longAudioFreeLoading) return;
+    _longAudioFreeLoading = true;
+    notifyListeners();
+    try {
+      final r = await _apiClient.getLongaudioAlbumList(
+        tagId: tagId,
+        sort: sort,
+        gender: gender,
+        status: status,
+        page: page,
+        pageSize: pageSize,
+      );
+      if (r != null) {
+        final data = r['data'];
+        final list = data is Map<String, dynamic> ? data['data_list'] : null;
+        final items = (list is List
+                ? list.whereType<Map<String, dynamic>>()
+                : <Map<String, dynamic>>[])
+            .map(KugouLongAudioAlbum.fromJson)
+            .toList();
+        if (append) {
+          _longAudioFreeAlbums = [..._longAudioFreeAlbums, ...items];
+          _longAudioFreePage = page;
+        } else {
+          _longAudioFreeAlbums = items;
+          _longAudioFreePage = 1;
+        }
+        final isEnd = data is Map<String, dynamic> ? data['is_end'] : 0;
+        _longAudioFreeHasMore = isEnd != 1;
+        // ignore: avoid_print
+        print(
+          '[AudiobookFree] tag_id=$tagId sort=$sort gender=$gender status=$status page=$page items=${items.length} isEnd=$isEnd',
+        );
+        notifyListeners();
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('[AudiobookFree] exception: $e');
+    } finally {
+      _longAudioFreeLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// 听书分类标签树：请求 /longaudio/tag/list，取 data[0].son[]（tag_id/tag_name/sort）。
+  /// 已拉取过则不重复请求。
+  Future<void> getLongaudioTags() async {
+    if (_longAudioTags.isNotEmpty) return;
+    try {
+      final r = await _apiClient.getLongaudioTagList();
+      if (r != null) {
+        final data = r['data'];
+        final first =
+            data is List && data.isNotEmpty ? data.first : null;
+        final son =
+            first is Map<String, dynamic> ? first['son'] : null;
+        if (son is List) {
+          final tags = <(int, String)>[];
+          for (final e in son.whereType<Map<String, dynamic>>()) {
+            final id = e['tag_id'];
+            final name = e['tag_name']?.toString() ?? '';
+            if (id is num && name.isNotEmpty) {
+              tags.add((id.toInt(), name));
+            }
+          }
+          // 保持上游 son[] 原顺序（即酷狗 App 的分类展示顺序）
+          _longAudioTags = tags;
+          // ignore: avoid_print
+          print('[AudiobookTags] son=${tags.length}');
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('[AudiobookTags] exception: $e');
+    }
+  }
+
   /// 听书关键词搜索：请求 /search/audiobook（Rust 转发 /complexsearch/v4/search/song）。
   /// 上游返回 data.lists 听书「章节」，这里按 AlbumID 去重成专辑，并清理 <em> 高亮与封面占位。
   Future<List<KugouLongAudioAlbum>> searchLongAudio(String keyword) async {
@@ -2277,33 +2381,33 @@ class KugouProvider extends ChangeNotifier {
         );
         return const [];
       }
-      final result = <KugouLongAudioAlbum>[];
-      final seen = <String>{};
+      // 按专辑聚合：同专辑去重（不做 VIP 过滤，限免专辑章节付费标识不可靠，全量展示）。
+      final titleMap = <String, KugouLongAudioAlbum>{};
       for (final it in lists) {
         if (it is! Map<String, dynamic>) continue;
         final albumId = it['AlbumID']?.toString() ?? '';
         if (albumId.isEmpty) continue;
-        if (!seen.add(albumId)) continue;
         final name = _stripHtmlTags(it['AlbumName']?.toString() ?? '');
         if (name.isEmpty) continue;
+        if (titleMap.containsKey(albumId)) continue;
         final coverRaw = (it['trans_param'] is Map<String, dynamic>
                 ? it['trans_param']!['union_cover']
                 : null) ??
             it['Image'];
-        result.add(KugouLongAudioAlbum(
+        titleMap[albumId] = KugouLongAudioAlbum(
           id: albumId,
           name: name,
           coverUrl: coverRaw == null
               ? null
               : _stripArtworkUrl(coverRaw.toString()),
           author: _stripHtmlTags(it['SingerName']?.toString() ?? ''),
-        ));
+        );
       }
       // ignore: avoid_print
       print(
-        '[AudiobookSearch] chapters=${lists.length} albums=${result.length}, keyword=$keyword',
+        '[AudiobookSearch] chapters=${lists.length} albums=${titleMap.length}, keyword=$keyword',
       );
-      return result;
+      return titleMap.values.toList();
     } catch (e) {
       // ignore: avoid_print
       print('[AudiobookSearch] parse exception: $e');

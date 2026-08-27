@@ -145,6 +145,8 @@ pub fn register(routes: &mut Vec<(&'static str, ModuleFn)>) {
     routes.push(("/longaudio/daily/recommend", longaudio::handle_daily_recommend));
     routes.push(("/longaudio/album/detail", longaudio::handle_album_detail));
     routes.push(("/longaudio/album/audios", longaudio::handle_album_audios));
+    routes.push(("/longaudio/album/list", longaudio::handle_album_list));
+    routes.push(("/longaudio/tag/list", longaudio::handle_tag_list));
     routes.push(("/pc/diantai", fm::handle_pc_diantai));
     routes.push(("/personal/fm", fm::handle_personal_fm));
     routes.push(("/playhistory/upload", extras::handle_playhistory_upload));
