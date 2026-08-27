@@ -697,6 +697,36 @@ class SettingsRepository {
     await prefs.setInt(_keyCollectedPlaylistSort, value);
   }
 
+  static const String _keyCreatedPlaylistOrder =
+      'settings_created_playlist_order';
+  static const String _keyCollectedPlaylistOrder =
+      'settings_collected_playlist_order';
+
+  /// 收藏页「我创建的歌单」手动排序：逗号分隔的歌单 ID 顺序列表。
+  Future<List<String>> getCreatedPlaylistOrder() async {
+    final prefs = await SharedPreferences.getInstance();
+    return _splitPlaylistOrder(prefs.getString(_keyCreatedPlaylistOrder));
+  }
+
+  Future<void> setCreatedPlaylistOrder(List<String> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyCreatedPlaylistOrder, ids.join(','));
+  }
+
+  /// 收藏页「我收藏的歌单」手动排序：逗号分隔的歌单 ID 顺序列表。
+  Future<List<String>> getCollectedPlaylistOrder() async {
+    final prefs = await SharedPreferences.getInstance();
+    return _splitPlaylistOrder(prefs.getString(_keyCollectedPlaylistOrder));
+  }
+
+  Future<void> setCollectedPlaylistOrder(List<String> ids) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyCollectedPlaylistOrder, ids.join(','));
+  }
+
+  List<String> _splitPlaylistOrder(String? raw) =>
+      raw == null || raw.isEmpty ? [] : raw.split(',');
+
   // ===== Pad 端网格列数 =====
 
   /// 读取 Pad 端网格页面列数偏好，默认 4。

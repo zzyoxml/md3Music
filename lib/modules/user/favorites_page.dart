@@ -61,10 +61,14 @@ class _FavoritesPageState extends State<FavoritesPage>
   bool _createdExpanded = true;
   bool _collectedExpanded = true;
 
-  // 分组手动排序方向（按歌单名称）：null=默认顺序（不主动排序）；
-  // true=升序（A→Z）；false=降序（Z→A）。分组标题右侧按钮循环切换。
-  bool? _createdSortAsc;
-  bool? _collectedSortAsc;
+  // 分组手动排序：拖拽产生的歌单 ID 顺序列表（key=globalCollectionId ?? id）。
+  // 空列表表示未手动排序，退回默认顺序/「最近点击」。
+  List<String> _createdManualOrder = [];
+  List<String> _collectedManualOrder = [];
+
+  // 排序模式：0=无分组在排序，1=「我创建的歌单」，2=「我收藏的歌单」。
+  // 进入后分组标题右侧按钮变为「完成」，列表项可长按拖拽调整顺序。
+  int _reorderingGroup = 0;
 
   // 歌单访问排序：歌单 ID → 最后访问时间戳（毫秒）
   // 点击歌单后记录时间，列表按最近访问排序（最近访问的排最前）
@@ -110,12 +114,9 @@ class _FavoritesPageState extends State<FavoritesPage>
       await _loadAccessOrder();
       _sortByLatestClick = await _settingsRepository
           .getSortCollectedByLatestClick();
-      _createdSortAsc = await _loadPlaylistSort(
-        _settingsRepository.getCreatedPlaylistSort,
-      );
-      _collectedSortAsc = await _loadPlaylistSort(
-        _settingsRepository.getCollectedPlaylistSort,
-      );
+      _createdManualOrder = await _settingsRepository.getCreatedPlaylistOrder();
+      _collectedManualOrder = await _settingsRepository
+          .getCollectedPlaylistOrder();
       if (!mounted) return;
       setState(() {});
       _loadAllData();
@@ -125,20 +126,8 @@ class _FavoritesPageState extends State<FavoritesPage>
     });
   }
 
-  /// 读取持久化的分组排序方向并转成 bool?：0=默认顺序(null)，1=升序，2=降序。
-  Future<bool?> _loadPlaylistSort(Future<int> Function() getter) async {
-    switch (await getter()) {
-      case 1:
-        return true;
-      case 2:
-        return false;
-      default:
-        return null;
-    }
-  }
-
-  /// 分组排序方向转持久化值：null=0，升序=1，降序=2。
-  int _sortToInt(bool? sortAsc) => sortAsc == null ? 0 : (sortAsc ? 1 : 2);
+  /// 歌单在排序持久化中的稳定 key（与 _playlistAccessOrder 同口径）。
+  String _playlistKey(KugouPlaylistBrief p) => p.globalCollectionId ?? p.id;
 
   /// 轻量级网络探测：用 /server/now 接口。结果通过 dio 拦截器自动
   /// 反映到 KugouApiClient.networkReachable。
@@ -195,7 +184,7 @@ class _FavoritesPageState extends State<FavoritesPage>
   }
 
   void _onCollectionChanged() {
-    if (!mounted) return;
+    if (!mounted || _reorderingGroup != 0) return;
     _loadPlaylists(forceNoCache: true);
     _loadAlbums(noCache: true);
     // 歌单/专辑/歌手收藏变更都走这个 notifier，歌手列表也要一并刷新
@@ -264,13 +253,24 @@ class _FavoritesPageState extends State<FavoritesPage>
   int _getAccessTime(KugouPlaylistBrief p) =>
       _playlistAccessOrder[p.globalCollectionId ?? p.id] ?? 0;
 
-  /// 对分组列表应用排序：手动排序（按名称升/降）优先，
-  /// 未启用时退回「最近点击」排序逻辑（_sortByLatestClick）。
-  void _applySort(List<KugouPlaylistBrief> list, bool? sortAsc) {
-    if (sortAsc != null) {
-      list.sort(
-        (a, b) => sortAsc ? a.name.compareTo(b.name) : b.name.compareTo(a.name),
-      );
+  /// 对分组列表应用排序：手动拖拽顺序（manualOrder）优先，
+  /// 未列入手动顺序的歌单排在最后且保持相对顺序；
+  /// 无手动顺序时退回「最近点击」排序逻辑（_sortByLatestClick）。
+  void _applySort(List<KugouPlaylistBrief> list, List<String> manualOrder) {
+    if (manualOrder.isNotEmpty) {
+      final rank = <String, int>{
+        for (var i = 0; i < manualOrder.length; i++) manualOrder[i]: i,
+      };
+      final originalIndex = <String, int>{
+        for (var i = 0; i < list.length; i++) _playlistKey(list[i]): i,
+      };
+      list.sort((a, b) {
+        final fallbackA = manualOrder.length + (originalIndex[_playlistKey(a)] ?? 0);
+        final fallbackB = manualOrder.length + (originalIndex[_playlistKey(b)] ?? 0);
+        return (rank[_playlistKey(a)] ?? fallbackA).compareTo(
+          rank[_playlistKey(b)] ?? fallbackB,
+        );
+      });
     } else if (_sortByLatestClick) {
       list.sort((a, b) => _getAccessTime(b).compareTo(_getAccessTime(a)));
     }
@@ -278,14 +278,43 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   List<KugouPlaylistBrief> get _createdPlaylists {
     final list = _playlists.where(_isCreated).toList();
-    _applySort(list, _createdSortAsc);
+    _applySort(list, _createdManualOrder);
     return list;
   }
 
   List<KugouPlaylistBrief> get _collectedPlaylists {
     final list = _playlists.where((p) => !_isCreated(p)).toList();
-    _applySort(list, _collectedSortAsc);
+    _applySort(list, _collectedManualOrder);
     return list;
+  }
+
+  /// 分组拖拽排序回调：更新内存顺序并立即持久化。
+  /// [newIndex] 已由 onReorderItem 换算为移除后的插入位置，无需再修正。
+  void _reorderGroup(int group, int oldIndex, int newIndex) {
+    // getter 返回的是已排序的新列表副本，可直接原地调整
+    final list = group == 1 ? _createdPlaylists : _collectedPlaylists;
+    final item = list.removeAt(oldIndex);
+    list.insert(newIndex, item);
+    final order = list.map(_playlistKey).toList();
+    setState(() {
+      if (group == 1) {
+        _createdManualOrder = order;
+      } else {
+        _collectedManualOrder = order;
+      }
+    });
+    if (group == 1) {
+      _settingsRepository.setCreatedPlaylistOrder(order);
+    } else {
+      _settingsRepository.setCollectedPlaylistOrder(order);
+    }
+  }
+
+  /// 排序按钮：点击进入该分组的自由排序模式，再次点击（✓）退出。
+  void _toggleReorderingGroup(int group) {
+    setState(
+      () => _reorderingGroup = _reorderingGroup == group ? 0 : group,
+    );
   }
 
   // ==================== 数据加载 ====================
@@ -294,6 +323,8 @@ class _FavoritesPageState extends State<FavoritesPage>
     bool forceNoCache = false,
     bool showLoading = true,
   }) async {
+    // 排序模式下禁止刷新，避免拖动中列表被重建
+    if (_reorderingGroup != 0) return;
     if (!mounted) return;
     // 重置分页状态
     _playlistPage = 1;
@@ -370,6 +401,8 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   /// 加载更多歌单（分页追加）
   Future<void> _loadMorePlaylists() async {
+    // 排序模式下禁止追加加载，避免拖动中列表变化
+    if (_reorderingGroup != 0) return;
     if (!_hasMorePlaylists || _isLoadingMorePlaylists || !mounted) return;
     setState(() => _isLoadingMorePlaylists = true);
 
@@ -923,6 +956,10 @@ class _FavoritesPageState extends State<FavoritesPage>
               onToggle: () =>
                   setState(() => _createdExpanded = !_createdExpanded),
               playlists: _createdPlaylists,
+              reordering: _reorderingGroup == 1,
+              onReorder: (oldIndex, newIndex) =>
+                  _reorderGroup(1, oldIndex, newIndex),
+              keyFor: _playlistKey,
               onBuildTile: (playlist) =>
                   _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
               // 新建歌单：原顶栏右上角的 "+" 移到此处；排序按钮靠最右
@@ -931,16 +968,14 @@ class _FavoritesPageState extends State<FavoritesPage>
                   : Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.add, size: 20),
-                          visualDensity: VisualDensity.compact,
-                          tooltip: '新建歌单',
-                          onPressed: _showCreatePlaylistDialog,
-                        ),
-                        _buildPlaylistSortButton(
-                          _createdSortAsc,
-                          _toggleCreatedSort,
-                        ),
+                        if (_reorderingGroup != 1)
+                          IconButton(
+                            icon: const Icon(Icons.add, size: 20),
+                            visualDensity: VisualDensity.compact,
+                            tooltip: '新建歌单',
+                            onPressed: _showCreatePlaylistDialog,
+                          ),
+                        _buildPlaylistSortButton(1),
                       ],
                     ),
             ),
@@ -951,14 +986,15 @@ class _FavoritesPageState extends State<FavoritesPage>
                 onToggle: () =>
                     setState(() => _collectedExpanded = !_collectedExpanded),
                 playlists: _collectedPlaylists,
+                reordering: _reorderingGroup == 2,
+                onReorder: (oldIndex, newIndex) =>
+                    _reorderGroup(2, oldIndex, newIndex),
+                keyFor: _playlistKey,
                 onBuildTile: (playlist) =>
                     _buildPlaylistTile(playlist, _playlists.indexOf(playlist)),
                 trailing: _isManaging
                     ? null
-                    : _buildPlaylistSortButton(
-                        _collectedSortAsc,
-                        _toggleCollectedSort,
-                      ),
+                    : _buildPlaylistSortButton(2),
               ),
             // 底部加载更多指示器
             if (_isLoadingMorePlaylists)
@@ -985,48 +1021,35 @@ class _FavoritesPageState extends State<FavoritesPage>
     );
   }
 
-  /// 分组标题右侧的升降序切换按钮：未排序时显示 [Icons.sort]，
-  /// 点击后按歌单名称升序（↑）/降序（↓）循环切换。
-  Widget _buildPlaylistSortButton(bool? sortAsc, VoidCallback onToggle) {
+  /// 分组标题右侧的排序按钮：点击进入自由排序模式（长按拖拽调整顺序），
+  /// 排序模式下变为「完成」勾选，点击退出排序模式。
+  Widget _buildPlaylistSortButton(int group) {
     final cs = Theme.of(context).colorScheme;
-    final IconData icon;
-    final String tooltip;
-    if (sortAsc == null) {
-      icon = Icons.sort;
-      tooltip = '按名称升序排序';
-    } else if (sortAsc) {
-      icon = Icons.arrow_upward;
-      tooltip = '切换为降序';
-    } else {
-      icon = Icons.arrow_downward;
-      tooltip = '切换为升序';
-    }
+    final reordering = _reorderingGroup == group;
     return IconButton(
-      icon: Icon(icon, size: 20, color: cs.onSurfaceVariant),
+      icon: Icon(
+        reordering ? Icons.check : Icons.sort,
+        size: 20,
+        color: reordering ? cs.primary : cs.onSurfaceVariant,
+      ),
       visualDensity: VisualDensity.compact,
-      tooltip: tooltip,
-      onPressed: onToggle,
+      tooltip: reordering ? '完成排序' : '自由排序',
+      onPressed: () => _toggleReorderingGroup(group),
     );
-  }
-
-  /// 切换「我创建的歌单」排序方向（null→升序→降序→升序…），并持久化。
-  void _toggleCreatedSort() {
-    setState(() => _createdSortAsc = !(_createdSortAsc ?? false));
-    _settingsRepository.setCreatedPlaylistSort(_sortToInt(_createdSortAsc));
-  }
-
-  /// 切换「我收藏的歌单」排序方向（null→升序→降序→升序…），并持久化。
-  void _toggleCollectedSort() {
-    setState(() => _collectedSortAsc = !(_collectedSortAsc ?? false));
-    _settingsRepository.setCollectedPlaylistSort(_sortToInt(_collectedSortAsc));
   }
 
   Widget _buildPlaylistTile(KugouPlaylistBrief playlist, int index) {
     final colorScheme = Theme.of(context).colorScheme;
     final isSelected = _selectedIndices.contains(index);
+    // 排序模式下禁用点击跳转与长按管理，长按留给 ReorderableListView 拖拽
+    final reordering = _isCreated(playlist)
+        ? _reorderingGroup == 1
+        : _reorderingGroup == 2;
 
     return InkWell(
-        onTap: _isManaging
+        onTap: reordering
+            ? null
+            : _isManaging
             ? () {
                 setState(() {
                   if (isSelected) {
@@ -1051,7 +1074,7 @@ class _FavoritesPageState extends State<FavoritesPage>
                   ),
                 );
               },
-        onLongPress: _isManaging
+        onLongPress: reordering || _isManaging
             ? null
             : () {
                 _enterManageMode(0);
@@ -1136,7 +1159,13 @@ class _FavoritesPageState extends State<FavoritesPage>
                   ],
                 ),
               ),
-              if (!_isManaging)
+              if (reordering)
+                Icon(
+                  Icons.drag_indicator,
+                  color: colorScheme.onSurfaceVariant,
+                  size: 20,
+                )
+              else if (!_isManaging)
                 Icon(
                   Icons.chevron_right,
                   color: colorScheme.onSurfaceVariant,
@@ -1472,6 +1501,15 @@ class _GroupSection extends StatefulWidget {
   final List<KugouPlaylistBrief> playlists;
   final Widget Function(KugouPlaylistBrief) onBuildTile;
 
+  /// 是否处于自由排序模式：分组主体切换为可拖拽的 ReorderableListView。
+  final bool reordering;
+
+  /// 拖拽调整顺序回调（reordering 为 true 时必填）。
+  final void Function(int oldIndex, int newIndex)? onReorder;
+
+  /// 歌单的稳定 key（reordering 为 true 时必填，供 ReorderableListView 去重）。
+  final String Function(KugouPlaylistBrief)? keyFor;
+
   /// 标题行最右侧的附加控件（如「我创建的歌单」的新建按钮）。
   final Widget? trailing;
 
@@ -1481,6 +1519,9 @@ class _GroupSection extends StatefulWidget {
     required this.onToggle,
     required this.playlists,
     required this.onBuildTile,
+    this.reordering = false,
+    this.onReorder,
+    this.keyFor,
     this.trailing,
   });
 
@@ -1587,11 +1628,26 @@ class _GroupSectionState extends State<_GroupSection>
           child: SizeTransition(
             sizeFactor: _sizeAnimation,
             alignment: Alignment.topCenter,
-            child: Column(
-              children: widget.playlists.map((playlist) {
-                return widget.onBuildTile(playlist);
-              }).toList(),
-            ),
+            child: widget.reordering
+                // 排序模式：嵌套在外层 ListView 内，自适应高度且禁止自滚动；
+                // 长按列表项触发拖拽（buildDefaultDragHandles 默认行为）
+                ? ReorderableListView(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    onReorderItem: widget.onReorder!,
+                    children: [
+                      for (final playlist in widget.playlists)
+                        KeyedSubtree(
+                          key: ValueKey(widget.keyFor!(playlist)),
+                          child: widget.onBuildTile(playlist),
+                        ),
+                    ],
+                  )
+                : Column(
+                    children: widget.playlists.map((playlist) {
+                      return widget.onBuildTile(playlist);
+                    }).toList(),
+                  ),
           ),
         ),
       ],

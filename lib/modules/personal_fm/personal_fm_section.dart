@@ -8,10 +8,7 @@ import '../../providers/favorites_provider.dart';
 import '../../providers/kugou_provider.dart';
 import '../../providers/player_provider.dart';
 import '../../services/kugou_api/kugou_models.dart';
-import '../../widgets/sliding_segmented_control.dart';
-import '../../widgets/wavy_playback_line.dart';
-import '../login/login_page.dart';
-import '../player/full_player_route.dart';
+import '_fm_refill.dart';
 
 /// 一个具名电台：把 API 的 (mode, songPoolId) 包成用户看得懂的一档。
 /// 接口共 9 种组合，这里只取 3 组，要全部组合的走完整 FM 页。
@@ -110,8 +107,9 @@ class _FmRefill {
     required this.songPoolId,
     required List<KugouSongDetail> songs,
     bool adoptQueue = false,
+    this._sessionGeneration,
   }) : _owned = songs.map((s) => s.hash).toSet(),
-       _cursor = songs.last {
+       _cursor = songs.isEmpty ? null : songs.last {
     // 接管一条已经在放、但槽位空了的队列（见 [_PersonalFmSectionState._armRefill]）：
     // 队列里可能有换档前灌进去、已经不在 personalFmSongs 里的歌，不一并认下来的话
     // 第一次通知就会被判成「别人的队列」而立刻退场。
@@ -130,7 +128,11 @@ class _FmRefill {
   final Set<String> _owned;
 
   /// 下一批的游标：上一批的最后一首（与完整 FM 页一致，hash + songId）。
-  KugouSongDetail _cursor;
+  /// 冷启动恢复出来的续播器拿不到 KugouSongDetail 游标，可空即为「不带游标要一批」。
+  KugouSongDetail? _cursor;
+
+  /// 会话代次（见 [FmRefillStore]）：非空时退场要把持久化的活跃标记清掉。
+  final int? _sessionGeneration;
 
   /// 在飞的那次补货。并发调用合流到同一个 Future，而不是让后来者拿到 false——
   /// 队列末尾那次若把「有人正在补」当成「补不到」，就不会推 next()，
@@ -164,6 +166,11 @@ class _FmRefill {
     player.removeListener(_onPlayerChanged);
     if (player.onPlaylistEnd == onQueueEnd) {
       player.onPlaylistEnd = null;
+    }
+    final gen = _sessionGeneration;
+    if (gen != null) {
+      // ignore: discarded_futures
+      FmRefillStore.clearIfCurrent(gen);
     }
   }
 
@@ -317,8 +324,40 @@ class _PersonalFmSectionState extends State<PersonalFmSection> {
     // initState 里读不到 provider。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      _reviveRefillIfNeeded();
       _restoreStation();
     });
+  }
+
+  /// 杀后台重进的自愈：播放队列被 PlayerStateRepository 恢复了，但续播器
+  /// 是内存对象已随进程消失，此时从底栏 resume 出来的是一条永不补货的死队列。
+  /// 有持久化的 FM 会话标记（见 [FmRefillStore]）就按当时档位重建续播器，
+  /// adoptQueue 接管恢复出来的队列；再补一批把 personalFmSongs 填回来，
+  /// 卡片的列表 UI 也随之恢复。
+  Future<void> _reviveRefillIfNeeded() async {
+    final player = Provider.of<PlayerProvider>(context, listen: false);
+    if (player.onPlaylistEnd != null) return;
+    if (player.playlist.isEmpty || player.currentSong == null) return;
+    final stationIndex = await FmRefillStore.activeStationIndex();
+    if (!mounted || stationIndex == null) return;
+    if (stationIndex < 0 || stationIndex >= _kStations.length) return;
+    if (stationIndex != _stationIndex) {
+      setState(() => _stationIndex = stationIndex);
+    }
+    final kugou = Provider.of<KugouProvider>(context, listen: false);
+    final generation = FmRefillStore.nextGeneration();
+    final refill = _FmRefill(
+      kugou: kugou,
+      player: player,
+      mode: _station.mode,
+      songPoolId: _station.songPoolId,
+      songs: const [],
+      adoptQueue: true,
+      sessionGeneration: generation,
+    );
+    player.onPlaylistEnd = refill.onQueueEnd;
+    // ignore: discarded_futures
+    refill.append();
   }
 
   /// 恢复上次选的档位。发现页的初始加载不带档位参数（服务端回落到默认档），
@@ -385,10 +424,7 @@ class _PersonalFmSectionState extends State<PersonalFmSection> {
     kugou.moveToFirst(song);
     final refill = _armRefill(kugou, player);
     await player.playOnlinePlaylist(kugou.personalFmAsSongs, 0);
-    // 起播后立刻先接一批（与完整 FM 页一致）。不这么做的话队列就只有起播那一批，
-    // 一路放到底才第一次补货，把「补货失败」和「队列见底」压进同一个窗口：那一次
-    // 要是没成，播放器当场停在最后一首。
-    refill?.append();
+    refill?.append(); // 立即补一批
   }
 
   /// 新建续播器占住 `onPlaylistEnd`，返回它（歌单为空时返回 null）。
@@ -404,6 +440,7 @@ class _PersonalFmSectionState extends State<PersonalFmSection> {
   }) {
     final songs = kugou.personalFmSongs;
     if (songs.isEmpty) return null;
+    final generation = FmRefillStore.nextGeneration();
     final refill = _FmRefill(
       kugou: kugou,
       player: player,
@@ -411,7 +448,11 @@ class _PersonalFmSectionState extends State<PersonalFmSection> {
       songPoolId: _station.songPoolId,
       songs: songs,
       adoptQueue: adoptQueue,
+      sessionGeneration: generation,
     );
+    // 持久化「这是一条 FM 队列」：杀后台重进后靠它把续播器挂回来。
+    // ignore: discarded_futures
+    FmRefillStore.markActive(_stationIndex);
     player.onPlaylistEnd = refill.onQueueEnd;
     return refill;
   }
