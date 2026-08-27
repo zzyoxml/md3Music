@@ -29,6 +29,10 @@ class LyricsViewState extends State<LyricsView> {
   int _currentLineIndex = -1;
   bool _forceScroll = false;
 
+  // 首次进入 / 切歌后第一次滚动用 jumpTo 直接定位当前行，
+  // 避免每次切到歌词页都从顶部滚 300ms 到当前行
+  bool _initialJumpDone = false;
+
   // 用户是否正在触摸歌词列表（手指按下状态）
   bool _userTouching = false;
   // 用户松手后，延迟恢复自动滚动的定时器
@@ -121,6 +125,7 @@ class LyricsViewState extends State<LyricsView> {
       _parseLyrics();
       _currentLineIndex = -1;
       _forceScroll = true;
+      _initialJumpDone = false; // 切歌后重新定位时直接跳转
     }
 
     _updateCurrentLine();
@@ -273,7 +278,7 @@ class LyricsViewState extends State<LyricsView> {
       if (shouldScroll && !_userTouching && newIndex >= 0) {
         _forceScroll = false;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _scrollToLine(newIndex);
+          if (mounted) _scrollToLine(newIndex, jump: !_initialJumpDone);
         });
       } else {
         _forceScroll = false;
@@ -304,6 +309,8 @@ class LyricsViewState extends State<LyricsView> {
         curve: Curves.easeOut,
       );
     }
+    // 首次定位已完成，后续行进中的行切换保持 300ms 平滑滚动
+    _initialJumpDone = true;
   }
 
   /// 计算每行容器高度与累计偏移（缓存，仅在歌词/偏好/宽度变化时重测）。

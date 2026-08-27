@@ -780,6 +780,8 @@ class _AppleLyricsViewState extends State<AppleLyricsView>
       // 新歌行数不同，旧索引无意义，直接整体清空。
       _perLineSprings.clear();
       _delayStartTimes.clear();
+      // 切歌后首次定位直接瞬移到新歌当前行（避免从旧歌曲的长距离滚动）
+      _scrollController.resetInitialJump();
       if (ecoLocked) {
         _syncEcoDriver();
       } else {
