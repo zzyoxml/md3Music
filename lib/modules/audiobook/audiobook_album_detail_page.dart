@@ -472,7 +472,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                         // 加载更多 footer（滚动到底自动翻页）
                         if (_audios.isNotEmpty)
                           SliverToBoxAdapter(
-                            child: _buildLoadMoreFooter(cs, tt),
+                            child: _buildLoadMoreFooter(),
                           ),
                     ],
                   ),
@@ -742,8 +742,8 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
     );
   }
 
-  /// 加载更多 footer：加载中/已全部加载提示（滚动到底自动翻页用）。
-  Widget _buildLoadMoreFooter(ColorScheme cs, TextTheme tt) {
+  /// 加载更多 footer：仅加载中转圈（滚动到底自动翻页用）。
+  Widget _buildLoadMoreFooter() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 14),
       child: Center(
@@ -753,12 +753,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : (!_hasMoreAudio)
-                ? Text(
-                    '已加载全部 ${_audios.length} 集',
-                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                  )
-                : const SizedBox(height: 20),
+            : const SizedBox(height: 20),
       ),
     );
   }
