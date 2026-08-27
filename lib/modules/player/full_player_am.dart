@@ -17,6 +17,7 @@ import '../../core/services/media_notification_service.dart';
 import '../../core/services/spectrum_service.dart';
 import '../../core/services/usb_audio_service.dart';
 import '../../core/utils/audio_scanner.dart';
+import '../../core/utils/app_haptics.dart';
 import '../../core/utils/app_toast.dart';
 import '../../core/utils/artwork_color_extractor.dart';
 import '../../data/models/album.dart';
@@ -48,6 +49,7 @@ import '../../widgets/player_artwork_image.dart';
 import '../../widgets/spectrum_artwork.dart';
 import '../../widgets/spectrum_background.dart';
 import '../../utils/landscape_immersive.dart';
+import '../../utils/playlist_order_utils.dart';
 import '../../widgets/player_playlist_view.dart';
 import 'comments_view.dart';
 import 'dlna_cast_sheet.dart';
@@ -2448,6 +2450,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     playerProvider.seek(newPosition);
                   },
                   onChangeEnd: (value) async {
+                    AppHaptics.tick();
                     final newPosition = Duration(
                       milliseconds: (duration.inMilliseconds * value).round(),
                     );
@@ -2515,6 +2518,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 playerProvider.seek(newPosition);
               },
               onChangeEnd: (value) async {
+                AppHaptics.tick();
                 final newPosition = Duration(
                   milliseconds: (totalMs * value).round(),
                 );
@@ -2570,13 +2574,19 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             // 深色背景下：启用时纯白，未启用时半透明白
             color: shuffleEnabled ? Colors.white : Colors.white70,
           ),
-          onPressed: () => playerProvider.toggleShuffle(),
+          onPressed: () {
+            AppHaptics.tick();
+            playerProvider.toggleShuffle();
+          },
         ),
         SizedBox(width: spacing),
         IconButton(
           iconSize: skipIconSize,
           icon: const Icon(Icons.skip_previous, color: Colors.white),
-          onPressed: () => playerProvider.previous(),
+          onPressed: () {
+            AppHaptics.click();
+            playerProvider.previous();
+          },
         ),
         SizedBox(width: spacing),
         // Apple Music 标志性白色圆形播放按钮，黑色图标
@@ -2584,6 +2594,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           iconSize: playIconSize,
           icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
           onPressed: () {
+            AppHaptics.click();
             if (isPlaying) {
               playerProvider.pause();
             } else {
@@ -2599,7 +2610,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         IconButton(
           iconSize: skipIconSize,
           icon: const Icon(Icons.skip_next, color: Colors.white),
-          onPressed: () => playerProvider.next(),
+          onPressed: () {
+            AppHaptics.click();
+            playerProvider.next();
+          },
         ),
         SizedBox(width: spacing),
         IconButton(
@@ -2607,7 +2621,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             _getLoopModeIcon(loopMode),
             color: loopMode != AppLoopMode.off ? Colors.white : Colors.white70,
           ),
-          onPressed: () => playerProvider.toggleLoopMode(),
+          onPressed: () {
+            AppHaptics.tick();
+            playerProvider.toggleLoopMode();
+          },
         ),
       ],
     );
@@ -2850,6 +2867,11 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   onTap: song != null
                       ? () {
                           // 本地歌曲走 LocalFavoritesProvider，在线走 FavoritesProvider
+                          if (isFavorited) {
+                            AppHaptics.click();
+                          } else {
+                            AppHaptics.heavy();
+                          }
                           if (isOnline) {
                             context.read<FavoritesProvider>().toggleFavorite(
                               song,
@@ -3902,8 +3924,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     showDialog(
       context: context,
       builder: (dialogContext) {
-        return FutureBuilder<Map<String, dynamic>?>(
-          future: api.getUserPlaylist(pagesize: 50),
+        return FutureBuilder<List<Map<String, dynamic>>?>(
+          future: _loadUserPlaylistsSorted(api),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
               return const AlertDialog(
@@ -3938,37 +3960,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               );
             }
 
-            final data = snapshot.data!['data'];
-            List<dynamic> rawPlaylists = [];
-            if (data is List) {
-              rawPlaylists = data;
-            } else if (data is Map) {
-              rawPlaylists =
-                  data['info'] ?? data['list'] ?? data['special_list'] ?? [];
-            }
-
-            // 使用 KugouPlaylistBrief 模型解析，确保字段名映射正确
-            // 只显示用户自己创建的歌单 (type=0)
-            final playlists = <Map<String, dynamic>>[];
-            for (final item in rawPlaylists) {
-              final json = item as Map<String, dynamic>;
-              final brief = KugouPlaylistBrief.fromJson(json);
-              if (brief.type != 0) continue;
-              // 排除「我喜欢」默认收藏歌单：收藏走红心机制，不走添加到歌单
-              // （判定与 FavoritesProvider 一致：name == '我喜欢' || is_def == 2）
-              if (brief.name == '我喜欢' || json['is_def'] == 2) continue;
-              // 将模型数据转回 Map 以便 UI 使用（包含正确的字段值）
-              playlists.add({
-                'name': brief.name,
-                'songCount': brief.songCount,
-                'listid': brief.listId.isEmpty ? brief.id : brief.listId,
-                'specialid': brief.id,
-                'global_collection_id': brief.globalCollectionId,
-                'type': brief.type,
-                // 保留原始 JSON 用于 API 调用
-                ...json,
-              });
-            }
+            final playlists = snapshot.data!;
 
             if (playlists.isEmpty) {
               return AlertDialog(
@@ -4026,6 +4018,49 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         );
       },
     );
+  }
+
+  /// 拉取用户歌单并解析为「添加到歌单」对话框所需的 Map 列表，
+  /// 再按收藏页「创建的歌单」自定义顺序原地排序后返回。
+  /// 返回 null 表示请求失败（与旧逻辑中 snapshot.data == null 等价）。
+  Future<List<Map<String, dynamic>>?> _loadUserPlaylistsSorted(
+    KugouApiClient api,
+  ) async {
+    final resp = await api.getUserPlaylist(pagesize: 50);
+    if (resp == null) return null;
+    final data = resp['data'];
+    List<dynamic> rawPlaylists = [];
+    if (data is List) {
+      rawPlaylists = data;
+    } else if (data is Map) {
+      rawPlaylists = data['info'] ?? data['list'] ?? data['special_list'] ?? [];
+    }
+
+    // 使用 KugouPlaylistBrief 模型解析，确保字段名映射正确
+    // 只显示用户自己创建的歌单 (type=0)
+    final playlists = <Map<String, dynamic>>[];
+    for (final item in rawPlaylists) {
+      final json = item as Map<String, dynamic>;
+      final brief = KugouPlaylistBrief.fromJson(json);
+      if (brief.type != 0) continue;
+      // 排除「我喜欢」默认收藏歌单：收藏走红心机制，不走添加到歌单
+      // （判定与 FavoritesProvider 一致：name == '我喜欢' || is_def == 2）
+      if (brief.name == '我喜欢' || json['is_def'] == 2) continue;
+      // 将模型数据转回 Map 以便 UI 使用（包含正确的字段值）
+      playlists.add({
+        'name': brief.name,
+        'songCount': brief.songCount,
+        'listid': brief.listId.isEmpty ? brief.id : brief.listId,
+        'specialid': brief.id,
+        'global_collection_id': brief.globalCollectionId,
+        'type': brief.type,
+        // 保留原始 JSON 用于 API 调用
+        ...json,
+      });
+    }
+
+    await PlaylistOrderUtils.sortCreatedPlaylistMaps(playlists);
+    return playlists;
   }
 
   Future<void> _addSongToPlaylist(

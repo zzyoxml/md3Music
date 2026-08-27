@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:m3e_core/m3e_core.dart';
 
 import '../../core/services/equalizer_service.dart';
+import '../../core/utils/app_haptics.dart';
 import '../../core/utils/app_toast.dart';
 
 /// 均衡器设置页：Material Design 3 风格，包含频率响应曲线、预设芯片、垂直频段滑块。
@@ -271,7 +272,7 @@ class _EqualizerSettingsPageState extends State<EqualizerSettingsPage> {
           Switch(
             value: _eq.enabled,
             onChanged: (value) {
-              HapticFeedback.selectionClick();
+              AppHaptics.tick();
               _eq.setEnabled(value);
             },
           ),
@@ -316,7 +317,7 @@ class _EqualizerSettingsPageState extends State<EqualizerSettingsPage> {
           return GestureDetector(
             onTap: _eq.enabled
                 ? () {
-                    HapticFeedback.selectionClick();
+                    AppHaptics.tick();
                     _eq.applyPreset(preset);
                   }
                 : null,

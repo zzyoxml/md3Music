@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 
 import '../data/models/song.dart';
 import '../core/layout/responsive_layout.dart';
+import '../core/utils/app_haptics.dart';
 import '../providers/player_provider.dart';
 
 /// 自定义长按延迟 700ms 的 Reorderable 监听器。
@@ -261,7 +262,7 @@ class _PlayerPlaylistDialogState extends State<PlayerPlaylistDialog> {
         if (details.progress >= _swipeThreshold) {
           // 越过阈值：触发震动 + 淡入红色背景（100ms）
           if (_hapticTriggered[song.id] != true) {
-            HapticFeedback.heavyImpact();
+            AppHaptics.heavy();
             _hapticTriggered[song.id] = true;
           }
           if (_redBgVisible[song.id] != true) {
