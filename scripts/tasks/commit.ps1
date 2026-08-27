@@ -12,7 +12,7 @@
        直接改（Ctrl+S 保存 / Esc 放弃 / Ctrl+E 转外部编辑器）；-NoLlm 退回模板候选
     4. 同步当前分支：先合并 upstream/<分支> 的新提交，再合并 origin/<分支>，最后推送 origin
        （首次推送自动 -u 建立跟踪；upstream 的提交因此经本地带到 origin，fork 不会越落越远）
-    5. 可选：向 upstream 开 PR / 导出公开版本（覆盖推送或开 PR）
+    5. 可选：向 upstream 开 PR / 导出公开版本（默认开 PR；加 -PublicForcePush 才直推覆盖）
 
   未勾选的文件只是本次不提交，仍留在工作区，不写入任何忽略文件。
   注意：确认后脚本会按勾选结果重置暂存区（git reset + git add 勾选项），
@@ -56,10 +56,14 @@
   upstream PR 的 base 分支（默认与当前分支同名）。
 
 .PARAMETER PublicExport
-  提交后导出公开版本并覆盖推送公开仓库（force push）。
+  提交后导出公开版本并发布到公开仓库：默认走 PR 审阅（与 -PublicPr 等价）；
+  配合 -PublicForcePush 才直推覆盖 main。
 
 .PARAMETER PublicPr
-  提交后导出公开版本并在公开仓库开 PR（推荐，可审阅导出差异）。
+  提交后导出公开版本并在公开仓库开 PR（默认的发布方式，可审阅导出差异）。
+
+.PARAMETER PublicForcePush
+  例外路径：导出公开版本后 force push 直接覆盖公开仓库目标分支（公开树历史被整段替换）。
 
 .PARAMETER PublicRemote
   公开仓库 URL（默认取 git remote 'public'，缺失则用 zzyoxml/md3Music）。
@@ -91,6 +95,7 @@ param(
     [string]$PrBase = '',
     [switch]$PublicExport,
     [switch]$PublicPr,
+    [switch]$PublicForcePush,
     [string]$PublicRemote = '',
     [switch]$SkipGate,
     [switch]$Yes
@@ -332,14 +337,6 @@ function Get-CommitDiffContext {
         $budget = $MaxChars - $sb.Length
     }
     $sb.ToString()
-}
-
-function Read-YesNo {
-    param([Parameter(Mandatory)][string]$Prompt, [bool]$Default = $false)
-    $hint = if ($Default) { '[Y/n]' } else { '[y/N]' }
-    $a = Read-Host "$Prompt $hint"
-    if ([string]::IsNullOrWhiteSpace($a)) { return $Default }
-    $a.Trim().ToLowerInvariant() -in @('y', 'yes', '是')
 }
 
 # ---------- 候选信息的展示与编辑 ----------
@@ -770,13 +767,15 @@ try {
         }
     }
 
-    # ---------- 后续动作：公开版导出 ----------
-    $doPublicPr = [bool]$PublicPr
-    $doPublicPush = [bool]$PublicExport
+    # ---------- 后续动作：公开版导出（默认走 PR；-PublicForcePush 才直推覆盖） ----------
+    $doPublicPr = [bool]($PublicPr -or ($PublicExport -and -not $PublicForcePush))
+    $doPublicPush = [bool]$PublicForcePush
     if (-not $Yes -and -not $doPublicPr -and -not $doPublicPush) {
         if (Read-YesNo '  导出公开版本并发布到公开仓库？') {
-            $doPublicPr = Read-YesNo '    走 PR 审阅（否则 force push 直接覆盖 main）？' $true
-            $doPublicPush = -not $doPublicPr
+            $doPublicPr = Read-YesNo '    走 PR 审阅？（推荐；回答 n 将进入 force push 确认）' $true
+            if (-not $doPublicPr) {
+                $doPublicPush = Read-YesNo '      确认 force push 直接覆盖公开仓库目标分支？历史将被整段替换'
+            }
         }
     }
     if ($doPublicPr -or $doPublicPush) {
@@ -784,9 +783,9 @@ try {
         $pubUrl = $PublicRemote
         if (-not $pubUrl) { $pubUrl = Get-RemoteUrl 'public' }
         if (-not $pubUrl) { $pubUrl = 'https://github.com/zzyoxml/md3Music.git' }
-        Write-Note "公开仓库：$pubUrl"
+        Write-Note ("公开仓库：$pubUrl（{0}）" -f $(if ($doPublicPush) { 'force push 覆盖' } else { '开 PR 审阅' }))
         $exportArgs = @('-PublicRemote', $pubUrl, '-NoPause')
-        if ($doPublicPr) { $exportArgs += '-AsPr' }
+        if ($doPublicPush) { $exportArgs += '-ForcePush' }
         & (Join-Path $PSScriptRoot 'export_public.ps1') @exportArgs
         if ($LASTEXITCODE -ne 0) { throw "公开版导出失败（退出码 $LASTEXITCODE）" }
     }

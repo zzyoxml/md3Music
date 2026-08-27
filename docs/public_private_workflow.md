@@ -61,8 +61,8 @@
 │  = 干净的公开源码：无 packages/、无 lib/private/、           │
 │    pubspec.yaml 已剥离私有依赖行                             │
 └───────────────┬────────────────────────────────────────────┘
-                │ 在 .public_export/ 内 git push -f（-PublicRemote 参数指定 URL；
-                │ 该临时仓库自己的 origin，与主仓库的 origin 无关）
+                │ 默认开 PR 到公开仓库（浅克隆→替换工作区→推临时分支）；
+                │ -ForcePush 例外：在 .public_export/ 临时仓库内 git push -f
                 ▼
 ┌────────────────────────────────────────────────────────────┐
 │  公开仓库（发布产物，只读镜像）                              │
@@ -283,13 +283,13 @@ flutter test
 #    flutter analyze            # 零错误
 #    grep -rn "边听边存\|StreamCacheManager\|md3_download_cache" lib/  # 空 = 干净
 
-# 4. 推送到公开仓库（脚本内部：git init → commit → force push 到 main）
+# 4. 发布到公开仓库（默认走 PR 审阅：浅克隆公开仓库 → 用导出树整体替换工作区
+#    → 提交到 public-export-<时间戳> 分支 → 开 PR，可逐文件比对导出差异）
 .\scripts\md3.ps1 export -PublicRemote https://github.com/zzyoxml/md3Music.git
-# 期望输出：Pushed to public repository: https://github.com/zzyoxml/md3Music.git
 
-# 4'. 或走 PR 审阅（保留公开仓库历史，可逐文件比对本次导出差异）
-.\scripts\md3.ps1 export -PublicRemote https://github.com/zzyoxml/md3Music.git -AsPr
-# 内部：浅克隆公开仓库 → 用导出树整体替换工作区 → 提交到 public-export-<时间戳> 分支 → 开 PR
+# 4'. 例外：force push 直接覆盖 main（脚本内部：git init → 单提交 → force push；
+#    交互环境会再确认一次；-AsPr 为兼容保留的旧参数，现在与默认行为等价）
+.\scripts\md3.ps1 export -PublicRemote https://github.com/zzyoxml/md3Music.git -ForcePush
 ```
 
 **手动推送（不想用脚本参数时）**：
@@ -307,7 +307,7 @@ git push -f origin HEAD:main
 ```
 
 **注意事项**：
-- 默认推送是 **force push 到公开仓库 main 分支**——公开仓库是镜像，历史上只允许被覆盖，不要在公开仓库上开分支开发（那样同步会很痛苦）。`-AsPr` 是唯一例外：它只为本次导出建一个临时分支供审阅，合并后仍是线性镜像。
+- 默认发布走 **PR 审阅**：为本次导出建一个 `public-export-<时间戳>` 临时分支开 PR，合并后公开仓库仍是线性镜像。`-ForcePush` 是例外：直接覆盖公开仓库 main 分支（历史上只允许被覆盖的发布方式，需显式声明并在交互下确认）。不要在公开仓库上开长期分支开发（那样同步会很痛苦）。
 - `.public_export/` 已被 `.gitignore` 忽略，不入私有仓库。
 - 导出树里的 `test/` 会被原样拷贝：**不要在公开树的 `test/` 里写下载/缓存测试**（会命中闸门）；私有功能测试放 `packages/md3_download_cache/test/`。
 

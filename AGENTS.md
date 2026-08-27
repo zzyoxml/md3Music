@@ -261,8 +261,8 @@ dart run scripts/tools/gen_settings_search_index.dart   # 产出 lib/modules/set
 ```powershell
 .\scripts\md3.ps1 verify                                  # 校验公开树 lib/ 否认清单零命中
 .\scripts\md3.ps1 export                                  # 导出到 .public_export/（过滤 + 闸门）
-.\scripts\md3.ps1 export -PublicRemote <公开仓库URL>       # 导出并推送到公开仓库（-f 覆盖）
-.\scripts\md3.ps1 export -PublicRemote <URL> -AsPr        # 导出并在公开仓库开 PR（保留历史，可审阅差异）
+.\scripts\md3.ps1 export -PublicRemote <公开仓库URL>       # 导出并在公开仓库开 PR（默认；保留历史，可审阅差异）
+.\scripts\md3.ps1 export -PublicRemote <URL> -ForcePush   # 例外：导出并 force push 直接覆盖公开仓库
 # 公开树独立构建：cd .public_export && flutter pub get && flutter build apk --debug（入口 lib/main.dart）
 ```
 
@@ -276,7 +276,8 @@ TUI 勾选改动 → 否认清单闸门 → 提交 → 推送 → 可选开 PR�
 .\scripts\md3.ps1 commit -All -Message "fix(player): ..."  # 非交互：全选 + 指定信息
 .\scripts\md3.ps1 commit -Pr                              # 提交推送后向 upstream 开 PR（不合并）
 .\scripts\md3.ps1 commit -PrMerge                         # 开 PR 并直接合并到 upstream，再拉回同步 origin
-.\scripts\md3.ps1 commit -PublicPr                        # 提交后导出公开版并在公开仓库开 PR
+.\scripts\md3.ps1 commit -PublicExport                    # 提交后导出公开版并在公开仓库开 PR（默认 PR）
+.\scripts\md3.ps1 commit -PublicForcePush                 # 例外：导出公开版后 force push 覆盖公开仓库
 ```
 
 - 不传 `-Message` 时按改动路径生成 `type(scope): 描述` 候选，回车接受或直接改写（描述必须人工确认）
@@ -498,7 +499,7 @@ flutter analyze                           # Dart 静态分析
 # 公开版本导出（下载/缓存隔离，见第 8 节）
 .\scripts\md3.ps1 verify         # 公开树 lib/ 否认清单零命中校验
 .\scripts\md3.ps1 export                # 过滤导出公开树（默认 .public_export/）
-.\scripts\md3.ps1 export -PublicRemote <URL>   # 导出并推送公开仓库
+.\scripts\md3.ps1 export -PublicRemote <URL>   # 导出并在公开仓库开 PR（默认；-ForcePush 例外直推覆盖）
 ```
 
 ---
@@ -653,4 +654,4 @@ flutter analyze                           # Dart 静态分析
 
 ### 9.4 导出脚本职责（改脚本前先看这）
 
-`scripts/md3.ps1 export` 一次完成：白名单拷贝（当前 16 项顶层，含 `CHANGELOG.md`）→ 排除 `lib/private/`、`pubspec.lock`、`.trae/`、`build-windows.yml` → `scripts/` 仅带出 android/windows 两个构建脚本（自带公共库缺失兜底，可独立运行）→ 剥离 pubspec 私有依赖（`md3_download_cache` 块 + `just_audio_windows`/`video_player_win`）→ README 删除「边听边存」条目 → 可选更新 CHANGELOG（`-Changelog`，LLM 总结需确认后写入）→ deny 闸门（40 条）→ 可选 force push。**导出树应有且仅有：公开功能 + Android 平台**（无 `windows/`；`scripts/` 仅两脚本；`CHANGELOG.md` 随导出携带；`.trae/` 与其余私有工具链绝不导出）。
+`scripts/md3.ps1 export` 一次完成：白名单拷贝（当前 16 项顶层，含 `CHANGELOG.md`）→ 排除 `lib/private/`、`pubspec.lock`、`.trae/`、`build-windows.yml` → `scripts/` 仅带出 android/windows 两个构建脚本（自带公共库缺失兜底，可独立运行）→ 剥离 pubspec 私有依赖（`md3_download_cache` 块 + `just_audio_windows`/`video_player_win`）→ README 删除「边听边存」条目 → 可选更新 CHANGELOG（`-Changelog`，LLM 总结需确认后写入）→ deny 闸门（40 条）→ 可选发布到公开仓库（默认开 PR；`-ForcePush` 例外直推覆盖）。**导出树应有且仅有：公开功能 + Android 平台**（无 `windows/`；`scripts/` 仅两脚本；`CHANGELOG.md` 随导出携带；`.trae/` 与其余私有工具链绝不导出）。
