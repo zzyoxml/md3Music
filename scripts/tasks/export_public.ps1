@@ -11,7 +11,7 @@
     4. 排除私有内容（lib/private/、pubspec.lock、scripts/ 残留、编译临时产物）
     5. 剥离 pubspec.yaml 的私有依赖块与 README 私有功能条目
     6. 否认清单闸门（scripts/public_deny.txt，lib/ 与 pubspec 零命中才通过）
-    7. 可选：推送导出树到公开仓库（force push 覆盖分支，或 -AsPr 开 PR 审阅）
+    7. 可选：发布到公开仓库（默认开 PR 审阅；加 -ForcePush 才直推覆盖分支）
     8. 完成总结（目录 / 体量 / 下一步建议）
 
   公开版本 = 本仓库过滤导出的干净树，不是独立代码库。
@@ -26,14 +26,17 @@
   示例：https://github.com/zzyoxml/md3Music.git
 
 .PARAMETER PublicBranch
-  公开仓库的目标分支（默认 main）。force push 模式直接覆盖它；-AsPr 模式以它为 PR base。
+  公开仓库的目标分支（默认 main）。PR 模式以它为 base；-ForcePush 模式直接覆盖它。
 
 .PARAMETER AsPr
-  不直接覆盖目标分支：浅克隆公开仓库 → 用导出树替换工作区内容 → 推到新分支 → 开 PR。
-  这样公开仓库保留历史，PR 里能逐文件审阅本次导出的差异。
+  【兼容保留】旧参数。开 PR 现已是给了 -PublicRemote 后的默认行为，本开关不再产生差异。
+
+.PARAMETER ForcePush
+  例外路径：不走进 PR，导出树打包成全新单提交仓库 force push 直接覆盖目标分支。
+  公开仓库历史会被整段替换，仅在明确需要重写公开树时使用；交互环境下会再确认一次。
 
 .PARAMETER PrBranch
-  -AsPr 模式的分支名（默认 public-export-<yyyyMMdd-HHmm>）。
+  PR 模式的分支名（默认 public-export-<yyyyMMdd-HHmm>）。
 
 .PARAMETER Changelog
   导出前先更新 CHANGELOG.md：总结上次记录哈希之后的提交（LLM 生成，需用户确认后才写入，
@@ -53,8 +56,8 @@
 
 .EXAMPLE
   .\scripts\md3.ps1 export                                     # 只导出 + 闸门校验
-  .\scripts\md3.ps1 export -PublicRemote <URL>                 # 导出 + force push 覆盖 main
-  .\scripts\md3.ps1 export -PublicRemote <URL> -AsPr           # 导出 + 推分支 + 开 PR
+  .\scripts\md3.ps1 export -PublicRemote <URL>                 # 导出 + 推分支 + 开 PR（默认）
+  .\scripts\md3.ps1 export -PublicRemote <URL> -ForcePush      # 导出 + force push 覆盖 main（例外）
   .\scripts\md3.ps1 export -Changelog -ChangelogVersion v5.4.0 # 更新 CHANGELOG 后随导出携带
   .\scripts\md3.ps1 export -PublicRemote <URL> -NoPause        # CI/非交互环境
 #>
@@ -64,6 +67,7 @@ param(
     [string]$PublicRemote = '',
     [string]$PublicBranch = 'main',
     [switch]$AsPr,
+    [switch]$ForcePush,
     [string]$PrBranch = '',
     [switch]$Changelog,
     [string]$ChangelogVersion = '',
@@ -90,13 +94,21 @@ try {
     $denyFile = Join-Path $Root 'scripts\public_deny.txt'
     if (-not (Test-Path $denyFile)) { throw "未找到否认清单 $denyFile" }
     Write-Ok "仓库根：$Root"
+    if ($AsPr -and $ForcePush) { throw '-AsPr 与 -ForcePush 不能同时使用（开 PR 已是默认行为，-AsPr 仅为兼容保留）' }
     if ($PublicRemote) {
         Assert-Command git '-PublicRemote 推送模式需要 git 在 PATH 中'
-        $mode = if ($AsPr) { "开 PR 到 $PublicBranch" } else { "force push 覆盖 $PublicBranch" }
+        if ($AsPr) { Write-Note '-AsPr 已为默认行为，无需显式指定（参数兼容保留）' }
+        $mode = if ($ForcePush) { "-ForcePush：直接覆盖 $PublicBranch" } else { "默认：开 PR 到 $PublicBranch" }
         Write-Ok "目标仓库：$PublicRemote（$mode）"
+        if ($ForcePush -and (Test-InteractiveConsole)) {
+            if (-not (Read-YesNo "确认要 force push 直接覆盖 $PublicRemote 的 $PublicBranch 分支吗？公开仓库历史将被整段替换")) {
+                Write-Warn '已取消发布，仅导出到本地目录'
+                $PublicRemote = ''
+            }
+        }
     } else {
         Write-Warn '未指定 -PublicRemote，仅导出不推送'
-        if ($AsPr) { Write-Warn '-AsPr 需要 -PublicRemote，本次忽略' }
+        if ($AsPr -or $ForcePush) { Write-Warn '-AsPr / -ForcePush 需要 -PublicRemote，本次忽略' }
     }
     # 工作区未提交改动提示（不阻断导出）
     if (Test-HasCommand git) {
@@ -306,8 +318,8 @@ try {
         throw '否认清单命中，导出终止'
     }
     Write-Ok '闸门通过：公开树零命中'
-    # ---------- 7. 可选推送 ----------
-    if ($PublicRemote -and -not $AsPr) {
+    # ---------- 7. 可选发布（默认开 PR；-ForcePush 才直推覆盖） ----------
+    if ($PublicRemote -and $ForcePush) {
         # 覆盖模式：导出树是全新 git init 的单提交仓库，force push 直接覆盖目标分支
         Write-Step "推送到公开仓库（force push 覆盖 $PublicBranch）"
         [void](Enable-AutoProxy)
@@ -326,8 +338,8 @@ try {
         Invoke-WithRetry -What '推送公开仓库' -Action { Invoke-Native { git -C $OutDir push -f origin HEAD:$PublicBranch } }
         Write-Ok "已推送 $PublicRemote（分支 $PublicBranch）"
     }
-    elseif ($PublicRemote -and $AsPr) {
-        # PR 模式：必须保留公开仓库历史，否则「无关历史」的分支无法与 main 比较、开不了 PR。
+    elseif ($PublicRemote) {
+        # PR 模式（默认）：必须保留公开仓库历史，否则「无关历史」的分支无法与 main 比较、开不了 PR。
         # 做法是浅克隆公开仓库 → 用导出树整体替换工作区 → 提交到新分支 → 开 PR。
         Write-Step "推送到公开仓库新分支并开 PR（base: $PublicBranch）"
         [void](Enable-AutoProxy)
@@ -353,7 +365,7 @@ try {
         } else {
             $srcSha = (& git -C $Root rev-parse --short HEAD 2>$null)
             $title = "public export $(Get-Date -Format 'yyyy-MM-dd HH:mm')$(if ($srcSha) { " (private @$srcSha)" })"
-            $body  = "由 scripts/md3.ps1 export -AsPr 生成的公开版本导出快照。`n`n"
+            $body  = "由 scripts/md3.ps1 export 生成的公开版本导出快照（PR 审阅模式）。`n`n"
             $body += "- 源：私有仓库 $(if ($srcSha) { "HEAD @$srcSha" } else { '工作区' })`n"
             $body += "- 否认清单闸门：通过（$($gate.DenyCount) 条规则零命中）`n"
             $body += "- 变更文件数：$(@($diff).Count)`n"
@@ -373,8 +385,8 @@ try {
     Write-Host ''
     Write-Host '  下一步：' -ForegroundColor Cyan
     Write-Host "    1) 抽查导出树：cd $OutDir && flutter pub get && flutter analyze"
-    Write-Host '    2) 覆盖式发布：.\scripts\md3.ps1 export -PublicRemote <公开仓库URL>'
-    Write-Host '    3) 走 PR 审阅：.\scripts\md3.ps1 export -PublicRemote <公开仓库URL> -AsPr'
+    Write-Host '    2) 发布到公开仓库（默认开 PR 审阅）：.\scripts\md3.ps1 export -PublicRemote <公开仓库URL>'
+    Write-Host '    3) 覆盖式直推（例外，需确认）：.\scripts\md3.ps1 export -PublicRemote <公开仓库URL> -ForcePush'
     Write-Host '    4) 公开入口构建验证：flutter build apk --debug（默认 lib/main.dart）'
     Write-Host '    5) 更新发布日志：.\scripts\md3.ps1 changelog（总结提交并写入 CHANGELOG.md）'
 }
