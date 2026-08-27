@@ -234,6 +234,14 @@ class UsbAudioPlugin(private val context: Context) {
             "getStatus" -> result.success(getStatus())
             "getFormatInfo" -> result.success(UsbAudioSinkController.getFormatInfo())
             "isEnabled" -> result.success(UsbAudioSinkController.isEnabled())
+            "setFloatOutputEnabled" -> {
+                // 32bit 播放支持开关（默认关闭）。开启后在 DefaultAudioSink 的 float 决策点生效，
+                // 下一首歌 configure 即按新开关走 float 高解析；关闭则回退 16bit 保证正确播放。
+                val enabled = call.argument<Boolean>("enabled") ?: false
+                UsbAudioSinkController.setFloatOutputEnabled(enabled)
+                Log.i(TAG, "setFloatOutputEnabled: $enabled (float output ${if (enabled) "开启" else "关闭"})")
+                result.success(true)
+            }
             "enableExclusive" -> requestEnableInternal(result)
             "setUsbVolume" -> {
                 // USB 独占独立音量（0..100），仅独占时参与 DAC 音量计算，实时生效

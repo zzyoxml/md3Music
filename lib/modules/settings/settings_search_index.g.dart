@@ -47,6 +47,7 @@ const List<({String label, String category, String aliases})>
   (label: '锁屏歌词粗细', category: '歌词', aliases: '粗细 加粗'),
   (label: '网络音质', category: '播放', aliases: '音质 清晰度 wifi 移动'),
   (label: '自动领取VIP', category: '播放', aliases: 'vip 会员 自动领取'),
+  (label: '32bit 播放支持', category: '播放', aliases: '32bit 无损 高解析 音质 float'),
   (label: '均衡器', category: '播放', aliases: 'eq 均衡'),
   (label: '暂停淡入淡出', category: '播放', aliases: '淡入淡出 渐变 音量'),
   (label: '允许与其他应用同时播放音频', category: '播放', aliases: '音频焦点 忽略焦点 同时播放 共存 不被打断 焦点'),
