@@ -1,4 +1,4 @@
-import '../../data/models/album.dart';
+﻿import '../../data/models/album.dart';
 import '../../data/models/artist.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/song.dart';
@@ -1952,6 +1952,34 @@ class KugouYouthChannel {
   }
 }
 
+/// 判断听书条目是否「需要听书VIP」：任一会员/付费标识字段非 0 即视为需 VIP。
+/// 不同听书接口付费字段名不一（privilege / pay_flag / pay_type / PayType /
+/// AlbumPrivilege / FailProcess / vip_flag），统一收敛供专辑与章节共用。
+bool isKugouLongAudioVip(Map json) {
+  int? getInt(String key) {
+    final v = json[key];
+    if (v == null) return null;
+    if (v is num) return v.toInt();
+    return int.tryParse(v.toString());
+  }
+
+  for (final key in const <String>[
+    'privilege',
+    'pay_flag',
+    'pay_type',
+    'PayType',
+    'AlbumPrivilege',
+    'vip_flag',
+  ]) {
+    final v = getInt(key);
+    if (v != null && v != 0) return true;
+  }
+  // FailProcess：0=可直接播放；非 0（如 4=需购买/仅试听）视为需 VIP。
+  final failProcess = getInt('FailProcess');
+  if (failProcess != null && failProcess != 0) return true;
+  return false;
+}
+
 class KugouLongAudioAlbum {
   final String id;
   final String name;
@@ -1960,6 +1988,8 @@ class KugouLongAudioAlbum {
   final int audioCount;
   /// 专辑简介（详情页展示，可空）。
   final String? intro;
+  /// 是否「需要听书VIP」（展示时据此过滤）。
+  final bool payBlocked;
 
   const KugouLongAudioAlbum({
     required this.id,
@@ -1968,6 +1998,7 @@ class KugouLongAudioAlbum {
     this.author,
     this.audioCount = 0,
     this.intro,
+    this.payBlocked = false,
   });
 
   factory KugouLongAudioAlbum.fromJson(Map<String, dynamic> json) {
@@ -1997,6 +2028,7 @@ class KugouLongAudioAlbum {
             0,
       ),
       intro: _strNull(json['intro'] ?? json['mix_intro'] ?? json['full_intro']),
+      payBlocked: isKugouLongAudioVip(json),
     );
   }
 }
@@ -2011,6 +2043,8 @@ class KugouLongAudioAudio {
   final String? artworkUri;
   final String? albumAudioId;
   final String? albumId;
+  /// 是否「需要听书VIP」（详情页章节据此过滤）。
+  final bool payBlocked;
 
   const KugouLongAudioAudio({
     required this.id,
@@ -2020,6 +2054,7 @@ class KugouLongAudioAudio {
     this.artworkUri,
     this.albumAudioId,
     this.albumId,
+    this.payBlocked = false,
   });
 
   factory KugouLongAudioAudio.fromJson(Map<String, dynamic> json) {
@@ -2046,12 +2081,15 @@ class KugouLongAudioAudio {
       ),
       author: _strNull(json['author_name'] ?? json['singer_name']),
       duration: Duration(
-        seconds: _parseInt(
-          json['timelength'] ??
-              json['timelength_128'] ??
-              json['timelength_320'] ??
-              json['timelength_high'] ??
-              0,
+        seconds: _normalizeDuration(
+          _parseInt(
+            json['timelength'] ??
+                json['timelength_128'] ??
+                json['timelength_320'] ??
+                json['timelength_high'] ??
+                json['duration'] ??
+                0,
+          ),
         ),
       ),
       artworkUri: _resolveArtworkUri(
@@ -2059,6 +2097,7 @@ class KugouLongAudioAudio {
       ),
       albumAudioId: _strNull(json['album_audio_id']),
       albumId: _strNull(json['album_id']),
+      payBlocked: isKugouLongAudioVip(json),
     );
   }
 }

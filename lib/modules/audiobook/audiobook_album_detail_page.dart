@@ -157,9 +157,11 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
     });
   }
 
-  /// 将章节列表转换为可播放的 Song 列表。
+  /// 将章节列表转换为可播放的 Song 列表（过滤需要听书VIP的章节）。
   List<Song> _buildSongs(List<KugouLongAudioAudio> audios) {
-    return audios
+    final vipIgnored = audios.where((a) => a.payBlocked).length;
+    final list = audios
+        .where((a) => !a.payBlocked)
         .map(
           (a) => Song(
             id: a.id,
@@ -174,6 +176,11 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
           ),
         )
         .toList();
+    if (vipIgnored > 0) {
+      // ignore: avoid_print
+      print('[AudiobookVip] 详情页过滤需听书VIP章节 $vipIgnored 条，剩余 ${list.length} 条');
+    }
+    return list;
   }
 
   /// 简介：优先取列表接口解析出的 intro，兜底取详情接口原始数据。
@@ -465,7 +472,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                         // 加载更多 footer（滚动到底自动翻页）
                         if (_audios.isNotEmpty)
                           SliverToBoxAdapter(
-                            child: _buildLoadMoreFooter(cs, tt),
+                            child: _buildLoadMoreFooter(),
                           ),
                     ],
                   ),
@@ -645,7 +652,6 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                             if (widget.album.author != null &&
                                 widget.album.author!.isNotEmpty)
                               widget.album.author!,
-                            if (_audios.isNotEmpty) '${_audios.length} 集',
                           ].join(' · '),
                           style: tt.labelMedium?.copyWith(
                             color: cs.onSurfaceVariant,
@@ -736,8 +742,8 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
     );
   }
 
-  /// 加载更多 footer：加载中/已全部加载提示（滚动到底自动翻页用）。
-  Widget _buildLoadMoreFooter(ColorScheme cs, TextTheme tt) {
+  /// 加载更多 footer：仅加载中转圈（滚动到底自动翻页用）。
+  Widget _buildLoadMoreFooter() {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 14),
       child: Center(
@@ -747,12 +753,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                 height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
-            : (!_hasMoreAudio)
-                ? Text(
-                    '已加载全部 ${_audios.length} 集',
-                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
-                  )
-                : const SizedBox(height: 20),
+            : const SizedBox(height: 20),
       ),
     );
   }

@@ -49,7 +49,7 @@ class _AudiobookPageState extends State<AudiobookPage> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  /// 从每日推荐原始数据中提取专辑列表（字段多级兜底）。
+  /// 从每日推荐原始数据中提取专辑列表（字段多级兜底），并过滤需听书VIP的。
   List<KugouLongAudioAlbum> _parseDailyAlbums() {
     final raw = context.read<KugouProvider>().longAudioData;
     if (raw == null) return [];
@@ -58,10 +58,16 @@ class _AudiobookPageState extends State<AudiobookPage> {
         : raw;
     final list = data['list'] ?? data['info'] ?? data['albums'];
     if (list is! List) return [];
-    return list
+    final all = list
         .whereType<Map<String, dynamic>>()
         .map(KugouLongAudioAlbum.fromJson)
         .toList();
+    final free = all.where((a) => !a.payBlocked).toList();
+    if (all.length != free.length) {
+      // ignore: avoid_print
+      print('[AudiobookVip] 每日推荐过滤需听书VIP ${all.length - free.length} 条，剩余 ${free.length}');
+    }
+    return free;
   }
 
   @override
@@ -74,7 +80,7 @@ class _AudiobookPageState extends State<AudiobookPage> {
       _AlbumSection(title: '每日推荐', albums: dailyAlbums),
       _AlbumSection(title: '排行榜推荐', albums: kugou.longAudioAlbums),
       _AlbumSection(title: '每周推荐', albums: kugou.longAudioWeekAlbums),
-      _AlbumSection(title: 'VIP 推荐', albums: kugou.longAudioVipAlbums),
+      _AlbumSection(title: 'VIP 推荐 仅显示不要听书会员的章节', albums: kugou.longAudioVipAlbums),
     ];
     final hasAnyData = sections.any((s) => s.albums.isNotEmpty);
 
