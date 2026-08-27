@@ -67,6 +67,8 @@ import androidx.media3.extractor.Ac4Util;
 import androidx.media3.extractor.DtsUtil;
 import androidx.media3.extractor.MpegAudioUtil;
 import androidx.media3.extractor.OpusUtil;
+// MD3Music fork: 32bit 播放开关的实时标志（DefaultAudioSink 每 configure 读取，切歌即生效）。
+import com.ryanheise.just_audio.UsbAudioSinkController;
 import com.google.common.collect.ImmutableList;
 import com.google.errorprone.annotations.CanIgnoreReturnValue;
 import java.lang.annotation.Documented;
@@ -632,7 +634,7 @@ public final class DefaultAudioSink implements AudioSink {
         return SINK_FORMAT_UNSUPPORTED;
       }
       if (format.pcmEncoding == C.ENCODING_PCM_16BIT
-          || (enableFloatOutput && format.pcmEncoding == C.ENCODING_PCM_FLOAT)) {
+          || (floatOutputRequested() && format.pcmEncoding == C.ENCODING_PCM_FLOAT)) {
         return SINK_FORMAT_SUPPORTED_DIRECTLY;
       }
       // We can resample all linear PCM encodings to 16-bit integer PCM, which AudioTrack is
@@ -1670,7 +1672,15 @@ public final class DefaultAudioSink implements AudioSink {
    * float PCM.
    */
   private boolean shouldUseFloatOutput(@C.PcmEncoding int pcmEncoding) {
-    return enableFloatOutput && Util.isEncodingHighResolutionPcm(pcmEncoding);
+    return floatOutputRequested() && Util.isEncodingHighResolutionPcm(pcmEncoding);
+  }
+
+  /**
+   * MD3Music fork: 是否实际请求 float 输出 = 构建期的 {@code enableFloatOutput} 与
+   * 32bit 播放开关（实时静态标志）取或。开关开启后下一首歌 configure 即生效，无需重建播放器。
+   */
+  private boolean floatOutputRequested() {
+    return enableFloatOutput || UsbAudioSinkController.isFloatOutputEnabled();
   }
 
   /**

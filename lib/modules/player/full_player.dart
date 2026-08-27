@@ -77,7 +77,7 @@ const List<Duration> _sleepTimerPresets = [
 class FullPlayer extends StatefulWidget {
   /// 可选扩展：封面长按回调（默认关闭，由私有构建注入，用于下载等旁路操作）。
   static void Function(BuildContext context, dynamic song)?
-      coverLongPressCallback;
+  coverLongPressCallback;
 
   const FullPlayer({super.key});
 
@@ -1103,8 +1103,9 @@ class _FullPlayerState extends State<FullPlayer>
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       systemNavigationBarColor: Colors.transparent,
-      systemNavigationBarIconBrightness:
-          isDark ? Brightness.light : Brightness.dark,
+      systemNavigationBarIconBrightness: isDark
+          ? Brightness.light
+          : Brightness.dark,
     );
     return PlayerSystemUiScope(
       dragRoute: _dragRoute,
@@ -1218,14 +1219,21 @@ class _FullPlayerState extends State<FullPlayer>
                   onTap: () => _tabController.animateTo(1),
                   behavior: HitTestBehavior.translucent,
                   child: _isLoadingLyrics
-                      ? Center(child: M3ELoadingIndicator(color: colorScheme.primary))
+                      ? Center(
+                          child: M3ELoadingIndicator(
+                            color: colorScheme.primary,
+                          ),
+                        )
                       // P0: 歌词时间只订阅 positionNotifier（高频 200ms），
                       // 不再因 positionStream 触发整页重建
                       : ValueListenableBuilder<Duration>(
                           valueListenable: playerProvider.positionNotifier,
                           builder: (context, position, _) => LyricsView(
                             lyrics: _lyrics,
-                            position: _adjustedLyricPosition(position, currentSong),
+                            position: _adjustedLyricPosition(
+                              position,
+                              currentSong,
+                            ),
                             doubleTapToJump: lyricDoubleTap,
                             onSeek: (duration) {
                               playerProvider.seek(duration);
@@ -1319,26 +1327,34 @@ class _FullPlayerState extends State<FullPlayer>
                                   child: SizedBox(
                                     width: size,
                                     height: size,
-                                    // 长按封面进入/退出 Zen 模式（按压内缩 + 引导提示）
-                                    child: _wrapArtworkZenPress(
-                                      child: AnimatedScale(
-                                        // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
-                                        scale:
-                                            _spectrumEnabled &&
-                                                _spectrumStyle < 2
-                                            ? 1.0
-                                            : (playerProvider.isPlaying
-                                                  ? 1.0
-                                                  : 0.85),
-                                        duration: const Duration(
-                                          milliseconds: 500,
-                                        ),
-                                        curve: Curves.easeOutBack,
-                                        child: _buildCrossfadeArtworkWrapper(
-                                          currentSong,
-                                          colorScheme,
-                                          iconSize: 48,
-                                          isPlaying: playerProvider.isPlaying,
+                                    // 封面支持向下拖拽原路返回关闭播放器（横屏/pad 与竖屏一致），
+                                    // 同时保留长按封面进入/退出 Zen 模式（按压内缩 + 引导提示）
+                                    child: GestureDetector(
+                                      behavior: HitTestBehavior.opaque,
+                                      onVerticalDragStart: _onTopBarDragStart,
+                                      onVerticalDragUpdate: _onTopBarDragUpdate,
+                                      onVerticalDragEnd: _onTopBarDragEnd,
+                                      onVerticalDragCancel: _onTopBarDragCancel,
+                                      child: _wrapArtworkZenPress(
+                                        child: AnimatedScale(
+                                          // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
+                                          scale:
+                                              _spectrumEnabled &&
+                                                  _spectrumStyle < 2
+                                              ? 1.0
+                                              : (playerProvider.isPlaying
+                                                    ? 1.0
+                                                    : 0.85),
+                                          duration: const Duration(
+                                            milliseconds: 500,
+                                          ),
+                                          curve: Curves.easeOutBack,
+                                          child: _buildCrossfadeArtworkWrapper(
+                                            currentSong,
+                                            colorScheme,
+                                            iconSize: 48,
+                                            isPlaying: playerProvider.isPlaying,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -1440,7 +1456,11 @@ class _FullPlayerState extends State<FullPlayer>
                                 ),
                               ),
                             _isLoadingLyrics
-                                ? Center(child: M3ELoadingIndicator(color: colorScheme.primary))
+                                ? Center(
+                                    child: M3ELoadingIndicator(
+                                      color: colorScheme.primary,
+                                    ),
+                                  )
                                 // P0: 歌词时间只订阅 positionNotifier（高频 200ms）
                                 : ValueListenableBuilder<Duration>(
                                     valueListenable:
@@ -1448,7 +1468,10 @@ class _FullPlayerState extends State<FullPlayer>
                                     builder: (context, position, _) =>
                                         LyricsView(
                                           lyrics: _lyrics,
-                                          position: _adjustedLyricPosition(position, currentSong),
+                                          position: _adjustedLyricPosition(
+                                            position,
+                                            currentSong,
+                                          ),
                                           doubleTapToJump: lyricDoubleTap,
                                           onSeek: (duration) {
                                             playerProvider.seek(duration);
@@ -1550,26 +1573,38 @@ class _FullPlayerState extends State<FullPlayer>
                                     ),
                                     child: AspectRatio(
                                       aspectRatio: 1,
-                                      // 长按封面进入/退出 Zen 模式（按压内缩 + 引导提示）
-                                      child: _wrapArtworkZenPress(
-                                        child: AnimatedScale(
-                                          // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
-                                          scale:
-                                              _spectrumEnabled &&
-                                                  _spectrumStyle < 2
-                                              ? 1.0
-                                              : (playerProvider.isPlaying
-                                                    ? 1.0
-                                                    : 0.85),
-                                          duration: const Duration(
-                                            milliseconds: 500,
-                                          ),
-                                          curve: Curves.easeOutBack,
-                                          child: _buildCrossfadeArtworkWrapper(
-                                            currentSong,
-                                            colorScheme,
-                                            iconSize: 48,
-                                            isPlaying: playerProvider.isPlaying,
+                                      // 封面支持向下拖拽原路返回关闭播放器（横屏/pad 与竖屏一致），
+                                      // 同时保留长按封面进入/退出 Zen 模式（按压内缩 + 引导提示）
+                                      child: GestureDetector(
+                                        behavior: HitTestBehavior.opaque,
+                                        onVerticalDragStart: _onTopBarDragStart,
+                                        onVerticalDragUpdate:
+                                            _onTopBarDragUpdate,
+                                        onVerticalDragEnd: _onTopBarDragEnd,
+                                        onVerticalDragCancel:
+                                            _onTopBarDragCancel,
+                                        child: _wrapArtworkZenPress(
+                                          child: AnimatedScale(
+                                            // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
+                                            scale:
+                                                _spectrumEnabled &&
+                                                    _spectrumStyle < 2
+                                                ? 1.0
+                                                : (playerProvider.isPlaying
+                                                      ? 1.0
+                                                      : 0.85),
+                                            duration: const Duration(
+                                              milliseconds: 500,
+                                            ),
+                                            curve: Curves.easeOutBack,
+                                            child:
+                                                _buildCrossfadeArtworkWrapper(
+                                                  currentSong,
+                                                  colorScheme,
+                                                  iconSize: 48,
+                                                  isPlaying:
+                                                      playerProvider.isPlaying,
+                                                ),
                                           ),
                                         ),
                                       ),
@@ -1668,7 +1703,11 @@ class _FullPlayerState extends State<FullPlayer>
                                 ),
                               ),
                             _isLoadingLyrics
-                                ? Center(child: M3ELoadingIndicator(color: colorScheme.primary))
+                                ? Center(
+                                    child: M3ELoadingIndicator(
+                                      color: colorScheme.primary,
+                                    ),
+                                  )
                                 // P0: 歌词时间只订阅 positionNotifier（高频 200ms）
                                 : ValueListenableBuilder<Duration>(
                                     valueListenable:
@@ -1676,7 +1715,10 @@ class _FullPlayerState extends State<FullPlayer>
                                     builder: (context, position, _) =>
                                         LyricsView(
                                           lyrics: _lyrics,
-                                          position: _adjustedLyricPosition(position, currentSong),
+                                          position: _adjustedLyricPosition(
+                                            position,
+                                            currentSong,
+                                          ),
                                           doubleTapToJump: lyricDoubleTap,
                                           onSeek: (duration) {
                                             playerProvider.seek(duration);
@@ -2280,9 +2322,7 @@ class _FullPlayerState extends State<FullPlayer>
                 ? colorScheme.onSecondaryContainer
                 : colorScheme.onSurfaceVariant,
           ),
-          icon: Icon(
-            _getLoopModeIcon(playerProvider.loopMode),
-          ),
+          icon: Icon(_getLoopModeIcon(playerProvider.loopMode)),
           onPressed: () => playerProvider.toggleLoopMode(),
         ),
       ],
@@ -2348,12 +2388,14 @@ class _FullPlayerState extends State<FullPlayer>
                     // 监听 animation 动画对象本身而非 TabController：
                     // _changeIndex 只在开始/结束时 notify，动画期间每帧进度
                     // （animateTo 的 Curves.ease 与手指拖拽 offset）在 animation 上。
-                    animation: _tabController.animation ??
+                    animation:
+                        _tabController.animation ??
                         const AlwaysStoppedAnimation<double>(0),
                     builder: (context, _) {
-                      final anim = (_tabController.animation?.value ??
-                              _tabController.index.toDouble())
-                          .clamp(0.0, 3.0);
+                      final anim =
+                          (_tabController.animation?.value ??
+                                  _tabController.index.toDouble())
+                              .clamp(0.0, 3.0);
                       _tabDragBtnW = btnW; // 供拖动逻辑换算 offset
                       return GestureDetector(
                         behavior: HitTestBehavior.opaque,
@@ -2384,156 +2426,161 @@ class _FullPlayerState extends State<FullPlayer>
                                 ),
                               ),
                             ),
-                          Row(
-                            children: [
-                              // 播放列表 — 切换到播放列表 tab（index 0，最左侧）
-                              Expanded(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    if (_tabController.index != 0) {
-                                      _tabController.animateTo(0);
-                                    }
-                                  },
-                                  child: Center(
-                                    child: Icon(
-                                      Icons.queue_music,
-                                      size: 22,
-                                      // 选中：浅色（在深色高亮球上）；未选中：深色；用连续动画值做平滑过渡
-                                      color: Color.lerp(
-                                        colorScheme.onPrimaryContainer,
-                                        colorScheme.onPrimary,
-                                        (1 - anim.abs().clamp(0.0, 1.0)),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
-                              Expanded(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    if (_tabController.index != 1) {
-                                      _tabController.animateTo(1);
-                                    }
-                                  },
-                                  onLongPress: song != null &&
-                                          isOnline &&
-                                          FullPlayer.coverLongPressCallback !=
-                                              null
-                                      ? () {
-                                          HapticFeedback.lightImpact();
-                                          FullPlayer.coverLongPressCallback!(
-                                            context,
-                                            song,
-                                          );
-                                        }
-                                      : null,
-                                  child: Center(
-                                    child: Icon(
-                                      Icons.album,
-                                      size: 22,
-                                      color: Color.lerp(
-                                        colorScheme.onPrimaryContainer,
-                                        colorScheme.onPrimary,
-                                        (1 - (anim - 1).abs().clamp(0.0, 1.0)),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // 歌词 — 短按跳转到歌词 tab，长按开关桌面歌词
-                              Expanded(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    if (_tabController.index != 2) {
-                                      _tabController.animateTo(2);
-                                    }
-                                  },
-                                  onLongPress: () async {
-                                    HapticFeedback.lightImpact();
-                                    await DesktopLyricService.instance.toggle();
-                                    if (mounted) {
-                                      // 同步通知栏"桌面歌词"按钮状态
-                                      final player =
-                                          context.read<PlayerProvider>();
-                                      final song = player.currentSong;
-                                      // 收藏状态需实时查询，避免暂停时显示为未收藏
-                                      bool isFavorited = false;
-                                      if (song != null) {
-                                        try {
-                                          isFavorited = context
-                                              .read<FavoritesProvider>()
-                                              .isFavorite(song.id);
-                                        } catch (_) {}
+                            Row(
+                              children: [
+                                // 播放列表 — 切换到播放列表 tab（index 0，最左侧）
+                                Expanded(
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () {
+                                      if (_tabController.index != 0) {
+                                        _tabController.animateTo(0);
                                       }
-                                      await MediaNotificationService
-                                          .updateNotification(
-                                            // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
-                                            title: song?.displayName ?? '',
-                                            artist: song?.artist ?? '',
-                                            artUrl: song?.artworkUri,
-                                            isPlaying: player.isPlaying,
-                                            position: player.position,
-                                            duration:
-                                                player.duration ?? Duration.zero,
-                                            desktopLyricEnabled:
-                                                DesktopLyricService
-                                                    .instance.enabled,
-                                            isFavorited: isFavorited,
-                                          );
-                                    }
-                                  },
-                                  child: Center(
-                                    child: Icon(
-                                      // 桌面歌词开启时用实心 icon + primary 色，与 mini_player 一致
-                                      DesktopLyricService.instance.enabled
-                                          ? Icons.lyrics
-                                          : Icons.lyrics_outlined,
-                                      size: 22,
-                                      // 选中浅色 / 未选中深色，用连续动画值平滑过渡
-                                      color: Color.lerp(
+                                    },
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.queue_music,
+                                        size: 22,
+                                        // 选中：浅色（在深色高亮球上）；未选中：深色；用连续动画值做平滑过渡
+                                        color: Color.lerp(
+                                          colorScheme.onPrimaryContainer,
+                                          colorScheme.onPrimary,
+                                          (1 - anim.abs().clamp(0.0, 1.0)),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                // 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
+                                Expanded(
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () {
+                                      if (_tabController.index != 1) {
+                                        _tabController.animateTo(1);
+                                      }
+                                    },
+                                    onLongPress:
+                                        song != null &&
+                                            isOnline &&
+                                            FullPlayer.coverLongPressCallback !=
+                                                null
+                                        ? () {
+                                            HapticFeedback.lightImpact();
+                                            FullPlayer.coverLongPressCallback!(
+                                              context,
+                                              song,
+                                            );
+                                          }
+                                        : null,
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.album,
+                                        size: 22,
+                                        color: Color.lerp(
+                                          colorScheme.onPrimaryContainer,
+                                          colorScheme.onPrimary,
+                                          (1 -
+                                              (anim - 1).abs().clamp(0.0, 1.0)),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                // 歌词 — 短按跳转到歌词 tab，长按开关桌面歌词
+                                Expanded(
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () {
+                                      if (_tabController.index != 2) {
+                                        _tabController.animateTo(2);
+                                      }
+                                    },
+                                    onLongPress: () async {
+                                      HapticFeedback.lightImpact();
+                                      await DesktopLyricService.instance
+                                          .toggle();
+                                      if (mounted) {
+                                        // 同步通知栏"桌面歌词"按钮状态
+                                        final player = context
+                                            .read<PlayerProvider>();
+                                        final song = player.currentSong;
+                                        // 收藏状态需实时查询，避免暂停时显示为未收藏
+                                        bool isFavorited = false;
+                                        if (song != null) {
+                                          try {
+                                            isFavorited = context
+                                                .read<FavoritesProvider>()
+                                                .isFavorite(song.id);
+                                          } catch (_) {}
+                                        }
+                                        await MediaNotificationService.updateNotification(
+                                          // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
+                                          title: song?.displayName ?? '',
+                                          artist: song?.artist ?? '',
+                                          artUrl: song?.artworkUri,
+                                          isPlaying: player.isPlaying,
+                                          position: player.position,
+                                          duration:
+                                              player.duration ?? Duration.zero,
+                                          desktopLyricEnabled:
+                                              DesktopLyricService
+                                                  .instance
+                                                  .enabled,
+                                          isFavorited: isFavorited,
+                                        );
+                                      }
+                                    },
+                                    child: Center(
+                                      child: Icon(
+                                        // 桌面歌词开启时用实心 icon + primary 色，与 mini_player 一致
                                         DesktopLyricService.instance.enabled
-                                            ? colorScheme.primary
-                                            : colorScheme.onPrimaryContainer,
-                                        colorScheme.onPrimary,
-                                        (1 - (anim - 2).abs().clamp(0.0, 1.0)),
+                                            ? Icons.lyrics
+                                            : Icons.lyrics_outlined,
+                                        size: 22,
+                                        // 选中浅色 / 未选中深色，用连续动画值平滑过渡
+                                        color: Color.lerp(
+                                          DesktopLyricService.instance.enabled
+                                              ? colorScheme.primary
+                                              : colorScheme.onPrimaryContainer,
+                                          colorScheme.onPrimary,
+                                          (1 -
+                                              (anim - 2).abs().clamp(0.0, 1.0)),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                              // 评论 — 跳转到评论 tab
-                              Expanded(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    if (_tabController.index != 3) {
-                                      _tabController.animateTo(3);
-                                    }
-                                  },
-                                  child: Center(
-                                    child: Icon(
-                                      Icons.comment_outlined,
-                                      size: 22,
-                                      color: Color.lerp(
-                                        colorScheme.onPrimaryContainer,
-                                        colorScheme.onPrimary,
-                                        (1 - (anim - 3).abs().clamp(0.0, 1.0)),
+                                // 评论 — 跳转到评论 tab
+                                Expanded(
+                                  child: GestureDetector(
+                                    behavior: HitTestBehavior.opaque,
+                                    onTap: () {
+                                      if (_tabController.index != 3) {
+                                        _tabController.animateTo(3);
+                                      }
+                                    },
+                                    child: Center(
+                                      child: Icon(
+                                        Icons.comment_outlined,
+                                        size: 22,
+                                        color: Color.lerp(
+                                          colorScheme.onPrimaryContainer,
+                                          colorScheme.onPrimary,
+                                          (1 -
+                                              (anim - 3).abs().clamp(0.0, 1.0)),
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                );
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
                 },
               ),
             ),
@@ -2590,8 +2637,10 @@ class _FullPlayerState extends State<FullPlayer>
   void _onTabDragUpdate(DragUpdateDetails d) {
     _tabDragDx += d.delta.dx;
     final len = _tabController.length;
-    final target = (_dragStartIndex + _tabDragDx / _tabDragBtnW)
-        .clamp(0.0, len - 1.0);
+    final target = (_dragStartIndex + _tabDragDx / _tabDragBtnW).clamp(
+      0.0,
+      len - 1.0,
+    );
     final int newIndex = target.floor().clamp(0, len - 1);
     final double off = (target - newIndex).clamp(-1.0, 1.0);
     _tabController.index = newIndex;
@@ -3536,7 +3585,11 @@ class _FullPlayerState extends State<FullPlayer>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     M3ELoadingIndicator(
-                        constraints: BoxConstraints.tightFor(width: 32, height: 32)),
+                      constraints: BoxConstraints.tightFor(
+                        width: 32,
+                        height: 32,
+                      ),
+                    ),
                     SizedBox(height: 16),
                     Text('加载歌单中...'),
                   ],
@@ -3656,7 +3709,9 @@ class _FullPlayerState extends State<FullPlayer>
     final listid =
         playlist['listid']?.toString() ?? playlist['list_id']?.toString() ?? '';
     final globalCollectionId =
-        playlist['global_collection_id']?.toString() ?? playlist['gid']?.toString() ?? '';
+        playlist['global_collection_id']?.toString() ??
+        playlist['gid']?.toString() ??
+        '';
 
     if (listid.isEmpty) {
       if (!context.mounted) return;
@@ -3665,17 +3720,21 @@ class _FullPlayerState extends State<FullPlayer>
     }
 
     if (!context.mounted) return;
-    final name = (playlist['name'] ?? playlist['specialname'] ?? '未知歌单').toString();
+    final name = (playlist['name'] ?? playlist['specialname'] ?? '未知歌单')
+        .toString();
 
     // 公开版偏好：添加前先检查歌曲是否已在歌单中，存在则不执行。
     // 用 global_collection_id 拉取歌单歌曲，按歌曲 hash（song.id）判断是否已存在。
     try {
       final gid = globalCollectionId.isNotEmpty ? globalCollectionId : listid;
-      final existing = await api.getPlaylistTrackAll(id: gid, page: 1, pagesize: 100);
+      final existing = await api.getPlaylistTrackAll(
+        id: gid,
+        page: 1,
+        pagesize: 100,
+      );
       if (existing != null) {
         final songHash = song.id?.toString().toLowerCase() ?? '';
-        final already =
-            existing.any((s) => s.hash.toLowerCase() == songHash);
+        final already = existing.any((s) => s.hash.toLowerCase() == songHash);
         if (already) {
           if (context.mounted) showToast('已在歌单「$name」中');
           return;

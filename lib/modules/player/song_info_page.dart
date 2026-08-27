@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 
 import '../../core/services/usb_audio_service.dart';
+import '../../core/utils/audio_scanner.dart' show audioExtensions;
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
 import '../../widgets/player_artwork_image.dart';
@@ -229,9 +230,21 @@ class _SongInfoPageState extends State<SongInfoPage> {
     );
   }
 
+  /// 去掉标题末尾的音频文件后缀（如 .flac/.mp3）。仅当确实以已知音频扩展名结尾才剥离。
+  String _stripAudioExtension(String title) {
+    final lower = title.toLowerCase();
+    for (final ext in audioExtensions) {
+      if (lower.endsWith(ext) && title.length > ext.length) {
+        return title.substring(0, title.length - ext.length);
+      }
+    }
+    return title;
+  }
+
   Widget _buildSongHeader(
       Song? song, ColorScheme colorScheme, TextTheme textTheme) {
-    final title = song?.title ?? '未在播放';
+    // 去掉文件名后缀：仅当标题以音频扩展名结尾才剥离，避免误伤合法带点的标题
+    final title = _stripAudioExtension(song?.title ?? '未在播放');
     final artist = song?.artist ?? '—';
     final artUrl = song?.artworkUri;
     return Padding(

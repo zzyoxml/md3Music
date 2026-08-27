@@ -38,6 +38,20 @@ public final class UsbAudioSinkController {
     private static volatile int activeDacBitDepth = 0;
     private static volatile UsbAudioReconfigListener reconfigListener = null;
 
+    // ── 32bit 播放支持开关（默认关闭） ─────────────────────────
+    // 开启后让 ExoPlayer 恢复 float 输出（24/32bit 高规格走 float32 直通 AudioTrack）。
+    // 注意：部分设备 stereo float 播放异常（速度加快/音高变高），故默认关闭，需用户主动开启。
+    // DefaultAudioSink 每个 configure 都会读取该实时标志，因此切歌即生效，无需重建播放器。
+    private static volatile boolean floatOutputEnabled = false;
+
+    public static void setFloatOutputEnabled(boolean enabled) {
+        floatOutputEnabled = enabled;
+    }
+
+    public static boolean isFloatOutputEnabled() {
+        return floatOutputEnabled;
+    }
+
     // ── 最近一次 ExoPlayer 解码输出格式（无论是否开启独占都会捕获，供歌曲信息页/初始化使用） ──
     private static volatile int lastSampleRate = 0;
     private static volatile int lastChannelCount = 0;
