@@ -116,7 +116,8 @@ md3Music/
     ├── lib/ui.tests.ps1          # ui.ps1 事件解码回归测试（不需要真实控制台）
     ├── tasks/android.ps1         # Rust 交叉编译 + Flutter 打包（默认私有入口）
     ├── tasks/windows.ps1         # Windows 桌面构建（便携版 zip）
-    ├── tasks/export_public.ps1   # 导出公开版本（过滤 + 否认清单闸门 + 可选推送/PR）
+    ├── tasks/export_public.ps1   # 导出公开版本（过滤 + 否认清单闸门 + 可选推送/PR；-WithHistory 携带提交记录）
+    ├── tasks/export_messages_history.ps1  # 重建私有提交记录为空树历史（export-messages 子命令，可推送）
     ├── tasks/verify_public.ps1   # 公开树洁净度校验（lib/ 否认清单零命中）
     ├── tasks/commit.ps1          # 一键提交（TUI 勾选改动 → 闸门 → 提交 → 推送 → PR/合并）
     ├── tasks/token.ps1           # GitHub token 管理（DPAPI 加密存 %LOCALAPPDATA%，不入库）
@@ -263,6 +264,10 @@ dart run scripts/tools/gen_settings_search_index.dart   # 产出 lib/modules/set
 .\scripts\md3.ps1 export                                  # 导出到 .public_export/（过滤 + 闸门）
 .\scripts\md3.ps1 export -PublicRemote <公开仓库URL>       # 导出并在公开仓库开 PR（默认；保留历史，可审阅差异）
 .\scripts\md3.ps1 export -PublicRemote <URL> -ForcePush   # 例外：导出并 force push 直接覆盖公开仓库
+.\scripts\md3.ps1 export -PublicRemote <URL> -PublicBranch <分支> -ForcePush -WithHistory
+#    ↑ 例外 + 携带提交记录历史：私有提交记录重建为空树提交，顶端叠加公开树；增量优先（有 .md3/export-state
+#      映射且早期历史未改写时只追加新记录，fast-forward 免 force；否则全量重建 + force）。用法见 docs/public_private_workflow.md §4.4
+.\scripts\md3.ps1 export-messages -PublicRemote <URL> -Force   # 只重建/推送提交记录（空树历史，不叠加公开树）
 # 公开树独立构建：cd .public_export && flutter pub get && flutter build apk --debug（入口 lib/main.dart）
 ```
 
@@ -638,6 +643,8 @@ flutter analyze                           # Dart 静态分析
 | 场景 D：发布公开版本 | §4.4 | `md3.ps1 verify` → `md3.ps1 export -PublicRemote` |
 | 场景 E：给公开类新增私有能力（钩子全流程） | §4.5 | 加中性静态钩子→私有层注入→deny 追加 |
 | 场景 F：导出白名单维护 | §4.6 | 新增顶层文件/目录时判断该不该公开 |
+| 发布时携带提交记录历史（增量优先） | §4.4 | `export -ForcePush -WithHistory`：空树提交记录 + 顶端公开树；有 `.md3/export-state` 映射则只追加新记录、fast-forward 免 force |
+| 单独重建/推送提交记录历史 | §8.1 | `export-messages`：只导出提交记录（空树历史），不叠加公开树 |
 
 ### 9.3 触发时机速查
 
@@ -648,6 +655,8 @@ flutter analyze                           # Dart 静态分析
 | 公开类需要**调用私有能力**（下载、缓存封面、本地音频） | 给该公开类加**中性静态钩子**（参考 §2.1 钩子表），私有层 `installCacheHooks/installUiHooks` 注入 | §4.5 + 本文档 §2.1 |
 | 改动涉及下载/缓存/新增私有符号 | 提交前跑 `scripts/md3.ps1 verify`（必须零命中） | §4.4 步骤 1 |
 | 要**发布公开版本** | `md3.ps1 export`（自动：白名单拷贝→排除私有→剥离依赖→README 清理→闸门→可选推送）；导出后抽查导出树 analyze + 构建 | §4.4 |
+| 发布公开版时**要保留提交记录历史** | `md3.ps1 export -PublicRemote <URL> -PublicBranch <分支> -ForcePush -WithHistory`（增量优先，免 force；无映射时全量重建 + force） | §4.4 |
+| 只**导出/推送提交记录**（不叠公开树） | `md3.ps1 export-messages -PublicRemote <URL> -Force` | §8.1 |
 | **公开仓库**有新功能要带回私有库 | 拉取 → 挑 commit → `cherry-pick` → 冲突时保留私有依赖块 → 验证 | §4.3 |
 | 新增**顶层目录/文件**（如 docs/、新脚本） | 判断该不该公开 → 需要则加进导出白名单 `$whitelist`；**导出工具链（tasks/export_public、tasks/verify_public、tasks/commit、tasks/changelog、tasks/token、public_deny 等）与 `.trae/` 永不导出** | §4.6 |
 | 新功能涉及 **Windows 桌面** 或 **README 功能宣传** | Windows 依赖需在导出脚本剥离、README 私有功能条目需清理、build-windows.yml 需排除（导出自动处理，但新增时确认覆盖） | §4.6 + 本文档 §8.1 |
@@ -655,3 +664,4 @@ flutter analyze                           # Dart 静态分析
 ### 9.4 导出脚本职责（改脚本前先看这）
 
 `scripts/md3.ps1 export` 一次完成：白名单拷贝（当前 16 项顶层，含 `CHANGELOG.md`）→ 排除 `lib/private/`、`pubspec.lock`、`.trae/`、`build-windows.yml` → `scripts/` 仅带出 android/windows 两个构建脚本（自带公共库缺失兜底，可独立运行）→ 剥离 pubspec 私有依赖（`md3_download_cache` 块 + `just_audio_windows`/`video_player_win`）→ README 删除「边听边存」条目 → 可选更新 CHANGELOG（`-Changelog`，LLM 总结需确认后写入）→ deny 闸门（40 条）→ 可选发布到公开仓库（默认开 PR；`-ForcePush` 例外直推覆盖）。**导出树应有且仅有：公开功能 + Android 平台**（无 `windows/`；`scripts/` 仅两脚本；`CHANGELOG.md` 随导出携带；`.trae/` 与其余私有工具链绝不导出）。
+`export -ForcePush -WithHistory` 会额外把私有提交记录重建为空树提交并叠加公开树后推送（**增量优先**：目标分支公开树内的 `.md3/export-state` 映射存在且早期历史未改写时只追加新记录、fast-forward 免 force；否则全量重建 + force）。`export-messages` 子命令独立重建/推送提交记录（`scripts/tasks/export_messages_history.ps1`，仅私有侧工具链，不导出）。详细用法见 `docs/public_private_workflow.md` §4.4 / §8.1。
