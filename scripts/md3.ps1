@@ -17,6 +17,8 @@
   .\scripts\md3.ps1 windows              # Rust dll + Flutter Windows + 便携 zip
   .\scripts\md3.ps1 verify               # 否认清单闸门（只读自检）
   .\scripts\md3.ps1 export -PublicRemote <URL>
+  .\scripts\md3.ps1 export-messages      # 重建私有提交记录为空树历史（不推送）
+  .\scripts\md3.ps1 export-messages -PublicRemote <URL> -Force   # 重建并首推公开仓库
   .\scripts\md3.ps1 changelog -Version v5.4.0        # 总结提交并更新 CHANGELOG.md
   .\scripts\md3.ps1 commit               # TUI 一键提交（勾选改动 / LLM 写提交信息 / 同步 / PR）
 #>
@@ -36,6 +38,7 @@ $Tasks = [ordered]@{
     'windows' = @{ File = 'windows.ps1';       Desc = 'Rust dll + Flutter Windows + 便携版 zip';     Alias = @('win') }
     'verify'  = @{ File = 'verify_public.ps1'; Desc = '否认清单闸门：自检当前仓库公开面是否干净';   Alias = @('check') }
     'export'  = @{ File = 'export_public.ps1'; Desc = '导出公开版本（默认开 PR；可选 force push / 更新 CHANGELOG）'; Alias = @('public') }
+    'export-messages' = @{ File = 'export_messages_history.ps1'; Desc = '重建私有提交记录为空树历史（可选推送到公开仓库）'; Alias = @('history', 'messages') }
     'changelog' = @{ File = 'changelog.ps1'; Desc = '总结提交并更新 CHANGELOG.md（指定版本号与起始哈希）'; Alias = @('cl') }
     'commit'  = @{ File = 'commit.ps1';        Desc = 'TUI 一键提交：勾选改动 / LLM 提交信息 / 同步 / 开 PR'; Alias = @('ci') }
     'token'   = @{ File = 'token.ps1';         Desc = '管理 GitHub token（开 PR / 自动合并用）';      Alias = @('auth') }
@@ -70,6 +73,15 @@ function Get-TaskOptions([string]$Key) {
             (New-TaskOption -Name '-ChangelogVersion' -Kind value -Desc '配合 -Changelog 的新版本号'),
             (New-TaskOption -Name '-ChangelogSince'   -Kind value -Desc '配合 -Changelog 的起始提交哈希'),
             (New-TaskOption -Name '-ChangelogYes' -Desc '配合 -Changelog 自动确认生成结果'),
+            (New-TaskOption -Name '-NoPause'      -Desc '结束后不等待按键')
+        ) }
+        'export-messages' { @(
+            (New-TaskOption -Name '-PublicRemote' -Kind value -Desc '公开仓库 URL（不填=只本地重建不推送）'),
+            (New-TaskOption -Name '-PublicBranch' -Kind value -Desc '目标分支（默认 main；首次推送用 -Force）'),
+            (New-TaskOption -Name '-SinceHash'    -Kind value -Desc '只保留该提交（含）起的历史，早期丢弃'),
+            (New-TaskOption -Name '-SanitizeMessages' -Desc '提交信息按 deny 清单脱敏为占位符'),
+            (New-TaskOption -Name '-DenyReplacement'  -Kind value -Desc '脱敏占位符文本（默认「[已隐藏]」）'),
+            (New-TaskOption -Name '-Force'        -Desc '推送用 --force（覆盖公开仓库已有同名分支）'),
             (New-TaskOption -Name '-NoPause'      -Desc '结束后不等待按键')
         ) }
         'changelog' { @(
