@@ -3187,6 +3187,36 @@ class KugouApiClient {
     );
   }
 
+  /// 免费听书库/分类榜单列表（Rust 转发 /longaudio/v1/album/list）。
+  /// [tagId] 分类（906=有声小说…）、[sort] 排序、[gender] 0不限/1男/2女、
+  /// [status] 0全部/1连载/2完结、[page]/[pageSize] 分页（上游固定 free=1）。
+  Future<Map<String, dynamic>?> getLongaudioAlbumList({
+    int tagId = 906,
+    int sort = 0,
+    int gender = 0,
+    int status = 0,
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    return await _get(
+      KugouEndpoints.longaudioAlbumList,
+      queryParameters: {
+        'tag_id': tagId,
+        'sort': sort,
+        'gender': gender,
+        'status': status,
+        'page': page,
+        'page_size': pageSize,
+      },
+    );
+  }
+
+  /// 听书分类标签树（Rust 转发 /v3/list_audiobook_tags）。
+  /// 响应 data[0] 为有声小说(906)，其 son[] 为 24 个子分类。
+  Future<Map<String, dynamic>?> getLongaudioTagList() async {
+    return await _get(KugouEndpoints.longaudioTagList);
+  }
+
   // ==================== Other ====================
 
   Future<Map<String, dynamic>?> getBrush({int page = 1}) async {

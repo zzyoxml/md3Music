@@ -213,6 +213,8 @@ class KugouEndpoints {
   static const String longaudioWeekRecommend = '/longaudio/week/recommend';
   static const String longaudioAlbumDetail = '/longaudio/album/detail';
   static const String longaudioAlbumAudios = '/longaudio/album/audios';
+  static const String longaudioAlbumList = '/longaudio/album/list';
+  static const String longaudioTagList = '/longaudio/tag/list';
   static const String longaudioSearch = '/search/audiobook';
 
   // Other

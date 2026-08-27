@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 import 'package:m3e_core/m3e_core.dart';
 import 'package:provider/provider.dart';
 
@@ -42,9 +42,9 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
   bool _hasMoreAudio = false;
   bool _loadingMore = false;
 
-  // 排序
+  // 排序（默认按章节原始顺序正序：第 1 集在最上面）
   _SortBy _sortBy = _SortBy.time;
-  bool _sortAscending = false;
+  bool _sortAscending = true;
 
   // 章节内搜索
   bool _isSearching = false;
@@ -113,7 +113,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
         kugou.getLongaudioAlbumAudios(
           widget.album.id,
           page: 1,
-          pageSize: 30,
+          pageSize: 50,
         ),
       ]);
       if (!mounted) return;
@@ -126,12 +126,45 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
         _isLoading = false;
         _invalidateDisplaySongs();
       });
+      // 进入页面即自动加载全书全部章节（循环翻页直到到底），不等用户滚动。
+      _loadAllAudios();
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _error = '加载失败，请检查网络后重试';
         _isLoading = false;
       });
+    }
+  }
+
+  /// 自动加载全部章节：循环请求后续页并追加，直到 hasMore=false 或页面销毁。
+  /// 期间 _loadingMore 置位，滚动触发的 _loadMoreAudios 会被 guard 拦截，避免并发。
+  Future<void> _loadAllAudios() async {
+    if (!mounted || !_hasMoreAudio || _loadingMore) return;
+    _loadingMore = true;
+    final kugou = context.read<KugouProvider>();
+    try {
+      while (_hasMoreAudio && mounted) {
+        final prevPage = _audioPage;
+        await kugou.getLongaudioAlbumAudios(
+          widget.album.id,
+          page: _audioPage + 1,
+          pageSize: 50,
+          append: true,
+        );
+        if (!mounted) return;
+        // 先同步 provider 状态到页面局部变量
+        _audios = List.of(kugou.longAudioAudios);
+        _songs = _buildSongs(_audios);
+        _audioPage = kugou.longAudioAudiosPage;
+        _hasMoreAudio = kugou.longAudioAudiosHasMore;
+        _invalidateDisplaySongs();
+        // 请求失败时 provider 不更新页码（_audioPage 未前进），停止避免死循环。
+        // 注意：必须在同步之后判断，否则首次循环 _audioPage 恒等于 prevPage 会误 break。
+        if (_audioPage == prevPage) break;
+      }
+    } finally {
+      if (mounted) setState(() => _loadingMore = false);
     }
   }
 
@@ -143,7 +176,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
     await kugou.getLongaudioAlbumAudios(
       widget.album.id,
       page: _audioPage + 1,
-      pageSize: 30,
+      pageSize: 50,
       append: true,
     );
     if (!mounted) return;
@@ -157,11 +190,12 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
     });
   }
 
-  /// 将章节列表转换为可播放的 Song 列表（过滤需要听书VIP的章节）。
+  /// 将章节列表转换为可播放的 Song 列表。
+  /// 只保留免费/限免章节（canPlay：fail_process==0），隐藏付费章节。
   List<Song> _buildSongs(List<KugouLongAudioAudio> audios) {
-    final vipIgnored = audios.where((a) => a.payBlocked).length;
+    final paid = audios.where((a) => !a.canPlay).length;
     final list = audios
-        .where((a) => !a.payBlocked)
+        .where((a) => a.canPlay)
         .map(
           (a) => Song(
             id: a.id,
@@ -176,9 +210,9 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
           ),
         )
         .toList();
-    if (vipIgnored > 0) {
+    if (paid > 0) {
       // ignore: avoid_print
-      print('[AudiobookVip] 详情页过滤需听书VIP章节 $vipIgnored 条，剩余 ${list.length} 条');
+      print('[AudiobookFree] 详情页隐藏付费章节 $paid 条，免费/限免 ${list.length} 条');
     }
     return list;
   }

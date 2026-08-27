@@ -8,6 +8,7 @@ import '../../services/kugou_api/kugou_models.dart';
 import '../../widgets/scroll_aware_app_bar.dart';
 import '../../widgets/smart_artwork_image.dart';
 import 'audiobook_album_detail_page.dart';
+import 'audiobook_free_library_page.dart';
 import 'audiobook_search_page.dart';
 
 /// 听书 Tab 主页：聚合 每日推荐 / 排行榜推荐 / 每周推荐 / VIP 推荐 四个分区。
@@ -49,7 +50,7 @@ class _AudiobookPageState extends State<AudiobookPage> {
     if (mounted) setState(() => _isLoading = false);
   }
 
-  /// 从每日推荐原始数据中提取专辑列表（字段多级兜底），并过滤需听书VIP的。
+  /// 从每日推荐原始数据中提取专辑列表（字段多级兜底，不做 VIP 过滤，全量展示限免内容）。
   List<KugouLongAudioAlbum> _parseDailyAlbums() {
     final raw = context.read<KugouProvider>().longAudioData;
     if (raw == null) return [];
@@ -58,16 +59,10 @@ class _AudiobookPageState extends State<AudiobookPage> {
         : raw;
     final list = data['list'] ?? data['info'] ?? data['albums'];
     if (list is! List) return [];
-    final all = list
+    return list
         .whereType<Map<String, dynamic>>()
         .map(KugouLongAudioAlbum.fromJson)
         .toList();
-    final free = all.where((a) => !a.payBlocked).toList();
-    if (all.length != free.length) {
-      // ignore: avoid_print
-      print('[AudiobookVip] 每日推荐过滤需听书VIP ${all.length - free.length} 条，剩余 ${free.length}');
-    }
-    return free;
   }
 
   @override
@@ -83,7 +78,6 @@ class _AudiobookPageState extends State<AudiobookPage> {
       _AlbumSection(title: 'VIP 推荐 仅显示不要听书会员的章节', albums: kugou.longAudioVipAlbums),
     ];
     final hasAnyData = sections.any((s) => s.albums.isNotEmpty);
-
     return Scaffold(
       appBar: ScrollAwareAppBar(
         title: '听书',
@@ -112,11 +106,15 @@ class _AudiobookPageState extends State<AudiobookPage> {
                   ? ListView(
                       controller: _scrollController,
                       padding: const EdgeInsets.only(bottom: 16),
-                      children: sections,
+                      children: [
+                        const _FreeLibraryEntryCard(),
+                        ...sections,
+                      ],
                     )
                   : ListView(
                       controller: _scrollController,
                       children: [
+                        const _FreeLibraryEntryCard(),
                         SizedBox(
                           height: MediaQuery.sizeOf(context).height * 0.5,
                           child: Center(
@@ -150,6 +148,67 @@ class _AudiobookPageState extends State<AudiobookPage> {
                       ],
                     ),
             ),
+    );
+  }
+}
+
+/// 免费听书库入口卡片：点击进入三级筛选列表页。
+class _FreeLibraryEntryCard extends StatelessWidget {
+  const _FreeLibraryEntryCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+      child: Material(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const AudiobookFreeLibraryPage(),
+              ),
+            );
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: cs.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(Icons.local_library_outlined, color: cs.onPrimaryContainer),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('免费听书库', style: tt.titleSmall),
+                      const SizedBox(height: 2),
+                      Text(
+                        '分类 · 排序 · 男/女频 · 连载状态',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right, color: cs.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

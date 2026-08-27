@@ -1952,34 +1952,6 @@ class KugouYouthChannel {
   }
 }
 
-/// 判断听书条目是否「需要听书VIP」：任一会员/付费标识字段非 0 即视为需 VIP。
-/// 不同听书接口付费字段名不一（privilege / pay_flag / pay_type / PayType /
-/// AlbumPrivilege / FailProcess / vip_flag），统一收敛供专辑与章节共用。
-bool isKugouLongAudioVip(Map json) {
-  int? getInt(String key) {
-    final v = json[key];
-    if (v == null) return null;
-    if (v is num) return v.toInt();
-    return int.tryParse(v.toString());
-  }
-
-  for (final key in const <String>[
-    'privilege',
-    'pay_flag',
-    'pay_type',
-    'PayType',
-    'AlbumPrivilege',
-    'vip_flag',
-  ]) {
-    final v = getInt(key);
-    if (v != null && v != 0) return true;
-  }
-  // FailProcess：0=可直接播放；非 0（如 4=需购买/仅试听）视为需 VIP。
-  final failProcess = getInt('FailProcess');
-  if (failProcess != null && failProcess != 0) return true;
-  return false;
-}
-
 class KugouLongAudioAlbum {
   final String id;
   final String name;
@@ -1988,8 +1960,6 @@ class KugouLongAudioAlbum {
   final int audioCount;
   /// 专辑简介（详情页展示，可空）。
   final String? intro;
-  /// 是否「需要听书VIP」（展示时据此过滤）。
-  final bool payBlocked;
 
   const KugouLongAudioAlbum({
     required this.id,
@@ -1998,7 +1968,6 @@ class KugouLongAudioAlbum {
     this.author,
     this.audioCount = 0,
     this.intro,
-    this.payBlocked = false,
   });
 
   factory KugouLongAudioAlbum.fromJson(Map<String, dynamic> json) {
@@ -2028,7 +1997,6 @@ class KugouLongAudioAlbum {
             0,
       ),
       intro: _strNull(json['intro'] ?? json['mix_intro'] ?? json['full_intro']),
-      payBlocked: isKugouLongAudioVip(json),
     );
   }
 }
@@ -2043,8 +2011,9 @@ class KugouLongAudioAudio {
   final String? artworkUri;
   final String? albumAudioId;
   final String? albumId;
-  /// 是否「需要听书VIP」（详情页章节据此过滤）。
-  final bool payBlocked;
+  /// 是否限免可播：fail_process_128（默认 128k 播放音质）为 0；字段缺失时兜底 fail_process。
+  /// 非 0（酷狗惯例 4）= 需购买/仅试听（付费章节）。
+  final bool canPlay;
 
   const KugouLongAudioAudio({
     required this.id,
@@ -2054,7 +2023,7 @@ class KugouLongAudioAudio {
     this.artworkUri,
     this.albumAudioId,
     this.albumId,
-    this.payBlocked = false,
+    this.canPlay = true,
   });
 
   factory KugouLongAudioAudio.fromJson(Map<String, dynamic> json) {
@@ -2097,9 +2066,20 @@ class KugouLongAudioAudio {
       ),
       albumAudioId: _strNull(json['album_audio_id']),
       albumId: _strNull(json['album_id']),
-      payBlocked: isKugouLongAudioVip(json),
+      canPlay: _isLongAudioCanPlay(json),
     );
   }
+}
+
+/// 限免/可播判定：`fail_process_128`（默认 128k 播放音质）为 0 即可播；
+/// 字段缺失时兜底顶层 `fail_process`；两者都无则默认可播（避免误杀）。
+/// 注意：不能用 privilege（限免章节 privilege_128 也是 4）。
+bool _isLongAudioCanPlay(Map<String, dynamic> json) {
+  final v128 = _parseIntOrNull(json['fail_process_128']);
+  if (v128 != null) return v128 == 0;
+  final v = _parseIntOrNull(json['fail_process']);
+  if (v != null) return v == 0;
+  return true;
 }
 
 /// 手机验证码登录的多账号候选（酷狗 `/v7/login_by_verifycode` 返回的
