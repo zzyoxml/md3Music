@@ -51,6 +51,12 @@
 .PARAMETER ChangelogYes
   配合 -Changelog 跳过生成结果的确认（非交互自动化用）。
 
+.PARAMETER WithHistory
+  配合 -ForcePush：把私有仓库提交记录以「空树提交」历史一并推送到目标分支，
+  顶端再叠加本次公开树快照，形成「提交记录完整、文件内容只在顶端」的分支。
+  历史不含任何文件内容（无 blob），下载/缓存代码零残留，可追溯但不可看代码。
+  仅 force push 覆盖模式有效；PR 模式下本开关无效（被忽略）。
+
 .PARAMETER NoPause
   结束时不等待按键（CI/被其他脚本调用时使用）。
 
@@ -58,6 +64,7 @@
   .\scripts\md3.ps1 export                                     # 只导出 + 闸门校验
   .\scripts\md3.ps1 export -PublicRemote <URL>                 # 导出 + 推分支 + 开 PR（默认）
   .\scripts\md3.ps1 export -PublicRemote <URL> -ForcePush      # 导出 + force push 覆盖 main（例外）
+  .\scripts\md3.ps1 export -PublicRemote <URL> -ForcePush -WithHistory  # 覆盖并携带提交记录历史（空树提交 + 顶端公开树）
   .\scripts\md3.ps1 export -Changelog -ChangelogVersion v5.4.0 # 更新 CHANGELOG 后随导出携带
   .\scripts\md3.ps1 export -PublicRemote <URL> -NoPause        # CI/非交互环境
 #>
@@ -73,6 +80,7 @@ param(
     [string]$ChangelogVersion = '',
     [string]$ChangelogSince = '',
     [switch]$ChangelogYes,
+    [switch]$WithHistory,
     [switch]$NoPause
 )
 
@@ -98,7 +106,10 @@ try {
     if ($PublicRemote) {
         Assert-Command git '-PublicRemote 推送模式需要 git 在 PATH 中'
         if ($AsPr) { Write-Note '-AsPr 已为默认行为，无需显式指定（参数兼容保留）' }
-        $mode = if ($ForcePush) { "-ForcePush：直接覆盖 $PublicBranch" } else { "默认：开 PR 到 $PublicBranch" }
+        if ($WithHistory -and -not $ForcePush) {
+            Write-Warn '-WithHistory 仅在 -ForcePush 覆盖模式下有效，本次忽略（PR 模式基于公开仓库现有历史，无法携带独立重建的提交记录）'
+        }
+        $mode = if ($ForcePush) { "-ForcePush：直接覆盖 $PublicBranch$(if ($WithHistory) { '（含提交记录历史）' } else { '' })" } else { "默认：开 PR 到 $PublicBranch" }
         Write-Ok "目标仓库：$PublicRemote（$mode）"
         if ($ForcePush -and (Test-InteractiveConsole)) {
             if (-not (Read-YesNo "确认要 force push 直接覆盖 $PublicRemote 的 $PublicBranch 分支吗？公开仓库历史将被整段替换")) {
@@ -332,23 +343,44 @@ try {
     Write-Ok '闸门通过：公开树零命中'
     # ---------- 7. 可选发布（默认开 PR；-ForcePush 才直推覆盖） ----------
     if ($PublicRemote -and $ForcePush) {
-        # 覆盖模式：导出树是全新 git init 的单提交仓库，force push 直接覆盖目标分支
-        Write-Step "推送到公开仓库（force push 覆盖 $PublicBranch）"
-        [void](Enable-AutoProxy)
-        Invoke-Native { git -C $OutDir init -q }
-        Invoke-Native { git -C $OutDir add -A }
-        Invoke-Native { git -C $OutDir -c user.name="md3music" -c user.email="md3music@local" commit -q -m "public export" }
-        # 全新 init 的导出树本无 origin；remove 仅作幂等清理（可能残留自上次 force push）。
-        # 注意：git 在无 origin 时报 "error: No such remote: 'origin'"，会被 $ErrorActionPreference='Stop'
-        # 误判为 NativeCommandError 并中断脚本（此前正是卡在这里，导致 remote add 与 push 未执行）。
-        # 因此这里临时放宽 ErrorActionPreference，仅让清理静默完成。
-        $prevEAP = $ErrorActionPreference
-        $ErrorActionPreference = 'Continue'
-        & git -C $OutDir remote remove origin 2>&1 | Out-Null
-        $ErrorActionPreference = $prevEAP
-        Invoke-Native { git -C $OutDir remote add origin $PublicRemote }
-        Invoke-WithRetry -What '推送公开仓库' -Action { Invoke-Native { git -C $OutDir push -f origin HEAD:$PublicBranch } }
-        Write-Ok "已推送 $PublicRemote（分支 $PublicBranch）"
+        if ($WithHistory) {
+            # 带提交记录模式：私有提交历史重建为空树提交 → 公开树叠加为顶端提交 → force push。
+            # 生成「消息完整、diff 全空」的历史，可追溯提交记录但看不到任何文件内容（无 blob）。
+            Write-Step "推送到公开仓库（force push 覆盖 $PublicBranch，含提交记录历史）"
+            $histDir = Join-Path $env:TEMP "md3music-public-messages-$(Get-Date -Format 'yyyyMMddHHmmss')"
+            $histArgs = @{ OutDir = $histDir; PublicBranch = $PublicBranch; NoPause = $true }
+            [void](Enable-AutoProxy)
+            & (Join-Path $PSScriptRoot 'export_messages_history.ps1') @histArgs
+            if ($LASTEXITCODE -ne 0) { throw "提交记录历史重建失败（退出码 $LASTEXITCODE），中止发布" }
+            # 公开树（排除残留 .git）整体放入历史仓库，叠加为顶端提交
+            foreach ($item in (Get-ChildItem $OutDir -Force | Where-Object { $_.Name -ne '.git' })) {
+                Copy-Item $item.FullName (Join-Path $histDir $item.Name) -Recurse -Force
+            }
+            Invoke-Native { git -C $histDir add -A }
+            Invoke-Native { git -C $histDir -c user.name="md3music" -c user.email="md3music@local" commit -q -m "public export" }
+            Invoke-Native { git -C $histDir remote add origin $PublicRemote }
+            Invoke-WithRetry -What '推送公开仓库' -Action { Invoke-Native { git -C $histDir push -f origin HEAD:$PublicBranch } }
+            Write-Ok "已推送 $PublicRemote（分支 $PublicBranch，含提交记录历史）"
+            Write-Note "历史仓库（如需人工补救）：$histDir"
+        } else {
+            # 覆盖模式：导出树是全新 git init 的单提交仓库，force push 直接覆盖目标分支
+            Write-Step "推送到公开仓库（force push 覆盖 $PublicBranch）"
+            [void](Enable-AutoProxy)
+            Invoke-Native { git -C $OutDir init -q }
+            Invoke-Native { git -C $OutDir add -A }
+            Invoke-Native { git -C $OutDir -c user.name="md3music" -c user.email="md3music@local" commit -q -m "public export" }
+            # 全新 init 的导出树本无 origin；remove 仅作幂等清理（可能残留自上次 force push）。
+            # 注意：git 在无 origin 时报 "error: No such remote: 'origin'"，会被 $ErrorActionPreference='Stop'
+            # 误判为 NativeCommandError 并中断脚本（此前正是卡在这里，导致 remote add 与 push 未执行）。
+            # 因此这里临时放宽 ErrorActionPreference，仅让清理静默完成。
+            $prevEAP = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            & git -C $OutDir remote remove origin 2>&1 | Out-Null
+            $ErrorActionPreference = $prevEAP
+            Invoke-Native { git -C $OutDir remote add origin $PublicRemote }
+            Invoke-WithRetry -What '推送公开仓库' -Action { Invoke-Native { git -C $OutDir push -f origin HEAD:$PublicBranch } }
+            Write-Ok "已推送 $PublicRemote（分支 $PublicBranch）"
+        }
     }
     elseif ($PublicRemote) {
         # PR 模式（默认）：必须保留公开仓库历史，否则「无关历史」的分支无法与 main 比较、开不了 PR。

@@ -62,6 +62,7 @@ function Get-TaskOptions([string]$Key) {
         'export' { @(
             (New-TaskOption -Name '-PublicRemote' -Kind value -Desc '公开仓库 URL（不填=只导出不推送；填了默认开 PR）'),
             (New-TaskOption -Name '-ForcePush'    -Desc '例外：force push 直接覆盖目标分支（默认走 PR）'),
+            (New-TaskOption -Name '-WithHistory'  -Desc '配合 -ForcePush：一并携带提交记录历史（空树提交 + 顶端公开树）'),
             (New-TaskOption -Name '-PublicBranch' -Kind value -Desc '目标分支 / PR base（默认 main）'),
             (New-TaskOption -Name '-PrBranch'     -Kind value -Desc 'PR 分支名（默认按时间戳生成）'),
             (New-TaskOption -Name '-OutDir'       -Kind value -Desc '导出目录（默认 .public_export）'),
