@@ -19,6 +19,17 @@ class MediaNotificationService {
   static void Function(String)? onDesktopLyricAction;
   // 来自悬浮窗内修改配置后回传
   static void Function(Map<dynamic, dynamic>)? onConfigChanged;
+  // 来自私人FM桌面小部件的按钮动作
+  static void Function()? onWidgetFmPlayPause;
+  static void Function()? onWidgetFmToggleFavorite;
+  // 参数为档位下标（0=红心 1=探索 2=小众）
+  static void Function(int)? onWidgetFmSelectStation;
+  // 参数为歌曲 hash（预告封面点击，后台起播）
+  static void Function(String)? onWidgetFmOpenTrack;
+  // 封面点击：app 已被拉起，打开播放器页
+  static void Function()? onWidgetFmOpenPlayer;
+  // 登录引导卡点击：MainActivity 拉起 app 后转发
+  static void Function()? onWidgetFmOpenLogin;
 
   static void initCallbacks() {
     _channel.setMethodCallHandler((call) async {
@@ -55,6 +66,27 @@ class MediaNotificationService {
         case 'desktopLyricConfigChanged':
           final config = call.arguments as Map<dynamic, dynamic>?;
           if (config != null) onConfigChanged?.call(config);
+          break;
+        // 私人FM桌面小部件按钮动作
+        case 'widgetFmPlayPause':
+          onWidgetFmPlayPause?.call();
+          break;
+        case 'widgetFmToggleFavorite':
+          onWidgetFmToggleFavorite?.call();
+          break;
+        case 'widgetFmSelectStation':
+          final index = call.arguments as int?;
+          if (index != null) onWidgetFmSelectStation?.call(index);
+          break;
+        case 'widgetFmOpenTrack':
+          final hash = call.arguments as String?;
+          if (hash != null) onWidgetFmOpenTrack?.call(hash);
+          break;
+        case 'widgetFmOpenPlayer':
+          onWidgetFmOpenPlayer?.call();
+          break;
+        case 'widgetFmOpenLogin':
+          onWidgetFmOpenLogin?.call();
           break;
       }
       return null;

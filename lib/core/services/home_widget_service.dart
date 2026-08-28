@@ -30,4 +30,31 @@ class HomeWidgetService {
       debugPrint('HomeWidgetService.updateWidget error: $e');
     }
   }
+
+  /// 更新私人FM桌面小组件。
+  ///
+  /// [snapshot] 为扁平键值对（含嵌套的 colors 主题色表），由 MainActivity 转发为
+  /// 广播 extras，PersonalFmWidgetProvider 据此重绘 RemoteViews。封面由原生侧
+  /// 按 coverUrl/nextCover 自行下载缓存，无需 Flutter 传位图。
+  static Future<void> updateFmWidget({
+    required Map<String, Object?> snapshot,
+  }) async {
+    try {
+      await _channel.invokeMethod('updateFmWidget', snapshot);
+    } catch (e) {
+      debugPrint('HomeWidgetService.updateFmWidget error: $e');
+    }
+  }
+
+  /// 向音乐播放器小组件推送当前主题色（color_* extras，文本走原生缓存）。
+  /// [colors] 为 ColorScheme 色角色名到 ARGB 值的映射。
+  static Future<void> updateMusicWidgetTheme({
+    required Map<String, int> colors,
+  }) async {
+    try {
+      await _channel.invokeMethod('updateMusicWidgetTheme', colors);
+    } catch (e) {
+      debugPrint('HomeWidgetService.updateMusicWidgetTheme error: $e');
+    }
+  }
 }
