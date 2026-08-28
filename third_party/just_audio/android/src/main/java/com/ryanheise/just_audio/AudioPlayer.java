@@ -1,6 +1,8 @@
 package com.ryanheise.just_audio;
 
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.media.AudioManager;
 import android.media.audiofx.AudioEffect;
 import android.media.audiofx.Equalizer;
@@ -17,6 +19,7 @@ import androidx.media3.exoplayer.ExoPlaybackException;
 import androidx.media3.exoplayer.LivePlaybackSpeedControl;
 import androidx.media3.exoplayer.LoadControl;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.MediaMetadata;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.PlaybackParameters;
 import androidx.media3.common.Player;
@@ -66,6 +69,7 @@ import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler;
 import io.flutter.plugin.common.MethodChannel.Result;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -907,11 +911,67 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             // 焦点仍由 ExoPlayer 的 AudioFocusManager 管理（handleAudioFocus=true），
             // MediaSession 仅作关联标识（不请求焦点、不绑定通知栏）。
             mediaSession = new MediaSession.Builder(context, player).build();
+            // MD3Music fork: 记录活跃播放器，供 AudioPlaybackService 注入封面到媒体3会话
+            sActivePlayer = this;
         }
     }
 
     // MD3Music fork: 关联系统的 MediaSession（见 ensurePlayerInitialized）
     private MediaSession mediaSession;
+
+    // ==== MD3Music fork: 运行时给媒体3会话注入封面/元数据 ====
+    // 媒体3 会话自身无元数据，播放中会被 SystemUI 提为控制中心顶层 → 无封面/无标题。
+    // 这里用官方正规 API `Player.replaceMediaItem(index, newItem)`（同 uri 仅更新 metadata、
+    // 不打断播放），把 App 下载好的封面+标题写进当前 MediaItem，供 AudioPlaybackService 调用。
+    private static volatile AudioPlayer sActivePlayer;
+
+    /// 由 AudioPlaybackService 封面加载成功后调用（同进程），把封面/标题注入媒体3会话。
+    public static void updateActiveSessionMetadata(String title, String artist, Bitmap art) {
+        AudioPlayer p = sActivePlayer;
+        if (p != null) {
+            p.applySessionMetadata(title, artist, art);
+        } else {
+            Log.w("AudioFocusFork", "updateActiveSessionMetadata: no active AudioPlayer");
+        }
+    }
+
+    /// 写媒体3 MediaItem 的 MediaMetadata（标题/艺术家/内嵌封面位图）。
+    /// 位图转 JPEG 字节经 setArtworkData 下发，使其成为系统 MEDIA_KEY_ART；异常静默。
+    /// ExoPlayer 必须在创建它的 Looper 线程访问，因此先派发到 player 所在线程执行。
+    private void applySessionMetadata(final String title, final String artist, final Bitmap art) {
+        try {
+            final androidx.media3.common.Player p = player;
+            if (p == null) return;
+            Handler handler = new Handler(p.getApplicationLooper());
+            handler.post(() -> doApplySessionMetadata(title, artist, art));
+        } catch (Exception e) {
+            Log.w("AudioFocusFork", "applySessionMetadata dispatch failed: " + e);
+        }
+    }
+
+    /// 在 player 所在线程执行「替换当前 MediaItem 的 MediaMetadata」。
+    private void doApplySessionMetadata(String title, String artist, Bitmap art) {
+        try {
+            MediaItem cur = player.getCurrentMediaItem();
+            if (cur == null) return;
+            int index = player.getCurrentMediaItemIndex();
+            MediaMetadata.Builder mb = cur.mediaMetadata.buildUpon();
+            if (title != null && !title.isEmpty()) mb.setTitle(title);
+            if (artist != null && !artist.isEmpty()) mb.setArtist(artist);
+            if (art != null) {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                art.compress(Bitmap.CompressFormat.JPEG, 90, baos);
+                mb.setArtworkData(baos.toByteArray(), MediaMetadata.PICTURE_TYPE_FRONT_COVER);
+            }
+            MediaItem updated = cur.buildUpon().setMediaMetadata(mb.build()).build();
+            // 官方推荐：同 uri 替换 → 只更新 metadata，不打断播放
+            player.replaceMediaItem(index, updated);
+            Log.d("AudioFocusFork", "applySessionMetadata OK title=" + title + " art=" + (art != null)
+                    + " onMainThread=" + (Thread.currentThread() == Looper.getMainLooper().getThread()));
+        } catch (Exception e) {
+            Log.w("AudioFocusFork", "applySessionMetadata failed: " + e);
+        }
+    }
 
     private void setAudioAttributes(int contentType, int flags, int usage) {
         AudioAttributes.Builder builder = new AudioAttributes.Builder();
@@ -1222,6 +1282,10 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         if (mediaSession != null) {
             mediaSession.release();
             mediaSession = null;
+        }
+        // MD3Music fork: 本播放器销毁后清空活跃引用，避免注入至过期会话
+        if (sActivePlayer == this) {
+            sActivePlayer = null;
         }
     }
 

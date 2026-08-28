@@ -578,6 +578,23 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       ) {
         try {
           if (sequenceState != null && sequenceState.currentSource != null) {
+            // 外部切歌同步：控制中心(媒体3)/耳机电线/自动播放下一首会直接推进
+            // just_audio 的播放队列，这里在 currentSource 变化时把「当前歌曲」同步
+            // 到 UI 与原生自定义 MediaSession/通知（否则自定义会话仍停留在上一首）。
+            // 用 tag 里的 song id 反查播放列表，兼容 shuffle 下的 effective 顺序。
+            final currentTag = sequenceState.currentSource!.tag;
+            if (currentTag is Map && currentTag['id'] != null) {
+              final newIndex = _playlist.indexWhere(
+                (s) => s.id == currentTag['id'],
+              );
+              if (newIndex >= 0 && newIndex != _currentIndex) {
+                _currentIndex = newIndex;
+                _currentSong = _playlist[newIndex];
+                _recordHistory(_currentSong!);
+                _updateNotification();
+                notifyListeners();
+              }
+            }
             final effectiveIndex = sequenceState.effectiveSequence.indexOf(
               sequenceState.currentSource!,
             );

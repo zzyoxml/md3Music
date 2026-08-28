@@ -1436,6 +1436,20 @@ class AudioPlaybackService : Service() {
                         updateMediaSessionMetadata(
                             displayTitle, displayArtist, duration, displayBitmap, effectiveArtUrl
                         )
+                        // 封面同步注入 just_audio 的媒体3 会话（该会话无封面，播放中会被 SystemUI
+                        // 提为控制中心顶层）。用官方 replaceMediaItem 同 uri 替换当前 MediaItem，
+                        // 只更新 metadata 不打断播放，保证控制中心选中媒体3 会话时也有封面。
+                        // 用反射调用：app 模块不宜直接依赖插件内部类（缺 media3 父类型解析）。
+                        try {
+                            Class.forName("com.ryanheise.just_audio.AudioPlayer")
+                                .getMethod(
+                                    "updateActiveSessionMetadata",
+                                    String::class.java,
+                                    String::class.java,
+                                    Bitmap::class.java,
+                                )
+                                .invoke(null, originalTitle, originalArtist, displayBitmap)
+                        } catch (_: Throwable) {}
                         Log.i(TAG, "封面后台加载完成，已更新 MediaSession bitmap=${displayBitmap.width}x${displayBitmap.height}")
                     } else {
                         // 封面链路日志：所有来源均失败 → MediaSession 无 bitmap
