@@ -127,6 +127,25 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/music_widget_info" />
         </receiver>
+        <!-- 桌面私人FM小组件 -->
+        <receiver
+            android:name=".PersonalFmWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.md3music.md3music.ACTION_FM_UPDATE_WIDGET" />
+                <action android:name="com.md3music.md3music.ACTION_FM_COVER_READY" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_OPEN_LOGIN" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_PLAY_PAUSE" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_TOGGLE_FAVORITE" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_SELECT_STATION" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_OPEN_TRACK" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_OPEN_PLAYER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/personal_fm_widget_info" />
+        </receiver>
         <meta-data android:name="lyricon_module" android:value="true" />
         <meta-data android:name="lyricon_module_author" android:value="𝒗𝒄𝒆𝒙𝒎𝒍 &amp; Little-White3110" />
         <meta-data android:name="lyricon_module_description" android:value="MD3Music Lyricon Provider" />

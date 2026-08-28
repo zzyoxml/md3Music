@@ -454,8 +454,17 @@ pub fn create_request(opts: &RequestOptions) -> Result<ModuleResponse, ModuleRes
         params_map.insert("dfid".to_string(), json!(dfid));
         params_map.insert("mid".to_string(), json!(mid));
         params_map.insert("uuid".to_string(), json!("-"));
-        params_map.insert("appid".to_string(), json!(3116));
-        params_map.insert("clientver".to_string(), json!(11440));
+        // 标准盐(standard_signature)必须配 appid=1005/clientver=20789：
+        // 概念版 3116/11440 会让上游把长音频章节的 fail_process 归 0，
+        // 导致详情页付费章节过滤失效（免费章节 0、付费章节 32 全部被当免费）。
+        params_map.insert(
+            "appid".to_string(),
+            json!(if opts.standard_signature { 1005 } else { 3116 }),
+        );
+        params_map.insert(
+            "clientver".to_string(),
+            json!(if opts.standard_signature { 20789 } else { 11440 }),
+        );
         params_map.insert("clienttime".to_string(), json!(clienttime));
         if !token.is_empty() {
             params_map.insert("token".to_string(), json!(token));

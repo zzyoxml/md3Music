@@ -164,6 +164,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   double get speed => _speed;
   bool get isResolvingUrl => _isResolvingUrl;
   String? get resolveError => _resolveError;
+
+  /// 播放链接解析失败时的提示文案。
+  /// 听书章节付费边界在列表接口不可靠，能点上播放、但无免费部分的付费章节
+  /// 解析必然失败——用更明确的文案提示用户，而不是通用的"无法获取播放链接"。
+  String _resolveErrorText(Song? song) {
+    if (song?.isLongAudio ?? false) return '该章节为 听书VIP单独付费内容';
+    return '无法获取播放链接';
+  }
+
   AudioQuality get audioQuality => _audioQuality;
   String get audioQualityLabel => _audioQuality.label;
 
@@ -685,7 +694,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           if (ok) {
             _resolveError = null;
           } else {
-            _resolveError = '无法获取播放链接';
+            _resolveError = _resolveErrorText(_currentSong);
           }
           notifyListeners();
         } else {
@@ -730,7 +739,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
               _currentIndex = (_currentIndex - 1).clamp(0, _playlist.length - 1);
               _currentSong = _playlist[_currentIndex];
               final ok = await _resolveAndPlayCurrentSong();
-              if (!ok) _resolveError = '无法获取播放链接';
+              if (!ok) {
+                _resolveError = _resolveErrorText(_currentSong);
+              }
             } else {
               // 仅一首歌时直接停止
               await _audioService?.pause();
@@ -774,7 +785,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           if (ok) {
             _resolveError = null;
           } else {
-            _resolveError = '无法获取播放链接';
+            _resolveError = _resolveErrorText(_currentSong);
           }
           notifyListeners();
         }
@@ -1153,7 +1164,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (_audioService != null) {
       final playbackUrl = await _resolvePlaybackUrl(song);
       if (playbackUrl == null || playbackUrl.isEmpty) {
-        _resolveError = '无法获取播放链接';
+        _resolveError = _resolveErrorText(song);
         notifyListeners();
         return;
       }
@@ -1248,7 +1259,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
             ?.call(resolvedSong, result.quality, result.url);
       } else {
         _isResolvingUrl = false;
-        _resolveError = '无法获取播放链接';
+        _resolveError = _resolveErrorText(song);
         notifyListeners();
       }
     } catch (e) {
@@ -1316,12 +1327,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           }
         } else {
           _isResolvingUrl = false;
-          _resolveError = '无法获取播放链接';
+          _resolveError = _resolveErrorText(_currentSong);
           final failedSong = _currentSong!;
           notifyListeners();
           // 先弹窗提示，随即切到下一首（不阻塞）
           _showUnplayableSongDialog(failedSong);
-          if (_playlist.length > 1) {
+          // 听书付费章节失败不自动跳下一曲：整专辑大概率连续付费，
+          // 自动切会疯狂刷日志且无意义，由用户手动选择。
+          if (_playlist.length > 1 && !failedSong.isLongAudio) {
             await next(autoPlay: true);
           }
         }
@@ -1335,7 +1348,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     } else if (_audioService != null) {
       final playbackUrl = await _resolvePlaybackUrl(_currentSong!);
       if (playbackUrl == null || playbackUrl.isEmpty) {
-        _resolveError = '无法获取播放链接';
+        _resolveError = _resolveErrorText(_currentSong);
         notifyListeners();
         return;
       }
@@ -1419,12 +1432,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
               ?.call(resolvedSong, result.quality, result.url);
         } else {
           _isResolvingUrl = false;
-          _resolveError = '无法获取播放链接';
+          _resolveError = _resolveErrorText(_currentSong);
           final failedSong = _currentSong!;
           notifyListeners();
           // 先弹窗提示，随即切到下一首（不阻塞）
           _showUnplayableSongDialog(failedSong);
-          if (_playlist.length > 1) {
+          // 听书付费章节失败不自动跳下一曲：整专辑大概率连续付费，
+          // 自动切会疯狂刷日志且无意义，由用户手动选择。
+          if (_playlist.length > 1 && !failedSong.isLongAudio) {
             await next(autoPlay: true);
           }
         }
@@ -1847,7 +1862,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
         await _setUrlAndPlay(playbackUrl, seekTo: seekTo, playAfter: play);
       } else {
-        _resolveError = '无法获取播放链接';
+        _resolveError = _resolveErrorText(_currentSong);
         notifyListeners();
       }
     }
@@ -1963,7 +1978,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       // 无法获取链接，继续尝试下一首
-      _resolveError = '无法获取播放链接';
+      _resolveError = _resolveErrorText(_currentSong);
 
       // 非列表循环模式下，到末尾就停止尝试
       if (_currentIndex >= _playlist.length - 1 &&
@@ -2008,7 +2023,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         _saveState();
         return;
       }
-      _resolveError = '无法获取播放链接';
+      _resolveError = _resolveErrorText(_currentSong);
     }
     _saveState();
     notifyListeners();
@@ -2035,12 +2050,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     final ok = await _resolveAndPlayCurrentSong();
-    if (!ok && _playlist.length > 1) {
-      // 手动选歌无法播放时，先弹窗提示，随即切到下一首（不阻塞）
-      _resolveError = '无法获取播放链接';
+    if (!ok) {
+      _resolveError = _resolveErrorText(_currentSong);
       final failedSong = _currentSong!;
       _showUnplayableSongDialog(failedSong);
-      await next(autoPlay: true);
+      // 听书付费章节失败不自动跳下一曲：整专辑大概率连续付费，
+      // 自动切会疯狂刷日志且无意义，由用户手动选择。
+      if (_playlist.length > 1 && !failedSong.isLongAudio) {
+        await next(autoPlay: true);
+      }
     }
   }
 
@@ -2467,7 +2485,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       if (result == null || result.url.isEmpty) {
         _isResolvingUrl = false;
-        _resolveError = '无法获取播放链接';
+        _resolveError = _resolveErrorText(song);
         notifyListeners();
         return;
       }
@@ -2573,20 +2591,16 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         isFavorited = ctx.read<FavoritesProvider>().isFavorite(song.id);
       }
     } catch (_) {}
-    final effectiveArtUrl = song.artworkUri;
-    MediaNotificationService.updateNotification(
-      // 使用 displayName 剥离 .mp3 等扩展名，与 _createAudioSource 行为保持一致
-      title: song.displayName,
-      artist: song.artist,
-      artUrl: effectiveArtUrl,
-      // 本地歌曲传递文件路径，供原生侧提取内嵌封面
-      fallbackFilePath: song.localPath,
-      isPlaying: _isPlaying,
-      position: _position,
-      duration: _duration ?? Duration.zero,
-      desktopLyricEnabled: DesktopLyricService.instance.enabled,
-      isFavorited: isFavorited,
-    );
+    _pushNotification(song, isFavorited);
+    // 在线歌曲封面偶现失效：原生端每次临时用 HttpURLConnection 下载封面，
+    // 覆盖网络波动/防泄漏链失败时 MediaSession 只剩 http ART_URI 而无 bitmap，
+    // 锁屏/车机多数只读 bitmap 所以「封面没传过去」。这里优先把已本地缓存的
+    // 封面 file:// 路径补发给原生，从源头规避对网络的临时依赖。
+    if (song.isOnline &&
+        song.artworkUri != null &&
+        PlayerProvider.resolveLocalArtworkPath != null) {
+      _pushNotificationWithCachedArtwork(song, isFavorited);
+    }
     // 同步更新桌面小组件（封面由原生侧从 MediaSession 缓存同步，无需传路径）
     HomeWidgetService.updateWidget(
       title: song.displayName,
@@ -2594,6 +2608,52 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       isPlaying: _isPlaying,
       position: _position,
       duration: _duration ?? Duration.zero,
+    );
+  }
+
+  /// 在线歌曲封面优先使用本地缓存路径（已由私有构建 StreamCacheManager 缓存）。
+  /// 命中后原生端按 file:// 图片直接解码，不依赖网络；未缓存/失败时静默，
+  /// 沿用原 artUrl。缓存封面解析是异步 IO，fire-and-forget 不阻塞播放主流程。
+  void _pushNotificationWithCachedArtwork(Song song, bool isFavorited) {
+    PlayerProvider.resolveLocalArtworkPath!(song.id).then((cached) {
+      if (cached == null || cached.isEmpty) {
+        // 封面链路日志：本地未缓存封面，沿用原 artUrl
+        debugPrint('[PlayerProvider] 封面无本地缓存，沿用原 artUrl=${song.artworkUri}');
+        return;
+      }
+      if (_currentSong?.id != song.id) {
+        // 封面链路日志：缓存解析完成但已切歌，丢弃避免跨歌错配
+        debugPrint('[PlayerProvider] 封面缓存解析完成但已切歌，丢弃 id=${song.id}');
+        return;
+      }
+      final url = cached.startsWith('file://') ? cached : 'file://$cached';
+      // 封面链路日志：命中本地缓存，改为下发 file:// 封面路径
+      debugPrint('[PlayerProvider] 封面命中本地缓存并下发 id=${song.id} url=$url');
+      _pushNotification(song, isFavorited, artUrlOverride: url);
+    }).catchError((e) {
+      // 封面链路日志：缓存封面解析异常，回退原逻辑
+      debugPrint('[PlayerProvider] 封面缓存解析异常: $e');
+    });
+  }
+
+  /// 统一下发通知/MediaSession 元数据。artUrlOverride 非空时优先用作封面源。
+  void _pushNotification(Song song, bool isFavorited, {String? artUrlOverride}) {
+    final artUrl = artUrlOverride ?? song.artworkUri;
+    // 封面链路日志：记录最终下发给原生的封面源（便于区分是否走本地缓存/在线 URL）
+    debugPrint('[PlayerProvider] 下发通知封面 artUrl=$artUrl '
+        'override=${artUrlOverride != null} fallback=${song.localPath}');
+    MediaNotificationService.updateNotification(
+      // 使用 displayName 剥离 .mp3 等扩展名，与 _createAudioSource 行为保持一致
+      title: song.displayName,
+      artist: song.artist,
+      artUrl: artUrl,
+      // 本地歌曲传递文件路径，供原生侧提取内嵌封面
+      fallbackFilePath: song.localPath,
+      isPlaying: _isPlaying,
+      position: _position,
+      duration: _duration ?? Duration.zero,
+      desktopLyricEnabled: DesktopLyricService.instance.enabled,
+      isFavorited: isFavorited,
     );
   }
 

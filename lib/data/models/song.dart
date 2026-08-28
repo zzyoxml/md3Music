@@ -29,6 +29,11 @@ class Song {
   /// 本地收藏标志位（区别于云端"我喜欢"）。
   /// true 表示用户在本机收藏过；旧 JSON 缺省时默认为 false，向后兼容。
   final bool isLocallyFavorited;
+  /// 是否为酷狗听书（长音频）章节。
+  /// 仅听书专辑详情页构造章节时置 true，用于播放失败时给出更明确的提示
+  /// （付费边界已按列表接口 fail_process 过滤隐藏；无免费部分的付费章节
+  /// 点开仍会失败，此时提示该章节为听书VIP单独付费内容）。
+  final bool isLongAudio;
 
   const Song({
     required this.id,
@@ -50,6 +55,7 @@ class Song {
     this.climaxEnd,
     this.bpm,
     this.isLocallyFavorited = false,
+    this.isLongAudio = false,
   });
 
   String get displayDuration {
@@ -90,6 +96,7 @@ class Song {
       climaxEnd: (json['climaxEnd'] as num?)?.toDouble(),
       bpm: (json['bpm'] as num?)?.toInt(),
       isLocallyFavorited: (json['isLocallyFavorited'] as bool?) ?? false,
+      isLongAudio: (json['isLongAudio'] as bool?) ?? false,
     );
   }
 
@@ -114,6 +121,7 @@ class Song {
       'climaxEnd': climaxEnd,
       'bpm': bpm,
       'isLocallyFavorited': isLocallyFavorited,
+      'isLongAudio': isLongAudio,
     };
   }
 
@@ -137,6 +145,7 @@ class Song {
     double? climaxEnd,
     int? bpm,
     bool? isLocallyFavorited,
+    bool? isLongAudio,
   }) {
     return Song(
       id: id ?? this.id,
@@ -158,6 +167,7 @@ class Song {
       climaxEnd: climaxEnd ?? this.climaxEnd,
       bpm: bpm ?? this.bpm,
       isLocallyFavorited: isLocallyFavorited ?? this.isLocallyFavorited,
+      isLongAudio: isLongAudio ?? this.isLongAudio,
     );
   }
 

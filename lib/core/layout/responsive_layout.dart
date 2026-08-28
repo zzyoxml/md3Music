@@ -248,9 +248,9 @@ class _ResponsiveScaffoldState extends State<ResponsiveScaffold> {
               // 原生胶囊已由 theme 关闭（indicatorColor transparent），
               // 胶囊统一由 _CapsuleBounce 绘制
               indicatorColor: Colors.transparent,
-              // 图标组从顶部开始排列（不垂直居中挤在中间）；tab 过多时
-              // NavigationRail 内部自动滚动。宽度/间距均为原生固定规格。
-              groupAlignment: -1.0,
+              // 图标组垂直居中排列（groupAlignment 0 = 居中，-1 = 顶部）。
+              // tab 过多时 NavigationRail 内部自动滚动。宽度/间距均为原生固定规格。
+              groupAlignment: 0.0,
             ),
           ),
           Visibility(

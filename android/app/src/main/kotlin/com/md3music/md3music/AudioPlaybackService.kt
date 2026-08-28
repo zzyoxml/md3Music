@@ -75,6 +75,16 @@ class AudioPlaybackService : Service() {
         // 桌面小组件按钮动作（由 MusicWidgetProvider 转发）
         const val ACTION_WIDGET_PLAY_PAUSE = "com.md3music.md3music.ACTION_WIDGET_PLAY_PAUSE"
         const val ACTION_WIDGET_NEXT = "com.md3music.md3music.ACTION_WIDGET_NEXT"
+        // 私人FM桌面小组件按钮动作（由 PersonalFmWidgetProvider 转发）
+        const val ACTION_WIDGET_FM_PLAY_PAUSE = "com.md3music.md3music.ACTION_FM_WIDGET_PLAY_PAUSE"
+        const val ACTION_WIDGET_FM_TOGGLE_FAVORITE = "com.md3music.md3music.ACTION_FM_WIDGET_TOGGLE_FAVORITE"
+        const val ACTION_WIDGET_FM_SELECT_STATION = "com.md3music.md3music.ACTION_FM_WIDGET_SELECT_STATION"
+        const val ACTION_WIDGET_FM_OPEN_TRACK = "com.md3music.md3music.ACTION_FM_WIDGET_OPEN_TRACK"
+        // 小部件封面点击：拉起 app 并打开播放器页
+        const val ACTION_WIDGET_FM_OPEN_PLAYER = "com.md3music.md3music.ACTION_FM_WIDGET_OPEN_PLAYER"
+        // FM 小部件动作参数（档位下标 / 歌曲 hash）
+        const val EXTRA_FM_ACTION_STATION_INDEX = "action_station_index"
+        const val EXTRA_FM_ACTION_TRACK_HASH = "action_track_hash"
         // 线控耳机媒体键（由 MediaButtonReceiver 转发，唤醒播放）
         const val ACTION_MEDIA_BUTTON = "com.md3music.md3music.ACTION_MEDIA_BUTTON"
         const val EXTRA_MEDIA_COMMAND = "mediaCommand"
@@ -700,8 +710,11 @@ class AudioPlaybackService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_PREV, ACTION_PLAY_PAUSE, ACTION_NEXT, ACTION_TOGGLE_DESKTOP_LYRIC, ACTION_TOGGLE_FAVORITE,
-            ACTION_WIDGET_PLAY_PAUSE, ACTION_WIDGET_NEXT -> {
-                handleAction(intent.action!!)
+            ACTION_WIDGET_PLAY_PAUSE, ACTION_WIDGET_NEXT,
+            ACTION_WIDGET_FM_PLAY_PAUSE, ACTION_WIDGET_FM_TOGGLE_FAVORITE,
+            ACTION_WIDGET_FM_SELECT_STATION, ACTION_WIDGET_FM_OPEN_TRACK,
+            ACTION_WIDGET_FM_OPEN_PLAYER -> {
+                handleAction(intent)
                 return START_STICKY
             }
             ACTION_MEDIA_BUTTON -> {
@@ -757,7 +770,13 @@ class AudioPlaybackService : Service() {
         return START_STICKY
     }
 
+    /** MediaSession / 广播接收器的既有入口：只有 action、无参数。 */
     private fun handleAction(action: String) {
+        handleAction(Intent().apply { this.action = action })
+    }
+
+    private fun handleAction(intent: Intent?) {
+        val action = intent?.action ?: return
         val engine = flutterEngine ?: staticFlutterEngine
         if (engine != null) {
             val method = when (action) {
@@ -766,10 +785,24 @@ class AudioPlaybackService : Service() {
                 ACTION_NEXT, ACTION_WIDGET_NEXT -> "next"
                 ACTION_TOGGLE_DESKTOP_LYRIC -> "toggleDesktopLyric"
                 ACTION_TOGGLE_FAVORITE -> "toggleFavorite"
+                // 私人FM小部件动作（PersonalFmWidgetProvider 转发）
+                ACTION_WIDGET_FM_PLAY_PAUSE -> "widgetFmPlayPause"
+                ACTION_WIDGET_FM_TOGGLE_FAVORITE -> "widgetFmToggleFavorite"
+                ACTION_WIDGET_FM_SELECT_STATION -> "widgetFmSelectStation"
+                ACTION_WIDGET_FM_OPEN_TRACK -> "widgetFmOpenTrack"
+                ACTION_WIDGET_FM_OPEN_PLAYER -> "widgetFmOpenPlayer"
                 else -> return
             }
+            // FM 动作携带参数：档位下标（Int）/ 歌曲 hash（String），其余为 null
+            val args: Any? = when (action) {
+                ACTION_WIDGET_FM_SELECT_STATION ->
+                    intent.getIntExtra(EXTRA_FM_ACTION_STATION_INDEX, 0)
+                ACTION_WIDGET_FM_OPEN_TRACK ->
+                    intent.getStringExtra(EXTRA_FM_ACTION_TRACK_HASH)
+                else -> null
+            }
             MethodChannel(engine.dartExecutor.binaryMessenger, "com.md3music.md3music/floating_lyric")
-                .invokeMethod(method, null)
+                .invokeMethod(method, args)
         } else {
             sendFlutterCommand(action)
         }
@@ -1180,11 +1213,21 @@ class AudioPlaybackService : Service() {
                 conn.readTimeout = 10000
                 conn.instanceFollowRedirects = true
                 try {
-                    BitmapFactory.decodeStream(conn.inputStream)
+                    val bmp = BitmapFactory.decodeStream(conn.inputStream)
+                    if (bmp != null) {
+                        Log.i(TAG, "封面 http 下载成功 ${bmp.width}x${bmp.height} url=$artUri")
+                    } else {
+                        Log.w(TAG, "封面 http 解码失败(响应非图片/空流) url=$artUri")
+                    }
+                    bmp
                 } finally {
                     conn.disconnect()
                 }
-            } catch (_: Exception) { null }
+            } catch (e: Exception) {
+                // 封面链路日志：网络波动/超时会造成这里 null→MediaSession 无 bitmap，正是偶现失效点
+                Log.w(TAG, "封面 http 下载异常 ${e.message} url=$artUri")
+                null
+            }
         }
 
         // 2. content:// MediaStore albumart
@@ -1192,11 +1235,20 @@ class AudioPlaybackService : Service() {
             try {
                 val uri = Uri.parse(artUri)
                 contentResolver.openInputStream(uri)?.use { input ->
-                    return BitmapFactory.decodeStream(input)
+                    val bmp = BitmapFactory.decodeStream(input)
+                    if (bmp != null) {
+                        Log.i(TAG, "封面 content 加载成功 ${bmp.width}x${bmp.height} url=$artUri")
+                    } else {
+                        Log.w(TAG, "封面 content 解码失败 url=$artUri")
+                    }
+                    return bmp
                 }
-            } catch (_: Exception) {}
+            } catch (e: Exception) {
+                Log.w(TAG, "封面 content 加载异常 ${e.message} url=$artUri")
+            }
             // content:// 加载失败，回退到 fallbackFilePath 提取内嵌封面
             if (!fallbackFilePath.isNullOrEmpty()) {
+                Log.d(TAG, "封面 content 失败，回退内嵌封面 fallback=$fallbackFilePath")
                 return extractEmbeddedArtwork(fallbackFilePath)
             }
             return null
@@ -1218,8 +1270,17 @@ class AudioPlaybackService : Service() {
             lower.endsWith(".png") || lower.endsWith(".webp")
         ) {
             return try {
-                BitmapFactory.decodeFile(filePath)
-            } catch (_: Exception) { null }
+                val bmp = BitmapFactory.decodeFile(filePath)
+                if (bmp != null) {
+                    Log.i(TAG, "封面文件解码成功 ${bmp.width}x${bmp.height} path=$filePath")
+                } else {
+                    Log.w(TAG, "封面文件解码失败(空/损坏) path=$filePath")
+                }
+                bmp
+            } catch (e: Exception) {
+                Log.w(TAG, "封面文件解码异常 ${e.message} path=$filePath")
+                null
+            }
         }
         return extractEmbeddedArtwork(filePath)
     }
@@ -1241,8 +1302,20 @@ class AudioPlaybackService : Service() {
                 retriever.setDataSource(filePath)
             }
             val art = retriever.embeddedPicture
-            if (art != null) BitmapFactory.decodeByteArray(art, 0, art.size) else null
-        } catch (_: Exception) {
+            if (art != null) {
+                val bmp = BitmapFactory.decodeByteArray(art, 0, art.size)
+                if (bmp != null) {
+                    Log.i(TAG, "内嵌封面提取成功 ${bmp.width}x${bmp.height} src=$filePath")
+                } else {
+                    Log.w(TAG, "内嵌封面字节解码失败 src=$filePath")
+                }
+                bmp
+            } else {
+                Log.w(TAG, "内嵌封面不存在(embeddedPicture=null) src=$filePath")
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "内嵌封面提取异常 ${e.message} src=$filePath")
             null
         } finally {
             // P0: 异常路径也必须释放 native 资源，避免 FD 泄漏
@@ -1326,9 +1399,13 @@ class AudioPlaybackService : Service() {
         // 同时立即同步 MediaSession 元数据（title/artist/时长），
         // 防止封面缺失时残留上一首歌曲的封面/标题（云盘歌封面为异步提取，会晚到）
         startForeground(NOTIFICATION_ID, builder.build())
-        updateMediaSessionMetadata(displayTitle, displayArtist, duration, null, effectiveArtUrl)
 
+        // P0: 不再广播「无 bitmap」的首帧 metadata——SystemUI 控制中心主面板
+        // MainPanelItemViewHolder 会先 setCover(null) 并在 flip 动画中吞掉后续补帧，
+        // 导致封面永远停在无封面。改为封面加载成功后再一次性 setMetadata(带 bitmap)，
+        // 使 SystemUI 首次拿到 metadata 即带封面；仅封面失败/无源时才发无封面兜底。
         if (!effectiveArtUrl.isNullOrEmpty()) {
+            Log.d(TAG, "触发后台封面加载 effectiveArtUrl=$effectiveArtUrl fallback=$fallbackFilePath")
             Thread {
                 try {
                     val originalBitmap = loadArtworkBitmap(effectiveArtUrl, fallbackFilePath)
@@ -1359,9 +1436,24 @@ class AudioPlaybackService : Service() {
                         updateMediaSessionMetadata(
                             displayTitle, displayArtist, duration, displayBitmap, effectiveArtUrl
                         )
+                        Log.i(TAG, "封面后台加载完成，已更新 MediaSession bitmap=${displayBitmap.width}x${displayBitmap.height}")
+                    } else {
+                        // 封面链路日志：所有来源均失败 → MediaSession 无 bitmap
+                        Log.w(TAG, "封面后台加载失败(所有来源返回 null) effectiveArtUrl=$effectiveArtUrl " +
+                                "MediaSession 将缺失 ART bitmap")
+                        // 封面确实失败：兜底发无 bitmap 的 metadata，避免残留上一首封面/标题
+                        updateMediaSessionMetadata(displayTitle, displayArtist, duration, null, effectiveArtUrl)
                     }
-                } catch (_: Exception) {}
+                } catch (e: Exception) {
+                    Log.e(TAG, "封面后台线程异常 ${e.message}", e)
+                    // 异常也兜底发无 bitmap metadata，避免残留上一首封面
+                    updateMediaSessionMetadata(displayTitle, displayArtist, duration, null, effectiveArtUrl)
+                }
             }.start()
+        } else {
+            Log.w(TAG, "无有效封面源(artUrl、fallback 均为空)，MediaSession 无封面")
+            // 无封面源：发无 bitmap metadata，保证系统能显示标题/艺术家（并清除上一首残留）
+            updateMediaSessionMetadata(displayTitle, displayArtist, duration, null, effectiveArtUrl)
         }
 
         mediaSession?.setPlaybackState(

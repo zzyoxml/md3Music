@@ -107,6 +107,30 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {
             // 个别 ROM 可能不支持，忽略即可
         }
+        // 桌面小部件冷启动拉起携带的动作（如登录卡 openLogin → 进登录页）。
+        // 引擎尚未就绪时 Flutter 侧导航尚不可用，invokeMethod 静默失败即降级为打开 app。
+        dispatchWidgetAction(intent?.getStringExtra("widget_action"))
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // singleTop 复用实例时（app 已在前台/后台存活），小部件动作走这里
+        dispatchWidgetAction(intent.getStringExtra("widget_action"))
+    }
+
+    /// 把小部件拉起 app 携带的 widget_action 转发给 Flutter。
+    /// 目前仅处理 FM 登录卡的 openLogin（现有 music widget 的 action 仍不处理）。
+    private fun dispatchWidgetAction(action: String?) {
+        if (action != "openLogin") return
+        val engine = FlutterEngineCache.getInstance().get("md3music_engine") ?: return
+        try {
+            MethodChannel(
+                engine.dartExecutor.binaryMessenger,
+                FLOATING_CHANNEL
+            ).invokeMethod("widgetFmOpenLogin", null)
+        } catch (_: Exception) {
+            // 引擎刚创建/未跑 Dart 时转发失败：降级为仅打开 app
+        }
     }
 
     override fun onResume() {
@@ -703,6 +727,20 @@ class MainActivity : FlutterActivity() {
                     MusicWidgetProvider.updateAllWidgets(
                         this, title, artist, isPlaying, position, duration
                     )
+                    result.success(true)
+                }
+                // 私人FM小部件：快照 Map 原样交给 Provider 拍平成广播 extras
+                "updateFmWidget" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val data = call.arguments as? Map<String, Any?> ?: emptyMap()
+                    PersonalFmWidgetProvider.updateAllWidgets(this, data)
+                    result.success(true)
+                }
+                // 音乐播放器小部件：仅推送主题色（文本走原生缓存）
+                "updateMusicWidgetTheme" -> {
+                    @Suppress("UNCHECKED_CAST")
+                    val colors = call.arguments as? Map<String, Number> ?: emptyMap()
+                    MusicWidgetProvider.updateTheme(this, colors)
                     result.success(true)
                 }
                 else -> result.notImplemented()

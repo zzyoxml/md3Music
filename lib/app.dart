@@ -10,6 +10,7 @@ import 'package:quick_actions/quick_actions.dart';
 
 import 'core/layout/responsive_layout.dart';
 import 'core/layout/ui_density.dart';
+import 'core/services/fm_widget_sync.dart';
 import 'core/services/lyricon_provider_service.dart';
 import 'core/theme/app_theme.dart';
 import 'core/theme/motion_constants.dart';
@@ -223,7 +224,17 @@ class _AppViewState extends State<_AppView> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _setupCoverColorBridge();
       _setupBackgroundColorBridge();
+      _setupFmWidgetSync();
     });
+  }
+
+  /// 建立私人FM桌面小部件桥接：监听三个 provider 推送快照，并接上原生按钮回调。
+  void _setupFmWidgetSync() {
+    FmWidgetSync.instance.attach(
+      kugou: context.read<KugouProvider>(),
+      player: context.read<PlayerProvider>(),
+      favorites: context.read<FavoritesProvider>(),
+    );
   }
 
   /// 根据 ShortcutConfigProvider 当前配置，整体替换 Android 桌面快捷方式列表。
