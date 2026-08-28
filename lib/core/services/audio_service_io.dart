@@ -619,6 +619,8 @@ class AudioService {
   /// 已经 [prepareCrossfade] 成功、等待起播的播放器。
   AudioPlayer? _preparedPlayer;
 
+
+
   /// abortCrossfade 里 fire-and-forget 的 retire 链（pause→seek0→恢复音量）。
   /// prepareCrossfade 复用同一播放器前必须先等它收尾：否则迟到的
   /// setVolume(_userVolume) 可能落在 prepare 的 setVolume(0) 之后，
@@ -650,7 +652,15 @@ class AudioService {
   /// 把 [url] 加载到备用播放器并预缓冲，音量 0、不出声。
   ///
   /// 返回 true 表示可以随后立即调用 [startCrossfade]。
-  Future<bool> prepareCrossfade(String url, {double speed = 1.0}) async {
+  /// [title]/[artist]/[artUri]：新歌元数据，加载到备用播放器时带 artUri，
+  Future<bool> prepareCrossfade(
+    String url, {
+    double speed = 1.0,
+    String? id,
+    String? title,
+    String? artist,
+    String? artUri,
+  }) async {
     if (_crossfading) return false;
     try {
       final standby = _standbyPlayer();
@@ -670,7 +680,22 @@ class AudioService {
       await standby.setLoopMode(LoopMode.off);
       await standby.setSpeed(speed);
       // setUrl 在加载完成后才返回，返回即可立即起播
-      final loaded = await standby.setUrl(url, headers: const {});
+      // 用带 artUri 的 AudioSource 加载：MediaSession 仅在 onMediaItemTransition 时
+      // 同步系统封面（SystemUI 从 artUri 下载显示）；setUrl 无 artUri 时通知栏缺失封面，
+      // 而 applySessionMetadata 的 bitmap 经 replaceMediaItem 注入不触发 MediaSession 同步。
+      final artUriParsed = artUri != null ? Uri.tryParse(artUri) : null;
+      final loaded = await standby.setAudioSource(
+        AudioSource.uri(
+          Uri.parse(url),
+          tag: {
+            'id': id,
+            'title': title ?? '',
+            'artist': artist,
+            'album': null,
+            'artUri': artUriParsed?.toString(),
+          },
+        ),
+      );
       _preparedPlayer = standby;
       // ignore: avoid_print
       print('[Crossfade] 预加载完成 dur=${loaded?.inSeconds}s');
@@ -711,7 +736,7 @@ class AudioService {
     _userVolume = targetVolume;
     final token = ++_crossfadeToken;
     _setCrossfading(true);
-    _crossedOver = false;
+    _crossedOver = true; // MD3Music fork：fade 起点即视为已过交叉点，循环内不再切换
     _fadingOutPlayer = outgoing;
     _fadingInPlayer = incoming;
     // ignore: avoid_print
@@ -722,6 +747,10 @@ class AudioService {
       // 不 await play()：它的 Future 直到播放结束/暂停才完成
       // ignore: discarded_futures
       incoming.play();
+      // MD3Music fork（方案A·fade 起点切歌）：起播后立即把活动播放器切给新歌（incoming），
+      // 使对外的 currentSong/媒体卡片/蓝牙歌词/Lyricon 在 fade 一开始就基于下一首，
+      // 避免切歌后媒体卡片/歌词卡在旧歌（原实现等到交叉点 t=0.5 才切）。
+      _promoteIncoming(incoming, onCrossover);
 
       final steps = (duration.inMilliseconds / 100).clamp(20, 80).round();
       final stepMs = (duration.inMilliseconds / steps).round();
@@ -753,19 +782,18 @@ class AudioService {
               '$outLabel(out)=${(gains.outGain * targetVolume).toStringAsFixed(2)} '
               '$inLabel(in)=${(gains.inGain * targetVolume).toStringAsFixed(2)}');
         }
-        if (!_crossedOver && t >= kCrossfadeCrossoverProgress) {
-          _promoteIncoming(incoming, onCrossover);
-        }
         if (t >= 1.0) break;
       }
       if (token != _crossfadeToken) return;
-      // 兜底：事件循环若在中点前后整段卡住，循环可能一步就跑到 t>=1
-      if (!_crossedOver) _promoteIncoming(incoming, onCrossover);
       // 用 _userVolume 而非入口捕获的 targetVolume：斜坡进行中用户调过音量
       // 时（AudioService.setVolume 淡化中只更新 _userVolume 提前返回），
       // 结束以最新音量收尾，否则会回跳淡化开始时的旧音量
+      // ignore: avoid_print
+      print('[Crossfade] 收尾 setVolume 后 activeIsMain=' + (_activePlayer == _mainPlayer).toString());
       await incoming.setVolume(_userVolume);
       await _retireFadedPlayer(outgoing);
+      // ignore: avoid_print
+      print('[Crossfade] 收尾 retire 后 activeIsMain=' + (_activePlayer == _mainPlayer).toString());
       // ignore: avoid_print
       print('[Crossfade] done');
     } catch (e) {
@@ -846,6 +874,7 @@ class AudioService {
       await p.setVolume(_userVolume);
     } catch (_) {}
   }
+
 
   Future<void> dispose() async {
     abortCrossfade();

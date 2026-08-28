@@ -70,7 +70,10 @@ class FloatingLyricService : Service() {
 
     companion object {
         const val CHANNEL_ID = "floating_lyric_channel"
-        const val NOTIFICATION_ID = 1001
+        // 注意：不能与媒体3 now-playing 通知（1001）撞号，否则桌面歌词一开
+        // startForeground(1001, ...) 会直接覆盖媒体通知 → 媒体卡片消失。
+        // AudioPlaybackService 保活通知用 1002，这里用 1003 保持唯一。
+        const val NOTIFICATION_ID = 1003
         const val ACTION_UPDATE_LYRIC = "com.md3music.md3music.UPDATE_LYRIC"
         const val ACTION_UPDATE_TITLE = "com.md3music.md3music.UPDATE_TITLE"
         const val ACTION_UPDATE_PROGRESS = "com.md3music.md3music.UPDATE_PROGRESS"

@@ -14,7 +14,6 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
-import android.support.v4.media.session.MediaSessionCompat
 import android.util.Rational
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -199,6 +198,10 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // MD3Music fork（方向1）：前台 UI 引擎恢复启用媒体3会话（headless 引擎曾关闭），
+        // 保证系统媒体会话始终=前台 UI 播放器。
+        try { com.ryanheise.just_audio.AudioPlayer.setMediaSessionEnabled(true) } catch (_: Throwable) {}
+
         // 缓存引擎：Service 端没有 FlutterEngine 时（app 进程被回收场景），能复用
         FlutterEngineCache.getInstance().put("md3music_engine", flutterEngine)
         cachedEngine = flutterEngine
@@ -380,17 +383,34 @@ class MainActivity : FlutterActivity() {
                         )
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(intent)
+                        try {
+                            startForegroundService(intent)
+                        } catch (e: Exception) {
+                            // 阶段6修复：App 转后台（导航等夺焦点）时后台启动前台服务会被系统
+                            // 拒绝（ForegroundServiceStartNotAllowedException）。吞掉避免崩溃，
+                            // 媒体通知由 media3 会话承载，保活服务稍后回到前台再恢复。
+                            Log.w("MainActivity", "startForegroundService rejected: ${e.javaClass.simpleName}: ${e.message}")
+                            // MD3Music fork（方案A·封面兜底）：服务启动被拒时媒体通知由
+                            // media3 会话承载（不受影响），但封面注入依赖本服务前台启动——
+                            // 直接调 AudioPlaybackService.injectCover 兜底注入封面到媒体3会话。
+                            AudioPlaybackService.injectCover(
+                                call.argument<String>("title") ?: "",
+                                call.argument<String>("artist") ?: "",
+                                call.argument<String>("artUrl"),
+                                call.argument<String>("fallbackFilePath")
+                            )
+                        }
                     } else {
                         startService(intent)
                     }
                     result.success(true)
                 }
-                "hideNotification" -> {
-                    val intent = Intent(this, AudioPlaybackService::class.java).apply {
-                        action = AudioPlaybackService.ACTION_STOP
-                    }
-                    startService(intent)
+                // 封面预取：切歌前把接下来数首封面下载到内存/磁盘缓存，切歌时命中秒显。
+                // 该方法在 headless 引擎通道有处理，但 MainActivity 正常运行时的主通道缺失
+                // → 预取静默失败。此处补注册，复用 AudioPlaybackService.prefetchCovers。
+                "prefetchCover" -> {
+                    val urls = call.argument<List<String>>("urls").orEmpty()
+                    AudioPlaybackService.prefetchCovers(this, urls)
                     result.success(true)
                 }
                 // 蓝牙歌词：更新当前歌词文本（title→歌词，artist→「作者 - 标题」由原生端处理）

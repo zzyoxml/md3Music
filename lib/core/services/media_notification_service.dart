@@ -125,6 +125,15 @@ class MediaNotificationService {
     } catch (_) {}
   }
 
+  /// 预取封面到原生本地缓存（方案B：切歌前下载后续歌曲封面，切歌时秒显，根治空档）。
+  static Future<void> prefetchCover(List<String?> artUrls) async {
+    try {
+      final urls = artUrls.whereType<String>().where((u) => u.isNotEmpty).toList();
+      if (urls.isEmpty) return;
+      await _channel.invokeMethod('prefetchCover', {'urls': urls});
+    } catch (_) {}
+  }
+
   /// 通知原生端：播放状态已恢复完成，可安全派发线控耳机命令（唤醒播放）。
   /// 原生端 AudioPlaybackService 进程被杀后创建后台 FlutterEngine 并等待该信号
   /// 后才派发 play/next 等命令，确保 PlayerProvider 已完成状态恢复。

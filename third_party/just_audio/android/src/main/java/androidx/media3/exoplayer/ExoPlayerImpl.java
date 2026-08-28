@@ -331,6 +331,15 @@ import java.util.concurrent.TimeoutException;
                   COMMAND_SET_VIDEO_SURFACE,
                   COMMAND_GET_TEXT,
                   COMMAND_RELEASE)
+              // MD3Music fork（阶段6·修复媒体卡片下一首按钮消失）：
+              // ExoPlayer 仅在时间线「当前不是最后一首」时才加入 SEEK_TO_NEXT/NEXT_MEDIA_ITEM，
+              // 而 App 队列自维护（时间线不反映完整队列），导致原生「下一首」按钮在卡片/通知栏
+              // 消失。Util.getAvailableCommands 只会基于 permanentAvailableCommands 追加、从不移除，
+              // 故把 4 个 seek 命令加入常驻集合，使上一首/下一首始终可用，由会话回调转发 App 逻辑。
+              .add(COMMAND_SEEK_TO_PREVIOUS)
+              .add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+              .add(COMMAND_SEEK_TO_NEXT)
+              .add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
               .addIf(
                   COMMAND_SET_TRACK_SELECTION_PARAMETERS, trackSelector.isSetParametersSupported())
               .addIf(COMMAND_GET_DEVICE_VOLUME, builder.deviceVolumeControlEnabled)

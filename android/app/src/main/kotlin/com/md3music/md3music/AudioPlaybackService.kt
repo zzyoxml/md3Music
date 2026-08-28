@@ -6,9 +6,11 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.ServiceConnection
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -22,8 +24,6 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
-import android.support.v4.media.MediaMetadataCompat
-import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -35,8 +35,12 @@ import com.hchen.superlyricapi.SuperLyricData
 import com.hchen.superlyricapi.SuperLyricHelper
 import com.hchen.superlyricapi.SuperLyricLine
 import com.hchen.superlyricapi.SuperLyricWord
+import com.ryanheise.just_audio.AudioPlayer
 import io.flutter.plugins.GeneratedPluginRegistrant
 import io.github.proify.lyricon.provider.ConnectionListener
+import java.io.File
+import java.io.FileOutputStream
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import io.github.proify.lyricon.provider.LyriconFactory
@@ -48,6 +52,9 @@ import io.github.proify.lyricon.lyric.model.Song
 class AudioPlaybackService : Service() {
     companion object {
         const val CHANNEL_ID = "md3music_audio_playback"
+        // 阶段6：保活通知专用新频道（IMPORTANCE_MIN）。用新 id 避开旧频道（LOW）删除重建
+        // 竞态，确保通知只出现在折叠的「其他通知」区、尽量隐形。
+        const val KEEPALIVE_CHANNEL_ID = "md3music_keepalive"
         const val NOTIFICATION_ID = 1002
         const val ACTION_PREV = "com.md3music.md3music.ACTION_PREV"
         const val ACTION_PLAY_PAUSE = "com.md3music.md3music.ACTION_PLAY_PAUSE"
@@ -95,6 +102,13 @@ class AudioPlaybackService : Service() {
         private var staticFlutterEngine: FlutterEngine? = null
         private var wakeLock: PowerManager.WakeLock? = null
 
+        // 方案A：在线封面本地缓存（根治切歌空档）。内存缓存 key=artUrl，磁盘缓存按 URL hash 命名。
+        // 命中内存/磁盘 → 免网络下载，切歌秒显；未命中才下载并写缓存。
+        private val coverMemoryCache = ConcurrentHashMap<String, Bitmap>()
+        private const val COVER_CACHE_DIR = "cover_cache"
+        // 磁盘缓存上限（张）：超限清空最旧文件，避免无限增长
+        private const val COVER_CACHE_MAX = 200
+
         /// 进程被杀后由本服务创建的后台 FlutterEngine 是否已就绪。
         /// Dart 端 PlayerProvider 完成状态恢复后会通过 playerReady 通知置为 true。
         @Volatile
@@ -103,9 +117,175 @@ class AudioPlaybackService : Service() {
         /// 当前是否正在播放（供 LockScreenLyricReceiver 判断锁屏时是否拉起歌词界面）。
         @Volatile
         var isNowPlaying = false
+        /// MD3Music fork（方案A·封面兜底）：前台服务启动被拒（mAllowStartForeground=false，
+        /// 如后台切歌/跨fade 收敛瞬间）时由 MainActivity 直接调用注入封面，
+        /// 不依赖 AudioPlaybackService 启动。处理 http(s) 在线封面，命中内存缓存免下载。
+        @JvmStatic
+        fun injectCover(title: String, artist: String, artUrl: String?, fallbackFilePath: String?) {
+            val effective = artUrl ?: fallbackFilePath ?: return
+            Thread {
+                try {
+                    // 1) 内存缓存命中：先剔除已回收的失效条目，避免复用后 isRecycled 判 false
+                    var bmp: Bitmap? = null
+                    if (effective.startsWith("http://") || effective.startsWith("https://")) {
+                        val cached = coverMemoryCache[effective]
+                        bmp = if (cached != null && cached.isRecycled) {
+                            coverMemoryCache.remove(effective)
+                            null
+                        } else cached
+                    }
+                    // 2) 未命中：按来源加载（http 下载 / file·local·纯路径读内嵌封面），
+                    //    http 下载失败时回退 fallbackFilePath
+                    if (bmp == null) {
+                        bmp = loadCoverBitmapForInject(effective, fallbackFilePath)
+                    }
+                    if (bmp != null && !bmp.isRecycled) {
+                        // 降采样到 512px 后再注入，避免大图常驻内存
+                        val display = resizeCoverBitmap(bmp, 512)
+                        AudioPlayer.updateActiveSessionMetadata(title, artist, display, effective)
+                        Log.i(TAG, "injectCover: 封面注入成功 title=" + title)
+                    } else {
+                        Log.w(TAG, "injectCover: 封面加载失败 url=" + effective)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "injectCover 异常 " + e.message)
+                }
+            }.start()
+        }
+
+        /// 兜底封面加载：http(s) 在线下载（成功写入内存缓存）；非 http 或下载失败时
+        /// 依次尝试 [source]（file:///local:///纯路径）与 [fallback] 的内嵌封面。
+        private fun loadCoverBitmapForInject(source: String, fallback: String?): Bitmap? {
+            var bmp: Bitmap? = null
+            if (source.startsWith("http://") || source.startsWith("https://")) {
+                try {
+                    val conn = java.net.URL(source).openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 5000
+                    conn.readTimeout = 10000
+                    conn.instanceFollowRedirects = true
+                    try {
+                        bmp = BitmapFactory.decodeStream(conn.inputStream)
+                        if (bmp != null && !bmp.isRecycled) coverMemoryCache[source] = bmp
+                    } finally {
+                        conn.disconnect()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "injectCover http 下载异常 ${e.message} url=$source")
+                }
+            }
+            if (bmp == null || bmp.isRecycled) {
+                bmp = decodeEmbeddedCoverCompat(source, fallback)
+            }
+            return if (bmp != null && !bmp.isRecycled) bmp else null
+        }
+
+        /// 从 file:///local:///纯路径依次取内嵌封面；优先 [source]，失败再试 [fallback]。
+        private fun decodeEmbeddedCoverCompat(source: String, fallback: String?): Bitmap? {
+            for (c in listOf(source, fallback).filterNotNull()) {
+                val path = when {
+                    c.startsWith("file://") -> Uri.parse(c).path ?: c.substring("file://".length)
+                    c.startsWith("local://") -> c.substring("local://".length)
+                    else -> c
+                }
+                val bmp = try {
+                    val mmr = MediaMetadataRetriever()
+                    mmr.setDataSource(path)
+                    val art = mmr.embeddedPicture
+                    mmr.release()
+                    if (art != null) BitmapFactory.decodeByteArray(art, 0, art.size) else null
+                } catch (e: Exception) {
+                    null
+                }
+                if (bmp != null && !bmp.isRecycled) return bmp
+            }
+            return null
+        }
+
+        /// 兜底封面降采样：与实例方法 resizeBitmap 语义一致（超限才缩放）。
+        private fun resizeCoverBitmap(source: Bitmap, maxSize: Int): Bitmap {
+            val w = source.width
+            val h = source.height
+            if (w <= maxSize && h <= maxSize) return source
+            val ratio = maxSize.toDouble() / maxOf(w, h)
+            return Bitmap.createScaledBitmap(
+                source,
+                (w * ratio).toInt(),
+                (h * ratio).toInt(),
+                true
+            )
+        }
 
         fun setFlutterEngine(engine: FlutterEngine) {
             staticFlutterEngine = engine
+        }
+        /// MD3Music fork（方案1·修复预取通道）：MainActivity 正常运行（前台/后台）时
+        /// floating_lyric 通道没有注册 prefetchCover 处理（只在 headless 引擎注册），
+        /// 导致 Dart 端 _prefetchUpcomingCovers 的封面预取全部静默失败 → 切歌时封面
+        /// 未缓存、只能现场联网下载（慢网/CDN 抖动时明显延迟）。
+        /// 此静态入口供 MainActivity 直接调用，写入与实例路径共用的 coverMemoryCache
+        /// 与磁盘缓存（cacheDir/cover_cache），切歌时 injectCover/showNotification 命中秒显。
+        @JvmStatic
+        fun prefetchCovers(context: Context, urls: List<String>) {
+            for (url in urls) {
+                if (url.isEmpty() || (!url.startsWith("http://") && !url.startsWith("https://"))) continue
+                // 内存缓存命中（且未回收）则跳过
+                val cached = coverMemoryCache[url]
+                if (cached != null && !cached.isRecycled) continue
+                if (cached != null && cached.isRecycled) coverMemoryCache.remove(url)
+                // 磁盘缓存命中则直接回填内存
+                val cacheFile = try {
+                    File(File(context.cacheDir, COVER_CACHE_DIR), url.hashCode().toString() + ".jpg")
+                } catch (_: Exception) {
+                    null
+                }
+                if (cacheFile != null && cacheFile.exists()) {
+                    try {
+                        val bmp = BitmapFactory.decodeFile(cacheFile.absolutePath)
+                        if (bmp != null && !bmp.isRecycled) {
+                            coverMemoryCache[url] = bmp
+                            continue
+                        }
+                    } catch (_: Exception) {}
+                }
+                // 网路线程下载并写内存 + 磁盘缓存
+                Thread {
+                    try {
+                        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 3000
+                        conn.readTimeout = 5000
+                        conn.instanceFollowRedirects = true
+                        try {
+                            val bmp = BitmapFactory.decodeStream(conn.inputStream)
+                            if (bmp != null && !bmp.isRecycled) {
+                                val small = if (bmp.width <= 512 && bmp.height <= 512) bmp else {
+                                    val ratio = 512.0 / maxOf(bmp.width, bmp.height)
+                                    Bitmap.createScaledBitmap(
+                                        bmp,
+                                        (bmp.width * ratio).toInt(),
+                                        (bmp.height * ratio).toInt(),
+                                        true
+                                    )
+                                }
+                                if (small !== bmp) bmp.recycle()
+                                coverMemoryCache[url] = small
+                                try {
+                                    val dir = File(context.cacheDir, COVER_CACHE_DIR)
+                                    if (!dir.exists()) dir.mkdirs()
+                                    val cf = File(dir, url.hashCode().toString() + ".jpg")
+                                    if (!cf.exists()) {
+                                        FileOutputStream(cf).use { out ->
+                                            small.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                                Log.i(TAG, "封面预取完成 url=$url")
+                            }
+                        } finally {
+                            conn.disconnect()
+                        }
+                    } catch (_: Exception) {}
+                }.start()
+            }
         }
 
         /** 检查是否有可用的 FlutterEngine（供 MusicWidgetProvider 判断是否需要拉起 app） */
@@ -145,9 +325,6 @@ class AudioPlaybackService : Service() {
         private const val LYRICON_RETRY_DELAY_MS = 2000L
         // P0: setMetadata 合并节流窗口：歌词行高频变化时 300ms 内只执行一次刷新
         private const val METADATA_REFRESH_DELAY_MS = 300L
-        // P0: 蓝牙歌词通知重建最小间隔：通知栏歌词 2s 刷新一次足够（车机读 MediaSession），
-        // 抑制 SystemUI 通知管线被歌词行变化持续唤醒
-        private const val BT_NOTIFY_THROTTLE_MS = 2000L
         private val lyriconRetryHandler = Handler(Looper.getMainLooper())
         // 用户意图上是否启用词幕（非 SDK 的 ConnectionStatus），决定失败后是否重试
         @Volatile
@@ -501,7 +678,6 @@ class AudioPlaybackService : Service() {
         }
     }
 
-    private var mediaSession: MediaSessionCompat? = null
     private var notificationManager: NotificationManager? = null
     private var receiver: BroadcastReceiver? = null
     private var lockScreenReceiver: BroadcastReceiver? = null
@@ -538,8 +714,14 @@ class AudioPlaybackService : Service() {
     private var pendingMediaCommand: String? = null
     private var mediaCommandInFlight = false
 
-    // P0: 蓝牙歌词刷新节流状态：通知重建最小间隔 + 最近一次显示的文本
-    private var lastBtLyricNotifyTime = 0L
+    // 方案B阶段1：绑定媒体3会话承载服务，使其 onCreate 注册为 fork 的 host（渲染 now playing 通知）
+    private var media3ServiceBound = false
+    private val media3ServiceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {}
+        override fun onServiceDisconnected(name: ComponentName?) {}
+    }
+
+    // P0: 蓝牙歌词刷新状态：最近一次显示的文本（避免无效刷新）
     private var lastShownBtLyricTitle: String? = null
     private var lastShownBtLyricArtist: String? = null
 
@@ -582,7 +764,6 @@ class AudioPlaybackService : Service() {
         super.onCreate()
         createNotificationChannel()
         notificationManager = getSystemService(NotificationManager::class.java)
-        initMediaSession()
         registerReceiver()
         // 锁屏歌词：动态注册 SCREEN_OFF/SCREEN_ON 广播（前台服务存活期间注册，
         // 比 manifest 静态广播在 MIUI 等 ROM 上更可靠）
@@ -645,6 +826,26 @@ class AudioPlaybackService : Service() {
         } catch (_: Exception) {}
         // 恢复蓝牙歌词开关：避免冷启动后开关丢失（Flutter 端也会再推一次，幂等）
         restoreBluetoothLyricState()
+        // 方案B阶段1：绑定媒体3会话承载服务（实例化 host，供 fork 会话渲染 now playing 通知）。
+        // 用带 SERVICE_INTERFACE action 的 Intent 绑定，确保 onBind 返回非空 binder 使连接成功。
+        try {
+            val m3Intent = Intent(this, MD3MusicMediaSessionService::class.java)
+                .setAction("androidx.media3.session.MediaSessionService")
+            bindService(m3Intent, media3ServiceConnection, Context.BIND_AUTO_CREATE)
+            media3ServiceBound = true
+        } catch (_: Exception) {}
+        // 方案B阶段4：注册媒体3自定义命令监听。媒体3通知栏按钮（桌面歌词/收藏）
+        // 触发后路由到与既有 ACTION 相同的 Flutter 通道处理逻辑。
+        // 阶段6：原生上一首/下一首命令拦截后也走这里，转发 App 自有切歌逻辑。
+        try {
+            AudioPlayer.setCustomActionListener(object : AudioPlayer.CustomActionListener {
+                override fun onToggleDesktopLyric() { handleAction(ACTION_TOGGLE_DESKTOP_LYRIC) }
+                override fun onToggleFavorite() { handleAction(ACTION_TOGGLE_FAVORITE) }
+                // 阶段6修复：媒体卡片/通知栏原生 PREVIOUS/NEXT → App 自有切歌逻辑
+                override fun onPrevious() { handleAction(ACTION_PREV) }
+                override fun onNext() { handleAction(ACTION_NEXT) }
+            })
+        } catch (_: Throwable) {}
     }
 
     /// 从 SharedPreferences 恢复蓝牙歌词开关状态。
@@ -823,6 +1024,53 @@ class AudioPlaybackService : Service() {
         sendBroadcast(intent)
     }
 
+    /// 解决方案B阶段5：前台服务保活通知。
+    /// 展示层已由媒体3 now-playing 通知（MD3MusicMediaSessionService）承载，本服务仍需保持前台
+    /// （后台 Flutter 引擎/WakeLock 保活）。Android 14+ 标准 startForeground 后立即
+    /// STOP_FOREGROUND_DETACH，可让服务维持前台状态而不让保活通知常驻通知栏。
+    private fun startForegroundDetached(builder: NotificationCompat.Builder) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(NOTIFICATION_ID, builder.build())
+                try {
+                    stopForeground(Service.STOP_FOREGROUND_DETACH)
+                    // 阶段6：DETACH 后系统异步处理通知，startForeground 的 post 可能与
+                    // cancel 竞态导致残留。延迟 cancel 兜底彻底移除（保活服务维持前台即可）。
+                    try {
+                        getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
+                    } catch (_: Exception) {}
+                    metadataRefreshHandler.postDelayed({
+                        try {
+                            getSystemService(NotificationManager::class.java)?.cancel(NOTIFICATION_ID)
+                        } catch (_: Exception) {}
+                    }, 800)
+                    Log.d(TAG, "startForegroundDetached: DETACH + cancel done")
+                } catch (e: Exception) {
+                    Log.w(TAG, "startForegroundDetached DETACH failed: $e")
+                }
+            } else {
+                startForeground(NOTIFICATION_ID, builder.build())
+            }
+        } catch (e: Throwable) {
+            // 阶段6修复：导航等 App 夺走音频焦点后本 App 转后台，此时通知更新触发
+            // 的服务启动可能被系统拒绝（ForegroundServiceStartNotAllowedException，
+            // mAllowStartForeground=false）。必须吞掉并自停，防止：
+            // 1) 本次 startForeground 抛异常直接闪退；
+            // 2) startForegroundService 已拉起服务但未成功 startForeground 时，
+            //    5 秒后触发 RemoteServiceException("did not call startForeground") 二次崩溃。
+            // 播放本身由媒体3会话承载（MD3MusicMediaSessionService），本服务自停不影响播放。
+            Log.w(TAG, "startForegroundDetached rejected: ${e.javaClass.simpleName}: ${e.message}")
+            // MD3Music fork（方案B·封面修复）：仅当服务尚未成功进入前台时才自停
+            // （防 startForegroundService 已拉起但未 startForeground 的 5 秒崩溃）。
+            // 若服务已在运行（foregroundStarted=true，本次只是通知更新被拒），保留服务，
+            // 否则 onDestroy 会 recycle lastArtBitmap，导致后台封面线程注入时
+            // bitmap 已被回收（Can't compress a recycled bitmap），封面缺失。
+            if (!foregroundStarted) {
+                try { stopSelf() } catch (_: Throwable) {}
+            }
+        }
+    }
+
     /// 前台服务占位通知：唤醒场景下服务可能刚被 startForegroundService 拉起，
     /// 需要尽快进入前台。真实内容随后由 Dart 端 updateNotification 覆盖。
     private fun ensureForeground() {
@@ -836,7 +1084,7 @@ class AudioPlaybackService : Service() {
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
-            startForeground(NOTIFICATION_ID, builder.build())
+            startForegroundDetached(builder)
         } catch (_: Exception) {}
     }
 
@@ -935,6 +1183,9 @@ class AudioPlaybackService : Service() {
     /// pendingMediaCommand 导致 play/next 命令派发丢失。
     private fun createHeadlessEngineAndDispatch() {
         playerReadyReceived = false
+        // MD3Music fork（方向1）：headless 引擎帧的播放器不创建媒体3会话，
+        // 使系统仅暴露前台 UI 播放器的会话，杜绝「媒体卡片暂停 vs app 内播放」不同步。
+        try { AudioPlayer.setMediaSessionEnabled(false) } catch (_: Throwable) {}
         val engineLatch = CountDownLatch(1)
         runOnMainThread {
             try {
@@ -1054,6 +1305,12 @@ class AudioPlaybackService : Service() {
                         stopSelf()
                         result.success(true)
                     }
+                    "prefetchCover" -> {
+                        // 方案B：Dart 切歌前预取后续歌曲封面到本地缓存，切歌时秒显。
+                        val urls = call.argument<List<String>>("urls").orEmpty()
+                        urls.forEach { prefetchCover(it) }
+                        result.success(true)
+                    }
                     "updateBluetoothLyric" -> {
                         currentBtLyricText = call.argument<String>("lyric") ?: ""
                         refreshMetadata()
@@ -1093,41 +1350,6 @@ class AudioPlaybackService : Service() {
         flutterEngine = engine
     }
 
-    private fun initMediaSession() {
-        val sessionIntent = packageManager.getLaunchIntentForPackage(packageName)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, sessionIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        mediaSession = MediaSessionCompat(this, "MD3MusicPlayback").apply {
-            setFlags(
-                MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or
-                        MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS
-            )
-            setSessionActivity(pendingIntent)
-            setCallback(object : MediaSessionCompat.Callback() {
-                override fun onPlay() = handleAction(ACTION_PLAY_PAUSE)
-                override fun onPause() = handleAction(ACTION_PLAY_PAUSE)
-                override fun onSkipToNext() = handleAction(ACTION_NEXT)
-                override fun onSkipToPrevious() = handleAction(ACTION_PREV)
-                override fun onStop() = handleAction(ACTION_STOP)
-                override fun onSeekTo(pos: Long) {
-                    val engine = flutterEngine ?: staticFlutterEngine ?: return
-                    MethodChannel(engine.dartExecutor.binaryMessenger, "com.md3music.md3music/floating_lyric")
-                        .invokeMethod("seekTo", pos.toInt())
-                }
-                override fun onCustomAction(action: String?, extras: android.os.Bundle?) {
-                    if (action == ACTION_TOGGLE_DESKTOP_LYRIC) {
-                        handleAction(ACTION_TOGGLE_DESKTOP_LYRIC)
-                    } else if (action == ACTION_TOGGLE_FAVORITE) {
-                        handleAction(ACTION_TOGGLE_FAVORITE)
-                    }
-                }
-            })
-            isActive = true
-        }
-    }
-
     private fun registerReceiver() {
         receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
@@ -1156,8 +1378,8 @@ class AudioPlaybackService : Service() {
             try {
                 val existingChannel = manager.getNotificationChannel(CHANNEL_ID)
                 if (existingChannel != null) {
-                    // 检查是否需要重建（重要度不是 LOW，或者声音未禁用）
-                    if (existingChannel.importance != NotificationManager.IMPORTANCE_LOW ||
+                    // 阶段6：重要度改为 MIN（保活通知彻底隐藏/最小化），旧渠道需删除重建
+                    if (existingChannel.importance != NotificationManager.IMPORTANCE_MIN ||
                         existingChannel.sound != null) {
                         manager.deleteNotificationChannel(CHANNEL_ID)
                     }
@@ -1165,21 +1387,39 @@ class AudioPlaybackService : Service() {
             } catch (_: Exception) {}
             
             // 创建静音通知渠道 - 修复荣耀/vivo 手机通知提示音问题
+            // 阶段6：IMPORTANCE_MIN（+ Android 14+ 的 STOP_FOREGROUND_DETACH 双保险），
+            // 使 1002 保活通知不常驻通知栏：DETACH 生效则完全隐藏；DETACH 失效（部分 ROM）
+            // 时也只会出现在折叠的「其他通知」区，不产生打扰。
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "音乐播放",
-                NotificationManager.IMPORTANCE_LOW  // 使用 LOW 而不是 DEFAULT，减少通知干扰
+                NotificationManager.IMPORTANCE_MIN
             ).apply {
-                description = "音乐播放控制"
+                description = "音乐播放控制（静默保活）"
                 setShowBadge(false)
-                lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
+                lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE
                 // 关键修复：禁用声音和震动
                 setSound(null, null)
                 enableVibration(false)
-                // 不在锁屏上显示（可选，根据需求调整）
-                // setLockscreenVisibility(Notification.VISIBILITY_PUBLIC)
             }
             manager.createNotificationChannel(channel)
+
+            // 阶段6：保活通知专用 MIN 频道（尽量隐形；配合 DETACH 彻底移除）
+            try {
+                manager.createNotificationChannel(
+                    NotificationChannel(
+                        KEEPALIVE_CHANNEL_ID,
+                        "播放保活",
+                        NotificationManager.IMPORTANCE_MIN
+                    ).apply {
+                        description = "静默保活（不显示）"
+                        setShowBadge(false)
+                        lockscreenVisibility = NotificationCompat.VISIBILITY_PRIVATE
+                        setSound(null, null)
+                        enableVibration(false)
+                    }
+                )
+            } catch (_: Exception) {}
         }
     }
 
@@ -1196,6 +1436,88 @@ class AudioPlaybackService : Service() {
         )
     }
 
+    // ===== 方案A：在线封面本地缓存（根治切歌空档） =====
+
+    private fun coverCacheFile(artUrl: String): File? {
+        return try {
+            val dir = File(cacheDir, COVER_CACHE_DIR)
+            if (!dir.exists()) dir.mkdirs()
+            File(dir, artUrl.hashCode().toString() + ".jpg")
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /// 从缓存取封面：先内存后磁盘，命中即返回（同步、无需网络）。
+    private fun getCachedCover(artUrl: String): Bitmap? {
+        coverMemoryCache[artUrl]?.let { return it }
+        val cacheFile = coverCacheFile(artUrl) ?: return null
+        if (cacheFile.exists()) {
+            return try {
+                val bmp = BitmapFactory.decodeFile(cacheFile.absolutePath)
+                if (bmp != null) {
+                    coverMemoryCache[artUrl] = bmp
+                    Log.d(TAG, "封面磁盘缓存命中 url=$artUrl")
+                }
+                bmp
+            } catch (_: Exception) {
+                null
+            }
+        }
+        return null
+    }
+
+    /// 将封面写入磁盘缓存 + 内存缓存；超过上限时清理最旧文件。
+    private fun putCoverCache(artUrl: String, bmp: Bitmap) {
+        try {
+            coverMemoryCache[artUrl] = bmp
+            val cacheFile = coverCacheFile(artUrl) ?: return
+            if (!cacheFile.exists()) {
+                FileOutputStream(cacheFile).use { out ->
+                    bmp.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                    out.flush()
+                }
+            }
+            // 限制磁盘缓存数量：清空最旧文件
+            try {
+                val dir = File(cacheDir, COVER_CACHE_DIR)
+                val files = dir.listFiles()?.filter { it.isFile } ?: emptyList()
+                if (files.size > COVER_CACHE_MAX) {
+                    files.sortedBy { it.lastModified() }
+                        .take(files.size - COVER_CACHE_MAX)
+                        .forEach { it.delete() }
+                }
+            } catch (_: Exception) {}
+        } catch (_: Exception) {}
+    }
+
+    /// 主动预取封面到缓存（方案B：进入下一首前调用，命中后切歌秒显）。
+    private fun prefetchCover(artUrl: String?) {
+        if (artUrl.isNullOrEmpty()) return
+        if (!artUrl.startsWith("http://") && !artUrl.startsWith("https://")) return
+        if (getCachedCover(artUrl) != null) return  // 已缓存，无需下载
+        // 网路线程下载并写入缓存，不阻塞播放
+        Thread {
+            try {
+                val conn = java.net.URL(artUrl).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 3000
+                conn.readTimeout = 5000
+                conn.instanceFollowRedirects = true
+                try {
+                    val bmp = BitmapFactory.decodeStream(conn.inputStream)
+                    if (bmp != null) {
+                        val small = resizeBitmap(bmp, 512)
+                        if (small !== bmp) bmp.recycle()
+                        putCoverCache(artUrl, small)
+                        Log.d(TAG, "封面预取完成 url=$artUrl")
+                    }
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (_: Exception) {}
+        }.start()
+    }
+
     /// 根据 URI 类型加载封面 Bitmap，支持：
     /// - http(s):// → URL 下载（在线音乐）
     /// - content:// → ContentResolver 加载（MediaStore albumart）
@@ -1204,8 +1526,10 @@ class AudioPlaybackService : Service() {
     /// - 纯文件路径 → 直接用 MediaMetadataRetriever 读内嵌封面
     /// [fallbackFilePath] 在所有方式失败后作为最终回退
     private fun loadArtworkBitmap(artUri: String, fallbackFilePath: String?): Bitmap? {
-        // 1. http(s):// 在线封面
+        // 1. http(s):// 在线封面（方案A：优先本地缓存，命中免下载秒显）
         if (artUri.startsWith("http://") || artUri.startsWith("https://")) {
+            // 缓存命中：内存或磁盘，直接返回（切歌空档的根治关键）
+            getCachedCover(artUri)?.let { return it }
             return try {
                 // P0: HttpURLConnection 显式设置超时，避免慢响应导致线程永久阻塞
                 val conn = java.net.URL(artUri).openConnection() as java.net.HttpURLConnection
@@ -1216,6 +1540,8 @@ class AudioPlaybackService : Service() {
                     val bmp = BitmapFactory.decodeStream(conn.inputStream)
                     if (bmp != null) {
                         Log.i(TAG, "封面 http 下载成功 ${bmp.width}x${bmp.height} url=$artUri")
+                        // 写入本地缓存，下次切到同歌秒显
+                        putCoverCache(artUri, bmp)
                     } else {
                         Log.w(TAG, "封面 http 解码失败(响应非图片/空流) url=$artUri")
                     }
@@ -1346,6 +1672,8 @@ class AudioPlaybackService : Service() {
         lastDuration = duration
         // 通知会在下方所有分支中调用 startForeground，标记已进入前台
         foregroundStarted = true
+        // 方案B阶段4：随通知更新把桌面歌词/收藏状态推到媒体3会话（渲染成通知栏按钮）。
+        pushMedia3CustomActions(desktopLyricEnabled, isFavorited)
         // 计算最终显示值：蓝牙歌词开启且有当前歌词时，title→歌词，artist→「作者 - 标题」
         val displayTitle: String
         val displayArtist: String
@@ -1358,47 +1686,30 @@ class AudioPlaybackService : Service() {
             displayArtist = originalArtist
         }
 
-        // P0: 复用缓存的 PendingIntent（懒加载一次，后续共用），避免每次通知重建对象
+        // 点击保活通知回到 App（懒加载一次，后续共用）
         val pendingIntent = launchPendingIntent()
-        val prevIntent = servicePendingIntent(1, ACTION_PREV)
-        val playPauseIntent = servicePendingIntent(2, ACTION_PLAY_PAUSE)
-        val nextIntent = servicePendingIntent(3, ACTION_NEXT)
-        val toggleLyricIntent = servicePendingIntent(4, ACTION_TOGGLE_DESKTOP_LYRIC)
-        val toggleFavoriteIntent = servicePendingIntent(5, ACTION_TOGGLE_FAVORITE)
 
-        val playPauseIcon = if (isPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-        val lyricIconRes = if (desktopLyricEnabled) R.drawable.ic_lyric_on else R.drawable.ic_lyric_off
-        val favoriteIconRes = if (isFavorited) R.drawable.ic_favorite_on else R.drawable.ic_favorite_off
-
-        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+        // 方案B阶段5：自定义 MediaSessionCompat 已移除，展示层由媒体3 now-playing 通知承载。
+        // 本服务仍须 startForeground 保持前台（Android 8+ 硬性要求），故构建「静默保活通知」：
+        // 阶段6：内容置空 + MIN 频道 + DETACH，使 1002 保活通知尽量隐形/彻底移除。
+        val builder = NotificationCompat.Builder(this, KEEPALIVE_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentTitle(displayTitle)
-            .setContentText(displayArtist)
+            .setContentTitle("")          // 空内容：即使残留也只是小图标
+            .setContentText("")
             .setContentIntent(pendingIntent)
             .setOngoing(true)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setPriority(NotificationCompat.PRIORITY_LOW)  // 降低优先级，配合渠道的 LOW 设置
-            .setOnlyAlertOnce(true)  // 关键：确保通知更新时不会触发声音/震动
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            .setPriority(NotificationCompat.PRIORITY_MIN)  // 最小打扰，避免与媒体3通知并列醒目
+            .setOnlyAlertOnce(true)
             .setShowWhen(false)
-            .addAction(android.R.drawable.ic_media_previous, "上一首", prevIntent)
-            .addAction(playPauseIcon, if (isPlaying) "暂停" else "播放", playPauseIntent)
-            .addAction(favoriteIconRes, "收藏", toggleFavoriteIntent)
-            .addAction(android.R.drawable.ic_media_next, "下一首", nextIntent)
-            .addAction(lyricIconRes, "桌面歌词", toggleLyricIntent)
-            .setLargeIcon(BitmapFactory.decodeResource(resources, android.R.drawable.ic_menu_myplaces))
-            .setStyle(
-                androidx.media.app.NotificationCompat.MediaStyle()
-                    .setMediaSession(mediaSession?.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 3)
-            )
+            .setSilent(true)
 
         // 封面加载：支持 http(s):// / content:// / local:// / file:// / 文件路径
         val effectiveArtUrl = artUrl ?: fallbackFilePath
 
-        // 先立即发布通知（默认封面），避免 startForegroundService 的 5 秒限制；
-        // 同时立即同步 MediaSession 元数据（title/artist/时长），
-        // 防止封面缺失时残留上一首歌曲的封面/标题（云盘歌封面为异步提取，会晚到）
-        startForeground(NOTIFICATION_ID, builder.build())
+        // 先立即进入前台（保活通知 DETACH，Android 14+ 不常驻），避免 startForegroundService 的 5 秒限制；
+        // 元数据由媒体3会话注入（见下），无需本服务发布 MediaSession 元数据。
+        startForegroundDetached(builder)
 
         // P0: 不再广播「无 bitmap」的首帧 metadata——SystemUI 控制中心主面板
         // MainPanelItemViewHolder 会先 setCover(null) 并在 flip 动画中吞掉后续补帧，
@@ -1412,7 +1723,12 @@ class AudioPlaybackService : Service() {
                     if (originalBitmap != null) {
                         // P0: 统一降采样到 512px 后再缓存/使用，避免原始大图（2000x2000+）常驻内存
                         val displayBitmap = resizeBitmap(originalBitmap, 512)
-                        if (displayBitmap !== originalBitmap) {
+                        // MD3Music fork：仅回收「非缓存」的原图。loadArtworkBitmap 命中内存/磁盘
+                        // 缓存时返回的是 coverMemoryCache 里的共享对象，recycle 它会污染缓存，
+                        // 导致后续 loadArtworkBitmap / injectCover 命中已回收位图 → 封面加载失败
+                        // / resizeBitmap 抛 IllegalStateException。
+                        val sharedCacheEntry = coverMemoryCache[effectiveArtUrl]
+                        if (displayBitmap !== originalBitmap && originalBitmap !== sharedCacheEntry) {
                             originalBitmap.recycle()
                         }
                         // 切歌时不再显式 recycle 旧封面：主线程 refreshMetadata（蓝牙歌词
@@ -1426,67 +1742,33 @@ class AudioPlaybackService : Service() {
                         // 同步封面到桌面小组件（与通知栏/MediaSession 一致）
                         MusicWidgetProvider.cachedArtwork = resizeBitmap(displayBitmap, 200)
                         MusicWidgetProvider.notifyArtworkChanged(this@AudioPlaybackService)
-                        // 通知 LargeIcon：缩放到 192px（~64dp @ xxhdpi）
-                        val iconBitmap = resizeBitmap(displayBitmap, 192)
-                        builder.setLargeIcon(iconBitmap)
-                        startForeground(NOTIFICATION_ID, builder.build())
 
-                        // MediaSession Metadata：用降采样 bitmap + URI
-                        // title/artist 用 display 值（蓝牙歌词开启时为歌词文本）
-                        updateMediaSessionMetadata(
-                            displayTitle, displayArtist, duration, displayBitmap, effectiveArtUrl
-                        )
-                        Log.i(TAG, "封面后台加载完成，已更新 MediaSession bitmap=${displayBitmap.width}x${displayBitmap.height}")
+                        // 封面同步注入 just_audio 的媒体3 会话（该会话无封面，播放中会被 SystemUI
+                        // 提为控制中心顶层）。用官方 replaceMediaItem 同 uri 替换当前 MediaItem，
+                        // 只更新 metadata 不打断播放，保证控制中心/媒体3通知栏选中媒体3 会话时也有封面。
+                        // 阶段2：改为直接强依赖调用（已通过 media3-common 建立编译类路径），
+                        // 移除原反射的静默吞错（catch Throwable），使封面注入失败可被日志暴露。
+                        AudioPlayer.updateActiveSessionMetadata(displayTitle, displayArtist, displayBitmap, effectiveArtUrl)
+                        Log.i(TAG, "封面后台加载完成，已注入媒体3会话 bitmap=${displayBitmap.width}x${displayBitmap.height}")
                     } else {
                         // 封面链路日志：所有来源均失败 → MediaSession 无 bitmap
                         Log.w(TAG, "封面后台加载失败(所有来源返回 null) effectiveArtUrl=$effectiveArtUrl " +
                                 "MediaSession 将缺失 ART bitmap")
-                        // 封面确实失败：兜底发无 bitmap 的 metadata，避免残留上一首封面/标题
-                        updateMediaSessionMetadata(displayTitle, displayArtist, duration, null, effectiveArtUrl)
+                        // 封面确实失败：兜底同步标题到媒体3会话（媒体3 Metadata 由 ExoPlayer
+                        // 播放内容自驱动，此处仅保证标题/艺术家正确）
+                        AudioPlayer.updateActiveSessionTitleArtist(displayTitle, displayArtist)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "封面后台线程异常 ${e.message}", e)
-                    // 异常也兜底发无 bitmap metadata，避免残留上一首封面
-                    updateMediaSessionMetadata(displayTitle, displayArtist, duration, null, effectiveArtUrl)
+                    // 异常也兜底同步标题到媒体3会话
+                    AudioPlayer.updateActiveSessionTitleArtist(displayTitle, displayArtist)
                 }
             }.start()
         } else {
             Log.w(TAG, "无有效封面源(artUrl、fallback 均为空)，MediaSession 无封面")
-            // 无封面源：发无 bitmap metadata，保证系统能显示标题/艺术家（并清除上一首残留）
-            updateMediaSessionMetadata(displayTitle, displayArtist, duration, null, effectiveArtUrl)
+            // 无封面源：同步标题到媒体3会话（保证标题/艺术家正确）
+            AudioPlayer.updateActiveSessionTitleArtist(displayTitle, displayArtist)
         }
-
-        mediaSession?.setPlaybackState(
-            PlaybackStateCompat.Builder()
-                .setState(
-                    if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
-                    position, 1f
-                )
-                .setActions(
-                    PlaybackStateCompat.ACTION_PLAY or
-                            PlaybackStateCompat.ACTION_PAUSE or
-                            PlaybackStateCompat.ACTION_PLAY_PAUSE or
-                            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                            PlaybackStateCompat.ACTION_STOP or
-                            PlaybackStateCompat.ACTION_SEEK_TO
-                )
-                .addCustomAction(
-                    PlaybackStateCompat.CustomAction.Builder(
-                        ACTION_TOGGLE_DESKTOP_LYRIC,
-                        "桌面歌词",
-                        if (desktopLyricEnabled) R.drawable.ic_lyric_on else R.drawable.ic_lyric_off
-                    ).build()
-                )
-                .addCustomAction(
-                    PlaybackStateCompat.CustomAction.Builder(
-                        ACTION_TOGGLE_FAVORITE,
-                        "收藏",
-                        if (isFavorited) R.drawable.ic_favorite_on else R.drawable.ic_favorite_off
-                    ).build()
-                )
-                .build()
-        )
 
         // 同步播放状态到 Lyricon：必须走 Auto PlaybackState（带 position+speed 时间戳）。
         // 不能调 Boolean 重载 / setPosition / seekTo，否则会切回 Manually 并 seek 到
@@ -1498,40 +1780,34 @@ class AudioPlaybackService : Service() {
         } catch (_: Exception) {}
     }
 
-    /// 统一更新 MediaSession 元数据。每次新建 Builder 重建，
-    /// 避免封面缺失/加载失败时残留上一首歌曲的封面 bitmap。
-    /// [artwork] 为 null 时仅同步 title/artist（封面留给异步线程补充）。
-    private fun updateMediaSessionMetadata(
-        title: String,
-        artist: String,
-        duration: Long,
-        artwork: Bitmap?,
-        artUri: String?
-    ) {
-        val metaBuilder = MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, title)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, artist)
-            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
-        if (artwork != null) {
-            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artwork)
-            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork)
-        }
-        if (!artUri.isNullOrEmpty()) {
-            metaBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, artUri)
-        }
-        // LyricInfo 歌词转发：发布整首歌词 JSON 到 MediaMetadata.extras，
-        // 供 ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取（空则不发布）
-        if (currentLyricInfo.isNotEmpty()) {
-            metaBuilder.putString(EXTRA_LYRIC_INFO, currentLyricInfo)
-        }
-        mediaSession?.setMetadata(metaBuilder.build())
+    /// 方案B阶段4：把当前桌面歌词/收藏状态推给媒体3会话，渲染为通知栏自定义按钮。
+    /// 图标资源在 app 模块（R.drawable），fork 仅持有 command/回调，不依赖资源。
+    /// 阶段6：下一首已改回 media3 原生按钮，这里只保留桌面歌词/收藏两个自定义按钮。
+    private fun pushMedia3CustomActions(desktopLyricEnabled: Boolean, isFavorited: Boolean) {
+        try {
+            AudioPlayer.setActiveSessionCustomActions(
+                desktopLyricEnabled, isFavorited,
+                R.drawable.ic_lyric_on, R.drawable.ic_lyric_off,
+                R.drawable.ic_favorite_on, R.drawable.ic_favorite_off,
+            )
+        } catch (_: Throwable) {}
     }
 
     /// 蓝牙歌词轻量刷新：歌词行变化或开关切换时，复用缓存的 bitmap 和播放状态
     /// 重建通知和 MediaSession 元数据，不重新下载封面。
     /// 仅在 showNotification 至少被调用过一次后有效（originalTitle 非空判定）。
     private fun refreshMetadata() {
-        if (originalTitle.isEmpty() && originalArtist.isEmpty()) return
+        val lyricInfoChanged = currentLyricInfo != lastShownLyricInfo
+        if (originalTitle.isEmpty() && originalArtist.isEmpty()) {
+            // 阶段6修复：标题/艺术家尚未由 showNotification 设置（如冷启动恢复播放态时
+            // lyricInfo 推送先于首次通知更新到达）时，不能整体 return——否则本次 lyricInfo
+            // 被丢弃。Dart 端每首歌只推一次（_lyricInfoPushed 去重），丢弃后不再重试，
+            // 该曲的 lyricInfo 就永久丢失。此处仅当 lyricInfo 无变化才跳过。
+            if (!lyricInfoChanged) return
+            lastShownLyricInfo = currentLyricInfo
+            scheduleMetadataRefresh()
+            return
+        }
         val displayTitle: String
         val displayArtist: String
         if (bluetoothLyricEnabled && currentBtLyricText.isNotEmpty()) {
@@ -1547,50 +1823,14 @@ class AudioPlaybackService : Service() {
         // 但 LyricInfo 歌词转发（currentLyricInfo 变化）不依赖 title/artist 变化，
         // 即使 title/artist 未变也需要更新 MediaSession 元数据以写入 extras.lyricInfo，
         // 因此本跳过逻辑仅在 lyricInfo 不变时生效。
-        val lyricInfoChanged = currentLyricInfo != lastShownLyricInfo
         if (displayTitle == lastShownBtLyricTitle && displayArtist == lastShownBtLyricArtist && !lyricInfoChanged) return
         lastShownBtLyricTitle = displayTitle
         lastShownBtLyricArtist = displayArtist
         lastShownLyricInfo = currentLyricInfo
 
-        // P0: 通知重建节流：歌词行变化驱动，通知栏重建限制为最少 2s 一次
-        // （车机 AVRCP 歌词读的是 MediaSession，不受节流影响；通知栏歌词 2s 刷新足够）
-        val now = SystemClock.elapsedRealtime()
-        val shouldUpdateNotification = now - lastBtLyricNotifyTime >= BT_NOTIFY_THROTTLE_MS
-        if (shouldUpdateNotification) {
-            lastBtLyricNotifyTime = now
-            val playPauseIcon = if (lastIsPlaying) android.R.drawable.ic_media_pause else android.R.drawable.ic_media_play
-            val lyricIconRes = if (lastDesktopLyricEnabled) R.drawable.ic_lyric_on else R.drawable.ic_lyric_off
-            val favoriteIconRes = if (lastIsFavorited) R.drawable.ic_favorite_on else R.drawable.ic_favorite_off
-
-            val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_media_play)
-                .setContentTitle(displayTitle)
-                .setContentText(displayArtist)
-                .setContentIntent(launchPendingIntent())
-                .setOngoing(true)
-                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setOnlyAlertOnce(true)
-                .setShowWhen(false)
-                .addAction(android.R.drawable.ic_media_previous, "上一首", servicePendingIntent(1, ACTION_PREV))
-                .addAction(playPauseIcon, if (lastIsPlaying) "暂停" else "播放", servicePendingIntent(2, ACTION_PLAY_PAUSE))
-                .addAction(favoriteIconRes, "收藏", servicePendingIntent(5, ACTION_TOGGLE_FAVORITE))
-                .addAction(android.R.drawable.ic_media_next, "下一首", servicePendingIntent(3, ACTION_NEXT))
-                .addAction(lyricIconRes, "桌面歌词", servicePendingIntent(4, ACTION_TOGGLE_DESKTOP_LYRIC))
-                .setStyle(
-                    androidx.media.app.NotificationCompat.MediaStyle()
-                        .setMediaSession(mediaSession?.sessionToken)
-                        .setShowActionsInCompactView(0, 1, 3)
-                )
-
-            // 复用缓存的封面 bitmap（缩放到 192px 作为通知 LargeIcon）
-            val cachedBitmap = lastArtBitmap
-            if (cachedBitmap != null) {
-                builder.setLargeIcon(resizeBitmap(cachedBitmap, 192))
-            }
-            notificationManager?.notify(NOTIFICATION_ID, builder.build())
-        }
+        // 方案B阶段5：保活通知已由 startForegroundDetached 分离（不常驻通知栏），
+        // 不再在此显式 notify（否则第二条无封面卡片会重新出现，造成"封面消失"观感）。
+        // 展示层完全交给媒体3 now-playing 通知（有封面/控制按钮）。
 
         // P0: setMetadata 300ms 合并节流：歌词行高频变化时合并为一次刷新，
         // 避免无节流 setMetadata 驱动 SystemUI 媒体卡片高频刷新（魅族等 ROM 卡顿）
@@ -1623,29 +1863,18 @@ class AudioPlaybackService : Service() {
             displayTitle = originalTitle
             displayArtist = originalArtist
         }
-        val metaBuilder = MediaMetadataCompat.Builder()
-            .putString(MediaMetadataCompat.METADATA_KEY_TITLE, displayTitle)
-            .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, displayArtist)
-            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, lastDuration)
-        val compressArt = try {
-            getSharedPreferences("FlutterSharedPreferences", Context.MODE_PRIVATE)
-                .getBoolean("flutter.settings_bluetooth_lyric_compress_art", false)
-        } catch (_: Exception) {
-            false
-        }
-        val artwork = if (compressArt) lastArtThumb else lastArtBitmap
-        if (artwork != null) {
-            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ART, artwork)
-            metaBuilder.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, artwork)
-        }
-        if (!lastArtUrl.isNullOrEmpty()) {
-            metaBuilder.putString(MediaMetadataCompat.METADATA_KEY_ART_URI, lastArtUrl)
-        }
-        // LyricInfo 歌词转发：蓝牙歌词刷新路径也保留 lyricInfo（空则不发布）
-        if (currentLyricInfo.isNotEmpty()) {
-            metaBuilder.putString(EXTRA_LYRIC_INFO, currentLyricInfo)
-        }
-        mediaSession?.setMetadata(metaBuilder.build())
+        // 方案B阶段5：自定义会话已移除，不再 setMetadata。
+        // 媒体3会话的元数据（标题/艺术家/封面/LyricInfo）由下方 updateActiveSession* 同步，
+        // 播放态由 ExoPlayer 自动驱动系统媒体卡片；封面压缩开关不再影响 MediaSession 下发。
+        // 方案B阶段3：把歌词行显示值同步到媒体3会话（蓝牙歌词逐句刷新路径）。
+        // 媒体3会话原生不带 AVRCP 歌词；此处复用它当前 MediaItem 仅更新 title/artist，
+        // 使车机/锁屏读到媒体3会话时与自定义会话的歌词一致（两会话不同步的根治方向）。
+        AudioPlayer.updateActiveSessionTitleArtist(displayTitle, displayArtist)
+        // 方案B阶段3b：把整首歌词 JSON（LyricInfo extras）也下发媒体3会话，供
+        // ColorOS 桌面歌词 / LyricInfo 模块读取；与自定义会话并列保留（为后续移除做准备）。
+        AudioPlayer.updateActiveSessionLyricInfo(currentLyricInfo)
+        // 方案B阶段4：按当前开关状态渲染媒体3通知栏的自定义按钮（桌面歌词/收藏）。
+        pushMedia3CustomActions(lastDesktopLyricEnabled, lastIsFavorited)
     }
 
     override fun onDestroy() {
@@ -1660,7 +1889,6 @@ class AudioPlaybackService : Service() {
             } catch (_: Exception) {}
         }
         lockScreenReceiver = null
-        mediaSession?.release()
         // 释放 Lyricon Provider
         try {
             lyriconProvider?.unregister()
@@ -1679,6 +1907,17 @@ class AudioPlaybackService : Service() {
         lastArtBitmap = null
         lastArtThumb?.let { if (!it.isRecycled) it.recycle() }
         lastArtThumb = null
+        // 方案B阶段1：解除媒体3会话承载服务绑定，并让 fork 注销 host
+        if (media3ServiceBound) {
+            try {
+                unbindService(media3ServiceConnection)
+            } catch (_: Exception) {}
+            media3ServiceBound = false
+        }
+        // 方案B阶段4：注销媒体3自定义命令监听
+        try {
+            AudioPlayer.setCustomActionListener(null)
+        } catch (_: Throwable) {}
         super.onDestroy()
     }
 }

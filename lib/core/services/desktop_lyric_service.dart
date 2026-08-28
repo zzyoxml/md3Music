@@ -856,11 +856,14 @@ class DesktopLyricService {
   }
 
   /// LyricInfo：歌词就绪后推送一次整首歌词（_lyricInfoPushed 去重，每首歌 1 次）。
+  /// 仅在 [_pushLyricInfo] 真正完成推送后才置位去重标志：若中途因无歌/空行等提前
+  /// 返回，则保持 false 让后续 tick 重试，避免该曲 lyricInfo 永久丢失。
   void _maybePushLyricInfo() {
     if (!_lyricInfoEnabled || _lyricInfoPushed) return;
     if (_lines.isEmpty) return;
-    _lyricInfoPushed = true;
-    _pushLyricInfo();
+    if (_pushLyricInfo()) {
+      _lyricInfoPushed = true;
+    }
   }
 
   /// 构造并推送 lyricInfo JSON（LyricInfo 协议标准格式）。
@@ -871,10 +874,11 @@ class DesktopLyricService {
   /// - format："elrc"（消费方据此启用逐字解析，否则按纯 LRC 处理）
   /// - translation："lrc"（存在翻译行时设置；翻译行为与主行相同时间戳的 LRC 行，
   ///   消费方据此把相邻同时间戳行识别为翻译）
-  void _pushLyricInfo() {
-    if (!_lyricInfoEnabled || _player == null) return;
+  /// 返回是否真正发起了推送（供 _maybePushLyricInfo 决定是否置位去重标志）。
+  bool _pushLyricInfo() {
+    if (!_lyricInfoEnabled || _player == null) return false;
     final song = _player!.currentSong;
-    if (song == null) return;
+    if (song == null) return false;
 
     final lyricBuf = StringBuffer();
     var hasTranslation = false;
@@ -908,7 +912,7 @@ class DesktopLyricService {
 
     if (lyricBuf.isEmpty) {
       // 无有效歌词行：不推送（保持移除状态）
-      return;
+      return false;
     }
 
     final lyricOut = lyricBuf.toString().trimRight();
@@ -921,6 +925,7 @@ class DesktopLyricService {
       if (hasTranslation) 'translation': 'lrc',
     });
     MediaNotificationService.updateLyricInfo(json);
+    return true;
   }
 
   /// 毫秒 → LRC 行级时间标签 [mm:ss.xxx]

@@ -34,6 +34,12 @@ public class MainMethodCallHandler implements MethodCallHandler {
                 break;
             }
             List<Object> rawAudioEffects = call.argument("androidAudioEffects");
+            // MD3Music fork（方案B·双播放器轮换）：所有播放器（含 crossfade 辅播放器）都创建
+            // 媒体3会话。跨fade 时 aux 播放新歌，其 play() 经 fork 的 syncSingleSessionToHost
+            // 把 aux 会话设为唯一 host 会话（移除主会话），使媒体卡片/封面跟随当前播放的
+            // 新歌，且不迁移播放主体（避免收敛回主播放器的重新加载停顿）。会话收敛由
+            // AudioPlayer.play() 权威执行，系统任意时刻只暴露一个活跃媒体会话。
+            boolean createMediaSession = true;
             players.put(
                 id,
                 new AudioPlayer(
@@ -44,7 +50,8 @@ public class MainMethodCallHandler implements MethodCallHandler {
                     rawAudioEffects,
                     call.argument("androidAudioOffloadPreferences"),
                     call.argument("androidOffloadSchedulingEnabled"),
-		    call.argument("useLazyPreparation")
+                    call.argument("useLazyPreparation"),
+                    createMediaSession
                 )
             );
             result.success(null);

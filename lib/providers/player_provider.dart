@@ -610,6 +610,23 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       ) {
         try {
           if (sequenceState != null && sequenceState.currentSource != null) {
+            // 外部切歌同步：控制中心(媒体3)/耳机电线/自动播放下一首会直接推进
+            // just_audio 的播放队列，这里在 currentSource 变化时把「当前歌曲」同步
+            // 到 UI 与原生自定义 MediaSession/通知（否则自定义会话仍停留在上一首）。
+            // 用 tag 里的 song id 反查播放列表，兼容 shuffle 下的 effective 顺序。
+            final currentTag = sequenceState.currentSource!.tag;
+            if (currentTag is Map && currentTag['id'] != null) {
+              final newIndex = _playlist.indexWhere(
+                (s) => s.id == currentTag['id'],
+              );
+              if (newIndex >= 0 && newIndex != _currentIndex) {
+                _currentIndex = newIndex;
+                _currentSong = _playlist[newIndex];
+                _recordHistory(_currentSong!);
+                _updateNotification();
+                notifyListeners();
+              }
+            }
             final effectiveIndex = sequenceState.effectiveSequence.indexOf(
               sequenceState.currentSource!,
             );
@@ -1019,14 +1036,23 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         // 回写解析后的真实路径（content:// → file://），避免起播后再解析一次
         song = song.copyWith(localPath: url);
       }
-      // 解析期间用户可能已经切歌 / 换了列表：丢弃这次预加载
-      if (_currentSong?.id != fromSongId ||
-          nextIndex >= _playlist.length ||
-          _playlist[nextIndex].id != song.id) {
-        return;
+      // MD3Music fork（方案2·预取提速）：crossfade 准备阶段立即预取下一首封面到原生
+      // 内存/磁盘缓存，确保切歌瞬间封面已就绪、命中缓存秒显（即使此前
+      // _prefetchUpcomingCovers 的预取因主通道未注册而静默失败，这里也是双保险）。
+      if (song.isOnline && song.artworkUri != null) {
+        MediaNotificationService.prefetchCover([song.artworkUri]);
       }
       _playlist[nextIndex] = song;
-      final ok = await _audioService?.prepareCrossfade(url, speed: _speed);
+      final ok = await _audioService?.prepareCrossfade(
+        url,
+        speed: _speed,
+        // MD3Music fork：传真实歌曲 id，使 aux/main 的 currentSong.id 为真实 hash，
+        // 否则 just_audio 生成随机 id，DesktopLyricService 拉歌词失败（蓝牙歌词/词幕不显示）。
+        id: song.id,
+        title: song.displayName,
+        artist: song.artist,
+        artUri: song.isOnline ? song.artworkUri : null,
+      );
       if (ok != true) {
         // ignore: avoid_print
         print('[Crossfade] prepare 放弃：备用播放器加载失败');
@@ -1084,6 +1110,10 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         onCrossover: () => _applyCrossfadeSwitch(nextIndex, nextSong, quality),
       );
       await fade;
+      // MD3Music fork（方案A）：收敛回主播放器后，主播放器成为 sActivePlayer，
+      // 重新下发一次通知封面——交叉点那次注入时 sActivePlayer 还是辅播放器（aux
+      // 无媒体会话），封面没进主播放器会话，通知栏会缺封面。此处补一次。
+      _updateNotification();
       // 旧播放源到这一刻才真正停止发声
       if (prevSong != null && prevSong.isOnline) {
         // 可选扩展：播放源停止回调（默认关闭）
@@ -2580,9 +2610,32 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
+  /// 预取队列中后续歌曲封面到原生本地缓存（方案B）。
+  /// 切歌前把接下来数首的封面下载到缓存，切换时命中缓存秒显，根治封面空档。
+  void _prefetchUpcomingCovers() {
+    try {
+      if (_playlist.isEmpty || _currentIndex < 0) return;
+      final urls = <String?>[];
+      // 预取接下来 3 首（含环回，贴合常见循环播放）
+      for (int i = 1; i <= 3; i++) {
+        if (_playlist.length <= 1) break;
+        final idx = (_currentIndex + i) % _playlist.length;
+        if (idx == _currentIndex) break;
+        final s = _playlist[idx];
+        // 仅在线歌走网络；本地歌封面本就秒读
+        if (s.isOnline) urls.add(s.artworkUri);
+      }
+      if (urls.isNotEmpty) {
+        MediaNotificationService.prefetchCover(urls);
+      }
+    } catch (_) {}
+  }
+
   void _updateNotification() {
     final song = _currentSong;
     if (song == null) return;
+    // 方案B：切歌后预取队列后续歌曲封面，下一首切换时命中缓存秒显
+    _prefetchUpcomingCovers();
     // Check favorite status from FavoritesProvider via global context
     bool isFavorited = false;
     try {
@@ -2796,18 +2849,32 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   // 记录上次的 enabled 状态，只在 disabled→enabled 边界触发重推，
   // 避免断开/超时等保持 enabled 的事件反复触发歌词重推
   bool _lyriconWasEnabled = false;
+  /// 上次 Lyricon 连接状态（用于检测「断开 → 重连成功」边界，重推当前歌曲）。
+  LyriconConnectionState _lastLyriconState = LyriconConnectionState.disabled;
 
-  /// Lyricon 状态变化时（enabled 从 false→true，如 auto_restored / connected），
-  /// 重置 _lastLyriconSong 强制重推当前歌曲。enabled=false 时无需处理，
-  /// 等下次 enabled 时再推（_handleLyriconSongChange 会自然恢复）。
+  /// Lyricon 状态变化时：
+  /// - enabled 从 false→true（auto_restored / connected）→ 重置 _lastLyriconSong 重推。
+  /// - enabled 保持 true 但连接状态从断开（disconnected/timeout）恢复为 connected
+  ///   （Lyricon 断开后自动重连成功）→ 同样重推当前歌曲，否则重连后词幕无歌词数据不显示。
   void _handleLyriconEnabledChanged() {
     final enabled = LyriconProviderService.instance.enabled;
+    final state = LyriconProviderService.instance.state;
     if (enabled && !_lyriconWasEnabled) {
       _lyriconWasEnabled = true;
+      _lastLyriconState = state;
       _lastLyriconSong = null;
       _handleLyriconSongChange();
     } else if (!enabled) {
       _lyriconWasEnabled = false;
+      _lastLyriconState = LyriconConnectionState.disabled;
+    } else if (_lastLyriconState != state) {
+      final wasDisconnected = _lastLyriconState == LyriconConnectionState.disconnected ||
+          _lastLyriconState == LyriconConnectionState.timeout;
+      _lastLyriconState = state;
+      if (wasDisconnected && state == LyriconConnectionState.connected) {
+        _lastLyriconSong = null;
+        _handleLyriconSongChange();
+      }
     }
   }
 
@@ -2919,8 +2986,8 @@ class AudioServiceLoader {
   static Future<dynamic> load() async {
     return AudioService();
   }
-}
 
+}
 just_audio.UriAudioSource createAudioSourceWeb({
   required String id,
   required String url,
