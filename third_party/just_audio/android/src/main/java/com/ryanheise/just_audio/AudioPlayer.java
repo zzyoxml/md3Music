@@ -979,7 +979,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             // MD3Music fork（方向1）：createMediaSession=false（headless 播放器）或进程级
             // 媒体会话开关关闭时，整体跳过建会话，使系统只暴露前台 UI 播放器的一个媒体会话，
             // 杜绝跨引擎播放/暂停不同步。
-            if (createMediaSession && sMediaSessionEnabled && !auxPlayer) {
+            if (createMediaSession && sMediaSessionEnabled) {
                 buildAndHostMediaSession();
             }
         }
