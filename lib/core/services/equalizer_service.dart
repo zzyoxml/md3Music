@@ -72,6 +72,11 @@ class EqualizerService extends ChangeNotifier {
       ];
 
   StreamSubscription<bool>? _playingSub;
+  StreamSubscription<List<int>>? _sessionIdsSub;
+
+  /// 已绑定原生 Equalizer 实例的 audio session ID。
+  /// 主 / 辅播放器各有独立会话，每个都要挂一个实例，淡化全程两路才都走音效。
+  final Set<int> _boundSessions = <int>{};
 
   /// 初始化：从 SharedPreferences 恢复设置。
   /// 不绑定音频会话（需等播放器就绪后调用 [tryBind]）。
@@ -88,14 +93,38 @@ class EqualizerService extends ChangeNotifier {
       // 监听播放状态，播放时自动绑定
       _playingSub?.cancel();
       _playingSub = AudioService().playingStream.listen((playing) {
-        if (playing && !_isBound && !_isBinding) {
+        if (playing && !_isBinding) {
           tryBind();
         }
+      });
+
+      // 会话集合变化：辅播放器首次创建（crossfade 预加载时）会多出一个会话，
+      // 播放器平台重新激活会换掉旧 id —— 新增的要绑，消失的要释放。
+      _sessionIdsSub?.cancel();
+      _sessionIdsSub =
+          AudioService().androidAudioSessionIdsStream.listen((ids) {
+        _releaseVanishedSessions(ids);
+        if (_boundSessions.isNotEmpty && !_isBinding) tryBind();
       });
 
       notifyListeners();
     } catch (e) {
       debugPrint('EqualizerService init error: $e');
+    }
+  }
+
+  /// 释放已经不存在的会话上的实例，避免残留 native 音效。
+  void _releaseVanishedSessions(List<int> currentIds) {
+    final gone = _boundSessions.where((id) => !currentIds.contains(id)).toList();
+    for (final id in gone) {
+      _boundSessions.remove(id);
+      try {
+        _channel.invokeMethod('release', {'audioSessionId': id});
+      } catch (_) {}
+    }
+    if (gone.isNotEmpty) {
+      _isBound = _boundSessions.isNotEmpty;
+      notifyListeners();
     }
   }
 
@@ -114,28 +143,43 @@ class EqualizerService extends ChangeNotifier {
     return levels;
   }
 
-  /// 尝试绑定到 just_audio 的 audio session ID。
-  /// 返回 true 表示绑定成功。
+  /// 为当前所有已就绪的 audio session 各绑定一个原生 Equalizer 实例。
+  /// 返回 true 表示至少有一个会话已绑定。
   Future<bool> tryBind() async {
     if (kIsWeb || !Platform.isAndroid) return false;
-    if (_isBound || _isBinding) return _isBound;
+    if (_isBinding) return _isBound;
 
-    final sessionId = AudioService().androidAudioSessionId;
-    if (sessionId == null || sessionId == 0) return false;
+    final pending = AudioService()
+        .androidAudioSessionIds
+        .where((id) => !_boundSessions.contains(id))
+        .toList();
+    if (pending.isEmpty) return _isBound;
 
     _isBinding = true;
     notifyListeners();
 
+    for (final sessionId in pending) {
+      await _bindSession(sessionId);
+    }
+
+    _isBinding = false;
+    notifyListeners();
+    return _isBound;
+  }
+
+  /// 绑定单个会话。第一个成功绑定的会话负责读回频段信息、预设表并应用已保存设置；
+  /// 之后加入的会话由原生侧照镜像自动初始化（见 EqualizerPlugin.applyMirroredState）。
+  Future<bool> _bindSession(int sessionId) async {
+    final isFirst = _boundSessions.isEmpty;
     try {
       final result = await _channel.invokeMethod<Map>('init', {
         'audioSessionId': sessionId,
       });
+      if (result == null) return false;
+      _boundSessions.add(sessionId);
+      _isBound = true;
 
-      if (result == null) {
-        _isBinding = false;
-        notifyListeners();
-        return false;
-      }
+      if (!isFirst) return true;
 
       _bandCount = result['bandCount'] as int? ?? 0;
       _minLevel = result['minLevel'] as int? ?? 0;
@@ -150,9 +194,6 @@ class EqualizerService extends ChangeNotifier {
       } catch (_) {
         _systemPresets = [];
       }
-
-      _isBound = true;
-      _isBinding = false;
 
       // 应用已保存的设置
       if (_enabled) {
@@ -175,28 +216,24 @@ class EqualizerService extends ChangeNotifier {
       } else if (customPresets.containsKey(_currentPreset)) {
         await _applyCustomPreset(_currentPreset);
       }
-
-      notifyListeners();
       return true;
     } on PlatformException catch (e) {
-      debugPrint('Equalizer bind failed: ${e.code} - ${e.message}');
-      _isBinding = false;
-      notifyListeners();
+      debugPrint('Equalizer bind failed on session $sessionId: '
+          '${e.code} - ${e.message}');
       return false;
     } catch (e) {
-      debugPrint('Equalizer bind error: $e');
-      _isBinding = false;
-      notifyListeners();
+      debugPrint('Equalizer bind error on session $sessionId: $e');
       return false;
     }
   }
 
-  /// 解绑（释放原生 Equalizer）
+  /// 解绑（释放全部原生 Equalizer 实例）
   Future<void> unbind() async {
     if (!_isBound) return;
     try {
       await _channel.invokeMethod('release');
     } catch (_) {}
+    _boundSessions.clear();
     _isBound = false;
     _bandCount = 0;
     _bandLevels = [];
@@ -358,6 +395,7 @@ class EqualizerService extends ChangeNotifier {
   @override
   void dispose() {
     _playingSub?.cancel();
+    _sessionIdsSub?.cancel();
     super.dispose();
   }
 }

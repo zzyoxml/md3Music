@@ -56,7 +56,15 @@ JustAudioPlatform get _pluginPlatform {
 /// You must call [stop] or [dispose] to release the resources used by this
 /// player, including any temporary files created to cache assets.
 class AudioPlayer {
-  static String _generateId() => _uuid.v4();
+  /// MD3Music fork: 辅播放器（crossfade 用）的 id 前缀。
+  ///
+  /// Android 侧 `AudioPlayer.java` 在构造时按此前缀判定"辅播放器"，
+  /// 跳过 MediaSession 创建（避免系统看到重复媒体会话）。
+  /// id 只用于 MethodChannel 名与平台消息的 `id` 字段，加前缀是安全的。
+  static const String androidAuxIdPrefix = 'md3aux-';
+
+  static String _generateId({bool aux = false}) =>
+      aux ? '$androidAuxIdPrefix${_uuid.v4()}' : _uuid.v4();
   final _lock = Lock(reentrant: true);
   Future<void>? _playbackEventPipe;
 
@@ -189,6 +197,14 @@ class AudioPlayer {
   final bool _androidApplyAudioAttributes;
   final bool _handleAudioSessionActivation;
 
+  /// MD3Music fork: 本实例是否为 crossfade 用的辅播放器。
+  ///
+  /// 必须存成字段：平台 id 在每次 [_setPlatformActive] 里都会重新生成
+  /// （`_id = _generateId()`），只在构造函数里加前缀会被覆盖掉，
+  /// Android 侧就认不出辅播放器、照旧创建第二个 MediaSession
+  /// （表现为 `IllegalStateException: Session ID must be unique. ID=`）。
+  final bool _androidAuxPlayer;
+
   /// Counts how many times [_setPlatformActive] is called.
   int _activationCount = 0;
 
@@ -239,6 +255,13 @@ class AudioPlayer {
   ///
   /// [androidAudioOffloadPreferences] specifies whether audio offload is enabled
   /// on Android.
+  ///
+  /// MD3Music fork: set [androidAuxPlayer] to `true` for the secondary player
+  /// used during crossfade. Such a player gets an id prefixed with
+  /// [androidAuxIdPrefix], which makes the Android side skip creating a
+  /// `MediaSession` for it (otherwise the system would see two active media
+  /// sessions for the app). Combine it with `androidApplyAudioAttributes:
+  /// false` so the aux player never requests audio focus of its own.
   AudioPlayer({
     String? userAgent,
     bool handleInterruptions = true,
@@ -253,7 +276,9 @@ class AudioPlayer {
     bool useLazyPreparation = true,
     ShuffleOrder? shuffleOrder,
     int maxSkipsOnError = 0,
-  })  : _id = _generateId(),
+    bool androidAuxPlayer = false,
+  })  : _id = _generateId(aux: androidAuxPlayer),
+        _androidAuxPlayer = androidAuxPlayer,
         _userAgent = userAgent,
         _androidApplyAudioAttributes =
             androidApplyAudioAttributes && _isAndroid(),
@@ -1792,7 +1817,7 @@ class AudioPlayer {
         // _platform is updated again during initialisation.
         final platform = active && !_disposed
             ? await (_nativePlatform = _pluginPlatform.init(InitRequest(
-                id: _id = _generateId(),
+                id: _id = _generateId(aux: _androidAuxPlayer),
                 audioLoadConfiguration: _audioLoadConfiguration?._toMessage(),
                 androidAudioEffects: (_isAndroid() || _isUnitTest())
                     ? _audioPipeline.androidAudioEffects
@@ -1811,7 +1836,7 @@ class AudioPlayer {
                 useLazyPreparation: _playlist.useLazyPreparation,
               )))
             : (_idlePlatform = _IdleAudioPlayer(
-                id: _id = _generateId(),
+                id: _id = _generateId(aux: _androidAuxPlayer),
                 sequenceStream: sequenceStream,
                 errorCode: playbackEvent.errorCode,
                 errorMessage: playbackEvent.errorMessage,

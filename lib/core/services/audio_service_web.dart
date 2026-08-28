@@ -39,6 +39,10 @@ class AudioService {
   /// Web 端无 Android 音频会话 ID。
   int? get androidAudioSessionId => null;
 
+  List<int> get androidAudioSessionIds => const [];
+
+  Stream<List<int>> get androidAudioSessionIdsStream => const Stream.empty();
+
   Future<void> init() async {
     await _player.setLoopMode(LoopMode.off);
   }
@@ -141,6 +145,29 @@ class AudioService {
   Future<void> setShuffleModeEnabled(bool enabled) async {
     await _player.setShuffleModeEnabled(enabled);
   }
+
+  Future<void> setVolume(double volume) async {
+    await _player.setVolume(volume.clamp(0.0, 1.0));
+  }
+
+  // —— 交叉淡化：Web 不支持（需要第二个播放器与 Media3 层的会话共享），
+  // 保持与 io 版同样的接口，上层无需分平台判断。
+  bool get isCrossfading => false;
+
+  Stream<bool> get crossfadingStream => const Stream.empty();
+
+  Future<bool> prepareCrossfade(String url, {double speed = 1.0}) async =>
+      false;
+
+  void discardPreparedCrossfade() {}
+
+  Future<void> startCrossfade({
+    required Duration duration,
+    required double targetVolume,
+    void Function()? onCrossover,
+  }) async {}
+
+  void abortCrossfade() {}
 
   Future<void> dispose() async {
     await _player.dispose();

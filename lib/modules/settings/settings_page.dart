@@ -121,6 +121,9 @@ class _SettingsPageState extends State<SettingsPage>
   int _lockScreenLyricFontWeight = 400;
   // 暂停淡入淡出开关
   bool _pauseFadeEnabled = false;
+  // 交叉淡化（自动切歌时上一首渐出与下一首渐入叠加）
+  bool _crossfadeEnabled = true;
+  int _crossfadeSeconds = SettingsRepository.kCrossfadeDefaultSeconds;
   // 播放时保持屏幕常亮开关
   bool _keepScreenOn = false;
   // 忽略音频焦点开关（默认开启：允许与其他应用同时播放音频）
@@ -309,6 +312,8 @@ class _SettingsPageState extends State<SettingsPage>
     final lockScreenLyricFontWeight = await _settingsRepository
         .getLockScreenLyricFontWeight();
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
+    final crossfadeEnabled = await _settingsRepository.getCrossfadeEnabled();
+    final crossfadeSeconds = await _settingsRepository.getCrossfadeSeconds();
     final keepScreenOn = await _settingsRepository.getKeepScreenOn();
     final ignoreAudioFocus = await _settingsRepository.getIgnoreAudioFocus();
     final audioFocusInterruptionMode = await _settingsRepository
@@ -357,6 +362,8 @@ class _SettingsPageState extends State<SettingsPage>
       _lockScreenLyricFontSize = lockScreenLyricFontSize;
       _lockScreenLyricFontWeight = lockScreenLyricFontWeight;
       _pauseFadeEnabled = pauseFadeEnabled;
+      _crossfadeEnabled = crossfadeEnabled;
+      _crossfadeSeconds = crossfadeSeconds;
       _keepScreenOn = keepScreenOn;
       _ignoreAudioFocus = ignoreAudioFocus;
       _audioFocusInterruptionMode = audioFocusInterruptionMode;
@@ -2096,6 +2103,49 @@ class _SettingsPageState extends State<SettingsPage>
             _settingsRepository.setPauseFadeEnabled(value);
           },
         ),
+        // search: 歌曲淡入淡出 交叉淡化 crossfade 渐入渐出 叠加 衔接 无缝 过渡
+        SwitchListTile(
+          title: const Text('歌曲淡入淡出'),
+          subtitle: const Text('切歌时当前歌曲渐出、下一首渐入',
+              maxLines: 2, overflow: TextOverflow.ellipsis),
+          value: _crossfadeEnabled,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            setState(() {
+              _crossfadeEnabled = value;
+            });
+            _settingsRepository.setCrossfadeEnabled(value);
+            // PlayerProvider 把设置缓存在字段里（判定在 ~200ms 的高频路径上），
+            // 改完必须通知它重新读取，否则本次运行内不生效
+            context.read<PlayerProvider>().refreshCrossfadeSettings();
+          },
+        ),
+        // 时长只在开关打开时才有意义，关闭时隐藏
+        if (_crossfadeEnabled)
+          // search-item: 淡出时长 | 交叉淡化时长 淡化 时长 秒数 crossfade 叠加
+          ListTile(
+            title: const Text('淡出时长'),
+            subtitle: M3ESlider(
+              decoration:
+                  const M3ESliderDecoration(haptic: M3EHapticFeedback.medium),
+              value: _crossfadeSeconds.toDouble(),
+              min: SettingsRepository.kCrossfadeMinSeconds.toDouble(),
+              max: SettingsRepository.kCrossfadeMaxSeconds.toDouble(),
+              divisions: SettingsRepository.kCrossfadeMaxSeconds -
+                  SettingsRepository.kCrossfadeMinSeconds,
+              label: '$_crossfadeSeconds 秒',
+              onChanged: (v) {
+                setState(() => _crossfadeSeconds = v.round());
+              },
+              onChangeEnd: (v) {
+                final seconds = v.round();
+                setState(() => _crossfadeSeconds = seconds);
+                _settingsRepository.setCrossfadeSeconds(seconds);
+                context.read<PlayerProvider>().refreshCrossfadeSettings();
+              },
+            ),
+            trailing: Text('$_crossfadeSeconds 秒'),
+          ),
         // 「失去音频焦点时」是下面这个开关的从属策略：忽略焦点关闭时才有意义
         // search: 音频焦点 忽略焦点 同时播放 共存 不被打断 焦点
         SwitchListTile(
