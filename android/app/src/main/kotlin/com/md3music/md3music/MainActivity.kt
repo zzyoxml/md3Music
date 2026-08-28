@@ -14,7 +14,6 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
-import android.support.v4.media.session.MediaSessionCompat
 import android.util.Rational
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -199,6 +198,10 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // MD3Music fork（方向1）：前台 UI 引擎恢复启用媒体3会话（headless 引擎曾关闭），
+        // 保证系统媒体会话始终=前台 UI 播放器。
+        try { com.ryanheise.just_audio.AudioPlayer.setMediaSessionEnabled(true) } catch (_: Throwable) {}
+
         // 缓存引擎：Service 端没有 FlutterEngine 时（app 进程被回收场景），能复用
         FlutterEngineCache.getInstance().put("md3music_engine", flutterEngine)
         cachedEngine = flutterEngine
@@ -380,7 +383,14 @@ class MainActivity : FlutterActivity() {
                         )
                     }
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        startForegroundService(intent)
+                        try {
+                            startForegroundService(intent)
+                        } catch (e: Exception) {
+                            // 阶段6修复：App 转后台（导航等夺焦点）时后台启动前台服务会被系统
+                            // 拒绝（ForegroundServiceStartNotAllowedException）。吞掉避免崩溃，
+                            // 媒体通知由 media3 会话承载，保活服务稍后回到前台再恢复。
+                            Log.w("MainActivity", "startForegroundService rejected: ${e.javaClass.simpleName}: ${e.message}")
+                        }
                     } else {
                         startService(intent)
                     }

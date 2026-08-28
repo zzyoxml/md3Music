@@ -35,6 +35,12 @@ import androidx.media3.exoplayer.NoSampleRenderer;
 import androidx.media3.exoplayer.Renderer;
 import androidx.media3.exoplayer.RenderersFactory;
 import androidx.media3.session.MediaSession;
+import androidx.media3.session.MediaSessionService;
+import androidx.media3.session.CommandButton;
+import androidx.media3.session.SessionCommand;
+import androidx.media3.session.SessionResult;
+import com.google.common.util.concurrent.Futures;
+import com.google.common.util.concurrent.ListenableFuture;
 import androidx.media3.extractor.DefaultExtractorsFactory;
 import androidx.media3.common.Metadata;
 import androidx.media3.common.Format;
@@ -179,10 +185,40 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         Boolean offloadSchedulingEnabled,
         boolean useLazyPreparation
     ) {
+        this(applicationContext, messenger, id, audioLoadConfiguration, rawAudioEffects,
+                audioOffloadPreferences, offloadSchedulingEnabled, useLazyPreparation, true);
+    }
+
+    /// MD3Music fork（方向1·单一媒体会话）：新增 [createMediaSession] 开关。
+    /// 默认 true：正常播放器创建媒体3会话。后台 headless 引擎的播放器传 false，
+    /// 不创建 media3 会话，使系统仅暴露「前台 UI 播放器」一个会话，
+    /// 杜绝「媒体卡片暂停/播放与 app 内 UI 状态不同步」（跨引擎双播放器）。
+    public AudioPlayer(
+        final Context applicationContext,
+        final BinaryMessenger messenger,
+        final String id,
+        Map<?, ?> audioLoadConfiguration,
+        List<Object> rawAudioEffects,
+        Map<?, ?> audioOffloadPreferences,
+        Boolean offloadSchedulingEnabled,
+        boolean useLazyPreparation,
+        boolean createMediaSession
+    ) {
+        this.createMediaSession = createMediaSession;
+        // MD3Music fork（诊断·方向1）：打印每个播放器实例构造，定位"第二个播放器"来源
+        Log.i("AudioFocusFork", "AudioPlayer ctor id=" + id
+                + " createMediaSession=" + createMediaSession
+                + " sMediaSessionEnabled=" + sMediaSessionEnabled
+                + " stack=" + (new Throwable().getStackTrace().length > 5
+                    ? new Throwable().getStackTrace()[4].getClassName() + "." + new Throwable().getStackTrace()[4].getMethodName()
+                    : "?"));
         this.context = applicationContext;
         this.rawAudioEffects = rawAudioEffects;
         this.offloadSchedulingEnabled = offloadSchedulingEnabled != null ? offloadSchedulingEnabled : false;
         this.useLazyPreparation = useLazyPreparation;
+        // MD3Music fork: 媒体3会话 ID 用唯一值（默认空串会被 SESSION_ID_TO_SESSION_MAP
+        // 判重冲突）。基于 Flutter 传入的 player id 加全局递增序号，保证同进程多播放器不撞。
+        sessionId = "md3music-" + id + "-" + (SESSION_ID_COUNTER.incrementAndGet());
 
         if (audioOffloadPreferences != null) {
             this.audioOffloadPreferences = new AudioOffloadPreferences.Builder()
@@ -429,6 +465,34 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                 playResult = null;
             }
             break;
+        }
+    }
+
+    /// MD3Music fork（阶段6·修复「媒体卡片暂停/播放 vs app 内 UI 不同步」）：
+    /// 系统媒体卡片/线控按钮经媒体3会话直接驱动 ExoPlayer 的 playWhenReady，
+    /// 不经过 onMethodCall，原有 enqueuePlaybackEvent 链路不会触发，
+    /// 导致 Dart 端 playing 状态停留在旧值 → 音频已停、app 内进度仍在假走
+    /// （反之媒体卡片播放时 app 内仍显示暂停）。
+    /// 此处监听 playWhenReady/isPlaying 变化：
+    /// 1) 广播播放事件（位置/缓冲等）；
+    /// 2) 关键：把 playing 状态经 data 通道推给 Dart。Dart 端
+    ///    playerDataMessageStream 解析 map['playing'] 才会更新
+    ///    _playerEventSubject.playing —— 仅广播 event 通道不会改 playing 标志。
+    @Override
+    public void onEvents(Player player, Player.Events events) {
+        if (events.contains(Player.EVENT_PLAY_WHEN_READY_CHANGED)
+                || events.contains(Player.EVENT_IS_PLAYING_CHANGED)) {
+            updatePosition();
+            broadcastImmediatePlaybackEvent();
+            try {
+                java.util.Map<String, Object> data = new java.util.HashMap<>();
+                data.put("playing", player.getPlayWhenReady());
+                dataEventChannel.success(data);
+                Log.i("AudioFocusFork", "onEvents push playing=" + player.getPlayWhenReady()
+                        + " sessionId=" + sessionId);
+            } catch (Exception e) {
+                Log.w("AudioFocusFork", "onEvents push playing failed: " + e);
+            }
         }
     }
 
@@ -904,26 +968,243 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             );
             setAudioSessionId(player.getAudioSessionId());
             player.addListener(this);
+            // MD3Music fork（阶段6·收敛单一会话）：登记本实例，供跨实例释放非活跃会话
+            registerPlayer(this);
             // MD3Music fork: 创建 Media3 MediaSession 关联 ExoPlayer。
             // 小米等系统按「播放器是否关联 MediaSession」判定是否自动 duck
             // （hasUid=false → 系统绕过 app 直接 VolumeShaper duck，三模式收不到事件）。
             // 关联后系统识别播放器、不自动 duck，焦点事件正常进入 AudioFocusManager。
             // 焦点仍由 ExoPlayer 的 AudioFocusManager 管理（handleAudioFocus=true），
             // MediaSession 仅作关联标识（不请求焦点、不绑定通知栏）。
-            mediaSession = new MediaSession.Builder(context, player).build();
+            // MD3Music fork（方向1）：createMediaSession=false（headless 播放器）或进程级
+            // 媒体会话开关关闭时，整体跳过建会话，使系统只暴露前台 UI 播放器的一个媒体会话，
+            // 杜绝跨引擎播放/暂停不同步。
+            if (createMediaSession && sMediaSessionEnabled) {
+                buildAndHostMediaSession();
+            }
+        }
+    }
+
+    /// MD3Music fork（方向1）：构建并接线媒体3会话（ID / sessionActivity / 自定义命令 callback），
+    /// 归入 host 服务，并把本实例设为活跃播放器。仅在 createMediaSession==true 时由
+    /// ensurePlayerInitialized 调用；headless 播放器不建会话，保持 mediaSession=null。
+    private void buildAndHostMediaSession() {
+        MediaSession.Builder sessionBuilder = new MediaSession.Builder(context, player);
+            // MD3Music fork（阶段6修复）：点击媒体3 now-playing 通知卡片回到 App。
+            // 用 App 的 launch intent 作为 sessionActivity，使通知 contentIntent 有效。
+            try {
+                android.content.Intent launch =
+                        context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+                if (launch != null) {
+                    android.app.PendingIntent activityIntent = android.app.PendingIntent.getActivity(
+                            context, 0, launch,
+                            android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                                    | android.app.PendingIntent.FLAG_IMMUTABLE);
+                    sessionBuilder.setSessionActivity(activityIntent);
+                }
+            } catch (Exception e) {
+                Log.w("AudioFocusFork", "setSessionActivity failed: " + e);
+            }
+            // MD3Music fork: 用唯一会话 ID，避免默认空串被 SESSION_ID_TO_SESSION_MAP 判重冲突
+            sessionBuilder.setId(sessionId);
+            // MD3Music fork: 处理媒体3自定义命令（阶段4，自研交互迁往媒体3）。
+            // 通知栏自定义按钮（桌面歌词/收藏）经 onCustomCommand 到达，转发给 App 处理。
+            sessionBuilder.setCallback(new MediaSession.Callback() {
+                @Override
+                public MediaSession.ConnectionResult onConnect(
+                        MediaSession session, MediaSession.ControllerInfo controller) {
+                    // MD3Music fork: 让自定义命令（桌面歌词/收藏）对所有 controller 可用，
+                    // 否则内部媒体通知 controller 的 customLayout 会把它们过滤成禁用/移除，
+                    // 通知栏自定义按钮无法渲染（阶段4）。
+                    MediaSession.ConnectionResult.AcceptedResultBuilder builder =
+                            new MediaSession.ConnectionResult.AcceptedResultBuilder(session);
+                    androidx.media3.session.SessionCommands.Builder cmdBuilder =
+                            new androidx.media3.session.SessionCommands.Builder();
+                    cmdBuilder.add(CMD_TOGGLE_DESKTOP_LYRIC);
+                    cmdBuilder.add(CMD_TOGGLE_FAVORITE);
+                    builder.setAvailableSessionCommands(cmdBuilder.build());
+                    return builder.build();
+                }
+                // MD3Music fork（阶段6·修复媒体卡片上一首/下一首）：
+                // App 队列为自维护（不走 media3 时间线），原生 seekToNext/seekToPrevious
+                // 直接驱动 ExoPlayer 时间线会与 App 队列脱节（上一首变成「从头重播」当前曲）。
+                // 这里拦截原生 PREVIOUS/NEXT 命令，转发给 App 的上一首/下一首逻辑，
+                // 并返回 RESULT_INFO_SKIPPED 阻止 media3 默认 seek（info 级非 error，SystemUI 静默）。
+                @Override
+                public @SessionResult.Code int onPlayerCommandRequest(
+                        MediaSession session, MediaSession.ControllerInfo controller,
+                        @Player.Command int playerCommand) {
+                    final CustomActionListener listener = sCustomActionListener;
+                    if (listener == null) {
+                        // 默认实现即返回 RESULT_SUCCESS，此处直接返回等价
+                        return SessionResult.RESULT_SUCCESS;
+                    }
+                    switch (playerCommand) {
+                        case Player.COMMAND_SEEK_TO_NEXT:
+                        case Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM:
+                            Log.i("AudioFocusFork", "onPlayerCommandRequest SEEK_TO_NEXT -> App next");
+                            listener.onNext();
+                            return SessionResult.RESULT_INFO_SKIPPED;
+                        case Player.COMMAND_SEEK_TO_PREVIOUS:
+                        case Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM:
+                            Log.i("AudioFocusFork", "onPlayerCommandRequest SEEK_TO_PREVIOUS -> App previous");
+                            listener.onPrevious();
+                            return SessionResult.RESULT_INFO_SKIPPED;
+                        default:
+                            // 默认实现即返回 RESULT_SUCCESS，此处直接返回等价
+                            return SessionResult.RESULT_SUCCESS;
+                    }
+                }
+                @Override
+                public ListenableFuture<SessionResult> onCustomCommand(
+                        MediaSession session, final MediaSession.ControllerInfo controller,
+                        SessionCommand customCommand, android.os.Bundle args) {
+                    final CustomActionListener listener = sCustomActionListener;
+                    if (customCommand != null && listener != null) {
+                        String action = customCommand.customAction;
+                        if (CMD_TOGGLE_DESKTOP_LYRIC.customAction.equals(action)) {
+                            listener.onToggleDesktopLyric();
+                        } else if (CMD_TOGGLE_FAVORITE.customAction.equals(action)) {
+                            listener.onToggleFavorite();
+                        }
+                    }
+                    return Futures.immediateFuture(new SessionResult(SessionResult.RESULT_SUCCESS));
+                }
+            });
+            mediaSession = sessionBuilder.build();
             // MD3Music fork: 记录活跃播放器，供 AudioPlaybackService 注入封面到媒体3会话
             sActivePlayer = this;
-        }
+            // MD3Music fork: 若已注册 MediaSessionService host，把本会话归入服务以渲染 now playing 通知
+            ensureSessionHosted();
     }
 
     // MD3Music fork: 关联系统的 MediaSession（见 ensurePlayerInitialized）
     private MediaSession mediaSession;
+
+    // MD3Music fork（方向1）：是否创建媒体3会话。后台 headless 引擎播放器为 false → 不建会话
+    private final boolean createMediaSession;
+
+    // MD3Music fork（方向1）：进程级「媒体3会话总开关」。headless 引擎创建时由原生置 false，
+    // 前台 UI 引擎置 true；配合 createMediaSession 双条件，确保系统只暴露前台 UI 播放器的一个会话。
+    private static volatile boolean sMediaSessionEnabled = true;
+
+    /// 由 App 设置：headless 引擎传 false（禁用媒体会话），前台 UI 引擎传 true。
+    public static void setMediaSessionEnabled(boolean enabled) {
+        sMediaSessionEnabled = enabled;
+    }
+
+    // MD3Music fork: 媒体3会话唯一 ID（构造时生成）与全局递增计数器（避免 SESSION_ID 判重冲突）
+    private final String sessionId;
+    private static final java.util.concurrent.atomic.AtomicInteger SESSION_ID_COUNTER =
+            new java.util.concurrent.atomic.AtomicInteger(0);
 
     // ==== MD3Music fork: 运行时给媒体3会话注入封面/元数据 ====
     // 媒体3 会话自身无元数据，播放中会被 SystemUI 提为控制中心顶层 → 无封面/无标题。
     // 这里用官方正规 API `Player.replaceMediaItem(index, newItem)`（同 uri 仅更新 metadata、
     // 不打断播放），把 App 下载好的封面+标题写进当前 MediaItem，供 AudioPlaybackService 调用。
     private static volatile AudioPlayer sActivePlayer;
+
+    // ==== MD3Music fork: 媒体3会话归属 MediaSessionService（渲染 now playing 通知） ====
+    // 原生 App 的 MD3MusicMediaSessionService 创建后注册为本 host；fork 自建的媒体3
+    // 会话随后加入该服务，由 media3 的 MediaNotificationManager + DefaultMediaNotificationProvider
+    // 生成系统 now playing 通知（阶段1「媒体3 通知栏上线」）。
+    private static volatile MediaSessionService sSessionHost;
+
+    /// 由 App 的 MediaSessionService 在 onCreate 注册 / onDestroy 注销。
+    /// 注册时若有已创建的会话立即补入（服务晚于会话创建的情况）。
+    // MD3Music fork（阶段6·收敛单一会话）：进程内所有 AudioPlayer 实例清单，
+    // 用于确保任意时刻只保留「当前活跃播放器」的一个媒体3会话，其余实例的会话被释放，
+    // 杜绝 SystemUI 在多个 media3 会话间竞争顶层导致「卡片不更新/标题封面丢失」。
+    private static final java.util.List<AudioPlayer> sPlayers =
+            java.util.Collections.synchronizedList(new java.util.ArrayList<AudioPlayer>());
+
+    private static void registerPlayer(AudioPlayer p) {
+        synchronized (sPlayers) { if (!sPlayers.contains(p)) sPlayers.add(p); }
+    }
+
+    private static void unregisterPlayer(AudioPlayer p) {
+        synchronized (sPlayers) { sPlayers.remove(p); }
+    }
+
+    /// 由 App 的 MediaSessionService 在 onCreate 注册 / onDestroy 注销。
+    /// 注册时若有已创建的会话立即补入（服务晚于会话创建的情况）。
+    public static void setMediaSessionServiceHost(MediaSessionService host) {
+        sSessionHost = host;
+        ensureActiveSessionHosted();
+    }
+
+    /// 供 MediaSessionService.onGetSession 返回当前活跃（或任一）媒体3会话。
+    public static MediaSession getActiveMediaSession() {
+        AudioPlayer p = sActivePlayer;
+        return p != null ? p.mediaSession : null;
+    }
+
+    /// 幂等地把活跃会话加入已注册的 host（重复加入会抛 IllegalArgumentException）。
+    /// MD3Music fork（方向1·安全收敛）：再把「非活跃播放器」的会话从 host 移除（不 release
+    /// 播放器、不置 null），使系统仅暴露当前活跃播放器的一个会话。调用方保证 sActivePlayer
+    /// 是真正在播放的播放器（play/ensurePlayerInitialized 后），避免误移除。
+    private static void ensureActiveSessionHosted() {
+        AudioPlayer p = sActivePlayer;
+        MediaSessionService host = sSessionHost;
+        if (host == null || p == null || p.mediaSession == null) return;
+        try {
+            if (!host.isSessionAdded(p.mediaSession)) {
+                host.addSession(p.mediaSession);
+            }
+        } catch (Exception e) {
+            Log.w("AudioFocusFork", "ensureActiveSessionHosted addSession failed: " + e);
+        }
+        // 移除其他实例的会话（仅 remove，不 release）：系统卡片/媒体键只跟随活跃会话
+        synchronized (sPlayers) {
+            for (AudioPlayer other : sPlayers) {
+                if (other == null || other == p) continue;
+                MediaSession ms = other.mediaSession;
+                if (ms == null) continue;
+                try {
+                    if (host.isSessionAdded(ms)) host.removeSession(ms);
+                } catch (Exception ignore) {}
+            }
+        }
+    }
+
+    /// MD3Music fork（方向1）：play() 权威收敛点。把本实例会话设为唯一 host 会话，
+    /// 其余实例的会话仅从 host 移除（不 release 播放器/会话对象），使系统只跟随本播放器。
+    /// 由 play() 在 sActivePlayer=this 之后调用。
+    private void syncSingleSessionToHost() {
+        MediaSessionService host = sSessionHost;
+        if (host == null || mediaSession == null) return;
+        try {
+            if (!host.isSessionAdded(mediaSession)) host.addSession(mediaSession);
+        } catch (Exception e) {
+            Log.w("AudioFocusFork", "syncSingleSessionToHost addSession failed: " + e);
+        }
+        synchronized (sPlayers) {
+            for (AudioPlayer other : sPlayers) {
+                if (other == null || other == this) continue;
+                MediaSession ms = other.mediaSession;
+                if (ms == null) continue;
+                try {
+                    if (host.isSessionAdded(ms)) host.removeSession(ms);
+                } catch (Exception ignore) {}
+            }
+        }
+    }
+
+    /// 实例方法：会话创建后调用，把当前播放器加入 host（若已注册）。
+    /// MD3Music fork（方向1）：仅当本实例是「活跃播放器」时才把会话加入 host；
+    /// 非活跃播放器不加入（且确保其已被 host 移除），保证系统只暴露活跃播放器的一个会话。
+    private void ensureSessionHosted() {
+        if (this == sActivePlayer) {
+            ensureActiveSessionHosted();
+        } else {
+            // 非活跃：确保从 host 移除，避免重新加入造成多会话
+            MediaSessionService host = sSessionHost;
+            if (host != null && mediaSession != null) {
+                try { if (host.isSessionAdded(mediaSession)) host.removeSession(mediaSession); }
+                catch (Exception ignore) {}
+            }
+        }
+    }
 
     /// 由 AudioPlaybackService 封面加载成功后调用（同进程），把封面/标题注入媒体3会话。
     public static void updateActiveSessionMetadata(String title, String artist, Bitmap art) {
@@ -932,6 +1213,18 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             p.applySessionMetadata(title, artist, art);
         } else {
             Log.w("AudioFocusFork", "updateActiveSessionMetadata: no active AudioPlayer");
+        }
+    }
+
+    /// 阶段3：仅更新媒体3会话 标题/艺术家（蓝牙歌词逐句刷新用，不重压缩封面）。
+    /// 由 AudioPlaybackService 在蓝牙歌词行变化/performMetadataRefresh 时调用，
+    /// 使媒体3会话与自定义会话的 AVRCP 歌词显示一致（双会话不打架）。
+    public static void updateActiveSessionTitleArtist(String title, String artist) {
+        AudioPlayer p = sActivePlayer;
+        if (p != null) {
+            p.applySessionTitleArtist(title, artist);
+        } else {
+            Log.w("AudioFocusFork", "updateActiveSessionTitleArtist: no active AudioPlayer");
         }
     }
 
@@ -946,6 +1239,185 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             handler.post(() -> doApplySessionMetadata(title, artist, art));
         } catch (Exception e) {
             Log.w("AudioFocusFork", "applySessionMetadata dispatch failed: " + e);
+        }
+    }
+
+    /// 阶段3：仅更新媒体3会话 标题/艺术家（不重压缩封面）。
+    /// ExoPlayer 必须在创建它的 Looper 线程访问，先派发到 player 所在线程执行。
+    private void applySessionTitleArtist(final String title, final String artist) {
+        try {
+            final androidx.media3.common.Player p = player;
+            if (p == null) return;
+            Handler handler = new Handler(p.getApplicationLooper());
+            handler.post(() -> doApplySessionTitleArtist(title, artist));
+        } catch (Exception e) {
+            Log.w("AudioFocusFork", "applySessionTitleArtist dispatch failed: " + e);
+        }
+    }
+
+    /// 在 player 线程只更新 Title/Artist；与现有值相同则跳过，避免无谓的 MediaItem 替换事件。
+    private void doApplySessionTitleArtist(String title, String artist) {
+        try {
+            MediaItem cur = player.getCurrentMediaItem();
+            if (cur == null) return;
+            MediaMetadata m = cur.mediaMetadata;
+            String curTitle = m.title != null ? m.title.toString() : null;
+            String curArtist = m.artist != null ? m.artist.toString() : null;
+            if (equalsOrBothNull(curTitle, title) && equalsOrBothNull(curArtist, artist)) return;
+            MediaMetadata.Builder mb = m.buildUpon();
+            if (title != null && !title.isEmpty()) mb.setTitle(title);
+            if (artist != null && !artist.isEmpty()) mb.setArtist(artist);
+            player.replaceMediaItem(
+                    player.getCurrentMediaItemIndex(),
+                    cur.buildUpon().setMediaMetadata(mb.build()).build());
+        } catch (Exception e) {
+            Log.w("AudioFocusFork", "doApplySessionTitleArtist failed: " + e);
+        }
+    }
+
+    private static boolean equalsOrBothNull(String a, String b) {
+        return a == null ? b == null : a.equals(b);
+    }
+
+    // ==== MD3Music fork: 给媒体3会话下发 LyricInfo extras（阶段3b） ====
+    // 自定义会话把整首歌词 JSON 写进 MediaSession 元数据 extras.lyricInfo，供
+    // ColorOS 桌面歌词 / LyricInfo 模块等第三方系统读取。这里让媒体3会话的
+    // MediaItem.mediaMetadata.extras 同样携带该字段，为后续移除自定义会话做准备。
+    private static final String SESSION_LYRIC_INFO_KEY = "lyricInfo";
+
+    public static void updateActiveSessionLyricInfo(String lyricInfo) {
+        AudioPlayer p = sActivePlayer;
+        if (p != null) {
+            p.applySessionLyricInfo(lyricInfo);
+        } else {
+            Log.w("AudioFocusFork", "updateActiveSessionLyricInfo: no active AudioPlayer");
+        }
+    }
+
+    // ==== MD3Music fork: 媒体3自定义命令（阶段4，自研 action 迁往媒体3） ====
+    // 桌面歌词开关、收藏以 media3 自定义 Command 承载：App 把状态/图标推给
+    // setActiveSessionCustomActions，渲染为通知栏按钮；点击经 onCustomCommand 回传 App。
+    // 上一首/下一首不再用自定义按钮：改由拦截原生 seekToPrevious/seekToNext 命令
+    // （onPlayerCommandRequest）转发 App 队列逻辑，见 buildAndHostMediaSession。
+    public interface CustomActionListener {
+        void onToggleDesktopLyric();
+        void onToggleFavorite();
+        // MD3Music fork（阶段6·修复媒体卡片上一首/下一首）：
+        // 原生 PREVIOUS/NEXT 命令拦截后回调，走 App 自有切歌逻辑。
+        void onPrevious();
+        void onNext();
+    }
+
+    private static volatile CustomActionListener sCustomActionListener;
+    // 用 new Bundle() 而非 Bundle.EMPTY：后者要求 API 26+，本项目 minSdk 为 24/25。
+    private static final SessionCommand CMD_TOGGLE_DESKTOP_LYRIC =
+            new SessionCommand("com.md3music.toggle_desktop_lyric", new android.os.Bundle());
+    private static final SessionCommand CMD_TOGGLE_FAVORITE =
+            new SessionCommand("com.md3music.toggle_favorite", new android.os.Bundle());
+
+    /// 由 App 注册，接收媒体3通知按钮触发的自定义命令。
+    public static void setCustomActionListener(CustomActionListener listener) {
+        sCustomActionListener = listener;
+    }
+
+    /// 由 App 在元数据/开关变化时推送媒体3通知栏的自定义按钮（图标按开/关态切换）。
+    /// 阶段6：下一首已改回原生按钮，这里只保留桌面歌词/收藏两个自定义按钮。
+    public static void setActiveSessionCustomActions(
+            boolean desktopLyricEnabled,
+            boolean isFavorited,
+            int desktopLyricOnIcon,
+            int desktopLyricOffIcon,
+            int favoriteOnIcon,
+            int favoriteOffIcon) {
+        AudioPlayer p = sActivePlayer;
+        if (p != null) {
+            p.applySessionCustomActions(
+                    desktopLyricEnabled, isFavorited,
+                    desktopLyricOnIcon, desktopLyricOffIcon, favoriteOnIcon, favoriteOffIcon);
+        } else {
+            Log.w("AudioFocusFork", "setActiveSessionCustomActions: no active AudioPlayer");
+        }
+    }
+
+    private void applySessionCustomActions(
+            final boolean desktopLyricEnabled,
+            final boolean isFavorited,
+            final int desktopLyricOnIcon,
+            final int desktopLyricOffIcon,
+            final int favoriteOnIcon,
+            final int favoriteOffIcon) {
+        try {
+            final androidx.media3.common.Player p = player;
+            if (p == null || mediaSession == null) return;
+            Handler handler = new Handler(p.getApplicationLooper());
+            handler.post(() -> {
+                try {
+                    // MD3Music fork（阶段6）：下一首改回 media3 原生按钮（自动渲染），
+                    // 这里只保留 桌面歌词/收藏 两个自定义按钮。
+                    java.util.List<CommandButton> layout = new java.util.ArrayList<>(2);
+                    layout.add(new CommandButton.Builder()
+                            .setSessionCommand(CMD_TOGGLE_DESKTOP_LYRIC)
+                            .setDisplayName("桌面歌词")
+                            .setIconResId(desktopLyricEnabled ? desktopLyricOnIcon : desktopLyricOffIcon)
+                            .setEnabled(true)
+                            .build());
+                    layout.add(new CommandButton.Builder()
+                            .setSessionCommand(CMD_TOGGLE_FAVORITE)
+                            .setDisplayName("收藏")
+                            .setIconResId(isFavorited ? favoriteOnIcon : favoriteOffIcon)
+                            .setEnabled(true)
+                            .build());
+                    mediaSession.setCustomLayout(layout);
+                    // MD3Music fork: 自定义按钮 layout 变化不会自动重渲染 now playing 通知，
+                    // 需让承载服务按最新 layout 强制刷新一次（见 MediaSessionService.refreshNotification）。
+                    MediaSessionService host = sSessionHost;
+                    if (host != null) {
+                        host.refreshNotification(mediaSession);
+                    }
+                } catch (Exception e) {
+                    Log.w("AudioFocusFork", "applySessionCustomActions failed: " + e);
+                }
+            });
+        } catch (Exception e) {
+            Log.w("AudioFocusFork", "applySessionCustomActions dispatch failed: " + e);
+        }
+    }
+
+    private void applySessionLyricInfo(final String lyricInfo) {
+        try {
+            final androidx.media3.common.Player p = player;
+            if (p == null) return;
+            Handler handler = new Handler(p.getApplicationLooper());
+            handler.post(() -> doApplySessionLyricInfo(lyricInfo));
+        } catch (Exception e) {
+            Log.w("AudioFocusFork", "applySessionLyricInfo dispatch failed: " + e);
+        }
+    }
+
+    private void doApplySessionLyricInfo(String lyricInfo) {
+        try {
+            MediaItem cur = player.getCurrentMediaItem();
+            if (cur == null) return;
+            MediaMetadata mm = cur.mediaMetadata;
+            android.os.Bundle currentExtras = mm.extras;
+            String current = currentExtras != null ? currentExtras.getString(SESSION_LYRIC_INFO_KEY) : null;
+            String incoming = (lyricInfo == null || lyricInfo.isEmpty()) ? null : lyricInfo;
+            if ((incoming == null && current == null) || (incoming != null && incoming.equals(current))) return;
+            android.os.Bundle newExtras = currentExtras != null
+                    ? new android.os.Bundle(currentExtras)
+                    : new android.os.Bundle();
+            if (incoming == null) {
+                newExtras.remove(SESSION_LYRIC_INFO_KEY);
+            } else {
+                newExtras.putString(SESSION_LYRIC_INFO_KEY, incoming);
+            }
+            MediaMetadata updated = mm.buildUpon().setExtras(newExtras).build();
+            player.replaceMediaItem(
+                    player.getCurrentMediaItemIndex(),
+                    cur.buildUpon().setMediaMetadata(updated).build());
+            Log.d("AudioFocusFork", "doApplySessionLyricInfo OK hasLyricInfo=" + (incoming != null));
+        } catch (Exception e) {
+            Log.w("AudioFocusFork", "doApplySessionLyricInfo failed: " + e);
         }
     }
 
@@ -1146,6 +1618,13 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             result.success(new HashMap<String, Object>());
             return;
         }
+        // MD3Music fork: 真正开始播放时把当前实例设为活跃播放器，
+        // 使封面/歌词/自定义按钮注入（updateActiveSessionMetadata 等）落到真正播放的会话，
+        // 避免多播放器并存时 sActivePlayer 指向占位/最后一个创建的播放器。
+        sActivePlayer = this;
+        // MD3Music fork（方向1）：play 是权威收敛点——把本实例会话设为唯一 host 会话，
+        // 其余实例的会话仅从 host 移除（不 release 播放器/会话对象），使系统只跟随本播放器。
+        syncSingleSessionToHost();
         if (playResult != null) {
             playResult.success(new HashMap<String, Object>());
         }
@@ -1283,6 +1762,8 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             mediaSession.release();
             mediaSession = null;
         }
+        // MD3Music fork（阶段6·收敛单一会话）：注销实例登记
+        unregisterPlayer(this);
         // MD3Music fork: 本播放器销毁后清空活跃引用，避免注入至过期会话
         if (sActivePlayer == this) {
             sActivePlayer = null;

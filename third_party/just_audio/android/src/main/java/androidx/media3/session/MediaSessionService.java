@@ -632,6 +632,21 @@ public abstract class MediaSessionService extends Service {
     return true;
   }
 
+  /**
+   * MD3Music fork: 手动触发指定会话的 now playing 通知刷新。
+   *
+   * <p>media3 的通知渲染由 metadata/播放态变化驱动；自定义按钮 layout
+   * （{@link MediaSession#setCustomLayout}）变化后不会自动重渲染。App 在 push
+   * 自定义按钮后调用本方法，强制按最新 layout 重建通知。仅用于承载通知的服务。
+   */
+  @UnstableApi
+  public void refreshNotification(MediaSession session) {
+    if (session == null || !isSessionAdded(session)) {
+      return;
+    }
+    onUpdateNotificationInternal(session, /* startInForegroundWhenPaused= */ false);
+  }
+
   private MediaNotificationManager getMediaNotificationManager() {
     synchronized (lock) {
       if (mediaNotificationManager == null) {

@@ -105,6 +105,10 @@ dependencies {
     // 用于在下载完成后向音频文件嵌入标题/艺术家/专辑/封面/歌词）。
     // JitPack 上 AdrienPoupa 分叉仅有 2.2.3（无 2.2.5）。
     implementation("com.github.AdrienPoupa:jaudiotagger:2.2.3")
+    // 方案B阶段1：app 侧 Kotlin 引用 androidx.media3.common 类型（UnstableApi、Player 等）。
+    // media3-common 为单一 maven 源（fork 同版本 1.4.1），此处显式依赖以便编译期可见
+    // （fork 用 implementation 隐藏了传递依赖）。session/exoplayer 仍是 fork 本地源码，勿加 maven。
+    implementation("androidx.media3:media3-common:1.4.1")
 
     // ==================== Miuix 风格测试页（原生 Compose） ====================
     // miuix-android 0.8.8：Kotlin 2.3.20 + Compose Foundation 1.10.3 编译，

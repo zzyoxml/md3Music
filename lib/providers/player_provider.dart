@@ -2180,9 +2180,32 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
+  /// 预取队列中后续歌曲封面到原生本地缓存（方案B）。
+  /// 切歌前把接下来数首的封面下载到缓存，切换时命中缓存秒显，根治封面空档。
+  void _prefetchUpcomingCovers() {
+    try {
+      if (_playlist.isEmpty || _currentIndex < 0) return;
+      final urls = <String?>[];
+      // 预取接下来 3 首（含环回，贴合常见循环播放）
+      for (int i = 1; i <= 3; i++) {
+        if (_playlist.length <= 1) break;
+        final idx = (_currentIndex + i) % _playlist.length;
+        if (idx == _currentIndex) break;
+        final s = _playlist[idx];
+        // 仅在线歌走网络；本地歌封面本就秒读
+        if (s.isOnline) urls.add(s.artworkUri);
+      }
+      if (urls.isNotEmpty) {
+        MediaNotificationService.prefetchCover(urls);
+      }
+    } catch (_) {}
+  }
+
   void _updateNotification() {
     final song = _currentSong;
     if (song == null) return;
+    // 方案B：切歌后预取队列后续歌曲封面，下一首切换时命中缓存秒显
+    _prefetchUpcomingCovers();
     // Check favorite status from FavoritesProvider via global context
     bool isFavorited = false;
     try {
