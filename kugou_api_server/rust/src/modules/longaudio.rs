@@ -19,6 +19,9 @@ pub fn handle_album_audios(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, Modul
         .post("/longaudio/v2/album_audios")
         .json_body(Value::Object(m))
         .encrypt_type("android")
+        // appid=1005 必须标准盐，否则上游 20006 签名错误，导致章节列表
+        // 拿不到 fail_process 付费字段（详情页付费章节过滤依赖它）。
+        .standard_signature(true)
         .cookie(q_cookie(q))
         .header("x-router", "openapi.kugou.com")
         .header("KG-TID", "78");

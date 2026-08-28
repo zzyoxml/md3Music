@@ -977,7 +977,16 @@ class KugouApiClient {
     }
 
     var json = await _get(KugouEndpoints.songUrl, queryParameters: params);
-    if (json == null) return null;
+    if (json == null) {
+      // 非标准音质请求失败（如听书章节只有 128k 免费部分，320 音质上游返回
+      // 31863 no free part info / 502）→ 降级到标准音质重试一次。
+      // 过滤已按 fail_process 判断可播，此处解决"可播但音质不可用"的播放失败。
+      if (downgrade && quality != KugouQuality.standard) {
+        params['quality'] = KugouQuality.standard;
+        json = await _get(KugouEndpoints.songUrl, queryParameters: params);
+      }
+      if (json == null) return null;
+    }
 
     var data = _extractData(json['data'] ?? json);
     final errcode = data['errcode'];
