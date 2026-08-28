@@ -27,6 +27,8 @@
 | 场景 D：发布公开版本 | 功能完成要发版 | §4.4 |
 | 场景 E：给公开类新增私有能力 | 公开类需要调用下载/缓存能力 | §4.5 |
 | 场景 F：导出白名单维护 | 新增顶层文件/目录 | §4.6 |
+| 发布时携带提交记录历史 | 想公开版保留私有提交记录（增量优先、免 force） | §4.4 |
+| 单独重建/推送提交记录历史 | 只导出提交记录（空树），不导出文件 | §8.1 |
 | 导出残留排查清单 | 发布前/新增私有功能后自查 | §4.6 + 注记 |
 
 > AI Agent 侧的同款速查见 `AGENTS.md` 第 9 节（含导出脚本职责与当前基线）。
@@ -290,6 +292,10 @@ flutter test
 # 4'. 例外：force push 直接覆盖 main（脚本内部：git init → 单提交 → force push；
 #    交互环境会再确认一次；-AsPr 为兼容保留的旧参数，现在与默认行为等价）
 .\scripts\md3.ps1 export -PublicRemote https://github.com/zzyoxml/md3Music.git -ForcePush
+
+# 4''. force push 覆盖 + 携带提交记录历史（把私有仓库提交记录以「空树提交」一并推过去，
+#     顶端叠加公开树；增量优先：有映射且早期历史未改写时只追加新记录并 fast-forward 推送，免 force）
+.\scripts\md3.ps1 export -PublicRemote https://github.com/zzyoxml/md3Music.git -PublicBranch rust-local-force -ForcePush -WithHistory
 ```
 
 **手动推送（不想用脚本参数时）**：
@@ -308,6 +314,12 @@ git push -f origin HEAD:main
 
 **注意事项**：
 - 默认发布走 **PR 审阅**：为本次导出建一个 `public-export-<时间戳>` 临时分支开 PR，合并后公开仓库仍是线性镜像。`-ForcePush` 是例外：直接覆盖公开仓库 main 分支（历史上只允许被覆盖的发布方式，需显式声明并在交互下确认）。不要在公开仓库上开长期分支开发（那样同步会很痛苦）。
+- `-WithHistory` 只对 `-ForcePush` 生效（PR 模式基于公开仓库现有历史，无法携带独立重建的提交记录，会警告忽略）。**无论是否推送，勾选后前置检查都会输出明确提示**：已启用携带提交记录历史；若未带 `-PublicRemote`/`-ForcePush`（只导出不推送）会警告「仅导出公开树，提交记录历史不会实际推送」。它把私有仓库每个提交按原样（作者/日期/信息）重建为**空树提交**（无任何文件内容、无 blob），顶端叠加本次公开树快照，形成「提交记录完整、文件内容只在顶端」的分支——下载/缓存代码零残留，可追溯但不可看代码。**增量优先**：目标分支上次导出的映射（公开树内 `.md3/export-state`，记录上次 `private_head`/`empty_head`）存在且早期历史未改写时，只把新增私有提交线性重建并追加、**fast-forward 普通 push（免 force）**；无映射/历史被改写时回落到全量重建 + force。增量模式下目标分支体量较大时（公开树约 80MB），探测 fetch 用 `--filter=blob:none` 只拉 commit/tree，避免整树下载。
+- **`-WithHistory` 运行提示（新逻辑）**：脚本在**任何场景**（含只导出不推送）都会输出明确提示、不会静默，流程大致如下——
+  - 前置检查：`[OK] 已启用「携带提交记录历史」…`；缺 `-ForcePush` 时警告「需要配合 -ForcePush 才能生效」；缺 `-PublicRemote`（只导出）时警告「仅导出公开树，提交记录历史不会实际推送」。
+  - 推送阶段（`-PublicRemote` + `-ForcePush`）：`=== 推送到公开仓库（<分支>，含提交记录历史）===` → `探测 <分支> 的增量基线（--filter=blob:none…）` → `[OK] 已拉取远端历史（oldTip @xxx）` → 有映射 `[OK] 找到上次导出映射（private @xxx / empty @xxx）` / 无映射 `远端历史中无 .md3/export-state 映射，将全量重建` / 无分支 `远端无分支 <分支>，将全量重建`；增量时 `[OK] 增量模式：复用现有历史，仅追加 private @xxx 之后的新提交` + `本次新增 N 条提交记录待重建` + 重建进度条；全量时 `[OK] 提交记录历史已全量重建（空树提交），接下来叠加公开树并推送`。
+  - 结束：增量成功 `[OK] 已推送 …（增量追加 N 条提交记录）`；无变更 `[!!] 无任何变更…跳过提交与推送`；总结区 `[OK] 本次发布已携带提交记录历史（目标分支 <分支>；如需人工补救：<历史仓库路径>）`。
+- 只想单独导出/推送提交记录（不叠加公开树）时，用独立子命令 `md3.ps1 export-messages`（见 §8.1）。
 - `.public_export/` 已被 `.gitignore` 忽略，不入私有仓库。
 - 导出树里的 `test/` 会被原样拷贝：**不要在公开树的 `test/` 里写下载/缓存测试**（会命中闸门）；私有功能测试放 `packages/md3_download_cache/test/`。
 
@@ -347,7 +359,7 @@ void installUiHooks() {
 
 ### 4.6 场景 F：导出白名单维护（新增文件/目录时）
 
-> 导出的白名单在 `scripts/md3.ps1 export` 的 `$whitelist` 数组（当前 17 项）。**白名单制 = 只有列出的顶层项才会被拷贝进公开树**，未列出的东西（包括意外创建的任何顶层目录/文件）一律不进公开仓库——这是隔离的**第一道闸**。
+> 导出的白名单在 `scripts/md3.ps1 export` 的 `$whitelist` 数组（当前 16 项）。**白名单制 = 只有列出的顶层项才会被拷贝进公开树**，未列出的东西（包括意外创建的任何顶层目录/文件）一律不进公开仓库——这是隔离的**第一道闸**。
 
 **新增功能时按落点分类处理：**
 
@@ -363,6 +375,8 @@ void installUiHooks() {
 > ⚠️ **`scripts/` 目录例外**：不作为整目录进白名单，导出时**只带出 `tasks/android.ps1` 与 `tasks/windows.ps1` 两个构建脚本**（脚本内已带「lib/common.ps1 缺失时自包含兜底」，可脱离公共库独立运行）。`md3.ps1` 入口、`lib/`（common/ui/llm）、`tools/`、`public_deny.txt` 及 `tasks/` 下其余任务脚本（export/verify/commit/changelog/token）都是**私有侧工具链，一律不进公开仓库**（避免导出脚本自复制、否认清单与 API key 外泄）。`scripts/` 目录内白名单之外的文件在导出时会按允许清单防御式清理。新增导出相关脚本时，同样保持「只允许列表白名单制」。
 >
 > ⚠️ **其他私有功能排除**：`windows/` 目录（私有版 Windows 桌面功能，公开版 Android-only）不在白名单；pubspec 的 `just_audio_windows`/`video_player_win` 依赖与 README 的「边边存」条目、`.github/workflows/build-windows.yml` 在导出时被剥离/删除；`.trae/`（AI 计划/工作产物）白名单外且导出时防御性删除，**绝不导出**。`CHANGELOG.md` **在白名单内**（由 `md3.ps1 changelog` / `export -Changelog` 维护：总结提交记录、LLM 生成需确认后写入，随导出携带）。**新增私有功能时，同步检查这三处：依赖剥离、文档宣传清理、CI 排除；新增 plan/分析文档放 `.trae/` 或 `tmp/`，绝不进公开树。**
+>
+> ⚠️ **Rust API 服务器源码（已导出）**：`kugou_api_server/rust/` 在 `$whitelist` 内，随公开导出——含 `src/`、`tests/`、`Cargo.toml`/`Cargo.lock`、`build_android.sh`/`build_desktop.ps1`。但其**本地构建/工具链临时物绝不导出**：`target*` 系列（`target/`、`target-native/`、`target-wsl/` 等不定名 cargo 编译产物，Copy-Item 不认 gitignore 会一并复制）与 `.cargo/` 在导出步骤 4 被显式删除。旧 Node 时代的 `kugou_api_server/module|util|server.js|Dockerfile` 等**不在白名单**，天然排除。公开版仍用已提交的 `libkugou_server.so`（`android/jniLibs` 随 `android/` 导出）打包，Rust 源码供审阅/可重建。
 
 **判断标准（一句话）**：这个文件/目录**该不该出现在公开仓库？**
 - 该 → 加进 `$whitelist`
@@ -375,6 +389,7 @@ void installUiHooks() {
 $whitelist = @(
     'lib', 'android', 'assets', 'web', 'windows', 'test',
     'third_party', 'img', 'scripts', '.github',
+    'kugou_api_server/rust',        # ← Rust API 服务器源码（导出时剔除 target*/.cargo 本地物）
     'pubspec.yaml', 'analysis_options.yaml', 'README.md',
     'LICENSE', 'CHANGELOG.md', 'DISCLAIMER.md',
     'devtools_options.yaml',
@@ -484,6 +499,8 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 | 闸门校验（私有库内） | `.\scripts\md3.ps1 verify` |
 | 生成公开树 | `.\scripts\md3.ps1 export` |
 | 生成并推送公开树 | `.\scripts\md3.ps1 export -PublicRemote https://github.com/zzyoxml/md3Music.git` |
+| 覆盖发布并携带提交记录历史 | `.\scripts\md3.ps1 export -PublicRemote <URL> -PublicBranch <分支> -ForcePush -WithHistory` |
+| 重建并推送提交记录历史（空树，不叠加公开树） | `.\scripts\md3.ps1 export-messages -PublicRemote <URL> -Force` |
 | 私有入口构建 | `flutter build apk --debug -t lib/private/main_private.dart` |
 | 公开入口构建 | `flutter build apk --debug`（默认 lib/main.dart） |
 | 每日完整构建 | `.\scripts\md3.ps1 android`（默认私有入口） |
@@ -496,7 +513,9 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 | `lib/`（不含 private/） | 公开 | 公开功能；只许中性钩子 |
 | `lib/private/` | 私有 | 6 文件：`cache_bridge.dart`、`enhanced_ui.dart`、`downloads_provider.dart`、`downloads_page.dart`、`private_settings.dart`、`main_private.dart` |
 | `packages/md3_download_cache/` | 私有 | 引擎包：`download/`（manager/repository/task）+ `cache/`（stream_cache_manager/repository/lyric_data） |
-| `scripts/tasks/export_public.ps1` | 工具 | 过滤导出 + deny 闸门 + 可选推送/PR |
+| `kugou_api_server/rust/` | 公开 | Rust API 服务器源码（白名单内，随导出；剔除 `target*`/`.cargo` 本地物） |
+| `scripts/tasks/export_public.ps1` | 工具 | 过滤导出 + deny 闸门 + 可选推送/PR（`-WithHistory` 携带提交记录） |
+| `scripts/tasks/export_messages_history.ps1` | 工具 | 重建私有提交记录为空树历史（`export-messages` 子命令，可推送） |
 | `scripts/tasks/verify_public.ps1` | 工具 | 闸门校验（pre-push/CI 用） |
 | `scripts/tasks/commit.ps1` | 工具 | 一键提交（TUI 勾选 + 闸门 + 推送 + PR/合并） |
 | `scripts/tasks/token.ps1` | 工具 | GitHub token 管理（PAT 存 %LOCALAPPDATA%，不入库） |
@@ -520,3 +539,10 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 - **验证结果**：`flutter analyze` 零错误；`flutter test` +345 通过（19 个预存插件失败除外）；双入口 debug APK 均构建成功；导出树独立 analyze 零错误 + 特征残留零命中。
 - **待办**：真机验证（需接入 R52R30F3Q9Z）；改动尚未提交（`git status` 见未提交文件），建议按逻辑单元提交：引擎入包 / 公开树减法 / 导出脚本与闸门。
 - **回滚**：改动未提交，`git checkout -- .` + `git clean -fd lib/private packages scripts/tasks scripts/lib` 可回到改造前。
+
+### 9.1 后续进展（截至 2026-08-28）
+
+- **提交记录导出能力**：新增 `export -WithHistory`（`-ForcePush` 模式下把私有提交记录以「空树提交」历史一并推送到目标分支，顶端叠加公开树快照，**增量优先、免 force**）与独立子命令 `export-messages`（只重建/推送提交记录）。用法见 §4.4 / §8.1；实现位于 `scripts/tasks/export_public.ps1`（`-WithHistory` 分支）与 `scripts/tasks/export_messages_history.ps1`（均为私有侧工具链，不进公开仓库）。
+- **增量机制**：目标分支公开树内维护 `.md3/export-state` 映射（`private_head`/`empty_head`）。有映射且早期私有历史未改写时，只把新增提交线性重建为空树并追加、fast-forward 普通 push（免 force）；无映射（首迁）或历史被改写（rebase/amend/脱敏）时回落到全量重建 + force。探测 fetch 用 `--filter=blob:none` 避免整树（约 80MB）下载。
+- **已实跑验证**：全量首迁（912 条空树 + 公开树 + 映射写入）→ 增量判定与「无变更跳过」→ 本地 fast-forward 校验（增量提交父链包含 oldTip），链路全部通过。
+- **运行提示强化**：`-WithHistory` 的提示从"仅推送时"提到前置检查公共位置——**任何场景**（含只导出不推送）都会输出明确提示（已启用携带提交记录历史 / 需要 `-ForcePush` / 未指定 `-PublicRemote` 时仅导出不推送），推送阶段另有探测、映射、增量/全量判定、重建进度与总结区提示，杜绝"跟不带参数一样"的静默感。见 §4.4 注意事项。
