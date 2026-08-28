@@ -75,6 +75,16 @@ class AudioPlaybackService : Service() {
         // 桌面小组件按钮动作（由 MusicWidgetProvider 转发）
         const val ACTION_WIDGET_PLAY_PAUSE = "com.md3music.md3music.ACTION_WIDGET_PLAY_PAUSE"
         const val ACTION_WIDGET_NEXT = "com.md3music.md3music.ACTION_WIDGET_NEXT"
+        // 私人FM桌面小组件按钮动作（由 PersonalFmWidgetProvider 转发）
+        const val ACTION_WIDGET_FM_PLAY_PAUSE = "com.md3music.md3music.ACTION_FM_WIDGET_PLAY_PAUSE"
+        const val ACTION_WIDGET_FM_TOGGLE_FAVORITE = "com.md3music.md3music.ACTION_FM_WIDGET_TOGGLE_FAVORITE"
+        const val ACTION_WIDGET_FM_SELECT_STATION = "com.md3music.md3music.ACTION_FM_WIDGET_SELECT_STATION"
+        const val ACTION_WIDGET_FM_OPEN_TRACK = "com.md3music.md3music.ACTION_FM_WIDGET_OPEN_TRACK"
+        // 小部件封面点击：拉起 app 并打开播放器页
+        const val ACTION_WIDGET_FM_OPEN_PLAYER = "com.md3music.md3music.ACTION_FM_WIDGET_OPEN_PLAYER"
+        // FM 小部件动作参数（档位下标 / 歌曲 hash）
+        const val EXTRA_FM_ACTION_STATION_INDEX = "action_station_index"
+        const val EXTRA_FM_ACTION_TRACK_HASH = "action_track_hash"
         // 线控耳机媒体键（由 MediaButtonReceiver 转发，唤醒播放）
         const val ACTION_MEDIA_BUTTON = "com.md3music.md3music.ACTION_MEDIA_BUTTON"
         const val EXTRA_MEDIA_COMMAND = "mediaCommand"
@@ -700,8 +710,11 @@ class AudioPlaybackService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_PREV, ACTION_PLAY_PAUSE, ACTION_NEXT, ACTION_TOGGLE_DESKTOP_LYRIC, ACTION_TOGGLE_FAVORITE,
-            ACTION_WIDGET_PLAY_PAUSE, ACTION_WIDGET_NEXT -> {
-                handleAction(intent.action!!)
+            ACTION_WIDGET_PLAY_PAUSE, ACTION_WIDGET_NEXT,
+            ACTION_WIDGET_FM_PLAY_PAUSE, ACTION_WIDGET_FM_TOGGLE_FAVORITE,
+            ACTION_WIDGET_FM_SELECT_STATION, ACTION_WIDGET_FM_OPEN_TRACK,
+            ACTION_WIDGET_FM_OPEN_PLAYER -> {
+                handleAction(intent)
                 return START_STICKY
             }
             ACTION_MEDIA_BUTTON -> {
@@ -757,7 +770,13 @@ class AudioPlaybackService : Service() {
         return START_STICKY
     }
 
+    /** MediaSession / 广播接收器的既有入口：只有 action、无参数。 */
     private fun handleAction(action: String) {
+        handleAction(Intent().apply { this.action = action })
+    }
+
+    private fun handleAction(intent: Intent?) {
+        val action = intent?.action ?: return
         val engine = flutterEngine ?: staticFlutterEngine
         if (engine != null) {
             val method = when (action) {
@@ -766,10 +785,24 @@ class AudioPlaybackService : Service() {
                 ACTION_NEXT, ACTION_WIDGET_NEXT -> "next"
                 ACTION_TOGGLE_DESKTOP_LYRIC -> "toggleDesktopLyric"
                 ACTION_TOGGLE_FAVORITE -> "toggleFavorite"
+                // 私人FM小部件动作（PersonalFmWidgetProvider 转发）
+                ACTION_WIDGET_FM_PLAY_PAUSE -> "widgetFmPlayPause"
+                ACTION_WIDGET_FM_TOGGLE_FAVORITE -> "widgetFmToggleFavorite"
+                ACTION_WIDGET_FM_SELECT_STATION -> "widgetFmSelectStation"
+                ACTION_WIDGET_FM_OPEN_TRACK -> "widgetFmOpenTrack"
+                ACTION_WIDGET_FM_OPEN_PLAYER -> "widgetFmOpenPlayer"
                 else -> return
             }
+            // FM 动作携带参数：档位下标（Int）/ 歌曲 hash（String），其余为 null
+            val args: Any? = when (action) {
+                ACTION_WIDGET_FM_SELECT_STATION ->
+                    intent.getIntExtra(EXTRA_FM_ACTION_STATION_INDEX, 0)
+                ACTION_WIDGET_FM_OPEN_TRACK ->
+                    intent.getStringExtra(EXTRA_FM_ACTION_TRACK_HASH)
+                else -> null
+            }
             MethodChannel(engine.dartExecutor.binaryMessenger, "com.md3music.md3music/floating_lyric")
-                .invokeMethod(method, null)
+                .invokeMethod(method, args)
         } else {
             sendFlutterCommand(action)
         }
