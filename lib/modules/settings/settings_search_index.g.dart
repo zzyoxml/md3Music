@@ -50,6 +50,8 @@ const List<({String label, String category, String aliases})>
   (label: '32bit 播放支持', category: '播放', aliases: '32bit 无损 高解析 音质 float'),
   (label: '均衡器', category: '播放', aliases: 'eq 均衡'),
   (label: '暂停淡入淡出', category: '播放', aliases: '淡入淡出 渐变 音量'),
+  (label: '歌曲淡入淡出', category: '播放', aliases: '歌曲淡入淡出 交叉淡化 crossfade 渐入渐出 叠加 衔接 无缝 过渡'),
+  (label: '淡出时长', category: '播放', aliases: '交叉淡化时长 淡化 时长 秒数 crossfade 叠加'),
   (label: '允许与其他应用同时播放音频', category: '播放', aliases: '音频焦点 忽略焦点 同时播放 共存 不被打断 焦点'),
   (label: '播放时保持屏幕常亮', category: '播放', aliases: '屏幕常亮 常亮 息屏'),
   (label: '播放 MV 时自动画中画', category: '播放', aliases: '画中画 pip 悬浮'),
