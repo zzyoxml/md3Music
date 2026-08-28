@@ -18,6 +18,7 @@ import '../core/services/listening_grade_service.dart';
 import '../core/services/media_notification_service.dart';
 import '../core/services/wakelock_service.dart';
 import '../core/services/media_store_service.dart';
+import '../core/services/usb_audio_service.dart';
 import '../data/models/song.dart';
 import '../modules/player/comments_view.dart';
 import '../modules/player/mv_player_page.dart';
@@ -105,6 +106,33 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   int _abnormalEndRetries = 0;
   // 记录正在重试的歌曲 ID，切歌后自动重置计数器
   String? _retryingSongId;
+
+  // —— 交叉淡化（crossfade）——
+  // 自然播完前 _crossfadeDuration 秒开始：本首等功率渐出、下一首等功率渐入，
+  // 两路音频由 AudioService 的主/辅播放器真实叠加。
+  // 设置值缓存在字段里：判定发生在 positionStream（~200ms）这样的高频路径上，
+  // 不能每次都 await SharedPreferences。
+  bool _crossfadeEnabled = false;
+  Duration _crossfadeDuration = const Duration(
+    seconds: SettingsRepository.kCrossfadeDefaultSeconds,
+  );
+
+  /// 正在解析/预加载下一首（避免同一时间重入）。
+  bool _crossfadePreparing = false;
+
+  /// 正在执行淡化启动流程（账目切换期间不再触发新的判定）。
+  bool _crossfadeStarting = false;
+
+  /// 预加载完成、等待起播的下一首。索引为 null 表示没有可用的预加载。
+  int? _crossfadePreparedIndex;
+  Song? _crossfadePreparedSong;
+  String? _crossfadePreparedQuality;
+
+  /// 预加载时的"当前歌曲"id：起播前校验，列表/当前歌曲已变化则丢弃。
+  String? _crossfadeFromSongId;
+
+  bool get crossfadeEnabled => _crossfadeEnabled;
+  Duration get crossfadeDuration => _crossfadeDuration;
 
   Song? get currentSong => _currentSong;
   bool get isPlaying => _isPlaying;
@@ -284,6 +312,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       await _syncAudioFocusMode();
       // 恢复持久化的应用内音量（重启后保留）
       await _restoreVolume();
+      // 读取交叉淡化设置到字段缓存（判定在 positionStream 高频路径上）
+      await _loadCrossfadeSettings();
       // 恢复上次播放状态
       await _restoreState();
     } catch (e) {}
@@ -302,7 +332,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       final saved = prefs.getDouble('player_volume');
       if (saved != null) {
         _volume = saved.clamp(0.0, 1.0);
-        await _audioService?.player?.setVolume(_volume);
+        await _audioService?.setVolume(_volume);
         notifyListeners();
       }
     } catch (_) {}
@@ -522,6 +552,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
               'dur=${duration.inSeconds}s)');
           _handlePlaybackCompleted();
         }
+        // 交叉淡化调度：与位置兜底共用同一个 ~200ms tick，无需额外 Timer
+        _maybeCrossfade(position);
         // 直接转发给 Lyricon，无节流。
         // positionStream 本身就是 ~200ms 周期（just_audio 默认），是天然节流。
         // MethodChannel 是异步的，不阻塞 Dart UI；setPosition 是 fire-and-forget。
@@ -627,6 +659,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> _handlePlaybackCompleted() async {
     if (_handlingCompletion) return;
+    // 交叉淡化进行中：旧歌会在淡化收尾前自然播完并发出 completed，而交叉点
+    // 之前对外的流仍来自旧播放器（这样界面显示的才是听到的那首）。此时切歌
+    // 已由淡化流程接管，这里必须放行，否则会额外再跳一首。
+    if (_crossfadeStarting || _audioService?.isCrossfading == true) {
+      // ignore: avoid_print
+      print('[Crossfade] 忽略 completed：淡化进行中');
+      return;
+    }
     // Windows 误报 completed 防护：just_audio_windows 在 setUrl() 加载新源时，
     // 旧源会异步补发一次 completed，若距上次加载源 < 窗口则判为误报并忽略，
     // 避免"播放列表点歌总自动跳到下一首"。真实播完一首歌必然远超该窗口。
@@ -780,6 +820,344 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     _abnormalEndRetries = 0;
     _retryingSongId = null;
     _actualPlayingQuality = null;
+    // 用户主动切歌：预加载的"下一首"已经不再是下一首了
+    _resetCrossfadePrepared();
+  }
+
+  // ===================== 交叉淡化（crossfade） =====================
+
+  /// 从设置读取 crossfade 开关与时长到字段缓存。
+  /// 设置页改动后由 [refreshCrossfadeSettings] 重新调用。
+  Future<void> _loadCrossfadeSettings() async {
+    try {
+      final settings = SettingsRepository();
+      final enabled = await settings.getCrossfadeEnabled();
+      final seconds = await settings.getCrossfadeSeconds();
+      final changed =
+          enabled != _crossfadeEnabled || seconds != _crossfadeDuration.inSeconds;
+      _crossfadeEnabled = enabled;
+      _crossfadeDuration = Duration(seconds: seconds);
+      if (!enabled) _resetCrossfadePrepared();
+      if (changed) {
+        // ignore: avoid_print
+        print('[Crossfade] 设置已加载 enabled=$enabled seconds=$seconds');
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('[Crossfade] 读取设置失败: $e');
+    }
+  }
+
+  /// 设置页修改 crossfade 设置后调用，刷新字段缓存。
+  Future<void> refreshCrossfadeSettings() => _loadCrossfadeSettings();
+
+  /// 上次已按当前歌曲刷新过设置缓存的歌曲 id。
+  ///
+  /// 设置页改开关时会调 [refreshCrossfadeSettings]，但那条通路依赖设置页能拿到
+  /// 本 Provider；这里每首歌开头再读一次（一次 SharedPreferences 读，开销可忽略），
+  /// 保证即使通知没到也最迟在下一首生效。
+  String? _crossfadeSettingsSongId;
+
+  /// 诊断日志去重键（同一首歌内同样的原因只打一次，避免 200ms 刷屏）。
+  String? _lastCrossfadeDiag;
+
+  void _crossfadeDiag(String msg) {
+    final key = '${_currentSong?.id}|$msg';
+    if (_lastCrossfadeDiag == key) return;
+    _lastCrossfadeDiag = key;
+    // ignore: avoid_print
+    print('[Crossfade] $msg');
+  }
+
+  /// 丢弃已预加载的下一首（切歌 / 拖动进度条 / 关闭开关等）。
+  void _resetCrossfadePrepared() {
+    if (_crossfadePreparedIndex == null &&
+        !_crossfadePreparing &&
+        _crossfadeFromSongId == null) {
+      return;
+    }
+    _crossfadePreparedIndex = null;
+    _crossfadePreparedSong = null;
+    _crossfadePreparedQuality = null;
+    _crossfadeFromSongId = null;
+    _crossfadePreparing = false;
+    try {
+      _audioService?.discardPreparedCrossfade();
+    } catch (_) {}
+  }
+
+  /// crossfade 的所有前置条件。返回阻塞原因（null = 允许）。
+  /// 原因字符串直接进诊断日志，排障时一眼看出卡在哪一条。
+  /// 时间轴判断（是否接近尾部、曲子够不够长）在 [decideCrossfadePhase] 里。
+  String? _crossfadeBlockReason() {
+    if (!_crossfadeEnabled) return '开关未开启';
+    // 双播放器方案依赖 Media3（共享 audioSessionId、跳过第二个 MediaSession）
+    if (kIsWeb || !Platform.isAndroid) return '非 Android 平台';
+    if (!_isPlaying) return '未在播放';
+    if (_isResolvingUrl) return '正在解析播放链接';
+    if (_handlingCompletion) return '正在处理播放结束';
+    if (_crossfadeStarting) return '淡化启动中';
+    if (_currentIndex < 0) return '无当前歌曲';
+    if (_playlist.length < 2) return '播放列表不足 2 首';
+    // 单曲循环：同一首歌尾接头不做叠加
+    if (_loopMode == AppLoopMode.one) return '单曲循环';
+    if (_currentIndex >= _playlist.length - 1) {
+      // 最后一首且非列表循环：播完就该停，不该叠加
+      if (_loopMode != AppLoopMode.all) return '最后一首且非列表循环';
+      // 私人 FM 等会在末尾续列表，交给原有 onPlaylistEnd 流程
+      if (onPlaylistEnd != null) return '最后一首，交给 onPlaylistEnd 续列表';
+    }
+    // 同专辑：尾接头属于正常曲间过渡，不做叠加（覆盖 prepare 与 start 两阶段）
+    final nextIndex = _nextIndexForCrossfade();
+    if (nextIndex != null) {
+      final currentSong = _currentSong;
+      final nextSong = _playlist[nextIndex];
+      if (currentSong != null && _isSameAlbum(currentSong, nextSong)) {
+        return '同专辑（同 disk 歌曲不叠加）';
+      }
+    }
+    // USB 独占输出：所有 AudioSink 共用一条 USB 流（见 UsbAudioSinkController
+    // 的 static activeStream），两个播放器会交替写入同一条流而不是混音，
+    // 结果是音频错乱而非叠加。独占开启期间直接跳过。
+    if (UsbAudioService.instance.lastStatus['enabled'] == true) {
+      return 'USB 独占输出已开启';
+    }
+    return null;
+  }
+
+  /// 判断两首歌是否属于同一专辑：优先比 albumId（非空且相等），
+  /// 否则比专辑名（trim 后忽略大小写相等）。
+  bool _isSameAlbum(Song a, Song b) {
+    final aId = a.albumId;
+    final bId = b.albumId;
+    if (aId != null && aId.isNotEmpty && bId != null && bId.isNotEmpty) {
+      return aId == bId;
+    }
+    final aName = a.album.trim();
+    final bName = b.album.trim();
+    if (aName.isEmpty || bName.isEmpty) return false;
+    return aName.toLowerCase() == bName.toLowerCase();
+  }
+
+  /// 每个 position tick 调用：决定是否预加载下一首或开始淡化。
+  void _maybeCrossfade(Duration position) {
+    // 每首歌开头补读一次设置，避免设置页的通知没到导致本次运行内不生效
+    final songId = _currentSong?.id;
+    if (songId != null && songId != _crossfadeSettingsSongId) {
+      _crossfadeSettingsSongId = songId;
+      // ignore: discarded_futures
+      _loadCrossfadeSettings();
+    }
+    if (_crossfadePreparing || _crossfadeStarting) return;
+
+    final reason = _crossfadeBlockReason();
+    final total = _duration;
+    // 诊断：按去重键每首歌只打一次，定位卡在哪一步
+    if (reason != null) {
+      _crossfadeDiag('跳过：$reason');
+    } else if (total == null || total <= Duration.zero) {
+      _crossfadeDiag('时长未知，无法判断尾部位置');
+    } else {
+      final minLength = _crossfadeDuration * 2 + kCrossfadeMinTailroom;
+      if (total < minLength) {
+        _crossfadeDiag('曲子过短：${total.inSeconds}s < ${minLength.inSeconds}s，不叠加');
+      } else if (total - position <=
+          _crossfadeDuration + kCrossfadePrepareLead) {
+        _crossfadeDiag('进入窗口 pos=${position.inSeconds}s dur=${total.inSeconds}s '
+            'fade=${_crossfadeDuration.inSeconds}s');
+      }
+    }
+
+    final phase = decideCrossfadePhase(
+      position: position,
+      duration: total,
+      crossfadeDuration: _crossfadeDuration,
+      enabled: reason == null,
+      prepared: _crossfadePreparedIndex != null,
+      fading: _audioService?.isCrossfading == true,
+    );
+    switch (phase) {
+      case CrossfadePhase.idle:
+        return;
+      case CrossfadePhase.prepare:
+        // ignore: discarded_futures
+        _prepareCrossfade();
+      case CrossfadePhase.start:
+        // ignore: discarded_futures
+        _startCrossfade();
+    }
+  }
+
+  /// 自然播完时的下一首索引（与 [next] 的推进规则一致；
+  /// 随机播放已由 `_playlist` 自身的顺序体现，这里同样是 +1）。
+  int? _nextIndexForCrossfade() {
+    if (_playlist.isEmpty || _currentIndex < 0) return null;
+    if (_currentIndex < _playlist.length - 1) return _currentIndex + 1;
+    if (_loopMode == AppLoopMode.all) return 0;
+    return null;
+  }
+
+  /// 解析下一首的播放地址并加载到备用播放器预缓冲（不出声）。
+  Future<void> _prepareCrossfade() async {
+    if (_crossfadePreparing || _crossfadePreparedIndex != null) return;
+    final nextIndex = _nextIndexForCrossfade();
+    if (nextIndex == null) return;
+    final fromSongId = _currentSong?.id;
+    _crossfadePreparing = true;
+    // ignore: avoid_print
+    print('[Crossfade] prepare 开始 nextIndex=$nextIndex');
+    try {
+      var song = _playlist[nextIndex];
+      String? quality;
+      if (song.isOnline && (song.url == null || song.url!.isEmpty)) {
+        final result = await KugouApiClient().getSongUrlWithFallback(
+          song.id,
+          quality: _audioQuality.value,
+          albumId: song.albumId,
+          albumAudioId: song.albumAudioId,
+        );
+        if (result == null || result.url.isEmpty) {
+          // ignore: avoid_print
+          print('[Crossfade] prepare 放弃：下一首无播放链接 id=${song.id}');
+          return;
+        }
+        quality = result.quality;
+        song = song.copyWith(url: result.url);
+      } else if (song.isOnline) {
+        quality = _audioQuality.value;
+      }
+      final url = await _resolvePlaybackUrl(song);
+      if (url == null || url.isEmpty) {
+        // ignore: avoid_print
+        print('[Crossfade] prepare 放弃：地址解析失败 id=${song.id}');
+        return;
+      }
+      if (!song.isOnline) {
+        // 回写解析后的真实路径（content:// → file://），避免起播后再解析一次
+        song = song.copyWith(localPath: url);
+      }
+      // 解析期间用户可能已经切歌 / 换了列表：丢弃这次预加载
+      if (_currentSong?.id != fromSongId ||
+          nextIndex >= _playlist.length ||
+          _playlist[nextIndex].id != song.id) {
+        return;
+      }
+      _playlist[nextIndex] = song;
+      final ok = await _audioService?.prepareCrossfade(url, speed: _speed);
+      if (ok != true) {
+        // ignore: avoid_print
+        print('[Crossfade] prepare 放弃：备用播放器加载失败');
+        return;
+      }
+      if (_currentSong?.id != fromSongId) {
+        _audioService?.discardPreparedCrossfade();
+        return;
+      }
+      _crossfadePreparedIndex = nextIndex;
+      _crossfadePreparedSong = song;
+      _crossfadePreparedQuality = quality;
+      _crossfadeFromSongId = fromSongId;
+      // ignore: avoid_print
+      print('[Crossfade] prepared index=$nextIndex title=${song.title}');
+    } catch (e) {
+      // ignore: avoid_print
+      print('[Crossfade] prepare 异常: $e');
+    } finally {
+      _crossfadePreparing = false;
+    }
+  }
+
+  /// 启动淡化并把"当前歌曲"账目切到新歌。
+  ///
+  /// [AudioService.startCrossfade] 内部先把新播放器切为活动播放器再开始斜坡，
+  /// 因此旧播放器随后自然播完发出的 completed 不会被转发，
+  /// [_handlePlaybackCompleted] 不会再触发一次切歌。
+  Future<void> _startCrossfade() async {
+    final nextIndex = _crossfadePreparedIndex;
+    final nextSong = _crossfadePreparedSong;
+    final fromSongId = _crossfadeFromSongId;
+    final quality = _crossfadePreparedQuality;
+    if (nextIndex == null || nextSong == null || _crossfadeStarting) return;
+    // 起播前最后一次校验：列表/当前歌曲变了就丢弃，避免切到错误的歌
+    if (_currentSong?.id != fromSongId ||
+        nextIndex >= _playlist.length ||
+        _playlist[nextIndex].id != nextSong.id) {
+      _resetCrossfadePrepared();
+      return;
+    }
+    _crossfadeStarting = true;
+    try {
+      // 复用 Windows 误报 completed 的防护窗口：新歌刚起播时不做位置兜底切歌
+      _lastUrlLoadStarted = DateTime.now();
+      // 作废可能仍在跑的暂停淡入/淡出循环：它们会往播放器写音量，
+      // 和淡化斜坡抢同一个 setVolume 通道
+      _fadeToken++;
+      final prevSong = _currentSong;
+      // 「当前歌曲」的账目推迟到交叉点（淡化中点）再切：一开始就切会让
+      // 界面/歌词/通知栏写着下一首，而这几秒听到的主体还是正在淡出的上一首。
+      final fade = _audioService?.startCrossfade(
+        duration: _crossfadeDuration,
+        targetVolume: _volume,
+        onCrossover: () => _applyCrossfadeSwitch(nextIndex, nextSong, quality),
+      );
+      await fade;
+      // 旧播放源到这一刻才真正停止发声
+      if (prevSong != null && prevSong.isOnline) {
+        // 可选扩展：播放源停止回调（默认关闭）
+        PlayerProvider.onPlaybackSourceStopped?.call(prevSong.id);
+      }
+      // 预取下一批链接与高潮数据推迟到淡化结束后：这两件事都发网络请求，
+      // 在斜坡进行中做会挤占事件循环，让音量步进变得不均匀
+      if (_currentIndex == nextIndex) {
+        _prefetchNextSongs(_currentIndex);
+        // ignore: discarded_futures
+        _fetchClimaxData();
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('[Crossfade] 启动失败: $e');
+    } finally {
+      _crossfadePreparedIndex = null;
+      _crossfadePreparedSong = null;
+      _crossfadePreparedQuality = null;
+      _crossfadeFromSongId = null;
+      _crossfadeStarting = false;
+    }
+  }
+
+  /// 交叉点回调：把「当前歌曲」账目切给新歌。
+  ///
+  /// 由 [AudioService.startCrossfade] 在淡化进度到 [kCrossfadeCrossoverProgress]
+  /// 时调用 —— 此刻活动播放器刚切给新歌，两首响度相当，界面/歌词/通知栏
+  /// 一起换过去在听感上最自然。
+  void _applyCrossfadeSwitch(int index, Song song, String? quality) {
+    if (index >= _playlist.length || _playlist[index].id != song.id) {
+      // ignore: avoid_print
+      print('[Crossfade] crossover 放弃：列表已变化');
+      return;
+    }
+    _abnormalEndRetries = 0;
+    _retryingSongId = null;
+    _currentIndex = index;
+    _currentSong = song;
+    _actualPlayingQuality = quality;
+    _resolveError = null;
+    // 新歌此刻已经播了半个淡化时长，用它的真实进度而不是 0
+    _updatePosition(_audioService?.position ?? Duration.zero);
+    _recordHistory(song);
+    if (song.isOnline && (song.url?.isNotEmpty ?? false)) {
+      // 可选扩展：播放源开始后回调（默认关闭）
+      PlayerProvider.onPlaybackSourceStarted?.call(
+        song,
+        quality ?? _audioQuality.value,
+        song.url!,
+      );
+    }
+    _updateNotification();
+    // 用防抖保存而不是立即 _saveState()：这一帧本来就要跑 UI 重建 + 封面取色，
+    // 再叠一次同步磁盘写会明显卡音
+    _scheduleSave();
+    notifyListeners();
   }
 
   Future<void> playSong(Song song) async {
@@ -912,6 +1290,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 关闭时按原顺序播放。始终以原始顺序同步 [_originalPlaylist]
   /// （关闭随机时用于还原）。
   void _loadPlaylist(List<Song> songs, int startIndex) {
+    // 换列表：预加载的"下一首"索引已失效
+    _resetCrossfadePrepared();
     _originalPlaylist = List.from(songs);
     if (_shuffleEnabled) {
       final currentSong = songs[startIndex];
@@ -1296,10 +1676,21 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> pause() async {
     // 取消正在进行的淡入
     _fadeToken++;
+    // 交叉淡化进行中被暂停：先收掉正在淡出的那一路，否则下面的暂停淡出
+    // 只作用于活动播放器，旧歌会继续响
+    _audioService?.abortCrossfade();
+    _resetCrossfadePrepared();
     final fadeEnabled = await SettingsRepository().getPauseFadeEnabled();
     if (fadeEnabled && _audioService != null) {
+      // 捕获播放器实例，不在循环里重新读 `player`。
+      // `player` 返回的是「当前活动播放器」，交叉淡化会在半途换掉它；
+      // 每次迭代重新取会把递减音量写到刚淡入的新歌上，收尾的
+      // setVolume(_volume) 再把它猛拉回正常音量——表现正是
+      // 「下一首不渐强反而减弱，到点后音量突然恢复」。
+      final target = _audioService!.player;
       // 从播放器实际当前音量开始淡出（避免淡入未完成时音量跳变）
-      final currentVol = _audioService!.player.volume;
+      final currentVol = target.volume;
+      final token = _fadeToken;
       const steps = 10;
       const stepMs = 50; // 10步 x 50ms = 500ms
       // 淡出循环加 try-catch：若中途被切歌/清列表等竞态打断抛异常，
@@ -1307,13 +1698,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       // false，WakeLock 无法释放（暂停后功耗降不下来）
       try {
         for (int i = steps - 1; i >= 0; i--) {
-          _audioService!.player.setVolume(currentVol * i / steps);
+          // 被更新的 fade / 切歌抢占就停手，别再动音量
+          if (token != _fadeToken) break;
+          target.setVolume(currentVol * i / steps);
           await Future.delayed(const Duration(milliseconds: stepMs));
         }
       } catch (_) {}
       await _audioService?.pause();
       // 恢复音量设置（下次播放时使用）
-      _audioService!.player.setVolume(_volume);
+      if (token == _fadeToken) target.setVolume(_volume);
     } else {
       await _audioService?.pause();
     }
@@ -1323,16 +1716,32 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   /// 拖动进度条时直接暂停（无淡入淡出），避免拖动期间音量渐变影响体验。
   Future<void> pauseForSeek() async {
     _fadeToken++;
+    _audioService?.abortCrossfade();
+    _resetCrossfadePrepared();
     await _audioService?.pause();
   }
 
   Future<void> resume() async {
+    // 交叉淡化进行中：不跑淡入循环，直接 play（已在播时是 no-op）。
+    // 淡入循环会以 50ms 步进与淡化斜坡抢 setVolume 通道：交叉点前写旧歌
+    // 会让渐出的旧歌音量回升，交叉点后写捕获的旧实例会把刚淡入的新歌
+    // 压回低位——听感正是"渐出渐入反过来"。pause() 已先 abortCrossfade，
+    // 此处斜坡仍在跑，守卫必须为只读（不能 abort，否则淡化被取消）。
+    if (_crossfadeStarting || _audioService?.isCrossfading == true) {
+      // ignore: avoid_print
+      print('[Fade] resume 跳过淡入：淡化进行中');
+      await _audioService?.play();
+      _saveState();
+      return;
+    }
     final fadeEnabled = await SettingsRepository().getPauseFadeEnabled();
     if (fadeEnabled && _audioService != null) {
       final targetVolume = _volume;
       final token = ++_fadeToken;
+      // 同 pause()：捕获实例，避免循环中途活动播放器被交叉淡化换掉
+      final target = _audioService!.player;
       // 先设置低音量再播放，避免突然出声
-      _audioService!.player.setVolume(0.01);
+      target.setVolume(0.01);
       // 不 await play()：避免 play() 的 Future 阻塞导致淡入代码不执行
       _audioService!.play();
       // 淡入：逐步提升音量到目标值
@@ -1342,7 +1751,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         if (token != _fadeToken) return;
         await Future.delayed(const Duration(milliseconds: stepMs));
         if (token != _fadeToken) return;
-        _audioService!.player.setVolume(targetVolume * i / steps);
+        target.setVolume(targetVolume * i / steps);
       }
     } else {
       await _audioService?.play();
@@ -1351,6 +1760,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> seek(Duration position) async {
+    // 拖动进度条：中止淡化（AudioService.seek 内部也会中止，这里同步清掉
+    // 预加载状态，避免拖回中段后仍按旧的"即将播完"判定起播下一首）
+    _resetCrossfadePrepared();
     // 立即更新位置，让 UI（进度条、歌词行高亮、滚动）即时响应
     // 否则要等 just_audio positionStream 触发，会有一帧的滞后，
     // 导致拖动 slider 后歌词不跟随。
@@ -1668,6 +2080,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> clearPlaylist() async {
+    _resetCrossfadePrepared();
     // 可选扩展：播放源停止回调（默认关闭）
     if (_currentSong != null && _currentSong!.isOnline) {
       PlayerProvider.onPlaybackSourceStopped?.call(_currentSong!.id);
@@ -1954,6 +2367,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> toggleLoopMode() async {
+    // 循环模式决定"下一首是谁"，预加载结果作废
+    _resetCrossfadePrepared();
     switch (_loopMode) {
       case AppLoopMode.off:
         _loopMode = AppLoopMode.all;
@@ -1977,6 +2392,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> toggleShuffle() async {
+    // 列表顺序即将改变，预加载结果作废
+    _resetCrossfadePrepared();
     _shuffleEnabled = !_shuffleEnabled;
     // just_audio 的 shuffleMode 始终保持 false：应用层通过打乱 _playlist
     // （Dart List）控制播放顺序，不依赖 just_audio 的 shuffle。若开启
@@ -2008,7 +2425,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> setVolume(double volume) async {
     _volume = volume.clamp(0.0, 1.0);
-    await _audioService?.player?.setVolume(_volume);
+    await _audioService?.setVolume(_volume);
     // 持久化应用内音量（重启保留）
     try {
       final prefs = await SharedPreferences.getInstance();

@@ -44,6 +44,7 @@ import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/md3e_transport_row.dart';
 import '../../widgets/menu_action_cell.dart';
 import '../../widgets/player_artwork_image.dart';
+import '../../widgets/smart_artwork_image.dart';
 import '../../widgets/player_playlist_view.dart';
 import '../../widgets/spectrum_artwork.dart';
 import '../../widgets/spectrum_background.dart';
@@ -3668,9 +3669,17 @@ class _FullPlayerState extends State<FullPlayer>
                         playlist['song_count'] ??
                         playlist['count'] ??
                         0;
+                    final coverUrl = playlist['coverUrl']?.toString();
 
                     return ListTile(
-                      leading: const Icon(Icons.queue_music),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                      ),
+                      leading: SmartArtworkImage(
+                        artworkUri: coverUrl,
+                        size: 44,
+                        borderRadius: 6,
+                      ),
                       title: Text(name),
                       subtitle: Text('$songCount 首'),
                       onTap: () async {
@@ -3724,6 +3733,7 @@ class _FullPlayerState extends State<FullPlayer>
       playlists.add({
         'name': brief.name,
         'songCount': brief.songCount,
+        'coverUrl': brief.coverUrl,
         'listid': brief.listId.isEmpty ? brief.id : brief.listId,
         'specialid': brief.id,
         'global_collection_id': brief.globalCollectionId,

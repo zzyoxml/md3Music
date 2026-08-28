@@ -463,6 +463,41 @@ class SettingsRepository {
     await prefs.setBool(_keyPauseFadeEnabled, value);
   }
 
+  // ===== 交叉淡化（crossfade）=====
+  static const String _keyCrossfadeEnabled = 'settings_crossfade_enabled';
+  static const String _keyCrossfadeSeconds = 'settings_crossfade_seconds';
+
+  /// 交叉淡化时长的允许范围（秒）。
+  static const int kCrossfadeMinSeconds = 2;
+  static const int kCrossfadeMaxSeconds = 12;
+  static const int kCrossfadeDefaultSeconds = 4;
+
+  /// 自动切歌时是否把本首的渐出与下一首的渐入叠加，默认 true。
+  Future<bool> getCrossfadeEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyCrossfadeEnabled) ?? true;
+  }
+
+  Future<void> setCrossfadeEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyCrossfadeEnabled, value);
+  }
+
+  /// 交叉淡化时长（秒），默认 [kCrossfadeDefaultSeconds]。
+  Future<int> getCrossfadeSeconds() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getInt(_keyCrossfadeSeconds) ?? kCrossfadeDefaultSeconds;
+    return value.clamp(kCrossfadeMinSeconds, kCrossfadeMaxSeconds);
+  }
+
+  Future<void> setCrossfadeSeconds(int seconds) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(
+      _keyCrossfadeSeconds,
+      seconds.clamp(kCrossfadeMinSeconds, kCrossfadeMaxSeconds),
+    );
+  }
+
   // ===== 播放时保持屏幕常亮 =====
   static const String _keyKeepScreenOn = 'settings_keep_screen_on';
 

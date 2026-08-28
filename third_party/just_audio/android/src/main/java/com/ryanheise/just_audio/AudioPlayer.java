@@ -121,6 +121,17 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
 
     private ExoPlayer player;
     private Integer audioSessionId;
+
+    // MD3Music fork（crossfade）：辅播放器标记。Dart 侧 AudioPlayer 以
+    // androidAuxPlayer:true 创建时 id 会带 AUX_ID_PREFIX 前缀，构造时即可判定。
+    // 辅播放器不创建 MediaSession，避免系统看到两个活跃媒体会话。
+    static final String AUX_ID_PREFIX = "md3aux-";
+    private final boolean auxPlayer;
+
+    /// 平台播放器 id（Dart 侧每次激活平台都会新生成一个 uuid）。
+    /// 用作 MediaSession 的唯一 id，见 ensurePlayerInitialized。
+    private final String playerId;
+
     private Integer errorCode;
     private String errorMessage;
     private Integer currentIndex;
@@ -181,6 +192,8 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
     ) {
         this.context = applicationContext;
         this.rawAudioEffects = rawAudioEffects;
+        this.playerId = id;
+        this.auxPlayer = id != null && id.startsWith(AUX_ID_PREFIX);
         this.offloadSchedulingEnabled = offloadSchedulingEnabled != null ? offloadSchedulingEnabled : false;
         this.useLazyPreparation = useLazyPreparation;
 
@@ -888,6 +901,12 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             // GAIN）会对本播放器强制 interruptMusicPlayback 直接暂停，忽略开关与
             // 三模式均无法阻止。固定 id 须在 AudioTrack 创建前设置（此时尚未播放），
             // MediaSession（下方创建）自动同步该 id 到系统。
+            //
+            // crossfade：主 / 辅播放器各自生成独立 id，**不共用会话**。共用会话时
+            // 一个 session 里会同时存在两条 AudioTrack，MIUI 上只要该会话挂着音效
+            // （均衡器）且音效在处理，两路的音量斜坡就会串台（旧歌渐强、新歌渐弱）。
+            // 独立会话后由 EqualizerPlugin 为每个会话各挂一个 Equalizer 实例并同步设置，
+            // 淡化全程两路都走音效，且无需在淡化期间开关音效（开关本身会爆音）。
             try {
                 AudioManager am = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
                 if (am != null && android.os.Build.VERSION.SDK_INT >= 21) {
@@ -910,9 +929,35 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             // 关联后系统识别播放器、不自动 duck，焦点事件正常进入 AudioFocusManager。
             // 焦点仍由 ExoPlayer 的 AudioFocusManager 管理（handleAudioFocus=true），
             // MediaSession 仅作关联标识（不请求焦点、不绑定通知栏）。
+<<<<<<< HEAD
             mediaSession = new MediaSession.Builder(context, player).build();
             // MD3Music fork: 记录活跃播放器，供 AudioPlaybackService 注入封面到媒体3会话
             sActivePlayer = this;
+=======
+            //
+            // crossfade：辅播放器跳过创建，否则系统会看到两个活跃媒体会话。
+            // 注意辅播放器有独立 audioSessionId（见上方 setAudioSessionId），
+            // 该会话不与任何 MediaSession 关联，因此淡化那几秒里辅播放器这一路
+            // 对系统是 hasUid=false 的：独占型中断可能只把它强制暂停 / duck。
+            // 相比"共用会话导致两路音量斜坡串台"，这是更小的代价。
+            //
+            // setId(id)：Media3 要求 MediaSession id 全进程唯一，默认 id 是空串。
+            // 平台播放器每次重新激活都会换一个新 uuid，用它作 session id 可彻底
+            // 排除 "IllegalStateException: Session ID must be unique. ID=" 崩溃。
+            // MediaSession 在本 fork 里只作关联标识（不绑通知栏），改 id 无副作用。
+            if (!auxPlayer) {
+                try {
+                    mediaSession = new MediaSession.Builder(context, player)
+                            .setId(playerId)
+                            .build();
+                } catch (Exception e) {
+                    // 关联失败只影响系统对播放器的识别（自动 duck 判定），
+                    // 绝不能因此让播放起不来
+                    android.util.Log.w("AudioFocusFork", "MediaSession create failed: " + e);
+                    mediaSession = null;
+                }
+            }
+>>>>>>> 1199e6bc0d064b374b5b9232a28bdab8bf2d2442
         }
     }
 
@@ -1274,9 +1319,13 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             AudioFocusManager.removeAudioFocusEventListener(focusEventListener);
             focusEventListener = null;
         }
-        // MD3Music fork: 复位忽略/保持标志（避免影响其他播放器实例）
-        AudioFocusManager.setIgnoreAudioFocus(false);
-        AudioFocusManager.setForceKeepPlaying(false);
+        // MD3Music fork: 复位忽略/保持标志（避免影响其他播放器实例）。
+        // crossfade：辅播放器不复位 —— 这两个标志是全进程 static，
+        // 辅播放器被回收时复位会把用户在主播放器上设的焦点策略一起清掉。
+        if (!auxPlayer) {
+            AudioFocusManager.setIgnoreAudioFocus(false);
+            AudioFocusManager.setForceKeepPlaying(false);
+        }
         focusEventChannel.endOfStream();
         // MD3Music fork: 释放 MediaSession（与 player 关联）
         if (mediaSession != null) {
