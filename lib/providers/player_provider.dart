@@ -136,6 +136,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   double get speed => _speed;
   bool get isResolvingUrl => _isResolvingUrl;
   String? get resolveError => _resolveError;
+
+  /// 播放链接解析失败时的提示文案。
+  /// 听书章节付费边界在列表接口不可靠，能点上播放、但无免费部分的付费章节
+  /// 解析必然失败——用更明确的文案提示用户，而不是通用的"无法获取播放链接"。
+  String _resolveErrorText(Song? song) {
+    if (song?.isLongAudio ?? false) return '该章节为 听书VIP单独付费内容';
+    return '无法获取播放链接';
+  }
+
   AudioQuality get audioQuality => _audioQuality;
   String get audioQualityLabel => _audioQuality.label;
 
@@ -645,7 +654,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           if (ok) {
             _resolveError = null;
           } else {
-            _resolveError = '无法获取播放链接';
+            _resolveError = _resolveErrorText(_currentSong);
           }
           notifyListeners();
         } else {
@@ -690,7 +699,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
               _currentIndex = (_currentIndex - 1).clamp(0, _playlist.length - 1);
               _currentSong = _playlist[_currentIndex];
               final ok = await _resolveAndPlayCurrentSong();
-              if (!ok) _resolveError = '无法获取播放链接';
+              if (!ok) {
+                _resolveError = _resolveErrorText(_currentSong);
+              }
             } else {
               // 仅一首歌时直接停止
               await _audioService?.pause();
@@ -734,7 +745,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           if (ok) {
             _resolveError = null;
           } else {
-            _resolveError = '无法获取播放链接';
+            _resolveError = _resolveErrorText(_currentSong);
           }
           notifyListeners();
         }
@@ -775,7 +786,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     if (_audioService != null) {
       final playbackUrl = await _resolvePlaybackUrl(song);
       if (playbackUrl == null || playbackUrl.isEmpty) {
-        _resolveError = '无法获取播放链接';
+        _resolveError = _resolveErrorText(song);
         notifyListeners();
         return;
       }
@@ -870,7 +881,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
             ?.call(resolvedSong, result.quality, result.url);
       } else {
         _isResolvingUrl = false;
-        _resolveError = '无法获取播放链接';
+        _resolveError = _resolveErrorText(song);
         notifyListeners();
       }
     } catch (e) {
@@ -936,12 +947,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
           }
         } else {
           _isResolvingUrl = false;
-          _resolveError = '无法获取播放链接';
+          _resolveError = _resolveErrorText(_currentSong);
           final failedSong = _currentSong!;
           notifyListeners();
           // 先弹窗提示，随即切到下一首（不阻塞）
           _showUnplayableSongDialog(failedSong);
-          if (_playlist.length > 1) {
+          // 听书付费章节失败不自动跳下一曲：整专辑大概率连续付费，
+          // 自动切会疯狂刷日志且无意义，由用户手动选择。
+          if (_playlist.length > 1 && !failedSong.isLongAudio) {
             await next(autoPlay: true);
           }
         }
@@ -955,7 +968,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     } else if (_audioService != null) {
       final playbackUrl = await _resolvePlaybackUrl(_currentSong!);
       if (playbackUrl == null || playbackUrl.isEmpty) {
-        _resolveError = '无法获取播放链接';
+        _resolveError = _resolveErrorText(_currentSong);
         notifyListeners();
         return;
       }
@@ -1039,12 +1052,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
               ?.call(resolvedSong, result.quality, result.url);
         } else {
           _isResolvingUrl = false;
-          _resolveError = '无法获取播放链接';
+          _resolveError = _resolveErrorText(_currentSong);
           final failedSong = _currentSong!;
           notifyListeners();
           // 先弹窗提示，随即切到下一首（不阻塞）
           _showUnplayableSongDialog(failedSong);
-          if (_playlist.length > 1) {
+          // 听书付费章节失败不自动跳下一曲：整专辑大概率连续付费，
+          // 自动切会疯狂刷日志且无意义，由用户手动选择。
+          if (_playlist.length > 1 && !failedSong.isLongAudio) {
             await next(autoPlay: true);
           }
         }
@@ -1435,7 +1450,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         }
         await _setUrlAndPlay(playbackUrl, seekTo: seekTo, playAfter: play);
       } else {
-        _resolveError = '无法获取播放链接';
+        _resolveError = _resolveErrorText(_currentSong);
         notifyListeners();
       }
     }
@@ -1551,7 +1566,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         return;
       }
       // 无法获取链接，继续尝试下一首
-      _resolveError = '无法获取播放链接';
+      _resolveError = _resolveErrorText(_currentSong);
 
       // 非列表循环模式下，到末尾就停止尝试
       if (_currentIndex >= _playlist.length - 1 &&
@@ -1596,7 +1611,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         _saveState();
         return;
       }
-      _resolveError = '无法获取播放链接';
+      _resolveError = _resolveErrorText(_currentSong);
     }
     _saveState();
     notifyListeners();
@@ -1623,12 +1638,15 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
 
     final ok = await _resolveAndPlayCurrentSong();
-    if (!ok && _playlist.length > 1) {
-      // 手动选歌无法播放时，先弹窗提示，随即切到下一首（不阻塞）
-      _resolveError = '无法获取播放链接';
+    if (!ok) {
+      _resolveError = _resolveErrorText(_currentSong);
       final failedSong = _currentSong!;
       _showUnplayableSongDialog(failedSong);
-      await next(autoPlay: true);
+      // 听书付费章节失败不自动跳下一曲：整专辑大概率连续付费，
+      // 自动切会疯狂刷日志且无意义，由用户手动选择。
+      if (_playlist.length > 1 && !failedSong.isLongAudio) {
+        await next(autoPlay: true);
+      }
     }
   }
 
@@ -2050,7 +2068,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       if (result == null || result.url.isEmpty) {
         _isResolvingUrl = false;
-        _resolveError = '无法获取播放链接';
+        _resolveError = _resolveErrorText(song);
         notifyListeners();
         return;
       }

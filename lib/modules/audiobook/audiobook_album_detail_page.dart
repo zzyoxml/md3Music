@@ -127,6 +127,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
         _invalidateDisplaySongs();
       });
       // 进入页面即自动加载全书全部章节（循环翻页直到到底），不等用户滚动。
+      // 付费章节由 _buildSongs 按 canPlay（列表接口 fail_process）直接过滤隐藏。
       _loadAllAudios();
     } catch (_) {
       if (!mounted) return;
@@ -140,7 +141,11 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
   /// 自动加载全部章节：循环请求后续页并追加，直到 hasMore=false 或页面销毁。
   /// 期间 _loadingMore 置位，滚动触发的 _loadMoreAudios 会被 guard 拦截，避免并发。
   Future<void> _loadAllAudios() async {
-    if (!mounted || !_hasMoreAudio || _loadingMore) return;
+    if (!mounted) return;
+    if (!_hasMoreAudio) {
+      return;
+    }
+    if (_loadingMore) return;
     _loadingMore = true;
     final kugou = context.read<KugouProvider>();
     try {
@@ -164,7 +169,9 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
         if (_audioPage == prevPage) break;
       }
     } finally {
-      if (mounted) setState(() => _loadingMore = false);
+      if (mounted) {
+        setState(() => _loadingMore = false);
+      }
     }
   }
 
@@ -190,10 +197,9 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
     });
   }
 
-  /// 将章节列表转换为可播放的 Song 列表。
-  /// 只保留免费/限免章节（canPlay：fail_process==0），隐藏付费章节。
+  /// 将章节列表转换为 Song 列表：仅展示可播放（免费/限免）章节，
+  /// 付费章节（列表接口 fail_process 非 0，模型 canPlay=false）直接隐藏不显示。
   List<Song> _buildSongs(List<KugouLongAudioAudio> audios) {
-    final paid = audios.where((a) => !a.canPlay).length;
     final list = audios
         .where((a) => a.canPlay)
         .map(
@@ -207,12 +213,14 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
             isOnline: true,
             albumId: a.albumId ?? widget.album.id,
             albumAudioId: a.albumAudioId,
+            isLongAudio: true,
           ),
         )
         .toList();
-    if (paid > 0) {
+    final hidden = audios.length - list.length;
+    if (hidden > 0) {
       // ignore: avoid_print
-      print('[AudiobookFree] 详情页隐藏付费章节 $paid 条，免费/限免 ${list.length} 条');
+      print('[AudiobookFree] 详情页隐藏付费章节 $hidden 条，展示 ${list.length} 条');
     }
     return list;
   }
@@ -285,17 +293,30 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
 
   // ==================== 播放 ====================
 
+  /// 可播放章节（当前显示列表均为免费/限免章节，付费章节已被 _buildSongs 过滤）。
+  List<Song> get _playableSongs => _displaySongs;
+
   void _playAll() {
-    final songs = _displaySongs;
+    final songs = _playableSongs;
     if (songs.isEmpty) return;
     context.read<PlayerProvider>().playOnlinePlaylist(songs, 0);
   }
 
   void _playShuffle() {
-    final songs = _displaySongs;
+    final songs = _playableSongs;
     if (songs.isEmpty) return;
     final shuffled = List<Song>.from(songs)..shuffle();
     context.read<PlayerProvider>().playOnlinePlaylist(shuffled, 0);
+  }
+
+  /// 点击章节：在当前显示列表（均为免费/限免）内按当前排序播放。
+  void _playChapterAt(int index) {
+    final display = _displaySongs;
+    final song = display[index];
+    final playable = _playableSongs;
+    final freeIndex = playable.indexOf(song);
+    if (freeIndex == -1) return;
+    context.read<PlayerProvider>().playOnlinePlaylist(playable, freeIndex);
   }
 
   // ==================== 搜索 / 定位 ====================
@@ -423,21 +444,21 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                             children: [
                               Expanded(
                                 child: FilledButton.icon(
-                                  onPressed: displaySongs.isEmpty
+                                  onPressed: _playableSongs.isEmpty
                                       ? null
                                       : _playAll,
                                   icon: const Icon(Icons.play_arrow),
                                   label: Text(
-                                    displaySongs.isEmpty
-                                        ? '暂无章节'
-                                        : '播放全部 (${displaySongs.length})',
+                                    _playableSongs.isEmpty
+                                        ? '暂无免费章节'
+                                        : '播放全部 (${_playableSongs.length})',
                                   ),
                                 ),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: OutlinedButton.icon(
-                                  onPressed: displaySongs.isEmpty
+                                  onPressed: _playableSongs.isEmpty
                                       ? null
                                       : _playShuffle,
                                   icon: const Icon(Icons.shuffle),
@@ -491,12 +512,7 @@ class _AudiobookAlbumDetailPageState extends State<AudiobookAlbumDetailPage> {
                                     : Colors.transparent,
                                 child: SongListItem(
                                   song: song,
-                                  onTap: () => context
-                                      .read<PlayerProvider>()
-                                      .playOnlinePlaylist(
-                                        displaySongs,
-                                        index,
-                                      ),
+                                  onTap: () => _playChapterAt(index),
                                 ),
                               );
                             },

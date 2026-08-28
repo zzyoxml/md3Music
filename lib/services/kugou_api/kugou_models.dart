@@ -2071,14 +2071,17 @@ class KugouLongAudioAudio {
   }
 }
 
-/// 限免/可播判定：`fail_process_128`（默认 128k 播放音质）为 0 即可播；
-/// 字段缺失时兜底顶层 `fail_process`；两者都无则默认可播（避免误杀）。
-/// 注意：不能用 privilege（限免章节 privilege_128 也是 4）。
+/// 限免/可播判定。
+///
+/// 实测（album 202415911「北大怀沙说三国演义」，2026-08 抓包）证实：听书章节列表
+/// 接口 `/longaudio/v2/album_audios` 的 fail_process / fail_process_128 字段可靠：
+/// 免费/限免章节为 0，付费章节为 32（privilege=10）。据此可直接过滤付费章节，
+/// 无需再依赖播放层 31863 no free part 拦截。
 bool _isLongAudioCanPlay(Map<String, dynamic> json) {
   final v128 = _parseIntOrNull(json['fail_process_128']);
-  if (v128 != null) return v128 == 0;
+  if (v128 != null && v128 != 0) return false;
   final v = _parseIntOrNull(json['fail_process']);
-  if (v != null) return v == 0;
+  if (v != null && v != 0) return false;
   return true;
 }
 
