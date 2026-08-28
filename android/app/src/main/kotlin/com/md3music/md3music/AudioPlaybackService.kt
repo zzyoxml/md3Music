@@ -117,9 +117,175 @@ class AudioPlaybackService : Service() {
         /// 当前是否正在播放（供 LockScreenLyricReceiver 判断锁屏时是否拉起歌词界面）。
         @Volatile
         var isNowPlaying = false
+        /// MD3Music fork（方案A·封面兜底）：前台服务启动被拒（mAllowStartForeground=false，
+        /// 如后台切歌/跨fade 收敛瞬间）时由 MainActivity 直接调用注入封面，
+        /// 不依赖 AudioPlaybackService 启动。处理 http(s) 在线封面，命中内存缓存免下载。
+        @JvmStatic
+        fun injectCover(title: String, artist: String, artUrl: String?, fallbackFilePath: String?) {
+            val effective = artUrl ?: fallbackFilePath ?: return
+            Thread {
+                try {
+                    // 1) 内存缓存命中：先剔除已回收的失效条目，避免复用后 isRecycled 判 false
+                    var bmp: Bitmap? = null
+                    if (effective.startsWith("http://") || effective.startsWith("https://")) {
+                        val cached = coverMemoryCache[effective]
+                        bmp = if (cached != null && cached.isRecycled) {
+                            coverMemoryCache.remove(effective)
+                            null
+                        } else cached
+                    }
+                    // 2) 未命中：按来源加载（http 下载 / file·local·纯路径读内嵌封面），
+                    //    http 下载失败时回退 fallbackFilePath
+                    if (bmp == null) {
+                        bmp = loadCoverBitmapForInject(effective, fallbackFilePath)
+                    }
+                    if (bmp != null && !bmp.isRecycled) {
+                        // 降采样到 512px 后再注入，避免大图常驻内存
+                        val display = resizeCoverBitmap(bmp, 512)
+                        AudioPlayer.updateActiveSessionMetadata(title, artist, display, effective)
+                        Log.i(TAG, "injectCover: 封面注入成功 title=" + title)
+                    } else {
+                        Log.w(TAG, "injectCover: 封面加载失败 url=" + effective)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "injectCover 异常 " + e.message)
+                }
+            }.start()
+        }
+
+        /// 兜底封面加载：http(s) 在线下载（成功写入内存缓存）；非 http 或下载失败时
+        /// 依次尝试 [source]（file:///local:///纯路径）与 [fallback] 的内嵌封面。
+        private fun loadCoverBitmapForInject(source: String, fallback: String?): Bitmap? {
+            var bmp: Bitmap? = null
+            if (source.startsWith("http://") || source.startsWith("https://")) {
+                try {
+                    val conn = java.net.URL(source).openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 5000
+                    conn.readTimeout = 10000
+                    conn.instanceFollowRedirects = true
+                    try {
+                        bmp = BitmapFactory.decodeStream(conn.inputStream)
+                        if (bmp != null && !bmp.isRecycled) coverMemoryCache[source] = bmp
+                    } finally {
+                        conn.disconnect()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "injectCover http 下载异常 ${e.message} url=$source")
+                }
+            }
+            if (bmp == null || bmp.isRecycled) {
+                bmp = decodeEmbeddedCoverCompat(source, fallback)
+            }
+            return if (bmp != null && !bmp.isRecycled) bmp else null
+        }
+
+        /// 从 file:///local:///纯路径依次取内嵌封面；优先 [source]，失败再试 [fallback]。
+        private fun decodeEmbeddedCoverCompat(source: String, fallback: String?): Bitmap? {
+            for (c in listOf(source, fallback).filterNotNull()) {
+                val path = when {
+                    c.startsWith("file://") -> Uri.parse(c).path ?: c.substring("file://".length)
+                    c.startsWith("local://") -> c.substring("local://".length)
+                    else -> c
+                }
+                val bmp = try {
+                    val mmr = MediaMetadataRetriever()
+                    mmr.setDataSource(path)
+                    val art = mmr.embeddedPicture
+                    mmr.release()
+                    if (art != null) BitmapFactory.decodeByteArray(art, 0, art.size) else null
+                } catch (e: Exception) {
+                    null
+                }
+                if (bmp != null && !bmp.isRecycled) return bmp
+            }
+            return null
+        }
+
+        /// 兜底封面降采样：与实例方法 resizeBitmap 语义一致（超限才缩放）。
+        private fun resizeCoverBitmap(source: Bitmap, maxSize: Int): Bitmap {
+            val w = source.width
+            val h = source.height
+            if (w <= maxSize && h <= maxSize) return source
+            val ratio = maxSize.toDouble() / maxOf(w, h)
+            return Bitmap.createScaledBitmap(
+                source,
+                (w * ratio).toInt(),
+                (h * ratio).toInt(),
+                true
+            )
+        }
 
         fun setFlutterEngine(engine: FlutterEngine) {
             staticFlutterEngine = engine
+        }
+        /// MD3Music fork（方案1·修复预取通道）：MainActivity 正常运行（前台/后台）时
+        /// floating_lyric 通道没有注册 prefetchCover 处理（只在 headless 引擎注册），
+        /// 导致 Dart 端 _prefetchUpcomingCovers 的封面预取全部静默失败 → 切歌时封面
+        /// 未缓存、只能现场联网下载（慢网/CDN 抖动时明显延迟）。
+        /// 此静态入口供 MainActivity 直接调用，写入与实例路径共用的 coverMemoryCache
+        /// 与磁盘缓存（cacheDir/cover_cache），切歌时 injectCover/showNotification 命中秒显。
+        @JvmStatic
+        fun prefetchCovers(context: Context, urls: List<String>) {
+            for (url in urls) {
+                if (url.isEmpty() || (!url.startsWith("http://") && !url.startsWith("https://"))) continue
+                // 内存缓存命中（且未回收）则跳过
+                val cached = coverMemoryCache[url]
+                if (cached != null && !cached.isRecycled) continue
+                if (cached != null && cached.isRecycled) coverMemoryCache.remove(url)
+                // 磁盘缓存命中则直接回填内存
+                val cacheFile = try {
+                    File(File(context.cacheDir, COVER_CACHE_DIR), url.hashCode().toString() + ".jpg")
+                } catch (_: Exception) {
+                    null
+                }
+                if (cacheFile != null && cacheFile.exists()) {
+                    try {
+                        val bmp = BitmapFactory.decodeFile(cacheFile.absolutePath)
+                        if (bmp != null && !bmp.isRecycled) {
+                            coverMemoryCache[url] = bmp
+                            continue
+                        }
+                    } catch (_: Exception) {}
+                }
+                // 网路线程下载并写内存 + 磁盘缓存
+                Thread {
+                    try {
+                        val conn = java.net.URL(url).openConnection() as java.net.HttpURLConnection
+                        conn.connectTimeout = 3000
+                        conn.readTimeout = 5000
+                        conn.instanceFollowRedirects = true
+                        try {
+                            val bmp = BitmapFactory.decodeStream(conn.inputStream)
+                            if (bmp != null && !bmp.isRecycled) {
+                                val small = if (bmp.width <= 512 && bmp.height <= 512) bmp else {
+                                    val ratio = 512.0 / maxOf(bmp.width, bmp.height)
+                                    Bitmap.createScaledBitmap(
+                                        bmp,
+                                        (bmp.width * ratio).toInt(),
+                                        (bmp.height * ratio).toInt(),
+                                        true
+                                    )
+                                }
+                                if (small !== bmp) bmp.recycle()
+                                coverMemoryCache[url] = small
+                                try {
+                                    val dir = File(context.cacheDir, COVER_CACHE_DIR)
+                                    if (!dir.exists()) dir.mkdirs()
+                                    val cf = File(dir, url.hashCode().toString() + ".jpg")
+                                    if (!cf.exists()) {
+                                        FileOutputStream(cf).use { out ->
+                                            small.compress(Bitmap.CompressFormat.JPEG, 88, out)
+                                        }
+                                    }
+                                } catch (_: Exception) {}
+                                Log.i(TAG, "封面预取完成 url=$url")
+                            }
+                        } finally {
+                            conn.disconnect()
+                        }
+                    } catch (_: Exception) {}
+                }.start()
+            }
         }
 
         /** 检查是否有可用的 FlutterEngine（供 MusicWidgetProvider 判断是否需要拉起 app） */
@@ -894,7 +1060,14 @@ class AudioPlaybackService : Service() {
             //    5 秒后触发 RemoteServiceException("did not call startForeground") 二次崩溃。
             // 播放本身由媒体3会话承载（MD3MusicMediaSessionService），本服务自停不影响播放。
             Log.w(TAG, "startForegroundDetached rejected: ${e.javaClass.simpleName}: ${e.message}")
-            try { stopSelf() } catch (_: Throwable) {}
+            // MD3Music fork（方案B·封面修复）：仅当服务尚未成功进入前台时才自停
+            // （防 startForegroundService 已拉起但未 startForeground 的 5 秒崩溃）。
+            // 若服务已在运行（foregroundStarted=true，本次只是通知更新被拒），保留服务，
+            // 否则 onDestroy 会 recycle lastArtBitmap，导致后台封面线程注入时
+            // bitmap 已被回收（Can't compress a recycled bitmap），封面缺失。
+            if (!foregroundStarted) {
+                try { stopSelf() } catch (_: Throwable) {}
+            }
         }
     }
 
@@ -1550,7 +1723,12 @@ class AudioPlaybackService : Service() {
                     if (originalBitmap != null) {
                         // P0: 统一降采样到 512px 后再缓存/使用，避免原始大图（2000x2000+）常驻内存
                         val displayBitmap = resizeBitmap(originalBitmap, 512)
-                        if (displayBitmap !== originalBitmap) {
+                        // MD3Music fork：仅回收「非缓存」的原图。loadArtworkBitmap 命中内存/磁盘
+                        // 缓存时返回的是 coverMemoryCache 里的共享对象，recycle 它会污染缓存，
+                        // 导致后续 loadArtworkBitmap / injectCover 命中已回收位图 → 封面加载失败
+                        // / resizeBitmap 抛 IllegalStateException。
+                        val sharedCacheEntry = coverMemoryCache[effectiveArtUrl]
+                        if (displayBitmap !== originalBitmap && originalBitmap !== sharedCacheEntry) {
                             originalBitmap.recycle()
                         }
                         // 切歌时不再显式 recycle 旧封面：主线程 refreshMetadata（蓝牙歌词
@@ -1570,7 +1748,7 @@ class AudioPlaybackService : Service() {
                         // 只更新 metadata 不打断播放，保证控制中心/媒体3通知栏选中媒体3 会话时也有封面。
                         // 阶段2：改为直接强依赖调用（已通过 media3-common 建立编译类路径），
                         // 移除原反射的静默吞错（catch Throwable），使封面注入失败可被日志暴露。
-                        AudioPlayer.updateActiveSessionMetadata(displayTitle, displayArtist, displayBitmap)
+                        AudioPlayer.updateActiveSessionMetadata(displayTitle, displayArtist, displayBitmap, effectiveArtUrl)
                         Log.i(TAG, "封面后台加载完成，已注入媒体3会话 bitmap=${displayBitmap.width}x${displayBitmap.height}")
                     } else {
                         // 封面链路日志：所有来源均失败 → MediaSession 无 bitmap

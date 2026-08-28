@@ -390,17 +390,27 @@ class MainActivity : FlutterActivity() {
                             // 拒绝（ForegroundServiceStartNotAllowedException）。吞掉避免崩溃，
                             // 媒体通知由 media3 会话承载，保活服务稍后回到前台再恢复。
                             Log.w("MainActivity", "startForegroundService rejected: ${e.javaClass.simpleName}: ${e.message}")
+                            // MD3Music fork（方案A·封面兜底）：服务启动被拒时媒体通知由
+                            // media3 会话承载（不受影响），但封面注入依赖本服务前台启动——
+                            // 直接调 AudioPlaybackService.injectCover 兜底注入封面到媒体3会话。
+                            AudioPlaybackService.injectCover(
+                                call.argument<String>("title") ?: "",
+                                call.argument<String>("artist") ?: "",
+                                call.argument<String>("artUrl"),
+                                call.argument<String>("fallbackFilePath")
+                            )
                         }
                     } else {
                         startService(intent)
                     }
                     result.success(true)
                 }
-                "hideNotification" -> {
-                    val intent = Intent(this, AudioPlaybackService::class.java).apply {
-                        action = AudioPlaybackService.ACTION_STOP
-                    }
-                    startService(intent)
+                // 封面预取：切歌前把接下来数首封面下载到内存/磁盘缓存，切歌时命中秒显。
+                // 该方法在 headless 引擎通道有处理，但 MainActivity 正常运行时的主通道缺失
+                // → 预取静默失败。此处补注册，复用 AudioPlaybackService.prefetchCovers。
+                "prefetchCover" -> {
+                    val urls = call.argument<List<String>>("urls").orEmpty()
+                    AudioPlaybackService.prefetchCovers(this, urls)
                     result.success(true)
                 }
                 // 蓝牙歌词：更新当前歌词文本（title→歌词，artist→「作者 - 标题」由原生端处理）

@@ -769,11 +769,26 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         String id = (String)map.get("id");
         switch ((String)map.get("type")) {
         case "progressive":
+            MediaItem.Builder mediaItemBuilder = new MediaItem.Builder()
+                    .setUri(Uri.parse((String)map.get("uri")))
+                    .setTag(id);
+            // MD3Music fork：把 AudioSource.uri tag 里的 title/artist/album/artUri
+            // 映射进 MediaItem.mediaMetadata（原实现只 setTag(id)，mediaMetadata 为空），
+            // 使媒体会话（Lyricon autoSync / SystemUI 通知栏）能读到封面 artUri。
+            Object tagObj = map.get("tag");
+            if (tagObj instanceof Map<?, ?>) {
+                Map<?, ?> tagMap = (Map<?, ?>)tagObj;
+                MediaMetadata.Builder mmb = new MediaMetadata.Builder();
+                String tagTitle = (String)tagMap.get("title");
+                if (tagTitle != null && !tagTitle.isEmpty()) mmb.setTitle(tagTitle);
+                String tagArtist = (String)tagMap.get("artist");
+                if (tagArtist != null && !tagArtist.isEmpty()) mmb.setArtist(tagArtist);
+                String tagAlbum = (String)tagMap.get("album");
+                if (tagAlbum != null && !tagAlbum.isEmpty()) mmb.setAlbumTitle(tagAlbum);
+                mediaItemBuilder.setMediaMetadata(mmb.build());
+            }
             return new ProgressiveMediaSource.Factory(buildDataSourceFactory(mapGet(map, "headers")), buildExtractorsFactory(mapGet(map, "options")))
-                    .createMediaSource(new MediaItem.Builder()
-                            .setUri(Uri.parse((String)map.get("uri")))
-                            .setTag(id)
-                            .build());
+                    .createMediaSource(mediaItemBuilder.build());
         case "dash":
             return new DashMediaSource.Factory(buildDataSourceFactory(mapGet(map, "headers")))
                     .createMediaSource(new MediaItem.Builder()
@@ -1162,6 +1177,11 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                 if (ms == null) continue;
                 try {
                     if (host.isSessionAdded(ms)) host.removeSession(ms);
+                    // MD3Music fork：彻底 release 非活跃会话，从系统 Sessions Stack 注销，
+                    // 使 SystemUI/媒体卡片只跟随当前活跃播放器的一个会话（避免旧歌会话
+                    // 干扰导致封面不更新/显示旧歌）。
+                    try { ms.release(); } catch (Exception ignore) {}
+                    other.mediaSession = null;
                 } catch (Exception ignore) {}
             }
         }
@@ -1185,6 +1205,12 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                 if (ms == null) continue;
                 try {
                     if (host.isSessionAdded(ms)) host.removeSession(ms);
+                    // MD3Music fork：play() 收敛时同样彻底 release 非活跃会话，从系统
+                    // Sessions Stack 注销，避免跨fade 角色互换后多个 md3music 会话残留在
+                    // 系统栈里干扰 SystemUI/媒体卡片（显示旧歌封面）。该播放器下次 play()
+                    // 时会按 createMediaSession 重建会话（见 play()）。
+                    try { ms.release(); } catch (Exception ignore) {}
+                    other.mediaSession = null;
                 } catch (Exception ignore) {}
             }
         }
@@ -1207,10 +1233,10 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
     }
 
     /// 由 AudioPlaybackService 封面加载成功后调用（同进程），把封面/标题注入媒体3会话。
-    public static void updateActiveSessionMetadata(String title, String artist, Bitmap art) {
+    public static void updateActiveSessionMetadata(String title, String artist, Bitmap art, String artUri) {
         AudioPlayer p = sActivePlayer;
         if (p != null) {
-            p.applySessionMetadata(title, artist, art);
+            p.applySessionMetadata(title, artist, art, artUri);
         } else {
             Log.w("AudioFocusFork", "updateActiveSessionMetadata: no active AudioPlayer");
         }
@@ -1231,12 +1257,12 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
     /// 写媒体3 MediaItem 的 MediaMetadata（标题/艺术家/内嵌封面位图）。
     /// 位图转 JPEG 字节经 setArtworkData 下发，使其成为系统 MEDIA_KEY_ART；异常静默。
     /// ExoPlayer 必须在创建它的 Looper 线程访问，因此先派发到 player 所在线程执行。
-    private void applySessionMetadata(final String title, final String artist, final Bitmap art) {
+    private void applySessionMetadata(final String title, final String artist, final Bitmap art, final String artUri) {
         try {
             final androidx.media3.common.Player p = player;
             if (p == null) return;
             Handler handler = new Handler(p.getApplicationLooper());
-            handler.post(() -> doApplySessionMetadata(title, artist, art));
+            handler.post(() -> doApplySessionMetadata(title, artist, art, artUri));
         } catch (Exception e) {
             Log.w("AudioFocusFork", "applySessionMetadata dispatch failed: " + e);
         }
@@ -1422,7 +1448,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
     }
 
     /// 在 player 所在线程执行「替换当前 MediaItem 的 MediaMetadata」。
-    private void doApplySessionMetadata(String title, String artist, Bitmap art) {
+    private void doApplySessionMetadata(String title, String artist, Bitmap art, String artUri) {
         try {
             MediaItem cur = player.getCurrentMediaItem();
             if (cur == null) return;
@@ -1430,10 +1456,22 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             MediaMetadata.Builder mb = cur.mediaMetadata.buildUpon();
             if (title != null && !title.isEmpty()) mb.setTitle(title);
             if (artist != null && !artist.isEmpty()) mb.setArtist(artist);
+            // MD3Music fork：注入 artworkUri（Lyricon autoSync / 外部读取封面用），
+            // 通知栏封面仍用 artworkData（bitmap，稳定，避免 artUri 异步加载闪烁）。
+            if (artUri != null && !artUri.isEmpty()) {
+                mb.setArtworkUri(android.net.Uri.parse(artUri));
+            }
             if (art != null) {
+                // MD3Music fork：bitmap 可能已被 AudioPlaybackService.onDestroy 回收
+                // （服务被拒自停重建），此时跳过封面位图，仅保留 title/artist，避免
+                // "Can't compress a recycled bitmap" 异常导致整次注入失败。
+                if (art.isRecycled()) {
+                    Log.w("AudioFocusFork", "applySessionMetadata: art recycled, skip artwork");
+                } else {
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 art.compress(Bitmap.CompressFormat.JPEG, 90, baos);
                 mb.setArtworkData(baos.toByteArray(), MediaMetadata.PICTURE_TYPE_FRONT_COVER);
+                }
             }
             MediaItem updated = cur.buildUpon().setMediaMetadata(mb.build()).build();
             // 官方推荐：同 uri 替换 → 只更新 metadata，不打断播放
@@ -1622,6 +1660,11 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         // 使封面/歌词/自定义按钮注入（updateActiveSessionMetadata 等）落到真正播放的会话，
         // 避免多播放器并存时 sActivePlayer 指向占位/最后一个创建的播放器。
         sActivePlayer = this;
+        // MD3Music fork：跨fade 角色互换时本播放器的会话可能已被 syncSingleSessionToHost
+        // release（从系统注销），play 时若已释放则重建，保证系统始终有当前活跃播放器的会话。
+        if (createMediaSession && mediaSession == null) {
+            buildAndHostMediaSession();
+        }
         // MD3Music fork（方向1）：play 是权威收敛点——把本实例会话设为唯一 host 会话，
         // 其余实例的会话仅从 host 移除（不 release 播放器/会话对象），使系统只跟随本播放器。
         syncSingleSessionToHost();

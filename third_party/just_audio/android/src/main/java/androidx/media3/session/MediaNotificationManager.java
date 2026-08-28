@@ -363,7 +363,21 @@ import java.util.concurrent.TimeoutException;
 
   @SuppressLint("InlinedApi") // Using compile time constant FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
   private void startForeground(MediaNotification mediaNotification) {
-    ContextCompat.startForegroundService(mediaSessionService, startSelfIntent);
+    try {
+      ContextCompat.startForegroundService(mediaSessionService, startSelfIntent);
+    } catch (Throwable e) {
+      // MD3Music fork：后台切歌/跨fade 时 startForegroundService 被系统拒绝
+      // （ForegroundServiceStartNotAllowedException，mAllowStartForeground=false）。
+      // 若就此中止，通知内容（封面/标题）在后台永远无法刷新，媒体卡片停在旧歌。
+      // 这里降级为普通 notify() 更新通知内容：进程保活由 AudioPlaybackService
+      // 的前台服务承担，本服务无需置前台；回到前台后下一次更新会自动恢复
+      // startForegroundService 成功路径。
+      try {
+        notificationManagerCompat.notify(
+            mediaNotification.notificationId, mediaNotification.notification);
+      } catch (Throwable ignore) {}
+      return;
+    }
     Util.setForegroundServiceNotification(
         mediaSessionService,
         mediaNotification.notificationId,
