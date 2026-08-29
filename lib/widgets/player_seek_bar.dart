@@ -2,21 +2,26 @@ import 'dart:math' as math;
 import 'dart:ui' show FontFeature, lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 
 /// 播放器进度条 —— 一条最细的轨道 + 下方一行时间。
 ///
 /// 设计要点：
 /// - 已播放段与剩余段**不叠加**：剩余段从播放点后 4px 起画（MD3 expressive
-///   的间隙做法），因此剩余段那条直线不会从波形底下穿过。
+///   的间隙做法）。
 /// - 已播放段末端没有手柄，只有轨道自身的圆头。
 /// - 时间常显但压暗（50%），按下/拖动时提亮到全不透明并膨胀轨道；
 ///   数字固定占 14px 一行，不会被上方内容遮挡或截断。
-/// - [wavy] 为 true（MD3 皮肤）时活动轨道画正弦波，**只在播放中起伏**：
-///   暂停或拖动时波幅在 250ms 内收敛成直线（颜色不变），右端保留 MD3
-///   stop indicator 圆点；AM 皮肤全程纯细线（wavy=false）。
+/// - 已播放段**播放中才有颜色**：暂停时在 220ms 内褪成与未播放段相同的
+///   [inactiveColor]（拖动中视为「有颜色」，便于看清落点）。轨道全程是直线，
+///   不再有波浪线样式。
+/// - 位置**自驱动**：provider 的位置更新只有 ~200ms 一次（5fps），进度条内部
+///   用 [Ticker] 以 30fps 自行累加时间，画面因此连续；每次收到上报就对齐一次
+///   ([_rebase])，并做单调保护避免秒数回跳。倍速由 [speed] 参与推算。
 /// - 拖动过程只更新本地画面与时间数字，**不下发 seek**（连续 seek 会把
 ///   音频层打满导致跟手卡顿），松手时才 seek 一次。
-/// - [climaxStart]/[climaxEnd]（单位秒）非空时在轨道上叠加高潮区间高亮。
+/// - [climaxStart]/[climaxEnd]（单位秒）非空时在轨道上叠加高潮区间高亮，
+///   已播放的部分会被裁掉 —— 进度掠过后高亮逐渐消失。
 class PlayerSeekBar extends StatefulWidget {
   const PlayerSeekBar({
     super.key,
@@ -26,7 +31,8 @@ class PlayerSeekBar extends StatefulWidget {
     required this.inactiveColor,
     required this.labelColor,
     this.isPlaying = false,
-    this.wavy = false,
+    this.md3Style = false,
+    this.speed = 1.0,
     this.climaxStart,
     this.climaxEnd,
     this.height = 38,
@@ -37,7 +43,7 @@ class PlayerSeekBar extends StatefulWidget {
   final Duration position;
   final Duration duration;
 
-  /// 已播放段颜色
+  /// 已播放段颜色（仅播放中/拖动中生效，其余时候褪成 [inactiveColor]）
   final Color activeColor;
 
   /// 未播放段轨道颜色
@@ -46,11 +52,14 @@ class PlayerSeekBar extends StatefulWidget {
   /// 时间数字颜色
   final Color labelColor;
 
-  /// 是否正在播放（决定波形是起伏还是收敛成直线）
+  /// 是否正在播放（决定已播放段是否上色、以及自驱动 ticker 是否推进）
   final bool isPlaying;
 
-  /// 活动轨道是否画波形（MD3 皮肤 true / AM 皮肤 false）
-  final bool wavy;
+  /// MD3 皮肤：轨道 3px + 末端 stop indicator 圆点；AM 皮肤为 2px 纯细线。
+  final bool md3Style;
+
+  /// 播放倍速，用于自驱动推算位置（0.5x / 2x 时进度条不会走错速度）
+  final double speed;
 
   /// 高潮区间起止（秒），任一为空则不画高亮
   final double? climaxStart;
@@ -73,18 +82,33 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
   /// 时间行高度（[PlayerSeekBar.height] 减去它就是轨道区高度）
   static const double _labelHeight = 14;
 
+  /// 自驱动帧间隔：30fps（超过这个间隔才重绘，避免跟着 120Hz 屏幕白跑）
+  static const int _frameIntervalMs = 33;
+
+  /// 上报位置与推算位置差值超过这个阈值就认为发生了 seek / 切歌，硬重置
+  static const int _resyncThresholdMs = 1000;
+
   /// 轨道膨胀动画：0 = 常态细轨道，1 = 拖动态粗轨道
   late final AnimationController _expand;
 
-  /// 波形相位：一个周期 3s，播放中持续推进
-  late final AnimationController _phase;
+  /// 已播放段上色动画：1 = activeColor（播放中/拖动中），0 = inactiveColor
+  late final AnimationController _tint;
 
-  /// 波幅系数：1 = 完整起伏，0 = 直线。暂停/拖动时 250ms 收敛成直线。
-  late final AnimationController _wave;
+  /// 30fps 自驱动 ticker
+  late final Ticker _ticker;
+
+  /// 自驱动帧计数：每帧 +1，驱动画布与时间数字重绘（不走 setState）
+  final ValueNotifier<int> _frame = ValueNotifier(0);
 
   /// 拖动中的进度比例。用 ValueNotifier 而不是 setState：
   /// 跟手时每帧只重绘画布与时间数字，不重建整个 widget 子树（避免拖动卡顿）。
   final ValueNotifier<double> _dragFraction = ValueNotifier(0);
+
+  /// 当前展示的位置（毫秒）—— 由 ticker 每帧累加、由上报位置定期校准
+  int _displayMs = 0;
+
+  /// 上一帧的 ticker elapsed（毫秒），用于 30fps 节流与算帧间隔
+  int _lastTickMs = 0;
 
   bool _dragging = false;
   double _trackWidth = 0;
@@ -96,60 +120,102 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
       vsync: this,
       duration: const Duration(milliseconds: 180),
     );
-    _phase = AnimationController(
+    _tint = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 3),
+      duration: const Duration(milliseconds: 220),
+      value: widget.isPlaying ? 1 : 0,
     );
-    _wave = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 250),
-      value: widget.wavy && widget.isPlaying ? 1 : 0,
-    );
-    // 波幅收敛到 0 之后再停相位 ticker：先让波形平滑压平，再省掉每帧重绘
-    _wave.addStatusListener((status) {
-      if (status == AnimationStatus.dismissed && _phase.isAnimating) {
-        _phase.stop();
-      }
-    });
-    _syncWave();
+    _ticker = createTicker(_onTick);
+    _displayMs = widget.position.inMilliseconds;
+    _syncTicker();
   }
 
   @override
   void didUpdateWidget(covariant PlayerSeekBar oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.isPlaying != widget.isPlaying ||
-        oldWidget.wavy != widget.wavy) {
-      _syncWave();
+    if (oldWidget.position != widget.position ||
+        oldWidget.isPlaying != widget.isPlaying ||
+        oldWidget.duration != widget.duration) {
+      _rebase();
     }
-  }
-
-  /// 只在「波形皮肤 + 正在播放 + 未拖动」时起伏；
-  /// 其余状态把波幅动画回 0（变成直线，颜色不变），并在归零后停住 ticker。
-  void _syncWave() {
-    final shouldWave = widget.wavy && widget.isPlaying && !_dragging;
-    if (shouldWave) {
-      if (!_phase.isAnimating) _phase.repeat();
-      _wave.forward();
-    } else {
-      _wave.reverse();
+    if (oldWidget.isPlaying != widget.isPlaying) {
+      _syncTint();
+      _syncTicker();
     }
   }
 
   @override
   void dispose() {
+    _ticker.dispose();
     _expand.dispose();
-    _phase.dispose();
-    _wave.dispose();
+    _tint.dispose();
+    _frame.dispose();
     _dragFraction.dispose();
     super.dispose();
   }
 
-  /// 当前绘制用的进度比例：拖动中用手指位置，否则用播放位置
+  /// 已播放段是否上色：播放中，或正在拖动（拖动会先 pause，但此时仍要看清落点）
+  void _syncTint() {
+    if (widget.isPlaying || _dragging) {
+      _tint.forward();
+    } else {
+      _tint.reverse();
+    }
+  }
+
+  /// 只在「播放中 + 未拖动 + 时长已知」时跑 30fps ticker，其余状态停住省电
+  void _syncTicker() {
+    final shouldRun =
+        widget.isPlaying && !_dragging && widget.duration > Duration.zero;
+    if (shouldRun) {
+      if (!_ticker.isActive) {
+        // Ticker.start() 后 elapsed 从 0 重新计
+        _lastTickMs = 0;
+        _ticker.start();
+      }
+    } else if (_ticker.isActive) {
+      _ticker.stop();
+    }
+  }
+
+  /// 30fps 节流：不足一帧间隔就丢弃（不跟着 120Hz 屏幕白跑）
+  void _onTick(Duration elapsed) {
+    final ms = elapsed.inMilliseconds;
+    final delta = ms - _lastTickMs;
+    if (delta < _frameIntervalMs) return;
+    _lastTickMs = ms;
+    final total = widget.duration.inMilliseconds;
+    var next = _displayMs + (delta * widget.speed).round();
+    if (next < 0) next = 0;
+    if (total > 0 && next > total) next = total;
+    if (next == _displayMs) return;
+    _displayMs = next;
+    _frame.value++;
+  }
+
+  /// 收到新的上报位置：与自驱动的展示位置对齐。
+  ///
+  /// 单调保护：上报值略小于展示值（音频层上报抖动）且差距在
+  /// [_resyncThresholdMs] 以内时保留展示值，避免时间数字来回跳；
+  /// 差距过大（seek / 切歌）或已暂停则直接采用上报值。
+  void _rebase() {
+    final reported = widget.position.inMilliseconds;
+    final drift = _displayMs - reported;
+    if (widget.isPlaying &&
+        !_dragging &&
+        drift > 0 &&
+        drift < _resyncThresholdMs) {
+      return;
+    }
+    _displayMs = reported;
+  }
+
+  /// 当前绘制用的进度比例：拖动中用手指位置，否则用自驱动的展示位置
   double get _fraction {
     if (_dragging) return _dragFraction.value;
     final total = widget.duration.inMilliseconds;
     if (total <= 0) return 0;
-    return (widget.position.inMilliseconds / total).clamp(0.0, 1.0);
+    return (_displayMs / total).clamp(0.0, 1.0);
   }
 
   Duration _durationAt(double fraction) => Duration(
@@ -164,7 +230,8 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
     _dragFraction.value = _fractionFromDx(dx);
     setState(() => _dragging = true);
     _expand.forward();
-    _syncWave();
+    _syncTint();
+    _syncTicker();
     widget.onSeekStart?.call();
   }
 
@@ -179,8 +246,11 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
     if (!_dragging) return;
     final target = _durationAt(_dragFraction.value);
     setState(() => _dragging = false);
+    // 松手即以落点为新的展示位置：seek 回调是异步的，等上报会先闪回旧位置
+    _displayMs = target.inMilliseconds;
     _expand.reverse();
-    _syncWave();
+    _syncTint();
+    _syncTicker();
     widget.onSeekEnd?.call(target);
   }
 
@@ -215,19 +285,25 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
           child: SizedBox(
             height: widget.height,
             child: RepaintBoundary(
-              // 一个 AnimatedBuilder 同时驱动画布与时间数字：跟手时只重建这棵
-              // 小子树（不走 setState），拖动才跟得上手指
+              // 一个 AnimatedBuilder 同时驱动画布与时间数字：自驱动每帧与跟手
+              // 都只重建这棵小子树（不走 setState），拖动才跟得上手指
               child: AnimatedBuilder(
                 animation: Listenable.merge([
                   _expand,
-                  _phase,
-                  _wave,
+                  _tint,
+                  _frame,
                   _dragFraction,
                 ]),
                 builder: (context, _) {
                   final fraction = _fraction;
                   final elapsed = _durationAt(fraction);
                   final remaining = widget.duration - elapsed;
+                  final trackColor =
+                      Color.lerp(
+                        widget.inactiveColor,
+                        widget.activeColor,
+                        Curves.easeOut.transform(_tint.value),
+                      )!;
                   return Column(
                     children: [
                       Expanded(
@@ -240,11 +316,12 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
                           painter: _SeekBarPainter(
                             fraction: fraction,
                             expandT: Curves.easeOut.transform(_expand.value),
-                            phase: _phase.value,
-                            waveT: Curves.easeOut.transform(_wave.value),
-                            activeColor: widget.activeColor,
+                            trackColor: trackColor,
                             inactiveColor: widget.inactiveColor,
-                            wavy: widget.wavy,
+                            climaxColor: widget.activeColor.withValues(
+                              alpha: 0.45,
+                            ),
+                            md3Style: widget.md3Style,
                             climaxRange: _climaxRange,
                           ),
                         ),
@@ -295,41 +372,34 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
   }
 }
 
-/// 轨道绘制：未播放段 → 高潮高亮 → 已播放段（波形/直线）→ 手柄 → stop indicator
+/// 轨道绘制：未播放段 → 高潮高亮（只画未播放的那截）→ 已播放段 → stop indicator
 class _SeekBarPainter extends CustomPainter {
   _SeekBarPainter({
     required this.fraction,
     required this.expandT,
-    required this.phase,
-    required this.waveT,
-    required this.activeColor,
+    required this.trackColor,
     required this.inactiveColor,
-    required this.wavy,
+    required this.climaxColor,
+    required this.md3Style,
     required this.climaxRange,
   });
 
   final double fraction;
   final double expandT;
-  final double phase;
 
-  /// 波幅系数：1 = 完整起伏，0 = 直线（暂停/拖动）
-  final double waveT;
-  final Color activeColor;
+  /// 已播放段颜色（播放中为强调色，暂停时已褪成 [inactiveColor]）
+  final Color trackColor;
   final Color inactiveColor;
-  final bool wavy;
+  final Color climaxColor;
+  final bool md3Style;
   final List<double>? climaxRange;
 
-  /// 常态轨道高度：进度条是整个底部区里最细的元素，
-  /// 波形皮肤只比直线皮肤粗 1px（波峰靠 [_waveAmplitude] 撑开，不靠轨道厚度）。
-  static const double _idleWavyHeight = 3;
+  /// 常态轨道高度：进度条是整个底部区里最细的元素。
+  static const double _idleMd3Height = 3;
   static const double _idleFlatHeight = 2;
 
   /// 拖动态轨道高度
   static const double _dragHeight = 10;
-
-  /// 波长与波幅
-  static const double _waveLength = 26;
-  static const double _waveAmplitude = 2;
 
   /// 已播放段与剩余段之间的间隙（MD3 expressive 的做法）
   static const double _segmentGap = 4;
@@ -340,7 +410,7 @@ class _SeekBarPainter extends CustomPainter {
     if (w <= 0) return;
     final cy = size.height / 2 + 2;
     final trackH = lerpDouble(
-      wavy ? _idleWavyHeight : _idleFlatHeight,
+      md3Style ? _idleMd3Height : _idleFlatHeight,
       _dragHeight,
       expandT,
     )!;
@@ -351,8 +421,7 @@ class _SeekBarPainter extends CustomPainter {
     // 剩余段起点 = 已播放段末端 + 间隙，两段互不叠加
     final remainStart = math.min(activeEnd + _segmentGap, w);
 
-    // 1. 剩余段：只画播放点之后的部分（不再整条铺满，
-    //    否则这条直线会从已播放段的波形底下穿过）
+    // 1. 剩余段：只画播放点之后的部分
     if (remainStart < w) {
       canvas.drawRRect(
         RRect.fromLTRBR(remainStart, cy - r, w, cy + r, Radius.circular(r)),
@@ -360,60 +429,29 @@ class _SeekBarPainter extends CustomPainter {
       );
     }
 
-    // 2. 高潮区间高亮：贴在轨道上，用半透明强调色
+    // 2. 高潮区间高亮：只画还没播到的那截 —— 已播放进度掠过后逐渐消失
     final climax = climaxRange;
     if (climax != null) {
-      final ch = math.max(trackH * 0.7, 1.5);
-      canvas.drawRRect(
-        RRect.fromLTRBR(
-          w * climax[0],
-          cy - ch,
-          w * climax[1],
-          cy + ch,
-          Radius.circular(ch),
-        ),
-        Paint()..color = activeColor.withValues(alpha: 0.45),
-      );
+      final left = math.max(w * climax[0], remainStart);
+      final right = w * climax[1];
+      if (right > left) {
+        final ch = math.max(trackH * 0.7, 1.5);
+        canvas.drawRRect(
+          RRect.fromLTRBR(left, cy - ch, right, cy + ch, Radius.circular(ch)),
+          Paint()..color = climaxColor,
+        );
+      }
     }
 
-    // 3. 已播放段：波幅由 waveT 控制（暂停/拖动时收敛为 0，画成直线）
-    final amp = wavy ? _waveAmplitude * waveT : 0.0;
-    final activePaint = Paint()..color = activeColor;
-    if (amp < 0.2 || fx < trackH * 2) {
-      canvas.drawRRect(
-        RRect.fromLTRBR(0, cy - r, fx, cy + r, Radius.circular(r)),
-        activePaint,
-      );
-    } else {
-      final path = Path();
-      bool first = true;
-      for (double x = 0; x <= fx; x += 2) {
-        // 靠近末端时把波幅收敛为 0，让波形平滑地接回轨道中线
-        final taper = ((fx - x) / 14).clamp(0.0, 1.0);
-        final y =
-            cy +
-            amp * taper * math.sin((x / _waveLength + phase) * 2 * math.pi);
-        if (first) {
-          path.moveTo(x, y);
-          first = false;
-        } else {
-          path.lineTo(x, y);
-        }
-      }
-      path.lineTo(fx, cy);
-      canvas.drawPath(
-        path,
-        Paint()
-          ..color = activeColor
-          ..style = PaintingStyle.stroke
-          ..strokeWidth = trackH
-          ..strokeCap = StrokeCap.round
-          ..strokeJoin = StrokeJoin.round,
-      );
-    }
+    // 3. 已播放段：直线，颜色由 trackColor 决定（暂停时与未播放段同色）
+    final activePaint = Paint()..color = trackColor;
+    canvas.drawRRect(
+      RRect.fromLTRBR(0, cy - r, fx, cy + r, Radius.circular(r)),
+      activePaint,
+    );
 
     // 4. MD3 stop indicator：轨道末端的小圆点，进度接近末端时隐藏
-    if (wavy && fx < w - trackH * 3) {
+    if (md3Style && fx < w - trackH * 3) {
       canvas.drawCircle(Offset(w - r, cy), math.max(1.5, r), activePaint);
     }
   }
@@ -422,11 +460,10 @@ class _SeekBarPainter extends CustomPainter {
   bool shouldRepaint(covariant _SeekBarPainter old) =>
       old.fraction != fraction ||
       old.expandT != expandT ||
-      old.phase != phase ||
-      old.waveT != waveT ||
-      old.activeColor != activeColor ||
+      old.trackColor != trackColor ||
       old.inactiveColor != inactiveColor ||
-      old.wavy != wavy ||
+      old.climaxColor != climaxColor ||
+      old.md3Style != md3Style ||
       old.climaxRange?[0] != climaxRange?[0] ||
       old.climaxRange?[1] != climaxRange?[1];
 }

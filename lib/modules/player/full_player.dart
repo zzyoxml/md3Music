@@ -1350,13 +1350,27 @@ class _FullPlayerState extends State<FullPlayer>
                               ),
                             const SizedBox(height: 16),
                             // 歌名 / 艺人·专辑：三种横屏形态（手机横屏、平板竖屏、
-                            // 平板横屏）都固定在封面正下方，不再随 tab 变化
-                            _buildTitleBlock(
-                              playerProvider,
-                              currentSong,
-                              colorScheme,
-                              dense: true,
-                            ),
+                            // 平板横屏）都固定在封面正下方，不再随 tab 变化。
+                            // 标题块宽度收到与封面同宽，左边缘与专辑封面左边缘
+                            // 对齐（Zen 模式同样左对齐）；写真背景隐藏封面时
+                            // 没有对齐参照物，退回整栏宽度。
+                            if (hideArtworkForPhotoBg)
+                              _buildTitleBlock(
+                                playerProvider,
+                                currentSong,
+                                colorScheme,
+                                dense: true,
+                              )
+                            else
+                              SizedBox(
+                                width: size,
+                                child: _buildTitleBlock(
+                                  playerProvider,
+                                  currentSong,
+                                  colorScheme,
+                                  dense: true,
+                                ),
+                              ),
                           ],
                         );
                       },
@@ -1526,13 +1540,25 @@ class _FullPlayerState extends State<FullPlayer>
                                 ),
                               ),
                             const SizedBox(height: 16),
-                            // 歌名 / 艺人·专辑：固定在封面正下方（三种横屏形态一致）
-                            _buildTitleBlock(
-                              playerProvider,
-                              currentSong,
-                              colorScheme,
-                              dense: true,
-                            ),
+                            // 歌名 / 艺人·专辑：固定在封面正下方（三种横屏形态一致），
+                            // 标题块宽度收到与封面同宽 → 左边缘与专辑封面对齐
+                            if (hideArtworkForPhotoBg)
+                              _buildTitleBlock(
+                                playerProvider,
+                                currentSong,
+                                colorScheme,
+                                dense: true,
+                              )
+                            else
+                              SizedBox(
+                                width: maxSize,
+                                child: _buildTitleBlock(
+                                  playerProvider,
+                                  currentSong,
+                                  colorScheme,
+                                  dense: true,
+                                ),
+                              ),
                           ],
                         );
                       },
@@ -1638,7 +1664,6 @@ class _FullPlayerState extends State<FullPlayer>
             ),
             IconButton(
               icon: const Icon(Icons.more_horiz),
-              tooltip: '更多',
               onPressed: () => _showMoreMenu(context),
             ),
           ],
@@ -1795,7 +1820,16 @@ class _FullPlayerState extends State<FullPlayer>
               ),
             ),
           SizedBox(height: textSpacing),
-          _buildTitleBlock(playerProvider, currentSong, colorScheme),
+          // 竖屏 Zen 模式下标题居中（沉浸态没有其它左对齐参照物）；
+          // 常态仍左对齐
+          _buildTitleBlock(
+            playerProvider,
+            currentSong,
+            colorScheme,
+            alignment: _zenMode
+                ? CrossAxisAlignment.center
+                : CrossAxisAlignment.stretch,
+          ),
           if (!isExpanded) const Spacer(),
         ],
       ),
@@ -1807,6 +1841,8 @@ class _FullPlayerState extends State<FullPlayer>
   /// 原先「标题 / 艺人 / 专辑」三行同层级堆叠；艺人与专辑同为元数据，合并成一行。
   /// 倍速状态与调节入口都在更多菜单里，这里不再重复显示。
   /// [dense] 用于横屏左栏（宽度只有约 40%），标题降一号字避免频繁换行。
+  /// [alignment] 为 [CrossAxisAlignment.center] 时文字同时居中对齐
+  /// （竖屏 Zen 模式），其余形态一律左对齐。
   Widget _buildTitleBlock(
     PlayerProvider playerProvider,
     dynamic currentSong,
@@ -1815,6 +1851,9 @@ class _FullPlayerState extends State<FullPlayer>
     bool dense = false,
   }) {
     final textTheme = Theme.of(context).textTheme;
+    final textAlign = alignment == CrossAxisAlignment.center
+        ? TextAlign.center
+        : TextAlign.left;
     final subtitle = currentSong.album.toString().isEmpty
         ? currentSong.artist.toString()
         : '${currentSong.artist} · ${currentSong.album.toString().toUpperCase()}';
@@ -1835,7 +1874,7 @@ class _FullPlayerState extends State<FullPlayer>
                   letterSpacing: dense ? 1.0 : 1.5,
                   height: 1.2,
                 ),
-            textAlign: TextAlign.left,
+            textAlign: textAlign,
           ),
         ),
         const SizedBox(height: 2),
@@ -1851,7 +1890,7 @@ class _FullPlayerState extends State<FullPlayer>
                   color: colorScheme.onSurfaceVariant,
                   fontWeight: FontWeight.w500,
                 ),
-            textAlign: TextAlign.left,
+            textAlign: textAlign,
           ),
         ),
       ],
@@ -1903,7 +1942,8 @@ class _FullPlayerState extends State<FullPlayer>
     );
   }
 
-  /// 进度条 —— 常态一条细波形轨道，按下时膨胀并浮出时间数字（详见 [PlayerSeekBar]）。
+  /// 进度条 —— 常态一条细直线轨道（播放中才上色），按下时膨胀并浮出时间数字
+  /// （详见 [PlayerSeekBar]）。
   Widget _buildProgressBar(
     PlayerProvider playerProvider,
     Duration position,
@@ -1915,8 +1955,9 @@ class _FullPlayerState extends State<FullPlayer>
       position: position,
       duration: duration,
       isPlaying: playerProvider.isPlaying,
-      // MD3 皮肤：活动轨道走波形 + 末端 stop indicator
-      wavy: true,
+      // MD3 皮肤：3px 轨道 + 末端 stop indicator
+      md3Style: true,
+      speed: playerProvider.speed,
       activeColor: colorScheme.primary,
       inactiveColor: colorScheme.onSurfaceVariant.withValues(alpha: 0.24),
       labelColor: colorScheme.onSurfaceVariant,
@@ -1972,10 +2013,6 @@ class _FullPlayerState extends State<FullPlayer>
               color: _isDefaultPlayMode(playerProvider)
                   ? colorScheme.onSurfaceVariant
                   : colorScheme.primary,
-              tooltip: _playModeLabel(
-                playerProvider.shuffleEnabled,
-                playerProvider.loopMode,
-              ),
               onTap: () {
                 AppHaptics.tick();
                 playerProvider.cyclePlayMode();
@@ -2015,7 +2052,6 @@ class _FullPlayerState extends State<FullPlayer>
               color: isFavorited
                   ? colorScheme.error
                   : colorScheme.onSurfaceVariant,
-              tooltip: '收藏',
               onTap: song == null
                   ? null
                   : () {
@@ -2044,14 +2080,14 @@ class _FullPlayerState extends State<FullPlayer>
   }
 
   /// 传输行两端的次要动作：48dp 圆形触达区，无容器背景。
+  /// 不挂 Tooltip：长按只执行长按动作（如收藏长按开 AI 推荐），不弹按钮说明。
   Widget _buildEdgeAction({
     required IconData icon,
     required Color color,
     VoidCallback? onTap,
     VoidCallback? onLongPress,
-    String? tooltip,
   }) {
-    final Widget button = InkWell(
+    return InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
       customBorder: const CircleBorder(),
@@ -2061,9 +2097,6 @@ class _FullPlayerState extends State<FullPlayer>
         child: Center(child: Icon(icon, size: 24, color: color)),
       ),
     );
-    return tooltip == null
-        ? button
-        : Tooltip(message: tooltip, child: button);
   }
 
   /// 合并后的播放模式图标：随机优先，其次看循环模式。
@@ -2079,18 +2112,6 @@ class _FullPlayerState extends State<FullPlayer>
       case AppLoopMode.all:
         // 列表循环：实心箭头，播完回到第一首
         return Icons.repeat;
-    }
-  }
-
-  String _playModeLabel(bool shuffleEnabled, AppLoopMode loopMode) {
-    if (shuffleEnabled) return '随机播放';
-    switch (loopMode) {
-      case AppLoopMode.off:
-        return '不循环';
-      case AppLoopMode.one:
-        return '单曲循环';
-      case AppLoopMode.all:
-        return '列表循环';
     }
   }
 
@@ -2116,11 +2137,10 @@ class _FullPlayerState extends State<FullPlayer>
       onDragUpdate: _onTabDragUpdate,
       onDragEnd: _onTabDragEnd,
       items: [
-        const PlayerTabItem(icon: Icons.queue_music, tooltip: '播放列表'),
+        const PlayerTabItem(icon: Icons.queue_music),
         if (hasCoverTab)
           PlayerTabItem(
             icon: Icons.album,
-            tooltip: '封面',
             // 长按封面段：弹出下载音质选择（本地歌曲屏蔽）
             onLongPress:
                 song != null &&
@@ -2137,10 +2157,9 @@ class _FullPlayerState extends State<FullPlayer>
           icon: DesktopLyricService.instance.enabled
               ? Icons.lyrics
               : Icons.lyrics_outlined,
-          tooltip: '歌词',
           onLongPress: _toggleDesktopLyric,
         ),
-        const PlayerTabItem(icon: Icons.comment_outlined, tooltip: '评论'),
+        const PlayerTabItem(icon: Icons.comment_outlined),
       ],
     );
   }

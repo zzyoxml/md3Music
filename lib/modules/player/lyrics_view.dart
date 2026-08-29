@@ -316,22 +316,28 @@ class LyricsViewState extends State<LyricsView> {
   /// 计算每行容器高度与累计偏移（缓存，仅在歌词/偏好/宽度变化时重测）。
   ///
   /// 行高 = 实际文本块高（按当前字号 TextPainter 完整测量，英文原词+翻译
-  /// 超长行可换 2 行及以上，不截断）
-  ///        + 行间距留白 `fontSize * (lineSpacing - 1.4)`（下限 0）。
-  /// 行距基准取 1.4 而非 1.2：英文 ascenders/descenders（g/y/p/j/l/h）需要
-  /// 更宽松的行距，否则长英文行换行后字形会被上下行重叠/截断；lineSpacing
-  /// 低于 1.4 时以 1.4 为下限，保证容器高度不低于文本块（lineSpacing 最小
-  /// 可调到 0.8，原实现会出现负留白导致行高小于文本被裁切）。
+  /// 超长行可换 2 行及以上，不截断）+ 行间留白。
+  ///
+  /// 换行自适应间距：一行歌词换行后的**内部**视觉行距不再固定 1.4，而是跟随
+  /// 用户的行间距设置按 0.8× 缩放（[_wrapLineHeight]，与 Apple Music 风格歌词
+  /// 的 `wrapLineHeightFactor` 一致）——换行块因此和整体行距成比例，不会在大
+  /// 行间距下显得挤成一团。行与行之间的留白补足到 `fontSize * lineSpacing`，
+  /// 单行歌词的行距与改动前完全一致。
+  ///
+  /// 行距下限取 1.4：英文 ascenders/descenders（g/y/p/j/l/h）需要更宽松的行距，
+  /// 否则长英文行换行后字形会被上下行重叠/截断；lineSpacing 可低至 0.8，
+  /// 以 1.4 为下限保证容器高度不低于文本块。
   void _ensureLayout(double width, double fontSize, String? fontFamily) {
     if (!_layoutDirty && _lastLayoutWidth == width) return;
     _layoutDirty = false;
     _lastLayoutWidth = width;
 
     final n = _parsedLyrics.length;
-    final spacingExtra = fontSize * (_prefs.lineSpacing - 1.4);
+    final wrapHeight = _wrapLineHeight;
+    // 行间留白：把单行行距补足到 fontSize * lineSpacing（不足则为 0）
+    final spacingExtra = fontSize * (_prefs.lineSpacing - wrapHeight);
     final safeSpacing = spacingExtra > 0 ? spacingExtra : 0.0;
-    final minRowHeight =
-        fontSize * (_prefs.lineSpacing < 1.4 ? 1.4 : _prefs.lineSpacing);
+    final minRowHeight = fontSize * wrapHeight + safeSpacing;
     _lineHeights = List<double>.generate(n, (i) {
       final text = _parsedLyrics[i].text;
       // 空行显示 '...' 占位，按单行处理
@@ -341,7 +347,7 @@ class LyricsViewState extends State<LyricsView> {
           text: text,
           style: TextStyle(
             fontSize: fontSize,
-            height: 1.4,
+            height: wrapHeight,
             // 用当前行字重测量（当前行字重 >= 非当前行，可保证所有行不截断）
             fontWeight: _prefs.fontWeight,
             fontFamily: fontFamily,
@@ -361,6 +367,21 @@ class LyricsViewState extends State<LyricsView> {
       _lineTopOffsets[i] = _lineTopOffsets[i - 1] + _lineHeights[i - 1];
     }
   }
+
+  /// 换行后的内部视觉行距系数：行间距设置的 0.8×，下限 1.4。
+  ///
+  /// 必须与渲染用的 `TextStyle.height` 保持一致，否则测量出的容器高度与实际
+  /// 文本块高不符，长歌词会被裁切或多出空白。
+  double get _wrapLineHeight {
+    final scaled = _prefs.lineSpacing * _wrapLineHeightFactor;
+    return scaled > _minWrapLineHeight ? scaled : _minWrapLineHeight;
+  }
+
+  /// 换行内部行距相对整体行间距的比例
+  static const double _wrapLineHeightFactor = 0.8;
+
+  /// 换行内部行距下限（避免英文 descenders 被裁切）
+  static const double _minWrapLineHeight = 1.4;
 
   void _onLineTap(int index) {
     if (index < _parsedLyrics.length) {
@@ -444,7 +465,8 @@ class LyricsViewState extends State<LyricsView> {
                         color: isCurrent
                             ? colorScheme.primary
                             : colorScheme.onSurfaceVariant,
-                        height: 1.4,
+                        // 与 _ensureLayout 的测量保持一致（换行内部行距）
+                        height: _wrapLineHeight,
                       ),
                       child: Text(
                         line.text.isEmpty ? '...' : line.text,

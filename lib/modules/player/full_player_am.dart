@@ -1593,11 +1593,16 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                             ),
                             const SizedBox(height: 16),
                             // 歌名 / 艺人·专辑：三种横屏形态（手机横屏、平板竖屏、
-                            // 平板横屏）都固定在封面正下方，不再随 tab 变化
-                            _buildTitleBlock(
-                              playerProvider,
-                              currentSong,
-                              isExpanded: true,
+                            // 平板横屏）都固定在封面正下方，不再随 tab 变化。
+                            // 标题块宽度收到与封面同宽 → 左边缘与专辑封面对齐
+                            // （横屏 Zen 模式同样左对齐）。
+                            SizedBox(
+                              width: size,
+                              child: _buildTitleBlock(
+                                playerProvider,
+                                currentSong,
+                                isExpanded: true,
+                              ),
                             ),
                           ],
                         );
@@ -1781,11 +1786,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               ),
                             ),
                             const SizedBox(height: 16),
-                            // 歌名 / 艺人·专辑：固定在封面正下方（三种横屏形态一致）
-                            _buildTitleBlock(
-                              playerProvider,
-                              currentSong,
-                              isExpanded: true,
+                            // 歌名 / 艺人·专辑：固定在封面正下方（三种横屏形态一致），
+                            // 标题块宽度收到与封面同宽 → 左边缘与专辑封面对齐
+                            SizedBox(
+                              width: maxSize,
+                              child: _buildTitleBlock(
+                                playerProvider,
+                                currentSong,
+                                isExpanded: true,
+                              ),
                             ),
                           ],
                         );
@@ -1918,7 +1927,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             ),
             IconButton(
               icon: const Icon(Icons.more_horiz, color: Colors.white),
-              tooltip: '更多',
               onPressed: () => _showMoreMenu(context),
             ),
           ],
@@ -2059,7 +2067,15 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               ),
             ),
           SizedBox(height: textSpacing),
-          _buildTitleBlock(playerProvider, currentSong, isExpanded: isExpanded),
+          // 竖屏 Zen 模式下标题居中（沉浸态没有其它左对齐参照物）；常态仍左对齐
+          _buildTitleBlock(
+            playerProvider,
+            currentSong,
+            isExpanded: isExpanded,
+            alignment: _zenMode
+                ? CrossAxisAlignment.center
+                : CrossAxisAlignment.stretch,
+          ),
           if (!isExpanded) const Spacer(),
         ],
       ),
@@ -2070,17 +2086,23 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   ///
   /// 原先「标题 / 艺人 / 专辑」三行居中堆叠。改为 Apple Music 的左对齐布局，
   /// 艺人与专辑合并成一行（同为元数据）。倍速状态与调节入口都在传输行左端。
+  /// [alignment] 为 [CrossAxisAlignment.center] 时文字同时居中对齐
+  /// （竖屏 Zen 模式），其余形态一律左对齐。
   Widget _buildTitleBlock(
     PlayerProvider playerProvider,
     dynamic currentSong, {
     bool isExpanded = false,
+    CrossAxisAlignment alignment = CrossAxisAlignment.stretch,
   }) {
     final textTheme = Theme.of(context).textTheme;
+    final textAlign = alignment == CrossAxisAlignment.center
+        ? TextAlign.center
+        : TextAlign.left;
     final subtitle = currentSong.album.toString().isEmpty
         ? currentSong.artist.toString()
         : '${currentSong.artist} · ${currentSong.album}';
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: alignment,
       children: [
         InkWell(
           onTap: () => _navigateToAlbum(currentSong as Song),
@@ -2091,7 +2113,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             overflow: TextOverflow.ellipsis,
             style: (isExpanded ? textTheme.titleMedium : textTheme.titleLarge)
                 ?.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
-            textAlign: TextAlign.left,
+            textAlign: textAlign,
           ),
         ),
         const SizedBox(height: 2),
@@ -2103,7 +2125,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: textTheme.bodyMedium?.copyWith(color: Colors.white70),
-            textAlign: TextAlign.left,
+            textAlign: textAlign,
           ),
         ),
       ],
@@ -2180,7 +2202,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       position: position,
       duration: duration,
       isPlaying: playerProvider.isPlaying,
-      wavy: false,
+      md3Style: false,
+      speed: playerProvider.speed,
       activeColor: Colors.white,
       inactiveColor: Colors.white24,
       labelColor: Colors.white70,
@@ -2241,7 +2264,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               color: (!shuffleEnabled && loopMode == AppLoopMode.off)
                   ? Colors.white.withValues(alpha: 0.45)
                   : Colors.white,
-              tooltip: _playModeLabel(shuffleEnabled, loopMode),
               onTap: () {
                 AppHaptics.tick();
                 playerProvider.cyclePlayMode();
@@ -2292,7 +2314,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               icon: isFavorited ? Icons.favorite : Icons.favorite_border,
               // 收藏激活时用红色强调（与 MD 风格一致）
               color: isFavorited ? Colors.redAccent : Colors.white,
-              tooltip: '收藏',
               onTap: song == null
                   ? null
                   : () {
@@ -2321,14 +2342,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   }
 
   /// 传输行两端的次要动作：48dp 圆形触达区，无容器背景。
+  /// 不挂 Tooltip：长按只执行长按动作（如收藏长按开 AI 推荐），不弹按钮说明。
   Widget _buildEdgeAction({
     required IconData icon,
     required Color color,
     VoidCallback? onTap,
     VoidCallback? onLongPress,
-    String? tooltip,
   }) {
-    final Widget button = InkWell(
+    return InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
       customBorder: const CircleBorder(),
@@ -2338,7 +2359,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
         child: Center(child: Icon(icon, size: 24, color: color)),
       ),
     );
-    return tooltip == null ? button : Tooltip(message: tooltip, child: button);
   }
 
   /// 合并后的播放模式图标：随机优先，其次看循环模式。
@@ -2354,18 +2374,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       case AppLoopMode.all:
         // 列表循环：实心箭头，播完回到第一首
         return Icons.repeat;
-    }
-  }
-
-  String _playModeLabel(bool shuffleEnabled, AppLoopMode loopMode) {
-    if (shuffleEnabled) return '随机播放';
-    switch (loopMode) {
-      case AppLoopMode.off:
-        return '不循环';
-      case AppLoopMode.one:
-        return '单曲循环';
-      case AppLoopMode.all:
-        return '列表循环';
     }
   }
 
@@ -2385,11 +2393,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       onDragUpdate: _onTabDragUpdate,
       onDragEnd: _onTabDragEnd,
       items: [
-        const PlayerTabItem(icon: Icons.queue_music, tooltip: '播放列表'),
+        const PlayerTabItem(icon: Icons.queue_music),
         if (hasCoverTab)
           PlayerTabItem(
             icon: Icons.album,
-            tooltip: '封面',
             // 长按封面段：弹出下载音质选择（本地歌曲屏蔽）
             onLongPress:
                 song != null &&
@@ -2406,10 +2413,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           icon: DesktopLyricService.instance.enabled
               ? Icons.lyrics
               : Icons.lyrics_outlined,
-          tooltip: '歌词',
           onLongPress: _toggleDesktopLyric,
         ),
-        const PlayerTabItem(icon: Icons.comment_outlined, tooltip: '评论'),
+        const PlayerTabItem(icon: Icons.comment_outlined),
       ],
     );
   }
@@ -2441,18 +2447,19 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
-  /// 给歌词页右上角挂一个翻译/罗马音开关。
+  /// 给歌词页右下角挂一个翻译/罗马音开关。
   ///
   /// 原先这个按钮常驻在底部操作胶囊里，但它只作用于歌词副行；
   /// 移到歌词内容自身的角落后，其它 tab 不再为它付出常驻空间，
   /// 短按开关副行、长按在「翻译 / 罗马音」间切换的交互保持不变。
+  /// 落在歌词区右下角（紧贴进度条上方），拇指可达且不压住首行歌词；
   /// 无容器底色，只靠图标亮度区分开关态；Zen 模式下随其它控件一起隐藏。
   Widget _wrapLyricsWithTranslateToggle(Widget child) {
     return Stack(
       children: [
         Positioned.fill(child: child),
         Positioned(
-          top: 4,
+          bottom: 4,
           right: 8,
           child: ListenableBuilder(
             listenable: LyricPreferences.instance,
