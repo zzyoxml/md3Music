@@ -2664,7 +2664,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
-  /// 在线歌曲封面优先使用本地缓存路径（已由私有构建 StreamCacheManager 缓存）。
+  /// 在线歌曲封面优先使用本地缓存路径（已由私有构建的流缓存能力缓存）。
   /// 命中后原生端按 file:// 图片直接解码，不依赖网络；未缓存/失败时静默，
   /// 沿用原 artUrl。缓存封面解析是异步 IO，fire-and-forget 不阻塞播放主流程。
   void _pushNotificationWithCachedArtwork(Song song, bool isFavorited) {
