@@ -19,6 +19,8 @@
   .\scripts\md3.ps1 export -PublicRemote <URL>
   .\scripts\md3.ps1 export-messages      # 重建私有提交记录为空树历史（不推送）
   .\scripts\md3.ps1 export-messages -PublicRemote <URL> -Force   # 重建并首推公开仓库
+  .\scripts\md3.ps1 full-export          # 一键：空树消息历史 + 全量公开树快照推送公开仓库
+                                         #     （默认 https://github.com/zzyoxml/md3Music : rust-local-force）
   .\scripts\md3.ps1 changelog -Version v5.4.0        # 总结提交并更新 CHANGELOG.md
   .\scripts\md3.ps1 commit               # TUI 一键提交（勾选改动 / LLM 写提交信息 / 同步 / PR）
 #>
@@ -39,6 +41,7 @@ $Tasks = [ordered]@{
     'verify'  = @{ File = 'verify_public.ps1'; Desc = '否认清单闸门：自检当前仓库公开面是否干净';   Alias = @('check') }
     'export'  = @{ File = 'export_public.ps1'; Desc = '导出公开版本（默认开 PR；可选 force push / 更新 CHANGELOG）'; Alias = @('public') }
     'export-messages' = @{ File = 'export_messages_history.ps1'; Desc = '重建私有提交记录为空树历史（可选推送到公开仓库）'; Alias = @('history', 'messages') }
+    'full-export' = @{ File = 'export_full.ps1'; Desc = '一键发布：空树消息历史 + 全量公开树快照推送公开仓库（默认 zzyoxml/md3Music : rust-local-force）'; Alias = @('release') }
     'changelog' = @{ File = 'changelog.ps1'; Desc = '总结提交并更新 CHANGELOG.md（指定版本号与起始哈希）'; Alias = @('cl') }
     'commit'  = @{ File = 'commit.ps1';        Desc = 'TUI 一键提交：勾选改动 / LLM 提交信息 / 同步 / 开 PR'; Alias = @('ci') }
     'token'   = @{ File = 'token.ps1';         Desc = '管理 GitHub token（开 PR / 自动合并用）';      Alias = @('auth') }
@@ -82,6 +85,12 @@ function Get-TaskOptions([string]$Key) {
             (New-TaskOption -Name '-SanitizeMessages' -Desc '提交信息按 deny 清单脱敏为占位符'),
             (New-TaskOption -Name '-DenyReplacement'  -Kind value -Desc '脱敏占位符文本（默认「[已隐藏]」）'),
             (New-TaskOption -Name '-Force'        -Desc '推送用 --force（覆盖公开仓库已有同名分支）'),
+            (New-TaskOption -Name '-NoPause'      -Desc '结束后不等待按键')
+        ) }
+        'full-export' { @(
+            (New-TaskOption -Name '-PublicRemote' -Kind value -Desc '公开仓库 URL（默认 https://github.com/zzyoxml/md3Music）'),
+            (New-TaskOption -Name '-PublicBranch' -Kind value -Desc '目标分支（默认 rust-local-force）'),
+            (New-TaskOption -Name '-OutDir'       -Kind value -Desc '公开树快照目录（默认 .public_export）'),
             (New-TaskOption -Name '-NoPause'      -Desc '结束后不等待按键')
         ) }
         'changelog' { @(

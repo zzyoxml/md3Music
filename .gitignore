@@ -88,3 +88,4 @@ third_party/just_audio/example/android/.gradle
 # 临时调试/测试产物（不入库）
 tmp/
 docs/git_history_export_analysis.md
+third_party/just_audio/android/.gradle/
