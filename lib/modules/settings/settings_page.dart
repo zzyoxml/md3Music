@@ -16,6 +16,7 @@ import '../../core/services/usb_audio_service.dart';
 import '../../core/layout/page_title_alignment.dart';
 import '../../core/layout/ui_density.dart';
 import '../../core/services/audio_service_io.dart';
+import '../../core/services/volume_normalization_service.dart';
 import '../../core/services/background_image_loader.dart';
 import '../../core/widgets/app_background.dart' show kDefaultWallpaperAsset;
 import '../../core/services/custom_font_loader.dart';
@@ -93,8 +94,8 @@ class _SettingsPageState extends State<SettingsPage>
   bool _lyricEcoMode = true;
   // 歌词动态字体颜色开关（默认开启，仅 AM 播放器生效）
   bool _lyricDynamicColor = true;
-  // 辉光触发阈值系数（默认 1.4，范围 1.0~2.0）：触发阈值 = 歌词字长中位数 × 该系数
-  double _glowThresholdFactor = 1.4;
+  // 辉光触发阈值系数（默认 1.6，范围 1.0~2.0）：触发阈值 = 歌词字长中位数 × 该系数
+  double _glowThresholdFactor = 1.6;
   String _appVersion = '';
   // 实时歌词推送协议选择（三选一 + 关闭）
   String _lyricPushProtocol = 'none';
@@ -124,6 +125,9 @@ class _SettingsPageState extends State<SettingsPage>
   // 交叉淡化（自动切歌时上一首渐出与下一首渐入叠加）
   bool _crossfadeEnabled = false;
   int _crossfadeSeconds = SettingsRepository.kCrossfadeDefaultSeconds;
+  // 音量均衡（响度归一）
+  bool _volumeNormalizationEnabled = false;
+  double _volumeNormalizationLufs = VolumeNormalizationService.defaultReferenceLufs;
   // 播放时保持屏幕常亮开关
   bool _keepScreenOn = false;
   // 忽略音频焦点开关（默认开启：允许与其他应用同时播放音频）
@@ -314,6 +318,10 @@ class _SettingsPageState extends State<SettingsPage>
     final pauseFadeEnabled = await _settingsRepository.getPauseFadeEnabled();
     final crossfadeEnabled = await _settingsRepository.getCrossfadeEnabled();
     final crossfadeSeconds = await _settingsRepository.getCrossfadeSeconds();
+    final volumeNormalizationEnabled =
+        await _settingsRepository.getVolumeNormalizationEnabled();
+    final volumeNormalizationLufs =
+        await _settingsRepository.getVolumeNormalizationReferenceLufs();
     final keepScreenOn = await _settingsRepository.getKeepScreenOn();
     final ignoreAudioFocus = await _settingsRepository.getIgnoreAudioFocus();
     final audioFocusInterruptionMode = await _settingsRepository
@@ -364,9 +372,16 @@ class _SettingsPageState extends State<SettingsPage>
       _pauseFadeEnabled = pauseFadeEnabled;
       _crossfadeEnabled = crossfadeEnabled;
       _crossfadeSeconds = crossfadeSeconds;
+      _volumeNormalizationEnabled = volumeNormalizationEnabled;
+      _volumeNormalizationLufs = volumeNormalizationLufs;
       _keepScreenOn = keepScreenOn;
       _ignoreAudioFocus = ignoreAudioFocus;
       _audioFocusInterruptionMode = audioFocusInterruptionMode;
+      // 启动时把音量均衡设置同步给播放器（当前曲目若已加载会自动重算）
+      AudioService().setVolumeNormalization(
+        enabled: volumeNormalizationEnabled,
+        referenceLufs: volumeNormalizationLufs,
+      );
       _spectrumEnabled = spectrumEnabled;
       _spectrumBandCount = spectrumBandCount;
       _spectrumStyle = spectrumStyle;
@@ -2088,6 +2103,46 @@ class _SettingsPageState extends State<SettingsPage>
             );
           },
         ),
+        // —— 音量均衡（响度归一）——
+        // search: 音量均衡 响度归一 响度 均衡 参考响度 LUFS 安静歌 放大 峰值
+        SwitchListTile(
+          title: const Text('音量均衡'),
+          subtitle: const Text('按歌曲响度自动归一音量，安静歌放大、响亮歌压低，切歌不跳变',
+              maxLines: 2, overflow: TextOverflow.ellipsis),
+          value: _volumeNormalizationEnabled,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            setState(() => _volumeNormalizationEnabled = value);
+            _settingsRepository.setVolumeNormalizationEnabled(value);
+            // 开关变化即时对当前曲目重算并应用增益
+            AudioService().setVolumeNormalization(enabled: value);
+          },
+        ),
+        // 参考响度只在均衡开启时才有意义
+        // search-item: 参考响度 LUFS | 音量均衡 参考响度 响度 归一 均衡
+        if (_volumeNormalizationEnabled)
+          ListTile(
+            title: const Text('参考响度'),
+            subtitle: M3ESlider(
+              decoration:
+                  const M3ESliderDecoration(haptic: M3EHapticFeedback.medium),
+              value: _volumeNormalizationLufs,
+              min: -20,
+              max: -8,
+              divisions: 12,
+              label: '${_volumeNormalizationLufs.round()} LUFS',
+              onChanged: (v) {
+                setState(() => _volumeNormalizationLufs = v.roundToDouble());
+              },
+              onChangeEnd: (v) {
+                final lufs = v.roundToDouble();
+                setState(() => _volumeNormalizationLufs = lufs);
+                _settingsRepository.setVolumeNormalizationReferenceLufs(lufs);
+                AudioService().setVolumeNormalization(referenceLufs: lufs);
+              },
+            ),
+            trailing: Text('${_volumeNormalizationLufs.round()} LUFS'),
+          ),
         // ② 播放行为：音量过渡 → 与其他应用共存策略
         _buildGroupLabel('播放行为', colorScheme),
         // search: 淡入淡出 渐变 音量

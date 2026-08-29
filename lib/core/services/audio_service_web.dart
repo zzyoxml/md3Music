@@ -63,7 +63,11 @@ class AudioService {
     await _player.seek(position);
   }
 
-  Future<void> setUrl(String url) async {
+  Future<void> setUrl(
+    String url, {
+    double? loudnessLufs,
+    double? loudnessPeakDb,
+  }) async {
     final blobUrl = await _fetchAudioBlob(url);
     await _player.setUrl(blobUrl);
   }
@@ -156,7 +160,16 @@ class AudioService {
 
   Stream<bool> get crossfadingStream => const Stream.empty();
 
-  Future<bool> prepareCrossfade(String url, {double speed = 1.0}) async =>
+  Future<bool> prepareCrossfade(
+    String url, {
+    double speed = 1.0,
+    String? id,
+    String? title,
+    String? artist,
+    String? artUri,
+    double? loudnessLufs,
+    double? loudnessPeakDb,
+  }) async =>
       false;
 
   void discardPreparedCrossfade() {}

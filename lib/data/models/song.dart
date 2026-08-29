@@ -34,6 +34,10 @@ class Song {
   /// （付费边界已按列表接口 fail_process 过滤隐藏；无免费部分的付费章节
   /// 点开仍会失败，此时提示该章节为听书VIP单独付费内容）。
   final bool isLongAudio;
+  /// 音量均衡（响度归一）用：歌曲集总响度（LUFS），可空。
+  final double? loudnessLufs;
+  /// 音量均衡（响度归一）用：歌曲真峰值（dBTP/dBFS），可空。
+  final double? loudnessPeakDb;
 
   const Song({
     required this.id,
@@ -56,6 +60,8 @@ class Song {
     this.bpm,
     this.isLocallyFavorited = false,
     this.isLongAudio = false,
+    this.loudnessLufs,
+    this.loudnessPeakDb,
   });
 
   String get displayDuration {
@@ -97,6 +103,8 @@ class Song {
       bpm: (json['bpm'] as num?)?.toInt(),
       isLocallyFavorited: (json['isLocallyFavorited'] as bool?) ?? false,
       isLongAudio: (json['isLongAudio'] as bool?) ?? false,
+      loudnessLufs: (json['loudnessLufs'] as num?)?.toDouble(),
+      loudnessPeakDb: (json['loudnessPeakDb'] as num?)?.toDouble(),
     );
   }
 
@@ -122,6 +130,8 @@ class Song {
       'bpm': bpm,
       'isLocallyFavorited': isLocallyFavorited,
       'isLongAudio': isLongAudio,
+      'loudnessLufs': loudnessLufs,
+      'loudnessPeakDb': loudnessPeakDb,
     };
   }
 
@@ -146,6 +156,8 @@ class Song {
     int? bpm,
     bool? isLocallyFavorited,
     bool? isLongAudio,
+    double? loudnessLufs,
+    double? loudnessPeakDb,
   }) {
     return Song(
       id: id ?? this.id,
@@ -168,6 +180,8 @@ class Song {
       bpm: bpm ?? this.bpm,
       isLocallyFavorited: isLocallyFavorited ?? this.isLocallyFavorited,
       isLongAudio: isLongAudio ?? this.isLongAudio,
+      loudnessLufs: loudnessLufs ?? this.loudnessLufs,
+      loudnessPeakDb: loudnessPeakDb ?? this.loudnessPeakDb,
     );
   }
 

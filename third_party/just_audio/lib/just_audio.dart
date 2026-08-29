@@ -1263,6 +1263,21 @@ class AudioPlayer {
     await (await _platform).setVolume(SetVolumeRequest(volume: volume));
   }
 
+  /// MD3Music fork: 音量均衡——对当前曲目设固定线性增益（单位 dB，可放大/衰减）。
+  /// 仅 Android 有效。播放器未初始化（_id 为 null）时静默跳过。
+  Future<void> setNormalizationGain(double gainDb) async {
+    if (_disposed) return;
+    if (!_isAndroid()) return;
+    if (_id == null) return;
+    try {
+      final channel = MethodChannel('com.ryanheise.just_audio.methods.$_id');
+      await channel.invokeMethod('setNormalizationGain', {'gainDb': gainDb});
+    } catch (e) {
+      // ignore: avoid_print
+      print('[NormalizationGain] setNormalizationGain failed: $e');
+    }
+  }
+
   /// 读取当前曲目的「源格式」（歌曲原始位深/采样率/码率/声道，取自 TrackGroup）。
   /// 与解码输出格式不同：源格式保留歌曲原始位深（如 FLAC 24bit → bitsPerSample=24），
   /// 而解码输出可能被降为 16bit。仅 Android 平台有效，失败返回 null。

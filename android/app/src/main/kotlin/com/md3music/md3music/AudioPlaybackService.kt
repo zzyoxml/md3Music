@@ -1343,6 +1343,27 @@ class AudioPlaybackService : Service() {
             // SuperLyric channel 原生 handler 同样只能在 headless 场景下在此注册
             registerSuperLyricChannel(engine)
             restoreLyriconStateIfNeeded()
+            // 音量均衡通道：headless 引擎同样需要，播放/AudioService 在此 isolate 运行。
+            registerVolumeNormalizationChannel(engine)
+        } catch (_: Exception) {}
+    }
+
+    /// 注册音量均衡 MethodChannel：把当前歌曲响度归一增益（dB）广播给 AudioSink 增益装饰器。
+    private fun registerVolumeNormalizationChannel(engine: FlutterEngine) {
+        try {
+            MethodChannel(
+                engine.dartExecutor.binaryMessenger,
+                "com.md3music.md3music/volume_normalization"
+            ).setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setGainDb" -> {
+                        val db = call.argument<Double>("gainDb") ?: 0.0
+                        com.ryanheise.just_audio.NormalizationGainAudioSink.setGlobalGainDb(db)
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
         } catch (_: Exception) {}
     }
 
