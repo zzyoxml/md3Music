@@ -93,7 +93,7 @@ class LyricPreferences extends ChangeNotifier {
   static const double maxGlowThresholdFactor = 2.0;
 
   /// 辉光触发阈值系数默认值
-  static const double defaultGlowThresholdFactor = 1.4;
+  static const double defaultGlowThresholdFactor = 1.6;
 
   // ============== 按设备类型的默认值（手机 / Pad） ==============
 
@@ -148,7 +148,7 @@ class LyricPreferences extends ChangeNotifier {
   bool _ecoMode = true;
   // 动态字体颜色（默认开启，仅 AM 播放器可用）：当前行歌词颜色按「70% 白 + 30% 封面提取色」混色
   bool _useDynamicLyricColor = true;
-  // 辉光触发阈值系数（默认 1.4）：触发阈值 = 歌词字长中位数 × 该系数
+  // 辉光触发阈值系数（默认 1.6）：触发阈值 = 歌词字长中位数 × 该系数
   double _glowThresholdFactor = defaultGlowThresholdFactor;
   // 运行时加载成功后填充的 family（仅 custom 模式且加载成功时非 null）
   String? _loadedCustomFontFamily;

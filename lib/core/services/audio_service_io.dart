@@ -3,6 +3,11 @@ import 'dart:math' as math;
 
 import 'package:just_audio/just_audio.dart';
 import 'package:audio_session/audio_session.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../services/kugou_api/kugou_models.dart'
+    show loudnessForUrl, warmLoudnessCache;
+import 'volume_normalization_service.dart';
 
 /// 短暂失去音频焦点（如来电、语音助手等临时中断）时的处理策略。
 enum AudioFocusInterruptionMode {
@@ -208,13 +213,34 @@ class AudioService {
   factory AudioService() => _instance;
 
   AudioService._internal() {
+    _mainPlayer = _createPlayer(enhancer: _mainEnhancer);
     _activePlayer = _mainPlayer;
     _bindActiveStreams();
     _watchSessionIds(_mainPlayer);
+    _restoreVolumeNormalizationFromPrefs();
+  }
+
+  /// 启动时从持久化设置恢复音量均衡开关/参考响度并应用（不依赖打开设置页）。
+  Future<void> _restoreVolumeNormalizationFromPrefs() async {
+    try {
+      // 预热历史响度缓存（url→响度），使历史回放也能取到响度。
+      await warmLoudnessCache();
+      final prefs = await SharedPreferences.getInstance();
+      _vnEnabled = prefs.getBool('settings_volume_normalization_enabled') ?? false;
+      _vnReferenceLufs =
+          (prefs.getDouble('settings_volume_normalization_lufs') ??
+                  VolumeNormalizationService.defaultReferenceLufs)
+              .clamp(-20.0, -8.0);
+      await _applyNormalizationGainActive();
+    } catch (_) {}
   }
 
   /// 创建播放器实例。[aux] 为交叉淡化用的辅播放器。
-  static AudioPlayer _createPlayer({bool aux = false}) => AudioPlayer(
+  static AudioPlayer _createPlayer({
+    bool aux = false,
+    AndroidLoudnessEnhancer? enhancer,
+  }) =>
+      AudioPlayer(
         // 关闭 just_audio 内置的中断处理（handleInterruptions=false）：
         // 所有音频焦点策略统一由本服务按 AudioFocusInterruptionMode 处理，
         // 避免两套逻辑叠加导致重复暂停/恢复。
@@ -233,6 +259,10 @@ class AudioService {
         // 媒体会话），并与主播放器共享同一个 audioSessionId（均衡器/频谱在
         // 淡化全程对两路音频同时生效）。
         androidAuxPlayer: aux,
+        // 音量均衡：挂一个 LoudnessEnhancer 用于放大安静歌（跨引擎、Dart 侧可靠）。
+        audioPipeline: enhancer != null
+            ? AudioPipeline(androidAudioEffects: [enhancer])
+            : null,
         // Media3 (just_audio 0.10.x) 下缓冲区默认值已较合理，
         // 这里适度收紧：maxBuffer 从 60s 降到 30s（减少内存占用），
         // rebuffer 从 10s 降到 3s（缩短欠载后恢复等待，用户体验更流畅）。
@@ -244,10 +274,13 @@ class AudioService {
             bufferForPlaybackAfterRebufferDuration: Duration(seconds: 3),
           ),
         ),
+        // 注意：关闭 float 输出由 fork Java 侧统一处理
       );
 
   /// 主播放器：始终存在，是音频焦点与 MediaSession 的持有者。
-  final AudioPlayer _mainPlayer = _createPlayer();
+  // 音量均衡放大用 LoudnessEnhancer（先声明，供主播放器创建时注入）。
+  final AndroidLoudnessEnhancer _mainEnhancer = AndroidLoudnessEnhancer();
+  late final AudioPlayer _mainPlayer;
 
   /// 辅播放器：首次交叉淡化时才创建（未开启该功能的用户零开销）。
   AudioPlayer? _auxPlayer;
@@ -261,6 +294,70 @@ class AudioService {
 
   /// 用户设置的音量（0..1）。淡化斜坡以它为上限。
   double _userVolume = 1.0;
+
+  // ── 音量均衡（响度归一）状态与增益应用 ──
+  /// 当前曲目集总响度（LUFS），无则 null。
+  double? _vnLufs;
+  /// 当前曲目真峰值（dBTP/dBFS），无则 null。
+  double? _vnPeakDb;
+  /// 音量均衡开关。
+  bool _vnEnabled = false;
+  /// 参考响度（LUFS），默认 -14。
+  double _vnReferenceLufs = VolumeNormalizationService.defaultReferenceLufs;
+
+  /// 设置当前曲目的响度元数据并重新计算增益。
+  Future<void> setTrackLoudness({double? lufs, double? peakDb}) async {
+    _vnLufs = lufs;
+    _vnPeakDb = peakDb;
+    await _applyNormalizationGainActive();
+  }
+
+  /// 音量均衡开关/参考响度变化时，对当前曲目重新计算并应用增益。
+  Future<void> setVolumeNormalization({bool? enabled, double? referenceLufs}) async {
+    if (enabled != null) _vnEnabled = enabled;
+    if (referenceLufs != null) _vnReferenceLufs = referenceLufs;
+    await _applyNormalizationGainActive();
+  }
+
+  /// 计算当前应生效的归一增益（dB）；未开启或无响度时为 0（旁路）。
+  double _currentNormalizationGainDb() => _vnEnabled
+      ? VolumeNormalizationService.calcGainDb(
+          lufs: _vnLufs,
+          peakDb: _vnPeakDb,
+          referenceLufs: _vnReferenceLufs,
+        )
+      : 0;
+
+  /// 音量均衡衰减倍率（gainDb<0 时折进音量，ExoPlayer 只能衰减；>0 留给 enhancer 放大）。
+  double _vnAttenLinear = 1.0;
+
+  /// 应用增益：正增益（放大）走 native LoudnessEnhancer，负增益（衰减）折进音量。
+  /// 只用一个 enhancer：主/辅播放器共享同一 audio session，一个 LoudnessEnhancer
+  /// 作用于该 session 即可覆盖两路音频（避免同 session 创建第二个 enhancer 冲突）。
+  Future<void> _applyGain(double gainDb) async {
+    final boost = gainDb > 0 ? gainDb : 0.0;
+    _vnAttenLinear = gainDb < 0 ? math.pow(10, gainDb / 20).toDouble() : 1.0;
+    // effect 默认 disabled，需先 enable 才真正生效（未激活时仅记录标志，加载后应用）
+    try {
+      await _mainEnhancer.setEnabled(true);
+      await _mainEnhancer.setTargetGain(boost);
+    } catch (e) {
+      // ignore: avoid_print
+      print('[音量均衡] enhancer apply failed: $e');
+    }
+  }
+
+  Future<void> _applyNormalizationGainActive() async {
+    await _applyGain(_currentNormalizationGainDb());
+    // 非淡化中才落音量衰减，避免打断跨 fade 的斜坡
+    if (!_crossfading) {
+      await _activePlayer.setVolume(_userVolume * _vnAttenLinear);
+    }
+  }
+
+  Future<void> _applyNormalizationGainTo(AudioPlayer p) async {
+    await _applyGain(_currentNormalizationGainDb());
+  }
 
   AudioPlayer get player => _activePlayer;
 
@@ -520,17 +617,31 @@ class AudioService {
     await _activePlayer.seek(position);
   }
 
-  Future<void> setUrl(String url) async {
+  Future<void> setUrl(
+    String url, {
+    double? loudnessLufs,
+    double? loudnessPeakDb,
+  }) async {
     abortCrossfade();
+    // 音量均衡响度：歌曲未带响度时，回退查「url → 响度」缓存（KugouPlayUrl 解析时记录）
+    if (loudnessLufs == null) {
+      final cached = loudnessForUrl(url);
+      loudnessLufs = cached?.lufs;
+      loudnessPeakDb = cached?.peak;
+    }
+    _vnLufs = loudnessLufs;
+    _vnPeakDb = loudnessPeakDb;
     await _activePlayer.setUrl(url, headers: const {});
+    await _applyNormalizationGainActive();
   }
 
   /// 设置用户音量（0..1）。淡化斜坡以它为上限。
   Future<void> setVolume(double volume) async {
     _userVolume = volume.clamp(0.0, 1.0);
     // 淡化中不要打断斜坡：新音量在斜坡结束时自然生效
+    // 叠加音量均衡的衰减倍率（响歌压低）
     if (_crossfading) return;
-    await _activePlayer.setVolume(_userVolume);
+    await _activePlayer.setVolume(_userVolume * _vnAttenLinear);
   }
 
   Future<void> setPlaylist(
@@ -660,10 +771,16 @@ class AudioService {
     String? title,
     String? artist,
     String? artUri,
+    double? loudnessLufs,
+    double? loudnessPeakDb,
   }) async {
     if (_crossfading) return false;
     try {
       final standby = _standbyPlayer();
+      // 淡入段响度即正确：预加载时设置新歌的归一增益（旧歌保持各自增益直至淡出）。
+      _vnLufs = loudnessLufs;
+      _vnPeakDb = loudnessPeakDb;
+      await _applyNormalizationGainTo(standby);
       // 上一次 abort 留下的 retire 链（pause→seek0→恢复音量）若还在飞，
       // 必须先等它收尾再把这个播放器重新拉去当淡入方——否则 retire 末尾的
       // setVolume(_userVolume) 会落在下面的 setVolume(0) 之后，新歌以全音量

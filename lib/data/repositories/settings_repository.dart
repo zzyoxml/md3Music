@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/services/audio_service_io.dart';
+import '../../core/services/volume_normalization_service.dart';
 import '../../services/kugou_api/kugou_api_client.dart';
 import '../../widgets/apple_lyrics/layout/lyric_preferences.dart';
 
@@ -472,10 +473,10 @@ class SettingsRepository {
   static const int kCrossfadeMaxSeconds = 12;
   static const int kCrossfadeDefaultSeconds = 4;
 
-  /// 自动切歌时是否把本首的渐出与下一首的渐入叠加，默认 true。
+  /// 自动切歌时是否把本首的渐出与下一首的渐入叠加，默认 false。
   Future<bool> getCrossfadeEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyCrossfadeEnabled) ?? true;
+    return prefs.getBool(_keyCrossfadeEnabled) ?? false;
   }
 
   Future<void> setCrossfadeEnabled(bool value) async {
@@ -496,6 +497,34 @@ class SettingsRepository {
       _keyCrossfadeSeconds,
       seconds.clamp(kCrossfadeMinSeconds, kCrossfadeMaxSeconds),
     );
+  }
+
+  // ===== 音量均衡（响度归一） =====
+  static const String _keyVolumeNormalizationEnabled = 'settings_volume_normalization_enabled';
+  static const String _keyVolumeNormalizationLufs = 'settings_volume_normalization_lufs';
+
+  /// 音量均衡开关，默认 false。
+  Future<bool> getVolumeNormalizationEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyVolumeNormalizationEnabled) ?? false;
+  }
+
+  Future<void> setVolumeNormalizationEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyVolumeNormalizationEnabled, value);
+  }
+
+  /// 参考响度（LUFS），默认 -14，钳到 -20~-8。
+  Future<double> getVolumeNormalizationReferenceLufs() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getDouble(_keyVolumeNormalizationLufs) ??
+        VolumeNormalizationService.defaultReferenceLufs;
+    return value.clamp(-20.0, -8.0);
+  }
+
+  Future<void> setVolumeNormalizationReferenceLufs(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_keyVolumeNormalizationLufs, value.clamp(-20.0, -8.0));
   }
 
   // ===== 播放时保持屏幕常亮 =====

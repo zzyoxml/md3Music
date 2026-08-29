@@ -2399,7 +2399,7 @@ class _FullPlayerState extends State<FullPlayer>
       case AudioQuality.flac:
         return '无损';
       case AudioQuality.hires:
-        return 'Hi-Res 无损';
+        return 'Hi-Res';
     }
   }
 

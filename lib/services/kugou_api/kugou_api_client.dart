@@ -1022,7 +1022,12 @@ class KugouApiClient {
         if (json == null) return null;
         data = _extractData(json['data'] ?? json);
         if (data['url'] != null) {
-          return KugouPlayUrl.fromJson(data);
+          final refreshedQuality = data['quality'];
+          return KugouPlayUrl.fromJson(
+            refreshedQuality is String && refreshedQuality.isNotEmpty
+                ? data
+                : {...data, 'quality': quality},
+          );
         }
       }
     }
@@ -1051,7 +1056,15 @@ class KugouApiClient {
       }
 
       if (data['url'] != null) {
-        return KugouPlayUrl.fromJson(data);
+        // Rust 侧把实际音质写进 data.quality；响应结构异常时（没有 data 层 /
+        // body 未被解析成 JSON）拿不到该字段，退回请求值——否则会被 fromJson
+        // 的默认值恒标成 128，UI 与降级判定全部失真。
+        final serverQuality = data['quality'];
+        return KugouPlayUrl.fromJson(
+          serverQuality is String && serverQuality.isNotEmpty
+              ? data
+              : {...data, 'quality': quality},
+        );
       }
 
       // VIP 用户不要再走 free_part=1 主动拉 30 秒试听。
@@ -1137,7 +1150,14 @@ class KugouApiClient {
           return null;
         }
 
-        return KugouPlayUrl.fromJson({...data, 'quality': quality});
+        // 实际音质以服务端为准：Rust 侧按 qualities 下标 / 码率判定后写回
+        // data.quality。拿不到该字段时（上游异常）才回退到请求值。
+        final serverQuality = data['quality'];
+        final actualQuality =
+            serverQuality is String && serverQuality.isNotEmpty
+                ? serverQuality
+                : quality;
+        return KugouPlayUrl.fromJson({...data, 'quality': actualQuality});
       }
     } catch (e) {}
     return null;
@@ -1158,11 +1178,27 @@ class KugouApiClient {
     }
   }
 
+  /// 音质档位排序，用于比较哪一次尝试的结果更好。
+  int _qualityRank(String q) {
+    switch (q) {
+      case KugouQuality.hires: // 'high'
+        return 3;
+      case KugouQuality.lossless: // 'flac'
+        return 2;
+      case KugouQuality.high: // '320'
+        return 1;
+      default: // '128'
+        return 0;
+    }
+  }
+
   /// 带自动降级的获取播放链接。
   ///
-  /// 当请求的音质不可用时，按降级链依次尝试更低音质，
-  /// 直到获取到可用链接或全部尝试完毕。
-  /// 返回的 KugouPlayUrl 中 quality 字段反映实际获取到的音质。
+  /// 逐层降级：Hi-Res → 无损 → 320 → 128，每一档都核对**实际**音质。
+  /// 上游在请求音质不可用时常常静默返回一个更低音质的链接（不在 fail_process
+  /// 里标记），所以"拿到了链接"不等于"拿到了请求的音质"——只有实际音质与请求
+  /// 档位一致才采用，否则继续往下一档尝试，避免选了 Hi-Res 却直接掉到标准音质。
+  /// 全部档位都不匹配时，退回尝试过程中拿到的最好结果。
   Future<KugouPlayUrl?> getSongUrlWithFallback(
     String hash, {
     String quality = KugouQuality.standard,
@@ -1171,6 +1207,7 @@ class KugouApiClient {
   }) async {
     final chain = _getDowngradeChain(quality);
 
+    KugouPlayUrl? best;
     for (final q in chain) {
       try {
         final result = await getSongUrl(
@@ -1184,8 +1221,12 @@ class KugouApiClient {
         // free_part=1 兜底可能返回 30s 试听 URL。如果在此处接受试听结果，
         // 降级链会被短路——更低音质的完整播放链接永远不会被尝试。
         // 试听兜底统一在本方法末尾（所有音质都尝试完毕后）执行。
-        if (result != null && result.url.isNotEmpty && !result.isTrial) {
-          // 用实际请求的音质覆盖返回值中的 quality 字段
+        if (result == null || result.url.isEmpty || result.isTrial) {
+          continue;
+        }
+        // quality 取服务端回写的实际音质，而不是请求值：
+        // /song/url/new 的上游不接收 quality，用请求值会让 UI 虚标音质。
+        if (result.quality == q) {
           return KugouPlayUrl(
             url: result.url,
             fileSize: result.fileSize,
@@ -1194,7 +1235,21 @@ class KugouApiClient {
             isTrial: false,
           );
         }
+        if (best == null ||
+            _qualityRank(result.quality) > _qualityRank(best.quality)) {
+          best = result;
+        }
       } catch (_) {}
+    }
+
+    if (best != null) {
+      return KugouPlayUrl(
+        url: best.url,
+        fileSize: best.fileSize,
+        bitRate: best.bitRate,
+        quality: best.quality,
+        isTrial: false,
+      );
     }
 
     // 已收藏无版权歌曲兜底：用 ppage_id=356753938（收藏页）尝试获取完整播放链接。

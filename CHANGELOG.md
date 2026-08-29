@@ -7,6 +7,22 @@
 ## v5.4.0
 
 **功能**
+- add full-export one-click release command
+
+**修复**
+- fast-import 批量重建空树消息历史
+
+**文档**
+- update comment about cached artwork
+
+**CI/构建**
+- release v5.4.0 and update changelog
+
+---
+
+## v5.4.0
+
+**功能**
 - 迁移至官方媒体3通知系统并优化多端体验
 - 新增私人FM桌面小部件功能
 - add -WithHistory support and export-messages subcommand

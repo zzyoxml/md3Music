@@ -184,3 +184,88 @@ fn server_starts_on_random_port() {
         kugou_server::server::stop();
     }
 }
+
+/// /song/url/new 的音质挑选。上游请求体不带 quality，所以响应里的 url 有两种语义：
+/// 多链接（与 qualities 一一对应）→ 按请求档位下标取；单链接（只给最高可用音质）
+/// → 只能由码率反推。两种情况都必须把**真实**音质写回 data.quality。
+/// 回归：Dart 侧曾把请求值当成实际音质，导致没有 Hi-Res 音源时 UI 仍显示 Hi-Res。
+#[test]
+fn song_url_new_picks_actual_quality() {
+    use kugou_server::modules::song_url_new::apply_quality;
+    use serde_json::json;
+
+    // 多链接且目标档位可用 → 取该档位，音质即请求值
+    let mut data = json!({
+        "url": ["u128", "u320", "uflac", "uhigh", "", "", "", "", ""],
+        "bitRate": 4608,
+    });
+    apply_quality(&mut data, "high");
+    assert_eq!(data["url"], json!("uhigh"));
+    assert_eq!(data["quality"], json!("high"));
+
+    // 多链接但目标档位为空 → 往下退到第一个非空，音质由码率反推（不能虚标 high）
+    let mut data = json!({
+        "url": ["u128", "u320", "", "", "", "", "", "", ""],
+        "bitRate": 320,
+    });
+    apply_quality(&mut data, "high");
+    assert_eq!(data["url"], json!("u320"));
+    assert_eq!(data["quality"], json!("320"));
+
+    // 单链接 → 由码率反推。优先 fileSize/timeLength 反算（单位恒为 bps），
+    // 样本取自真机实测：上游静默降质时会给出远小于请求音质的文件。
+    // ≈1663kbps 的 flac → Hi-Res
+    let mut data = json!({
+        "url": ["uflac"],
+        "fileSize": 37219528,
+        "timeLength": 179,
+        "extName": "flac",
+    });
+    apply_quality(&mut data, "high");
+    assert_eq!(data["quality"], json!("high"));
+
+    // ≈98kbps 的 ogg → 标准（请求 high 时不能虚标）
+    let mut data = json!({
+        "url": ["uogg"],
+        "fileSize": 3194531,
+        "timeLength": 259,
+        "extName": "ogg",
+    });
+    apply_quality(&mut data, "high");
+    assert_eq!(data["quality"], json!("128"));
+
+    // ≈667kbps 的 flac → 无损
+    let mut data = json!({
+        "url": ["uflac"],
+        "fileSize": 20000000,
+        "timeLength": 240,
+        "extName": "flac",
+    });
+    apply_quality(&mut data, "high");
+    assert_eq!(data["quality"], json!("flac"));
+
+    // 320kbps 的 mp3 → 高音质（有损容器不参与无损档位判定）
+    let mut data = json!({
+        "url": ["u320"],
+        "fileSize": 9600000,
+        "timeLength": 240,
+        "extName": "mp3",
+    });
+    apply_quality(&mut data, "high");
+    assert_eq!(data["quality"], json!("320"));
+
+    // 没有时长时退回 bitRate 字段：bps 口径
+    let mut data = json!({ "url": ["uflac"], "bitRate": 1411000 });
+    apply_quality(&mut data, "high");
+    assert_eq!(data["quality"], json!("flac"));
+
+    // 没有时长时退回 bitRate 字段：kbps 口径
+    let mut data = json!({ "url": ["u128"], "bitRate": 128 });
+    apply_quality(&mut data, "flac");
+    assert_eq!(data["quality"], json!("128"));
+
+    // 无 url 字段 → 不改写响应
+    let mut data = json!({ "priv_status": 0 });
+    apply_quality(&mut data, "high");
+    assert_eq!(data.get("quality"), None);
+}
