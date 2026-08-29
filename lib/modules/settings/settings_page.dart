@@ -122,7 +122,7 @@ class _SettingsPageState extends State<SettingsPage>
   // 暂停淡入淡出开关
   bool _pauseFadeEnabled = false;
   // 交叉淡化（自动切歌时上一首渐出与下一首渐入叠加）
-  bool _crossfadeEnabled = true;
+  bool _crossfadeEnabled = false;
   int _crossfadeSeconds = SettingsRepository.kCrossfadeDefaultSeconds;
   // 播放时保持屏幕常亮开关
   bool _keepScreenOn = false;
@@ -1962,7 +1962,7 @@ class _SettingsPageState extends State<SettingsPage>
         M3EToggleButtonGroupAction(label: Text('标准')),
         M3EToggleButtonGroupAction(label: Text('高品质')),
         M3EToggleButtonGroupAction(label: Text('无损')),
-        M3EToggleButtonGroupAction(label: Text('Hi-Res 无损')),
+        M3EToggleButtonGroupAction(label: Text('Hi-Res')),
       ],
       // 高音质码是 '320'（KuGou 合法值）；遗留 'hq' 归一化到 '320'
       selectedIndex: const ['128', '320', 'flac', 'high'].indexOf(
