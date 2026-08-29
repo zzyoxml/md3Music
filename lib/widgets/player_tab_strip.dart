@@ -2,22 +2,12 @@ import 'package:flutter/material.dart';
 
 /// 播放器底部导航条的一个目标。
 class PlayerTabItem {
-  const PlayerTabItem({
-    required this.icon,
-    this.onLongPress,
-    this.activeColor,
-    this.tooltip,
-  });
+  const PlayerTabItem({required this.icon, this.onLongPress});
 
   final IconData icon;
 
   /// 长按动作（如封面段长按下载、歌词段长按桌面歌词）
   final VoidCallback? onLongPress;
-
-  /// 覆盖该段的选中色（如桌面歌词开启时歌词图标用强调色）
-  final Color? activeColor;
-
-  final String? tooltip;
 }
 
 /// 播放器底部导航条 —— 替代原先把「倍速 / 4 个 tab / 收藏」混装在一起的操作胶囊。
@@ -130,21 +120,19 @@ class PlayerTabStrip extends StatelessWidget {
     final item = items[index];
     // 用连续动画值做颜色过渡：滑动到一半时两侧图标各亮一半
     final t = (1 - (anim - index).abs()).clamp(0.0, 1.0);
-    final icon = Icon(
-      item.icon,
-      size: iconSize,
-      color: Color.lerp(inactiveColor, item.activeColor ?? activeColor, t),
-    );
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
         if (controller.index != index) controller.animateTo(index);
       },
+      // 不挂 Tooltip：长按只执行长按动作，不弹按钮说明
       onLongPress: item.onLongPress,
       child: Center(
-        child: item.tooltip == null
-            ? icon
-            : Tooltip(message: item.tooltip!, child: icon),
+        child: Icon(
+          item.icon,
+          size: iconSize,
+          color: Color.lerp(inactiveColor, activeColor, t),
+        ),
       ),
     );
   }

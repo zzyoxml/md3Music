@@ -9,8 +9,11 @@ Widget _wrap({
   required Duration duration,
   ValueChanged<Duration>? onSeekEnd,
   VoidCallback? onSeekStart,
-  bool wavy = true,
+  bool md3Style = true,
   bool isPlaying = false,
+  double speed = 1.0,
+  double? climaxStart,
+  double? climaxEnd,
 }) {
   return MaterialApp(
     home: Scaffold(
@@ -20,8 +23,11 @@ Widget _wrap({
           child: PlayerSeekBar(
             position: position,
             duration: duration,
-            wavy: wavy,
+            md3Style: md3Style,
             isPlaying: isPlaying,
+            speed: speed,
+            climaxStart: climaxStart,
+            climaxEnd: climaxEnd,
             activeColor: Colors.blue,
             inactiveColor: Colors.grey,
             labelColor: Colors.black,
@@ -33,6 +39,16 @@ Widget _wrap({
     ),
   );
 }
+
+/// 轨道画布（挂着 _SeekBarPainter 的那个 CustomPaint）
+Finder _canvas() => find.descendant(
+  of: find.byType(PlayerSeekBar),
+  matching: find.byWidgetPredicate(
+    (w) =>
+        w is CustomPaint &&
+        (w.painter?.runtimeType.toString().contains('SeekBar') ?? false),
+  ),
+);
 
 void main() {
   group('PlayerSeekBar', () {
@@ -65,14 +81,7 @@ void main() {
         ),
       );
 
-      final canvas = find.descendant(
-        of: find.byType(PlayerSeekBar),
-        matching: find.byWidgetPredicate(
-          (w) =>
-              w is CustomPaint &&
-              (w.painter?.runtimeType.toString().contains('SeekBar') ?? false),
-        ),
-      );
+      final canvas = _canvas();
       expect(canvas, findsOneWidget);
       final size = tester.getSize(canvas);
       expect(size.width, 300, reason: '画布必须铺满可用宽度，否则整条轨道画不出来');
@@ -119,7 +128,7 @@ void main() {
       expect((seeked!.inSeconds - 60).abs() <= 1, isTrue);
     });
 
-    testWidgets('暂停时波形收敛成直线并停住 ticker（pumpAndSettle 不应超时）', (tester) async {
+    testWidgets('暂停时停住 ticker（pumpAndSettle 不应超时）', (tester) async {
       await tester.pumpWidget(
         _wrap(
           position: const Duration(seconds: 30),
@@ -127,7 +136,7 @@ void main() {
           isPlaying: false,
         ),
       );
-      // 波形相位是 repeat() 的无限动画：若暂停后没停住，这里会超时失败
+      // 自驱动 ticker 是无限动画：暂停后若没停住，这里会超时失败
       await tester.pumpAndSettle();
       expect(find.byType(PlayerSeekBar), findsOneWidget);
     });
@@ -147,6 +156,139 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(seeked, isNull);
+    });
+
+    testWidgets('暂停时已播放段与未播放段同色', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          position: const Duration(seconds: 30),
+          duration: const Duration(minutes: 2),
+          isPlaying: false,
+        ),
+      );
+
+      // 绘制顺序：未播放段 → 已播放段；暂停时两段都是 inactiveColor
+      expect(
+        tester.renderObject(_canvas()),
+        paints
+          ..rrect(color: Colors.grey)
+          ..rrect(color: Colors.grey),
+      );
+    });
+
+    testWidgets('播放时已播放段用强调色', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          position: const Duration(seconds: 30),
+          duration: const Duration(minutes: 2),
+          isPlaying: true,
+        ),
+      );
+      // 上色动画 220ms 跑完
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(
+        tester.renderObject(_canvas()),
+        paints
+          ..rrect(color: Colors.grey)
+          ..rrect(color: Colors.blue),
+      );
+    });
+
+    testWidgets('高潮指示被已播放进度掠过后消失', (tester) async {
+      // 高潮区间 30~60s，进度在区间之前 → 未播放段 + 高潮 + 已播放段 = 3 个 rrect
+      await tester.pumpWidget(
+        _wrap(
+          position: const Duration(seconds: 10),
+          duration: const Duration(minutes: 2),
+          climaxStart: 30,
+          climaxEnd: 60,
+        ),
+      );
+      expect(
+        tester.renderObject(_canvas()),
+        paintsExactlyCountTimes(#drawRRect, 3),
+      );
+
+      // 进度越过高潮区间末端 → 高潮高亮整段被裁掉，只剩两段轨道
+      await tester.pumpWidget(
+        _wrap(
+          position: const Duration(seconds: 70),
+          duration: const Duration(minutes: 2),
+          climaxStart: 30,
+          climaxEnd: 60,
+        ),
+      );
+      expect(
+        tester.renderObject(_canvas()),
+        paintsExactlyCountTimes(#drawRRect, 2),
+      );
+    });
+
+    testWidgets('自驱动：上报位置不变也会按 30fps 推进', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          position: const Duration(seconds: 30),
+          duration: const Duration(minutes: 2),
+          isPlaying: true,
+        ),
+      );
+      expect(find.text('0:30'), findsOneWidget);
+
+      // 不更新 position，只让时间过去 2s：ticker 应自行把时间推到 0:32
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('0:32'), findsOneWidget);
+      expect(find.text('-1:28'), findsOneWidget);
+    });
+
+    testWidgets('自驱动：倍速参与推算', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          position: Duration.zero,
+          duration: const Duration(minutes: 2),
+          isPlaying: true,
+          speed: 2.0,
+        ),
+      );
+
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      // 2 秒墙上时间 × 2 倍速 ≈ 4 秒音频
+      expect(find.text('0:04'), findsOneWidget);
+    });
+
+    testWidgets('上报位置回退不到 1s 时不回跳（单调保护）', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          position: const Duration(seconds: 30),
+          duration: const Duration(minutes: 2),
+          isPlaying: true,
+        ),
+      );
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 1));
+      expect(find.text('0:32'), findsOneWidget);
+
+      // 音频层把位置又报成 31.5s（抖动）：展示值不应回退
+      await tester.pumpWidget(
+        _wrap(
+          position: const Duration(milliseconds: 31500),
+          duration: const Duration(minutes: 2),
+          isPlaying: true,
+        ),
+      );
+      expect(find.text('0:32'), findsOneWidget);
+
+      // 真正的 seek（差距 > 1s）则立即采用上报值
+      await tester.pumpWidget(
+        _wrap(
+          position: const Duration(seconds: 10),
+          duration: const Duration(minutes: 2),
+          isPlaying: true,
+        ),
+      );
+      expect(find.text('0:10'), findsOneWidget);
     });
   });
 }

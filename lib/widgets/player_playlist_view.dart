@@ -283,7 +283,6 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
           _buildSortMenu(playerProvider, enabled, colors),
           IconButton(
             icon: const Icon(Icons.edit_outlined),
-            tooltip: '编辑',
             color: enabled ? colors.action : colors.disabled,
             onPressed: enabled ? () => setState(() => _editMode = true) : null,
           ),
@@ -307,7 +306,6 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
         children: [
           IconButton(
             icon: const Icon(Icons.close),
-            tooltip: '退出编辑',
             color: colors.title,
             onPressed: _exitEditMode,
           ),
@@ -343,25 +341,29 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
     );
   }
 
-  /// 排序菜单：播放顺序 / 标题 / 时长，当前项右侧显示升降箭头
+  /// 排序菜单：播放顺序 / 标题 / 时长，当前项右侧显示升降箭头。
+  /// 用 TooltipVisibility 关掉 PopupMenuButton 的默认「显示菜单」气泡：
+  /// 播放器详情页统一不弹按钮说明，长按只走长按动作。
   Widget _buildSortMenu(
     PlayerProvider playerProvider,
     bool enabled,
     _PanelColors colors,
   ) {
-    return PopupMenuButton<PlaylistSortBy>(
-      enabled: enabled,
-      tooltip: '排序',
-      icon: Icon(
-        Icons.swap_vert,
-        color: enabled ? colors.action : colors.disabled,
+    return TooltipVisibility(
+      visible: false,
+      child: PopupMenuButton<PlaylistSortBy>(
+        enabled: enabled,
+        icon: Icon(
+          Icons.swap_vert,
+          color: enabled ? colors.action : colors.disabled,
+        ),
+        onSelected: (value) => _onSortSelected(value, playerProvider),
+        itemBuilder: (context) => [
+          _sortMenuItem(PlaylistSortBy.queue, '播放顺序'),
+          _sortMenuItem(PlaylistSortBy.title, '标题'),
+          _sortMenuItem(PlaylistSortBy.duration, '时长'),
+        ],
       ),
-      onSelected: (value) => _onSortSelected(value, playerProvider),
-      itemBuilder: (context) => [
-        _sortMenuItem(PlaylistSortBy.queue, '播放顺序'),
-        _sortMenuItem(PlaylistSortBy.title, '标题'),
-        _sortMenuItem(PlaylistSortBy.duration, '时长'),
-      ],
     );
   }
 
