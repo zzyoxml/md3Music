@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 音乐播放器桌面小部件元信息：4×1 格，预览图用应用图标 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="70dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_music_player"
+    android:resizeMode="horizontal"
+    android:widgetCategory="home_screen"
+    android:label="@string/music_widget_label"
+    android:previewLayout="@layout/widget_music_player"
+    android:previewImage="@mipmap/ic_launcher"
+    android:description="@string/widget_description" />
