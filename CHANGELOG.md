@@ -7,6 +7,78 @@
 ## v5.4.0
 
 **功能**
+- 优化播放器布局与进度条体验
+- 重构播放列表编辑与播放模式交互
+- 新增音量均衡功能，实现歌曲响度归一化
+- add full-export one-click release command
+- 迁移至官方媒体3通知系统并优化多端体验
+- 新增私人FM桌面小部件功能
+- add -WithHistory support and export-messages subcommand
+- 新增 export-messages 命令用于重建提交历史
+- 新增 -WithHistory 参数支持携带提交记录推送
+- 新增Rust API服务器源码的导出适配与清理逻辑
+- 新增消息级Git历史导出脚本
+- 增强播放器震动反馈并同步歌单排序
+- add 32bit float audio playback support switch
+- 默认通过 PR 发布公开版本
+- 新增免费听书库与动态分类，章节付费过滤与自动全量加载
+- 屏蔽需听书VIP内容并修复详情页集数/时长展示
+- 支持歌单自由拖拽排序并持久化
+- 新增辉光触发阈值系数可配置项
+- 新增听书搜索功能与相关优化
+- 新增歌曲BPM支持，优化歌词辉光自适应逻辑
+- 实现逐字符波浪强调效果与播放状态控制
+- 新增按网络区分的音质设置
+
+**修复**
+- 修复音质显示与实际不符问题，优化降级逻辑
+- fast-import 批量重建空树消息历史
+- 修复中文提交记录乱码问题
+- 修复多场景下媒体通知、封面显示异常及跨fade卡顿问题
+- 根治媒体会话双会话竞争与封面覆盖问题
+- 听书付费章节按列表接口 fail_process 过滤隐藏
+- 修复听歌时长不累计问题，新增在线歌曲播放历史上报
+- 修复切歌后长距离滚动动画问题
+- 详情页移除底部已加载全部提示
+- 修复 FM 冷启动续播并增强构建环境探测
+
+**改进**
+- 修正文档注释标点
+
+**文档**
+- update comment about cached artwork
+- 强化 -WithHistory 模式的运行提示
+- 更新公开导出白名单相关文档与配置
+- 新增Git历史导出分析文档 refactor(full_player): 重构播放器代码格式与交互逻辑
+
+**重构**
+- 重构播放器底部控制与导航组件
+- 重构通知与封面加载逻辑，优化锁屏/车机封面显示
+- adjust navigation rail group alignment to center
+- 剥离歌曲标题末尾的音频扩展名
+- 修复歌词渐变硬切问题，优化辉光字渲染逻辑
+- 抽离 FM 补货依赖
+- 重构歌词渲染与导出流程，新增CHANGELOG自动生成
+- 拆分歌词图片预生成时序，消除行切换掉帧
+- 重构歌词搜索逻辑，优化歌词获取成功率
+- 重构封面取色逻辑，统一工具类实现
+
+**CI/构建**
+- v5.4.0 发布并更新变更日志
+- release v5.4.0 and update changelog
+- 复制just_audio的CHANGELOG到third_party目录
+
+**其他**
+- 解决 route-b 合并冲突并修正无效 auxPlayer 引用
+- crossfade
+- 重新应用了拆分图片预生成时序的改动
+- 回退了拆分图片预生成时序的改动
+
+---
+
+## v5.4.0
+
+**功能**
 - add full-export one-click release command
 
 **修复**
