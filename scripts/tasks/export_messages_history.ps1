@@ -127,60 +127,79 @@ try {
     if ($created) { $EmptyTree = $created }
     Write-Ok "已在导出仓库物化空树对象：$EmptyTree"
 
-    $msgFile = Join-Path $OutDir "._msg.tmp"
     $terms = if ($SanitizeMessages) { (Get-DenyTerms) } else { @() }
-    $newMap = @{}   # 原始哈希 -> 新空树提交哈希
-    $lastNew = $null
+    # PowerShell 5.1 默认按控制台 GBK 解码 git 输出，先切 UTF-8，否则中文作者名/消息变乱码
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
+    # 逐提交收集元数据+消息，构造成一条 fast-import 流后一次性导入目标仓库。
+    # 相比旧版逐提交 clone + commit-tree（936×3 个 git 进程 + 大量 loose 对象逐个写入，
+    # 杀软扫描下会拖到半小时不动），这里源仓库只读、写放大收敛为单进程 fast-import，
+    # 秒级~分钟级完成，且每 25 条打印一次可见进度。
+    $branchRef = "refs/heads/$PublicBranch"
+    $importFile = Join-Path $OutDir '.import.fastimport'
+    $srcLines = @($lines)      # 强制数组（单条提交时会被 PowerShell 退化为 string）
+    $markOf = @{}              # 原始哈希 -> fast-import mark（父引用用）
+    $metaFmt = '--format=%an%x09%ae%x09%at%x09%ai%x09%cn%x09%ce%x09%ct%x09%ci'
+    $sb = [System.Text.StringBuilder]::new()
     for ($i = 0; $i -lt $srcCount; $i++) {
-        $line = @($lines)[$i]
-        $tok = $line -split '\s+'
+        Write-Progress -Activity '重建空树提交' -Status "处理 $($i+1)/$srcCount" -PercentComplete (($i+1)*100.0/$srcCount)
+        if (($i % 25) -eq 0) {
+            Write-Host ("  [..] {0}/{1} {2}" -f ($i+1), $srcCount, $srcLines[$i].Split(' ')[0])
+        }
+        $tok = $srcLines[$i] -split '\s+'
         $orig = $tok[0]
-        $origParents = @($tok[1..($tok.Count-1)] | Where-Object { $_ })
-        Write-Progress -Activity '重建空树提交' -Status "处理 $($i+1)/$srcCount" -PercentComplete (($i+1)*100/$srcCount)
+        # 不能用 $tok[1..($tok.Count-1)]：根提交只有 1 个 token 时 PowerShell 的
+        # 降序范围 1..0 会取到 $tok[0]，把提交自身误当父，产生 from :self 自引用。
+        # 用正序索引累加，根提交的父列表为空。
+        $origParents = @()
+        for ($j = 1; $j -lt $tok.Count; $j++) { if ($tok[$j]) { $origParents += $tok[$j] } }
 
-        # 读取作者/提交人/日期（RFC2822 含时区），以及消息正文
-        $logFmt = '--format=%an%x09%ae%x09%aD%x09%cn%x09%ce%x09%cD'
-        $meta = (& git -C $Root log -1 $logFmt $orig)
-        $p = $meta -split "`t"
-        if ($p.Count -lt 6) { throw "解析元数据失败：$orig" }
-        $an,$ae,$ad,$cn,$ce,$cd = $p[0],$p[1],$p[2],$p[3],$p[4],$p[5]
+        $meta = (& git -C $Root show -s $metaFmt $orig)
+        if ($LASTEXITCODE -ne 0) { throw "读取元数据失败：$orig" }
+        $p = ($meta -split "\t")
+        if ($p.Count -lt 8) { throw "解析元数据失败：$orig" }
+        # %ai / %ci 形如 "2026-08-29 12:03:45 +0800"，末尾为时区
+        $an,$ae,$at,$ai,$cn,$ce,$ct,$ci = $p
+        $atz = (($ai -split ' ')[-1])
+        $ctz = (($ci -split ' ')[-1])
 
-        $msg = ( (& git -C $Root log -1 --format=%B $orig) -join "`n")
+        $msg = ( (@(& git -C $Root log -1 --format=%B $orig)) -join "`n")
         foreach ($term in $terms) {
-            if ($msg -match [regex]::Escape($term)) {
-                $msg = $msg -replace [regex]::Escape($term), $redact
-            }
+            if ($msg -match [regex]::Escape($term)) { $msg = $msg -replace [regex]::Escape($term), $redact }
         }
         if (-not $msg.EndsWith("`n")) { $msg += "`n" }
-        $utf8 = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($msgFile, $msg, $utf8)
+        $len = [System.Text.Encoding]::UTF8.GetByteCount($msg)
 
-        # 父子映射：只保留已在映射中的父（截断模式允许祖先被丢弃 → 该分支成为根）
-        $newParents = @()
+        $mark = $i + 1
+        $markOf[$orig] = $mark
+        [void]$sb.Append("commit $branchRef`n")
+        [void]$sb.Append("mark :$mark`n")
+        [void]$sb.Append("author $an <$ae> $at $atz`n")
+        [void]$sb.Append("committer $cn <$ce> $ct $ctz`n")
+        [void]$sb.Append("data $len`n")
+        [void]$sb.Append($msg)
+        # 父引用：只保留已在本轮映射中的父（截断模式丢父 → 该提交成为根）
+        $first = $true
         foreach ($op in $origParents) {
-            if ($newMap.ContainsKey($op)) { $newParents += $op }
+            if ($markOf.ContainsKey($op)) {
+                [void]$sb.Append($(if ($first) { "from :$($markOf[$op])" } else { "merge :$($markOf[$op])" }) + "`n")
+                $first = $false
+            }
         }
-
-        Set-GitEnv AUTHOR $an $ae $ad
-        Set-GitEnv COMMITTER $cn $ce $cd
-        $args = @($EmptyTree)
-        foreach ($np in $newParents) { $args += @('-p', $newMap[$np]) }
-        $args += @('-F', $msgFile)
-        $new = (& git -C $OutDir commit-tree $args 2>&1)
-        Reset-GitEnv
-        if ($LASTEXITCODE -ne 0) { throw "commit-tree 失败：$($new -join ' ')" }
-
-        $newMap[$orig] = ($new | Out-String).Trim()
-        $lastNew = $newMap[$orig]
     }
     Write-Progress -Activity '重建空树提交' -Completed
-    Remove-ItemBypass $msgFile
-    Write-Ok "已重建 $($newMap.Count) 个空树提交"
+    [System.IO.File]::WriteAllText($importFile, $sb.ToString(), (New-Object System.Text.UTF8Encoding($false)))
+    # fast-import 只从 stdin 读输入，不接受文件位置参数。用 cmd 的 < 重定向把
+    # UTF-8 字节原样喂给它（PowerShell 管道会按 $OutputEncoding 重编码，破坏字节）。
+    $cfgCmd = 'git -C "' + $OutDir + '" fast-import --quiet --date-format=raw < "' + $importFile + '"'
+    & cmd /d /c $cfgCmd
+    if ($LASTEXITCODE -ne 0) { throw "fast-import 失败，退出码 $LASTEXITCODE" }
+    Write-Ok "已重建 $($markOf.Count) 个空树提交"
 
-    # 建立分支引用（研究对象）指向最新提交
-    Invoke-Native { git -C $OutDir symbolic-ref HEAD "refs/heads/$PublicBranch" }
-    Invoke-Native { git -C $OutDir update-ref "refs/heads/$PublicBranch" $lastNew }
+    # 建立分支引用指向最新提交
+    $lastNew = (& git -C $OutDir rev-parse $branchRef).Trim()
+    Invoke-Native { git -C $OutDir symbolic-ref HEAD $branchRef }
+    if ($lastNew) { Invoke-Native { git -C $OutDir update-ref $branchRef $lastNew } }
 
     # ---------- 4. 自检 ----------
     Write-Step '自检'
