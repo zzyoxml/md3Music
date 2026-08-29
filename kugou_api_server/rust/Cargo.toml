@@ -1,0 +1,39 @@
+[package]
+name = "kugou_server"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "kugou_server"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tiny_http = "0.12"
+ureq = { version = "2", default-features = false, features = ["tls", "gzip", "json"] }
+md-5 = "0.10"
+sha1 = "0.10"
+sha2 = "0.10"
+aes = "0.8"
+rsa = { version = "0.9", features = ["pem", "sha2", "std"] }
+num-traits = "0.2"
+base64 = "0.22"
+flate2 = "1"
+rand = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+libc = "0.2"
+qrcode = { version = "0.14.0", features = ["image"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# jni 仅 Android 需要（JNI 导出符号），桌面构建不引入，避免无谓编译与符号污染
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+
+[profile.release]
+# P0: "s"（体积优先）禁用循环展开/函数内联，HTTP 服务器是 CPU 密集型
+# （加密/JSON），改为 opt-level = 3 追求运行时性能。
+# 注意：不使用 strip = true——cdylib 的动态导出符号（start_server /
+# Java_com_md3music_* JNI 符号）可能被 strip 移除，导致 App 启动找不到符号崩溃
+opt-level = 3
+lto = true
+panic = "abort"

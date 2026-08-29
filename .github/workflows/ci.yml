@@ -1,0 +1,177 @@
+name: CI Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # 拉取代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 基础工具链
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            "cmdline-tools;latest" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.22.1"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # 缓存 Gradle
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # Flutter 构建
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Flutter analyze
+        continue-on-error: true
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      # 下载 release keystore（可选，不存在时用 debug keystore 兜底）
+      - name: Download release keystore
+        id: keystore
+        continue-on-error: true
+        run: |
+          set -e
+          echo "Downloading release.keystore from 'keystore' release..."
+          if ! curl -fL --retry 3 -o /tmp/release.keystore \
+              "https://github.com/${GITHUB_REPOSITORY}/releases/download/keystore/release.keystore"; then
+            echo "keystore release 不存在，使用 debug keystore"
+            echo "keystore_available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cp /tmp/release.keystore android/app/release.keystore
+          rm /tmp/release.keystore
+          echo "keystore_available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Generate keystore.properties (for CI)
+        if: steps.keystore.outputs.keystore_available == 'true'
+        run: |
+          set -e
+          cat > android/keystore.properties <<EOF
+          storePassword=${KEYSTORE_PASSWORD:-android}
+          keyPassword=${KEY_PASSWORD:-android}
+          keyAlias=${KEY_ALIAS:-androiddebugkey}
+          storeFile=release.keystore
+          EOF
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+
+      # 构建 Release APK（按 ABI 拆分）
+      - name: Flutter build APK (release, split per ABI)
+        run: |
+          flutter build apk --release --split-per-abi \
+            --dart-define=APP_VERSION=ci-${{ github.sha }}
+
+      - name: Verify APKs
+        run: |
+          ls -lh build/app/outputs/flutter-apk/
+          for f in build/app/outputs/flutter-apk/*.apk; do
+            echo ""
+            echo "=== $f ==="
+            if unzip -l "$f" > /dev/null; then
+              echo "  OK ($(du -h "$f" | cut -f1))"
+            else
+              echo "  CORRUPTED"
+              exit 1
+            fi
+          done
+
+      # 上传构建产物（每个 APK 单独一个 artifact，方便下载）
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-arm64-v8a-release
+          path: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload armeabi-v7a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-armeabi-v7a-release
+          path: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload x86_64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-x86_64-release
+          path: build/app/outputs/flutter-apk/app-x86_64-release.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      # 自动创建 Release 并上传 APK（仅 push 到 main/master 时）
+      - name: Create CI Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-${{ github.sha }}
+          name: CI Build ${{ github.sha }}
+          body: |
+            ## CI 自动构建
+
+            **分支:** ${{ github.ref_name }}
+            **提交:** ${{ github.sha }}
+            **时间:** ${{ github.event.head_commit.timestamp }}
+
+            ### 下载
+            - **app-arm64-v8a-release.apk** — 推荐：大多数现代 Android 设备
+            - **app-armeabi-v7a-release.apk** — 较旧的 32 位设备
+            - **app-x86_64-release.apk** — Android 模拟器
+
+            > 此为 CI 自动构建，非正式发布版本。
+          prerelease: true
+          generate_release_notes: true
+          files: |
+            build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+            build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+            build/app/outputs/flutter-apk/app-x86_64-release.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

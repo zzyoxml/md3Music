@@ -1,0 +1,103 @@
+name: Debug Build & Test
+
+# 手动触发：构建 debug APK 用于无线 ADB 测试
+# debug APK 保留调试符号 + 可抓取 logcat 日志
+on:
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: '构建类型'
+        required: true
+        type: choice
+        options:
+          - debug
+          - release
+        default: 'debug'
+      notes:
+        description: '构建说明（可选）'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: debug-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-debug:
+    name: Build Android ${{ inputs.build_type == 'release' && 'Release' || 'Debug' }} APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK & NDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            "cmdline-tools;latest" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.22.1"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # Flutter 构建 APK
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Flutter analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Flutter build APK
+        run: flutter build apk --${{ inputs.build_type }}
+
+      - name: Verify APK
+        run: |
+          ls -lh build/app/outputs/flutter-apk/
+          for f in build/app/outputs/flutter-apk/*.apk; do
+            echo "=== $f ==="
+            if unzip -l "$f" > /dev/null; then
+              echo "  OK ($(du -h "$f" | cut -f1))"
+            else
+              echo "  CORRUPTED"
+              exit 1
+            fi
+          done
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ inputs.build_type }}
+          path: build/app/outputs/flutter-apk/app-${{ inputs.build_type }}.apk
+          if-no-files-found: error
+          retention-days: 7

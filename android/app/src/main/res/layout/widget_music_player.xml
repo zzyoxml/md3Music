@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  桌面音乐播放器小组件：样式对齐 app 内 MiniPlayer 与 MD3E 视觉。
+  - 卡片底/封面圆角/按钮圆形底均用「ImageView + 白色 shape + setColorFilter」
+    实现动态取色（颜色由 Flutter 侧推送的当前 ColorScheme 提供）
+  - 按钮：播放=primary 圆底 onPrimary 图标（主操作），下一首=surfaceContainerHigh
+    圆底 onSurfaceVariant 图标（次操作），与私人FM小部件同一套层级
+  - 进度条：MD3 胶囊样式（widget_music_progress），经 tintList 上色
+  兼容性约束与私人FM小部件相同：不用负 margin、不用裸 <View>。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <!-- 卡片底色：与推送的 surfaceContainerLow 融合 -->
+    <ImageView
+        android:id="@+id/music_card_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_fm_bg_round16"
+        android:contentDescription="@null" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="12dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="8dp">
+
+        <!-- MD3 线性进度条：胶囊圆角，位图由 Provider 手绘（primary/outlineVariant
+             动态取色），比 ProgressBar 的 tintList 兼容性更好 -->
+        <ImageView
+            android:id="@+id/widget_progress"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:scaleType="fitXY"
+            android:contentDescription="@null" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="6dp">
+
+            <!-- 专辑封面 48dp 圆角12（位图由 Provider 经 Canvas 裁圆角） -->
+            <FrameLayout
+                android:layout_width="48dp"
+                android:layout_height="48dp">
+
+                <ImageView
+                    android:id="@+id/music_cover_bg"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitXY"
+                    android:src="@drawable/widget_fm_bg_round12"
+                    android:contentDescription="@null" />
+
+                <ImageView
+                    android:id="@+id/widget_artwork"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="centerCrop"
+                    android:visibility="gone"
+                    android:contentDescription="@string/widget_cover_desc" />
+            </FrameLayout>
+
+            <!-- 歌曲信息 -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:layout_marginStart="12dp"
+                android:layout_marginEnd="8dp">
+
+                <TextView
+                    android:id="@+id/widget_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="MD3Music"
+                    android:textSize="14sp"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <TextView
+                    android:id="@+id/widget_artist"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/widget_not_playing"
+                    android:textSize="12sp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:layout_marginTop="2dp" />
+            </LinearLayout>
+
+            <!-- 播放/暂停：MD3E 圆形填充按钮（primary 圆底 + onPrimary 图标） -->
+            <FrameLayout
+                android:id="@+id/widget_btn_play_pause"
+                android:layout_width="40dp"
+                android:layout_height="40dp">
+
+                <ImageView
+                    android:id="@+id/music_btn_play_bg"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitXY"
+                    android:src="@drawable/widget_fm_bg_circle"
+                    android:contentDescription="@null" />
+
+                <ImageView
+                    android:id="@+id/music_btn_play_icon"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_wg_play_arrow"
+                    android:contentDescription="@string/widget_play_desc" />
+            </FrameLayout>
+
+            <!-- 下一首：surfaceContainerHigh 圆底 + onSurfaceVariant 图标 -->
+            <FrameLayout
+                android:id="@+id/widget_btn_next"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="8dp">
+
+                <ImageView
+                    android:id="@+id/music_btn_next_bg"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scaleType="fitXY"
+                    android:src="@drawable/widget_fm_bg_circle"
+                    android:contentDescription="@null" />
+
+                <ImageView
+                    android:id="@+id/music_btn_next_icon"
+                    android:layout_width="20dp"
+                    android:layout_height="20dp"
+                    android:layout_gravity="center"
+                    android:scaleType="fitCenter"
+                    android:src="@drawable/ic_wg_next"
+                    android:contentDescription="@string/widget_next_desc" />
+            </FrameLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>
