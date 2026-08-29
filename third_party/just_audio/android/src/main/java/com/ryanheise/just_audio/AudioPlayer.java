@@ -126,6 +126,9 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
     private Map<String, Object> pendingPlaybackEvent;
 
     private ExoPlayer player;
+    // MD3Music fork: 音量均衡（响度归一）增益装饰器。在 buildAudioSink 时创建，
+    // 通过 setNormalizationGain(gainDb) 对当前曲目设固定线性增益（可放大/衰减）。
+    private NormalizationGainAudioSink normalizationGainSink;
     private Integer audioSessionId;
     private Integer errorCode;
     private String errorMessage;

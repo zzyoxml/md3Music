@@ -118,7 +118,9 @@ public final class UsbAudioSinkController {
     public static AudioSink wrap(AudioSink delegate, Context context) {
         UsbInterceptAudioSink sink = new UsbInterceptAudioSink(delegate, context);
         liveSinks.add(sink);
-        return sink;
+        android.util.Log.i("NormGainTest", "WrapUsbMarker"); // 唯一标记，验证构建是否保留
+        // MD3Music fork: 音量均衡——增益装饰器包在 USB 拦截层之外，先缩放再交给下层。
+        return NormalizationGainAudioSink.wrap(sink);
     }
 
     /** 开启独占。应用侧须先完成：打开设备 → 创建流 → 按 xHCI 时序 setAlt/SET_CUR/start。 */

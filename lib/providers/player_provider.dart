@@ -1680,7 +1680,12 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     // 诊断日志：setUrl
     // ignore: avoid_print
     print('[D切歌] setUrl → ${url.substring(0, url.length < 60 ? url.length : 60)}');
-    await _audioService.setUrl(url);
+    // 音量均衡：把当前歌曲的响度元数据带给播放器（无响度则旁路为 0 dB）。
+    await _audioService.setUrl(
+      url,
+      loudnessLufs: _currentSong?.loudnessLufs,
+      loudnessPeakDb: _currentSong?.loudnessPeakDb,
+    );
     final deadline = DateTime.now().add(const Duration(seconds: 10));
     while (DateTime.now().isBefore(deadline)) {
       final state = _audioService.player.playerState;

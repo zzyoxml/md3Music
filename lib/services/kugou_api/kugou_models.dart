@@ -1,7 +1,59 @@
-﻿import '../../data/models/album.dart';
+import 'dart:convert';
+
+import 'package:shared_preferences/shared_preferences.dart';
+
+import '../../data/models/album.dart';
 import '../../data/models/artist.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/song.dart';
+
+/// 音量均衡响度缓存：url → (LUFS, 峰值dB)。由 [KugouPlayUrl.fromJson] 在每次解析到
+/// 响度时记录，播放链路按播放 url 回退取用（避免依赖 song 对象承载响度字段）。
+/// 同时持久化到 SharedPreferences，历史回放的已缓存 url 跨会话也能取到响度。
+typedef KugouLoudness = ({double lufs, double? peak});
+final Map<String, KugouLoudness> kugouUrlLoudness = {};
+
+const String _kugouLoudnessPrefsKey = 'kugou_url_loudness';
+const int _kugouLoudnessMax = 300;
+bool _kugouLoudnessLoaded = false;
+
+/// 预热：启动时把历史持久化的 url→响度 载入内存缓存。
+Future<void> warmLoudnessCache() async {
+  if (_kugouLoudnessLoaded) return;
+  _kugouLoudnessLoaded = true;
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getString(_kugouLoudnessPrefsKey);
+    if (raw == null || raw.isEmpty) return;
+    final list = jsonDecode(raw) as List<dynamic>;
+    for (final item in list) {
+      if (item is! Map) continue;
+      final url = item['u'] as String?;
+      final lufs = item['l'];
+      if (url == null || url.isEmpty || lufs is! num) continue;
+      final pk = item['p'];
+      kugouUrlLoudness[url] = (lufs: lufs.toDouble(), peak: pk is num ? pk.toDouble() : null);
+    }
+  } catch (_) {}
+}
+
+/// 持久化 url→响度 缓存（截断到最近 [max] 条）。
+Future<void> _persistLoudnessCache() async {
+  try {
+    final prefs = await SharedPreferences.getInstance();
+    final entries = kugouUrlLoudness.entries
+        .take(_kugouLoudnessMax)
+        .map((e) => {'u': e.key, 'l': e.value.lufs, 'p': e.value.peak})
+        .toList();
+    await prefs.setString(_kugouLoudnessPrefsKey, jsonEncode(entries));
+  } catch (_) {}
+}
+
+/// 按播放 url 查询已解析的响度（无则 null）。内存未命中时尝试从持久化预热加载。
+KugouLoudness? loudnessForUrl(String url) {
+  if (url.isEmpty) return null;
+  return kugouUrlLoudness[url];
+}
 
 /// 归一化时长：酷狗不同接口返回的时长单位不一致（秒 / 毫秒）。
 /// 超过 10000 秒（约 2.8 小时）视为毫秒，统一转换为秒。
@@ -596,6 +648,12 @@ class KugouPlayUrl {
   final int bitRate;
   final String quality;
   final bool isTrial;
+  /// 音量均衡（响度归一）：集总响度（LUFS），无则 null。
+  final double? volumeLufs;
+  /// 真峰值（dBTP/dBFS），无则 null。
+  final double? volumePeakDb;
+  /// 上游响度增益（dB，仅诊断用），无则 null。
+  final double? volumeGainDb;
 
   const KugouPlayUrl({
     required this.url,
@@ -603,9 +661,17 @@ class KugouPlayUrl {
     this.bitRate = 0,
     required this.quality,
     this.isTrial = false,
+    this.volumeLufs,
+    this.volumePeakDb,
+    this.volumeGainDb,
   });
 
   factory KugouPlayUrl.fromJson(Map<String, dynamic> json) {
+    // 响度字段：读取嵌套 data 层（_extractData 已把 data 并到顶层或保留 data 层）。
+    final data = json['data'];
+    final source = data is Map<String, dynamic>
+        ? {...json, ...data}
+        : json;
     dynamic rawUrl = json['url'] ?? json['play_url'] ?? '';
     String url;
     if (rawUrl is List && rawUrl.isNotEmpty) {
@@ -637,7 +703,23 @@ class KugouPlayUrl {
       ),
       quality: _str(json['quality'] ?? '128'),
       isTrial: isTrial,
-    );
+      volumeLufs: _optDouble(source['volume'] ?? source['volume_lufs']),
+      volumePeakDb: _optDouble(source['volume_peak'] ?? source['volumePeak']),
+      volumeGainDb: _optDouble(source['volume_gain'] ?? source['volumeGain']),
+    ).. _rememberLoudness();
+  }
+
+  /// 记录本次解析的响度到全局缓存（并持久化，跨会话供历史回放），播放链路回退使用。
+  KugouPlayUrl _rememberLoudness() {
+    final lufs = volumeLufs;
+    final peak = volumePeakDb;
+    if (lufs != null && lufs.isFinite && url.isNotEmpty) {
+      kugouUrlLoudness.remove(url);
+      kugouUrlLoudness[url] = (lufs: lufs, peak: peak);
+      // 持久化（fire-and-forget），限制数量
+      if (kugouUrlLoudness.length >= 1) _persistLoudnessCache();
+    }
+    return this;
   }
 }
 
@@ -1313,6 +1395,14 @@ int? _parseIntOrNull(dynamic v) {
   if (v is int) return v;
   if (v is double) return v.toInt();
   return int.tryParse(v.toString());
+}
+
+/// 解析可选浮点字段（响度/峰值等）。缺失或非有限值时返回 null。
+double? _optDouble(dynamic v) {
+  if (v == null) return null;
+  final parsed = v is num ? v.toDouble() : double.tryParse(v.toString());
+  if (parsed == null || !parsed.isFinite) return null;
+  return parsed;
 }
 
 dynamic _zeroAsNull(dynamic v) {
