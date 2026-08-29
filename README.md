@@ -460,6 +460,9 @@ cargo test          # 本地测试（不依赖外网）
 
 - [EchoMusic](https://github.com/hoowhoami/EchoMusic) - UI 设计和架构参考
 - [apple-music-like-lyrics](https://github.com/amll-dev/applemusic-like-lyrics) - Apple Music 风格逐字歌词渲染参考
+- [Lyricon](https://github.com/tomakino/lyricon) - 桌面歌词 Provider（词幕 / 悬浮歌词）
+- [SuperLyric](https://github.com/HChenX/SuperLyric) - 系统级实时歌词（Lyricon/SuperLyric 协议）
+- [LyricInfo](https://github.com/limczhh/LyricInfo) - 蓝牙歌词（AVRCP/LyricInfo 歌词推送参考）
 - [Reorderable](https://github.com/Calvin-LL/Reorderable) - 播放列表面板长按拖拽排序
 - [MaterialKolor](https://github.com/jordond/MaterialKolor) - 莫奈取色 / Material Design 3 动态配色
 - [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) - API 代理服务
