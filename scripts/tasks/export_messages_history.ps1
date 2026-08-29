@@ -21,7 +21,8 @@
   scripts/md3.ps1 export 的常规快照流程。
 
 .PARAMETER OutDir
-  新历史所在的临时仓库目录（默认 %TEMP%\md3music-public-messages-<时间戳>，避免污染仓库）。
+  新历史所在的临时仓库目录（默认 <项目根>\tmp\md3music-public-messages-<时间戳>，
+  放在项目 tmp\ 内便于归档备份；tmp\ 已被 .gitignore 忽略，不随仓库提交）。
 
 .PARAMETER PublicRemote
   公开仓库 URL。提供时构建完成后推送。
@@ -102,8 +103,8 @@ try {
     Write-Ok "源仓库：$Root"
 
     if (-not $OutDir) {
-        $OutDir = Join-Path $env:TEMP "md3music-public-messages-$(Get-Date -Format 'yyyyMMddHHmmss')"
-        Write-Warn "未指定 -OutDir，使用临时目录：$OutDir"
+        $OutDir = Join-Path (Join-Path $Root 'tmp') "md3music-public-messages-$(Get-Date -Format 'yyyyMMddHHmmss')"
+        Write-Warn "未指定 -OutDir，使用项目 tmp 目录：$OutDir"
     }
     if (-not [System.IO.Path]::IsPathRooted($OutDir)) { $OutDir = Join-Path $Root $OutDir }
 

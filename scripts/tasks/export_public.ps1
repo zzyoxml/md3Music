@@ -362,7 +362,7 @@ try {
             [void](Enable-AutoProxy)
             # —— 探测增量基线（独立临时仓库，避免污染最终历史仓库）——
             Write-Note "探测 $PublicBranch 的增量基线（--filter=blob:none，仅拉取 commit/tree）…"
-            $probe = Join-Path $env:TEMP "md3music-history-probe-$(Get-Date -Format 'yyyyMMddHHmmss')"
+            $probe = Join-Path (Join-Path $Root 'tmp') "md3music-history-probe-$(Get-Date -Format 'yyyyMMddHHmmss')"
             New-Item -ItemType Directory -Path $probe | Out-Null
             git -C $probe init -q
             git -C $probe remote add origin $PublicRemote
@@ -472,7 +472,7 @@ try {
                 # ---------- 全量路径：全新重建 + force（无增量基线时） ----------
                 if ($oldTip) { Write-Warn '未找到增量基线（首次导出 / 映射缺失 / 早期历史被改写），执行全量重建（需 force push）' }
                 Remove-ItemBypass $probe
-                $histDir = Join-Path $env:TEMP "md3music-public-messages-$(Get-Date -Format 'yyyyMMddHHmmss')"
+                $histDir = Join-Path (Join-Path $Root 'tmp') "md3music-public-messages-$(Get-Date -Format 'yyyyMMddHHmmss')"
                 $histArgs = @{ OutDir = $histDir; PublicBranch = $PublicBranch; NoPause = $true }
                 & (Join-Path $PSScriptRoot 'export_messages_history.ps1') @histArgs
                 if ($LASTEXITCODE -ne 0) { throw "提交记录历史重建失败（退出码 $LASTEXITCODE），中止发布" }

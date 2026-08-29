@@ -118,6 +118,7 @@ md3Music/
     ├── tasks/windows.ps1         # Windows 桌面构建（便携版 zip）
     ├── tasks/export_public.ps1   # 导出公开版本（过滤 + 否认清单闸门 + 可选推送/PR；-WithHistory 携带提交记录）
     ├── tasks/export_messages_history.ps1  # 重建私有提交记录为空树历史（export-messages 子命令，可推送）
+    ├── tasks/export_full.ps1     # 一键发布（full-export 子命令）：空树消息历史 + 全量公开树快照推送公开仓库
     ├── tasks/verify_public.ps1   # 公开树洁净度校验（lib/ 否认清单零命中）
     ├── tasks/commit.ps1          # 一键提交（TUI 勾选改动 → 闸门 → 提交 → 推送 → PR/合并）
     ├── tasks/token.ps1           # GitHub token 管理（DPAPI 加密存 %LOCALAPPDATA%，不入库）
@@ -268,8 +269,14 @@ dart run scripts/tools/gen_settings_search_index.dart   # 产出 lib/modules/set
 #    ↑ 例外 + 携带提交记录历史：私有提交记录重建为空树提交，顶端叠加公开树；增量优先（有 .md3/export-state
 #      映射且早期历史未改写时只追加新记录，fast-forward 免 force；否则全量重建 + force）。用法见 docs/public_private_workflow.md §4.4
 .\scripts\md3.ps1 export-messages -PublicRemote <URL> -Force   # 只重建/推送提交记录（空树历史，不叠加公开树）
+.\scripts\md3.ps1 full-export          # 一键发布：空树消息历史 + 全量公开树快照推送公开仓库
+#   ↑ 等价 export -ForcePush -WithHistory，默认 zzyoxml/md3Music : rust-local-force（可 -PublicRemote/-PublicBranch 覆盖）
 # 公开树独立构建：cd .public_export && flutter pub get && flutter build apk --debug（入口 lib/main.dart）
 ```
+
+> **历史仓库备份路径**：空树消息历史仓库（`export-messages` 的 `-OutDir`、`export -WithHistory` 全量的 `histDir`、增量探测的 `probe`）
+> 默认落在 **项目根 `tmp\` 下**（`tmp\md3music-public-messages-<时间戳>`），而非系统临时目录；`tmp/` 已被 .gitignore 忽略，可归档不随仓库提交。
+> 一键入口：`.\scripts\md3.ps1 full-export`。新增任务脚本为 `scripts/tasks/export_full.ps1`。
 
 ### 3.6 一键提交（`md3.ps1 commit`）
 
