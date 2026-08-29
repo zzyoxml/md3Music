@@ -124,11 +124,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   Color? _lyricAccentColor;
   String? _lastAccentUrl;
 
-  // Pad 模式：左侧已有封面，隐藏"封面"Tab，只保留 2 个 Tab
-  bool _isPadMode = false;
   int _currentTabLength = 4;
-  // 手机横屏模式：保留封面Tab，但隐藏左侧歌曲信息
-  bool _isPhoneLandscape = false;
 
   // === 拖拽收起手势：已移除（与 MD 风格统一：无把手单行布局，关闭通过返回按钮） ===
   /// 防止 PopScope 回调与 dismiss() 重复触发。
@@ -372,41 +368,31 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     }
   }
 
-  /// 检测是否为 Pad 模式（宽度 >= 600），并动态调整 TabController
+  /// 检测宽屏（横屏/平板）并动态调整 TabController。
+  ///
+  /// 手机竖屏：4 tab [播放列表, 封面, 歌词, 评论]。
+  /// 横屏/平板（手机横屏、平板竖屏、平板横屏一致）：封面常驻在左栏、歌名也
+  /// 固定在封面下方，因此不需要封面/信息 tab → 3 tab [播放列表, 歌词, 评论]。
   void _checkPadMode() {
     if (!mounted) return;
     final width = MediaQuery.sizeOf(context).width;
     final deviceIsPad = isPadLayout(context);
-    final shouldBePadMode = deviceIsPad || width >= 600;
-    // 手机横屏：宽度 >= 600 但设备不是 Pad
-    final shouldBePhoneLandscape = !deviceIsPad && width >= 600;
-    // 与手机端统一：4 个 tab（播放列表 / 封面 / 歌词 / 评论），ActionBar 按钮索引对齐
-    const newTabLength = 4;
-
-    // Pad 模式首次进入（从非 pad → pad 且当前停在默认专辑 index 1）
-    // 时直接跳到歌词（index 2），无需重建 TabController。
-    // 避免每次从 miniplayer 点开都停在专辑 tab。
-    // 后续用户手动切换 tab 后保留用户当前选择。
-    if (shouldBePadMode && !_isPadMode && _tabController.index == 1) {
-      _tabController.index = 2;
-    }
+    final isWideLayout = deviceIsPad || width >= 600;
+    final newTabLength = isWideLayout ? 3 : 4;
 
     if (_currentTabLength != newTabLength) {
       // 保存当前 tab 索引
       final currentIndex = _tabController.index.clamp(0, newTabLength - 1);
       _tabController.dispose();
       _currentTabLength = newTabLength;
+      // 首次进入横屏/平板（4 tab → 3 tab）默认打开歌词：
+      // 3 tab 下 index 0 = 播放列表, 1 = 歌词, 2 = 评论
       _tabController = TabController(
         length: newTabLength,
         vsync: this,
-        initialIndex: currentIndex,
+        initialIndex: newTabLength == 3 ? 1 : currentIndex,
       );
-      _isPadMode = shouldBePadMode;
-      _isPhoneLandscape = shouldBePhoneLandscape;
       setState(() {});
-    } else {
-      _isPadMode = shouldBePadMode;
-      _isPhoneLandscape = shouldBePhoneLandscape;
     }
   }
 
@@ -1416,7 +1402,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               controller: _tabController,
               children: [
                 // 播放列表面板（index 0，专辑封面 tab 左侧）
-                PlayerPlaylistView(useDisplayName: true, zenMode: _zenMode),
+                const PlayerPlaylistView(useDisplayName: true),
                 GestureDetector(
                   onTap: () {
                     // 长按封面切 Zen 模式后松手不再当作点击跳歌词页
@@ -1566,111 +1552,53 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                       builder: (context, constraints) {
                         // 横屏时封面为正方形，需同时受可用宽度与高度约束：
                         // 减去 56 顶栏补偿后的可用高度，避免高度不足时正方形上下被裁切
-                        final availableHeight = constraints.maxHeight - 56;
+                        final availableHeight = constraints.maxHeight - 72;
                         final size =
                             (constraints.maxWidth < availableHeight
                                     ? constraints.maxWidth
                                     : availableHeight)
                                 .clamp(120.0, 300.0);
-                        return Stack(
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            // 封面居中：补偿顶栏高度，使封面在整个屏幕垂直方向居中
-                            Padding(
-                              padding: EdgeInsets.only(
-                                bottom: _zenMode ? 0.0 : 56.0,
-                              ),
-                              child: Center(
-                                child: SizedBox(
-                                  width: size,
-                                  height: size,
-                                  // 封面支持向下拖拽原路返回关闭播放器（横屏/pad 与竖屏一致），
-                                  // 同时保留长按封面进入/退出 Zen 模式（按压内缩 + 引导提示）
-                                  child: GestureDetector(
-                                    behavior: HitTestBehavior.opaque,
-                                    onVerticalDragStart: _onTopBarDragStart,
-                                    onVerticalDragUpdate: _onTopBarDragUpdate,
-                                    onVerticalDragEnd: _onTopBarDragEnd,
-                                    onVerticalDragCancel: _onTopBarDragCancel,
-                                    child: _wrapArtworkZenPress(
-                                      child: AnimatedScale(
-                                        // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
-                                        scale:
-                                            _spectrumEnabled &&
-                                                _spectrumStyle < 2
-                                            ? 1.0
-                                            : (playerProvider.isPlaying
-                                                  ? 1.0
-                                                  : 0.85),
-                                        duration: const Duration(
-                                          milliseconds: 500,
-                                        ),
-                                        curve: Curves.easeOutBack,
-                                        child: _buildLandscapeArtworkContent(
-                                          playerProvider,
-                                          currentSong,
-                                          colorScheme,
-                                        ),
-                                      ),
+                            SizedBox(
+                              width: size,
+                              height: size,
+                              // 封面支持向下拖拽原路返回关闭播放器（横屏/pad 与竖屏一致），
+                              // 同时保留长按封面进入/退出 Zen 模式（按压内缩 + 引导提示）
+                              child: GestureDetector(
+                                behavior: HitTestBehavior.opaque,
+                                onVerticalDragStart: _onTopBarDragStart,
+                                onVerticalDragUpdate: _onTopBarDragUpdate,
+                                onVerticalDragEnd: _onTopBarDragEnd,
+                                onVerticalDragCancel: _onTopBarDragCancel,
+                                child: _wrapArtworkZenPress(
+                                  child: AnimatedScale(
+                                    // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
+                                    scale: _spectrumEnabled && _spectrumStyle < 2
+                                        ? 1.0
+                                        : (playerProvider.isPlaying
+                                              ? 1.0
+                                              : 0.85),
+                                    duration: const Duration(milliseconds: 500),
+                                    curve: Curves.easeOutBack,
+                                    child: _buildLandscapeArtworkContent(
+                                      playerProvider,
+                                      currentSong,
+                                      colorScheme,
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                            // 歌曲信息：垂直方向 80% 位置，水平居中（手机横屏时隐藏）
-                            // 与手机端 _buildArtworkView 一致：标题用 titleLarge
-                            if (!_isPhoneLandscape)
-                              Positioned(
-                                top: constraints.maxHeight * 0.8,
-                                left: 0,
-                                right: 0,
-                                child: Column(
-                                  children: [
-                                    GestureDetector(
-                                      onTap: () =>
-                                          _navigateToAlbum(currentSong as Song),
-                                      child: Text(
-                                        currentSong.displayName,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleLarge
-                                            ?.copyWith(color: Colors.white),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    GestureDetector(
-                                      onTap: () =>
-                                          _navigateToAlbum(currentSong as Song),
-                                      child: Text(
-                                        currentSong.artist,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(color: Colors.white70),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                    GestureDetector(
-                                      onTap: () =>
-                                          _navigateToAlbum(currentSong as Song),
-                                      child: Text(
-                                        currentSong.album,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(color: Colors.white54),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                            const SizedBox(height: 16),
+                            // 歌名 / 艺人·专辑：三种横屏形态（手机横屏、平板竖屏、
+                            // 平板横屏）都固定在封面正下方，不再随 tab 变化
+                            _buildTitleBlock(
+                              playerProvider,
+                              currentSong,
+                              isExpanded: true,
+                            ),
                           ],
                         );
                       },
@@ -1689,28 +1617,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           controller: _tabController,
                           children: [
                             // 播放列表面板（index 0，封面信息 tab 左侧）
-                            PlayerPlaylistView(useDisplayName: true, zenMode: _zenMode),
-                            // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
-                            GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onVerticalDragStart: _onTopBarDragStart,
-                              onVerticalDragUpdate: _onTopBarDragUpdate,
-                              onVerticalDragEnd: _onTopBarDragEnd,
-                              onVerticalDragCancel: _onTopBarDragCancel,
-                              child: Selector<PlayerProvider, String?>(
-                                selector: (_, p) => p.currentSong?.id,
-                                builder: (context, songId, __) {
-                                  final song = playerProvider.currentSong;
-                                  if (song == null)
-                                    return const SizedBox.shrink();
-                                  return _buildSongInfo(
-                                    playerProvider,
-                                    song,
-                                    colorScheme,
-                                  );
-                                },
-                              ),
-                            ),
+                            const PlayerPlaylistView(useDisplayName: true),
                             _wrapLyricsWithTranslateToggle(
                               _isLoadingLyrics
                                   // AM 风格：歌词 loading 改为白色，与深色背景协调
@@ -1822,114 +1729,64 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                     ),
                     child: LayoutBuilder(
                       builder: (context, constraints) {
-                        final maxSize = (constraints.maxWidth - 32).clamp(
-                          0.0,
-                          380.0,
-                        );
-                        return Stack(
-                          children: [
-                            // 封面居中：补偿顶栏高度，使封面在整个屏幕垂直方向居中
-                            Padding(
-                              padding: EdgeInsets.only(
-                                bottom: _zenMode ? 0.0 : 56.0,
+                        // 减去标题块高度后再取正方形边长，避免封面上下被裁切
+                        final maxSize = (constraints.maxWidth - 32)
+                            .clamp(0.0, 380.0)
+                            .clamp(
+                              0.0,
+                              (constraints.maxHeight - 72).clamp(
+                                0.0,
+                                double.infinity,
                               ),
-                              child: Center(
-                                child: ConstrainedBox(
-                                  constraints: BoxConstraints(
-                                    maxWidth: maxSize,
-                                    maxHeight: maxSize,
-                                  ),
-                                  child: AspectRatio(
-                                    aspectRatio: 1,
-                                    // 封面支持向下拖拽原路返回关闭播放器（横屏/pad 与竖屏一致），
-                                    // 同时保留长按封面进入/退出 Zen 模式（按压内缩 + 引导提示）
-                                    child: GestureDetector(
-                                      behavior: HitTestBehavior.opaque,
-                                      onVerticalDragStart: _onTopBarDragStart,
-                                      onVerticalDragUpdate: _onTopBarDragUpdate,
-                                      onVerticalDragEnd: _onTopBarDragEnd,
-                                      onVerticalDragCancel: _onTopBarDragCancel,
-                                      child: _wrapArtworkZenPress(
-                                        child: AnimatedScale(
-                                          // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
-                                          scale:
-                                              _spectrumEnabled &&
-                                                  _spectrumStyle < 2
-                                              ? 1.0
-                                              : (playerProvider.isPlaying
-                                                    ? 1.0
-                                                    : 0.85),
-                                          duration: const Duration(
-                                            milliseconds: 500,
-                                          ),
-                                          curve: Curves.easeOutBack,
-                                          child: _buildLandscapeArtworkContent(
-                                            playerProvider,
-                                            currentSong,
-                                            colorScheme,
-                                          ),
-                                        ),
+                            );
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            ConstrainedBox(
+                              constraints: BoxConstraints(
+                                maxWidth: maxSize,
+                                maxHeight: maxSize,
+                              ),
+                              child: AspectRatio(
+                                aspectRatio: 1,
+                                // 封面支持向下拖拽原路返回关闭播放器（横屏/pad 与竖屏一致），
+                                // 同时保留长按封面进入/退出 Zen 模式（按压内缩 + 引导提示）
+                                child: GestureDetector(
+                                  behavior: HitTestBehavior.opaque,
+                                  onVerticalDragStart: _onTopBarDragStart,
+                                  onVerticalDragUpdate: _onTopBarDragUpdate,
+                                  onVerticalDragEnd: _onTopBarDragEnd,
+                                  onVerticalDragCancel: _onTopBarDragCancel,
+                                  child: _wrapArtworkZenPress(
+                                    child: AnimatedScale(
+                                      // 频谱模式（style 0/1 圆形旋转封面）不需要封面的放大缩小动画
+                                      scale:
+                                          _spectrumEnabled && _spectrumStyle < 2
+                                          ? 1.0
+                                          : (playerProvider.isPlaying
+                                                ? 1.0
+                                                : 0.85),
+                                      duration: const Duration(
+                                        milliseconds: 500,
+                                      ),
+                                      curve: Curves.easeOutBack,
+                                      child: _buildLandscapeArtworkContent(
+                                        playerProvider,
+                                        currentSong,
+                                        colorScheme,
                                       ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                            // 歌曲信息：垂直方向 80% 位置，水平居中（手机横屏时隐藏）
-                            // 与手机端 _buildArtworkView 一致：标题用 titleLarge
-                            if (!_isPhoneLandscape)
-                              Positioned(
-                                top: constraints.maxHeight * 0.8,
-                                left: 0,
-                                right: 0,
-                                child: Column(
-                                  children: [
-                                    GestureDetector(
-                                      onTap: () =>
-                                          _navigateToAlbum(currentSong as Song),
-                                      child: Text(
-                                        currentSong.displayName,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleLarge
-                                            ?.copyWith(color: Colors.white),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    GestureDetector(
-                                      onTap: () =>
-                                          _navigateToAlbum(currentSong as Song),
-                                      child: Text(
-                                        currentSong.artist,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(color: Colors.white70),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                    GestureDetector(
-                                      onTap: () =>
-                                          _navigateToAlbum(currentSong as Song),
-                                      child: Text(
-                                        currentSong.album,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .bodySmall
-                                            ?.copyWith(color: Colors.white54),
-                                        textAlign: TextAlign.center,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                            const SizedBox(height: 16),
+                            // 歌名 / 艺人·专辑：固定在封面正下方（三种横屏形态一致）
+                            _buildTitleBlock(
+                              playerProvider,
+                              currentSong,
+                              isExpanded: true,
+                            ),
                           ],
                         );
                       },
@@ -1945,31 +1802,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           controller: _tabController,
                           children: [
                             // 播放列表面板（index 0，封面信息 tab 左侧）
-                            PlayerPlaylistView(useDisplayName: true, zenMode: _zenMode),
-                            // 与手机端统一：4 个 tab（播放列表 / 封面 / 歌词 / 评论），
-                            // ActionBar 按钮 tab 索引对齐。
-                            // Pad 模式左侧已有封面，但 ActionBar 仍依赖标准 tab 顺序。
-                            // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
-                            GestureDetector(
-                              behavior: HitTestBehavior.opaque,
-                              onVerticalDragStart: _onTopBarDragStart,
-                              onVerticalDragUpdate: _onTopBarDragUpdate,
-                              onVerticalDragEnd: _onTopBarDragEnd,
-                              onVerticalDragCancel: _onTopBarDragCancel,
-                              child: Selector<PlayerProvider, String?>(
-                                selector: (_, p) => p.currentSong?.id,
-                                builder: (context, songId, __) {
-                                  final song = playerProvider.currentSong;
-                                  if (song == null)
-                                    return const SizedBox.shrink();
-                                  return _buildSongInfo(
-                                    playerProvider,
-                                    song,
-                                    colorScheme,
-                                  );
-                                },
-                              ),
-                            ),
+                            const PlayerPlaylistView(useDisplayName: true),
                             _wrapLyricsWithTranslateToggle(
                               _isLoadingLyrics
                                   // AM 风格：歌词 loading 改为白色，与深色背景协调
@@ -2277,19 +2110,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
-  Widget _buildSongInfo(
-    PlayerProvider playerProvider,
-    dynamic currentSong,
-    ColorScheme colorScheme,
-  ) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: _buildTitleBlock(playerProvider, currentSong),
-      ),
-    );
-  }
-
   /// 底部控制区 —— 三层等权重的旧结构（进度行 / 传输行 / 操作胶囊）压成两层：
   /// 进度（信息）+ 传输（动作），导航独立成一条极简指示条。
   Widget _buildControls(
@@ -2321,15 +2141,24 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             ),
           ),
           SizedBox(height: isExpanded ? 8 : 16),
-          // Selector 让主控制按钮仅在 isPlaying / 倍速变化时重建，
-          // 不再每 200ms 因 position 变化重建（倍速在左端常驻显示当前值）
-          Selector<PlayerProvider, ({bool isPlaying, double speed})>(
-            selector: (_, p) => (isPlaying: p.isPlaying, speed: p.speed),
+          // Selector 让主控制按钮仅在 isPlaying / 播放模式变化时重建，
+          // 不再每 200ms 因 position 变化重建
+          Selector<
+            PlayerProvider,
+            ({bool isPlaying, bool shuffleEnabled, AppLoopMode loopMode})
+          >(
+            selector: (_, p) => (
+              isPlaying: p.isPlaying,
+              shuffleEnabled: p.shuffleEnabled,
+              loopMode: p.loopMode,
+            ),
             builder: (context, state, __) => _buildMainControls(
               playerProvider,
               colorScheme,
               isExpanded: isExpanded,
               isPlaying: state.isPlaying,
+              shuffleEnabled: state.shuffleEnabled,
+              loopMode: state.loopMode,
             ),
           ),
           SizedBox(height: isExpanded ? 4 : 10),
@@ -2352,7 +2181,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       duration: duration,
       isPlaying: playerProvider.isPlaying,
       wavy: false,
-      showHandle: false,
       activeColor: Colors.white,
       inactiveColor: Colors.white24,
       labelColor: Colors.white70,
@@ -2364,7 +2192,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
           playerProvider.pauseForSeek();
         }
       },
-      onSeekUpdate: (value) => playerProvider.seek(value),
       onSeekEnd: (value) async {
         AppHaptics.tick();
         await playerProvider.seek(value);
@@ -2375,17 +2202,19 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
-  /// 传输行 —— 中央 prev/play/next，左端播放速度、右端收藏。
+  /// 传输行 —— 中央 prev/play/next，左端播放模式、右端收藏。
   ///
-  /// shuffle / loop 已迁到播放列表面板头部（它们描述的是「队列怎么播」，
-  /// 不属于「这一首怎么播」）。传输行因此从 5 个目标回到 3 个，播放键得以放大；
-  /// 倍速与收藏落在居中留下的左右空白里，不额外占用纵向高度。
-  /// 投屏保留在更多菜单的宫格里。
+  /// 播放模式把原先分开的 shuffle 与 loop 合成一个循环按钮
+  /// （不循环 → 列表循环 → 单曲循环 → 随机），传输行因此从 5 个目标回到 3 个，
+  /// 播放键得以放大；模式与收藏落在居中留下的左右空白里，不额外占纵向高度。
+  /// 倍速与投屏都在右上角的更多菜单里。
   Widget _buildMainControls(
     PlayerProvider playerProvider,
     ColorScheme colorScheme, {
     bool isExpanded = false,
     required bool isPlaying,
+    required bool shuffleEnabled,
+    required AppLoopMode loopMode,
   }) {
     // Apple Music HIG 风格：大按钮居中，白色图标，圆形白色播放按钮
     final spacing = isExpanded ? 8.0 : 12.0;
@@ -2402,15 +2231,21 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
 
     return Row(
       children: [
-        // 左端：播放速度（常驻显示当前倍速，点击调节）
+        // 左端：播放模式（不循环 → 列表循环 → 单曲循环 → 随机，单键循环切换）
+        // AM 风格：不加任何底色，只用图标亮度区分是否处于非默认模式
         Expanded(
           child: Align(
             alignment: Alignment.centerLeft,
             child: _buildEdgeAction(
-              label: '${playerProvider.speed}x',
-              color: Colors.white,
-              tooltip: '播放速度',
-              onTap: () => _showSpeedDialog(playerProvider),
+              icon: _playModeIcon(shuffleEnabled, loopMode),
+              color: (!shuffleEnabled && loopMode == AppLoopMode.off)
+                  ? Colors.white.withValues(alpha: 0.45)
+                  : Colors.white,
+              tooltip: _playModeLabel(shuffleEnabled, loopMode),
+              onTap: () {
+                AppHaptics.tick();
+                playerProvider.cyclePlayMode();
+              },
             ),
           ),
         ),
@@ -2486,10 +2321,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   }
 
   /// 传输行两端的次要动作：48dp 圆形触达区，无容器背景。
-  /// 传 [icon] 画图标，传 [label] 画文字（倍速这类需要显示当前值的动作）。
   Widget _buildEdgeAction({
-    IconData? icon,
-    String? label,
+    required IconData icon,
     required Color color,
     VoidCallback? onTap,
     VoidCallback? onLongPress,
@@ -2502,20 +2335,38 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
       child: SizedBox(
         width: 48,
         height: 48,
-        child: Center(
-          child: label != null
-              ? Text(
-                  label,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: color,
-                    fontWeight: FontWeight.w600,
-                  ),
-                )
-              : Icon(icon, size: 24, color: color),
-        ),
+        child: Center(child: Icon(icon, size: 24, color: color)),
       ),
     );
     return tooltip == null ? button : Tooltip(message: tooltip, child: button);
+  }
+
+  /// 合并后的播放模式图标：随机优先，其次看循环模式。
+  IconData _playModeIcon(bool shuffleEnabled, AppLoopMode loopMode) {
+    if (shuffleEnabled) return Icons.shuffle;
+    switch (loopMode) {
+      case AppLoopMode.off:
+        // 不循环：空心箭头（播完即停）
+        return Icons.repeat_outlined;
+      case AppLoopMode.one:
+        // 单曲循环：带数字 1
+        return Icons.repeat_one;
+      case AppLoopMode.all:
+        // 列表循环：实心箭头，播完回到第一首
+        return Icons.repeat;
+    }
+  }
+
+  String _playModeLabel(bool shuffleEnabled, AppLoopMode loopMode) {
+    if (shuffleEnabled) return '随机播放';
+    switch (loopMode) {
+      case AppLoopMode.off:
+        return '不循环';
+      case AppLoopMode.one:
+        return '单曲循环';
+      case AppLoopMode.all:
+        return '列表循环';
+    }
   }
 
   /// 底部导航条 —— 只做页面切换这一件事（原先与倍速/收藏/翻译混装在一条胶囊里）。
@@ -3026,6 +2877,16 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                       rootContext,
                       MaterialPageRoute(builder: (_) => const SongInfoPage()),
                     );
+                  },
+                ),
+                // 播放速度：低频动作，不占底部常驻位置
+                ListTile(
+                  leading: const Icon(Icons.speed),
+                  title: const Text('播放速度'),
+                  trailing: Text('${context.read<PlayerProvider>().speed}x'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _showSpeedDialog(context.read<PlayerProvider>());
                   },
                 ),
                 // 均衡器 / 定时关闭 / 投屏：同一行三格宫格，上方 icon 下方文字

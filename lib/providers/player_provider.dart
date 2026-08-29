@@ -37,6 +37,11 @@ import '../services/kugou_api/kugou_models.dart';
 
 enum AppLoopMode { off, one, all }
 
+/// 队列排序维度（播放列表面板的排序菜单）。
+/// [queue] = 保持当前播放顺序，即不排序。
+enum PlaylistSortBy { queue, title, duration }
+
+
 enum AudioQuality {
   standard('128', '标准音质'),
   high('320', '高音质'),
@@ -2379,20 +2384,130 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
+  /// 按维度重排整个播放队列（真实重排：后续「下一首」也按新顺序走）。
+  ///
+  /// 与歌单页的排序口径一致（标题按 displayName 大小写无关比较、时长按
+  /// Duration 比较），但队列的排序结果会写回 _playlist / _originalPlaylist，
+  /// 因为队列的顺序本身就是播放顺序。
+  ///
+  /// 不重建 audio_service 队列：当前正在播放的 source 与列表顺序无关，
+  /// 因此当前歌曲不会被打断（与 [reorderPlaylist] 同一原理）。
+  Future<void> sortPlaylist(
+    PlaylistSortBy by, {
+    bool ascending = true,
+  }) async {
+    // 「播放顺序」就是当前顺序，无需重排
+    if (by == PlaylistSortBy.queue || _playlist.length < 2) return;
+
+    final currentId = _currentSong?.id;
+    final sorted = List<Song>.from(_playlist);
+    sorted.sort((a, b) {
+      final int cmp;
+      switch (by) {
+        case PlaylistSortBy.title:
+          cmp = a.displayName.toLowerCase().compareTo(
+            b.displayName.toLowerCase(),
+          );
+          break;
+        case PlaylistSortBy.duration:
+          cmp = a.duration.compareTo(b.duration);
+          break;
+        case PlaylistSortBy.queue:
+          cmp = 0;
+          break;
+      }
+      return ascending ? cmp : -cmp;
+    });
+
+    _playlist = sorted;
+    // 排序后的顺序成为新的「原始顺序」：关闭随机播放时回到这个顺序
+    _originalPlaylist = List.from(sorted);
+    _currentIndex = currentId == null
+        ? -1
+        : _playlist.indexWhere((s) => s.id == currentId);
+    if (_currentIndex < 0) _currentIndex = _playlist.isEmpty ? -1 : 0;
+
+    _updateNotification();
+    notifyListeners();
+  }
+
+  /// 批量删除队列中的歌曲（编辑模式的「删除」/「全选后删除」）。
+  ///
+  /// 不含当前播放歌曲时只维护 Dart 端列表，不触碰 audio_service，
+  /// 当前播放不中断；含当前播放歌曲时，先摘掉其余歌曲，再走
+  /// [removeFromPlaylist] 复用「删除当前歌曲」的重建与续播逻辑。
+  Future<void> removeManyFromPlaylist(Set<String> songIds) async {
+    if (songIds.isEmpty || _playlist.isEmpty) return;
+
+    final currentId = _currentSong?.id;
+    final removingCurrent = currentId != null && songIds.contains(currentId);
+    final others = removingCurrent
+        ? songIds.where((id) => id != currentId).toSet()
+        : songIds;
+
+    if (others.isNotEmpty) {
+      _playlist.removeWhere((s) => others.contains(s.id));
+      _originalPlaylist.removeWhere((s) => others.contains(s.id));
+      _currentIndex = currentId == null
+          ? -1
+          : _playlist.indexWhere((s) => s.id == currentId);
+      if (_currentIndex < 0) _currentIndex = _playlist.isEmpty ? -1 : 0;
+    }
+
+    if (removingCurrent) {
+      await removeFromPlaylist(_currentIndex);
+      return;
+    }
+
+    _updateNotification();
+    notifyListeners();
+  }
+
   Future<void> toggleLoopMode() async {
-    // 循环模式决定"下一首是谁"，预加载结果作废
-    _resetCrossfadePrepared();
     switch (_loopMode) {
       case AppLoopMode.off:
-        _loopMode = AppLoopMode.all;
+        await _applyLoopMode(AppLoopMode.all);
         break;
       case AppLoopMode.all:
-        _loopMode = AppLoopMode.one;
+        await _applyLoopMode(AppLoopMode.one);
         break;
       case AppLoopMode.one:
-        _loopMode = AppLoopMode.off;
+        await _applyLoopMode(AppLoopMode.off);
         break;
     }
+  }
+
+  /// 合并后的播放模式循环（播放器底部只有一个模式按钮）：
+  /// 不循环 → 列表循环 → 单曲循环 → 随机播放 → 不循环。
+  ///
+  /// 随机播放视作「列表循环 + 打乱顺序」，因此进入随机时同时把 loopMode
+  /// 置为 all，退出随机时恢复原始列表顺序并回到不循环。
+  Future<void> cyclePlayMode() async {
+    if (_shuffleEnabled) {
+      // 随机 → 不循环：先恢复原始顺序，再关掉循环
+      await toggleShuffle();
+      await _applyLoopMode(AppLoopMode.off);
+      return;
+    }
+    switch (_loopMode) {
+      case AppLoopMode.off:
+        await _applyLoopMode(AppLoopMode.all);
+        break;
+      case AppLoopMode.all:
+        await _applyLoopMode(AppLoopMode.one);
+        break;
+      case AppLoopMode.one:
+        // 单曲循环 → 随机播放
+        await _applyLoopMode(AppLoopMode.all);
+        await toggleShuffle();
+        break;
+    }
+  }
+
+  Future<void> _applyLoopMode(AppLoopMode mode) async {
+    // 循环模式决定"下一首是谁"，预加载结果作废
+    _resetCrossfadePrepared();
+    _loopMode = mode;
     // just_audio 的 LoopMode 始终保持 off：应用层通过 _handlePlaybackCompleted
     // 完全控制循环行为（one 从头重播、all 列表循环、off 播完即停）。
     // 若设成 one/all，单 source 下 just_audio 会自动循环且不触发 completed，

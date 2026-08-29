@@ -10,6 +10,7 @@ Widget _wrap({
   ValueChanged<Duration>? onSeekEnd,
   VoidCallback? onSeekStart,
   bool wavy = true,
+  bool isPlaying = false,
 }) {
   return MaterialApp(
     home: Scaffold(
@@ -20,6 +21,7 @@ Widget _wrap({
             position: position,
             duration: duration,
             wavy: wavy,
+            isPlaying: isPlaying,
             activeColor: Colors.blue,
             inactiveColor: Colors.grey,
             labelColor: Colors.black,
@@ -34,7 +36,7 @@ Widget _wrap({
 
 void main() {
   group('PlayerSeekBar', () {
-    testWidgets('常态高度只有 24，时间标签不可见', (tester) async {
+    testWidgets('常态高度 38，时间常显但压暗', (tester) async {
       await tester.pumpWidget(
         _wrap(
           position: const Duration(seconds: 30),
@@ -42,15 +44,42 @@ void main() {
         ),
       );
 
-      expect(tester.getSize(find.byType(PlayerSeekBar)).height, 24);
-      // 标签存在于树里但完全透明（拖动时才浮现）
+      expect(tester.getSize(find.byType(PlayerSeekBar)).height, 38);
+      // 时间常显：左＝已播放，右＝剩余（负号）
+      expect(find.text('0:30'), findsOneWidget);
+      expect(find.text('-1:30'), findsOneWidget);
+      // 静止时压暗到 50%
       final opacity = tester.widget<AnimatedOpacity>(
         find.byType(AnimatedOpacity),
       );
-      expect(opacity.opacity, 0);
+      expect(opacity.opacity, 0.5);
     });
 
-    testWidgets('拖到轨道中点：浮现时间标签并回报中点位置', (tester) async {
+    testWidgets('画布拿到完整宽高（回归：CustomPaint 默认 size 为 0 导致轨道不可见）', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        _wrap(
+          position: const Duration(seconds: 30),
+          duration: const Duration(minutes: 2),
+        ),
+      );
+
+      final canvas = find.descendant(
+        of: find.byType(PlayerSeekBar),
+        matching: find.byWidgetPredicate(
+          (w) =>
+              w is CustomPaint &&
+              (w.painter?.runtimeType.toString().contains('SeekBar') ?? false),
+        ),
+      );
+      expect(canvas, findsOneWidget);
+      final size = tester.getSize(canvas);
+      expect(size.width, 300, reason: '画布必须铺满可用宽度，否则整条轨道画不出来');
+      expect(size.height, greaterThan(0));
+    });
+
+    testWidgets('拖到轨道中点：时间提亮并回报中点位置', (tester) async {
       Duration? seeked;
       bool started = false;
       await tester.pumpWidget(
@@ -74,7 +103,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 200));
 
       expect(started, isTrue);
-      // 拖动中标签淡入
+      // 拖动中时间提亮到全不透明
       final opacity = tester.widget<AnimatedOpacity>(
         find.byType(AnimatedOpacity),
       );
@@ -88,6 +117,19 @@ void main() {
 
       expect(seeked, isNotNull);
       expect((seeked!.inSeconds - 60).abs() <= 1, isTrue);
+    });
+
+    testWidgets('暂停时波形收敛成直线并停住 ticker（pumpAndSettle 不应超时）', (tester) async {
+      await tester.pumpWidget(
+        _wrap(
+          position: const Duration(seconds: 30),
+          duration: const Duration(minutes: 2),
+          isPlaying: false,
+        ),
+      );
+      // 波形相位是 repeat() 的无限动画：若暂停后没停住，这里会超时失败
+      await tester.pumpAndSettle();
+      expect(find.byType(PlayerSeekBar), findsOneWidget);
     });
 
     testWidgets('时长未知时不响应拖动', (tester) async {
