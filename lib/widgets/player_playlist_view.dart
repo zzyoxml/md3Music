@@ -155,10 +155,14 @@ class PlayerPlaylistView extends StatefulWidget {
   /// false 用主题莫奈色（为 MD3 风格 tab/浅色背景设计）。
   final bool useAmColors;
 
+  /// Zen 模式：隐藏顶部的随机/循环按钮，与播放器其它控件一起淡出。
+  final bool zenMode;
+
   const PlayerPlaylistView({
     super.key,
     this.useDisplayName = true,
     this.useAmColors = true,
+    this.zenMode = false,
   });
 
   @override
@@ -250,9 +254,9 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
             : colorScheme.onSurface.withValues(alpha: 0.38);
         return Column(
           children: [
-            // 顶部标题行：标题 + 清空
+            // 顶部标题行：标题 + 随机/循环 + 清空
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+              padding: const EdgeInsets.fromLTRB(20, 16, 8, 4),
               child: Row(
                 children: [
                   Expanded(
@@ -264,6 +268,14 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
                       ),
                     ),
                   ),
+                  // 随机 / 循环：描述的是「这个队列怎么播」，因此归属队列面板，
+                  // 不再挤在播放器底部的传输行里。Zen 模式下隐藏。
+                  if (!widget.zenMode)
+                    _buildQueueModeButtons(
+                      playerProvider,
+                      useAm: useAm,
+                      colorScheme: colorScheme,
+                    ),
                   TextButton(
                     onPressed: playlist.isEmpty
                         ? null
@@ -342,6 +354,99 @@ class _PlayerPlaylistViewState extends State<PlayerPlaylistView> {
         );
       },
     );
+  }
+
+  /// 队列播放模式按钮组：随机 + 循环。
+  ///
+  /// 用独立 Selector 订阅 shuffle / loopMode，避免外层面板 Selector
+  /// （只看列表指纹与当前索引）漏掉模式变化导致按钮态不刷新。
+  /// 激活态：AM 皮肤只提亮图标本身（深色背景上不加任何底色）；
+  /// MD 皮肤沿用 secondaryContainer 圆底，与底部导航选中态一致。
+  Widget _buildQueueModeButtons(
+    PlayerProvider playerProvider, {
+    required bool useAm,
+    required ColorScheme colorScheme,
+  }) {
+    return Selector<PlayerProvider, ({bool shuffle, AppLoopMode loop})>(
+      selector: (_, p) => (shuffle: p.shuffleEnabled, loop: p.loopMode),
+      builder: (context, state, _) {
+        final loopOn = state.loop != AppLoopMode.off;
+        return Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildModeButton(
+              icon: state.shuffle ? Icons.shuffle : Icons.shuffle_outlined,
+              active: state.shuffle,
+              tooltip: '随机播放',
+              useAm: useAm,
+              colorScheme: colorScheme,
+              onTap: () {
+                AppHaptics.tick();
+                playerProvider.toggleShuffle();
+              },
+            ),
+            _buildModeButton(
+              icon: _loopModeIcon(state.loop),
+              active: loopOn,
+              tooltip: '循环模式',
+              useAm: useAm,
+              colorScheme: colorScheme,
+              onTap: () {
+                AppHaptics.tick();
+                playerProvider.toggleLoopMode();
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildModeButton({
+    required IconData icon,
+    required bool active,
+    required String tooltip,
+    required bool useAm,
+    required ColorScheme colorScheme,
+    required VoidCallback onTap,
+  }) {
+    // AM 皮肤：激活态只提亮图标，不加圆底；MD 皮肤保留 tonal 圆底
+    final Color background = active && !useAm
+        ? colorScheme.secondaryContainer
+        : Colors.transparent;
+    final Color foreground = active
+        ? (useAm ? Colors.white : colorScheme.onSecondaryContainer)
+        : (useAm ? const Color(0x73FFFFFF) : colorScheme.onSurfaceVariant);
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: background,
+        shape: const CircleBorder(),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: SizedBox(
+            width: 40,
+            height: 40,
+            child: Center(child: Icon(icon, size: 20, color: foreground)),
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _loopModeIcon(AppLoopMode mode) {
+    switch (mode) {
+      case AppLoopMode.off:
+        // 不循环：空心箭头
+        return Icons.repeat_outlined;
+      case AppLoopMode.one:
+        // 单曲循环：带数字 1
+        return Icons.repeat_one;
+      case AppLoopMode.all:
+        // 列表循环：实心箭头，播完回到第一首
+        return Icons.repeat;
+    }
   }
 
   /// 清空播放列表前弹二次确认（配色跟随主题，确认按钮用错误色）。

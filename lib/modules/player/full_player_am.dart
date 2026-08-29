@@ -46,6 +46,8 @@ import '../../widgets/apple_lyrics/parsers/lyric_parser_chain.dart';
 import '../../widgets/ai_recommend_sheet.dart';
 import '../../widgets/menu_action_cell.dart';
 import '../../widgets/player_artwork_image.dart';
+import '../../widgets/player_seek_bar.dart';
+import '../../widgets/player_tab_strip.dart';
 import '../../widgets/smart_artwork_image.dart';
 import '../../widgets/spectrum_artwork.dart';
 import '../../widgets/spectrum_background.dart';
@@ -96,8 +98,7 @@ class AmStyleFullPlayer extends StatefulWidget {
 class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   late TabController _tabController;
-  // 高亮球拖动切换：拖动时上方页面跟随、球放大，松手吸附 & 回缩
-  bool _tabDragActive = false;
+  // 导航条拖动切换：拖动时上方页面跟随，松手吸附到最近 tab
   double _tabDragBtnW = 0;
   double _tabDragDx = 0;
   int _dragStartIndex = 0;
@@ -1397,9 +1398,10 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     ColorScheme colorScheme,
     bool lyricDoubleTap,
   ) {
-    // 竖屏 edgeToEdge 模式：底部需要额外 padding 避免被导航栏遮挡
-    // 使用 viewPadding.bottom 和固定最小值 32 确保控件不被遮挡
-    final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 32;
+    // 竖屏 edgeToEdge 模式：底部需要额外 padding 避免被导航栏遮挡。
+    // 底部控制区从三层压成两层 + 一条 34px 导航条后，这里的固定留白
+    // 从 32 收到 16，把省出的高度还给封面/歌词。
+    final bottomPadding = MediaQuery.of(context).viewPadding.bottom + 16;
 
     return SafeArea(
       bottom: false,
@@ -1414,7 +1416,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               controller: _tabController,
               children: [
                 // 播放列表面板（index 0，专辑封面 tab 左侧）
-                const PlayerPlaylistView(useDisplayName: true),
+                PlayerPlaylistView(useDisplayName: true, zenMode: _zenMode),
                 GestureDetector(
                   onTap: () {
                     // 长按封面切 Zen 模式后松手不再当作点击跳歌词页
@@ -1449,8 +1451,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   behavior: HitTestBehavior.translucent,
                   // RepaintBoundary 隔离 AppleLyricsView 每帧 setState 的重绘范围，
                   // 避免父级 TabBarView/Column 被牵连重建
-                  child: RepaintBoundary(
-                    child: _isLoadingLyrics
+                  child: _wrapLyricsWithTranslateToggle(
+                    RepaintBoundary(
+                      child: _isLoadingLyrics
                         // AM 风格：歌词 loading 改为白色，与深色背景协调
                         ? const Center(
                             child: M3ELoadingIndicator(color: Colors.white),
@@ -1501,6 +1504,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               );
                             },
                           ),
+                    ),
                   ),
                 ),
                 // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
@@ -1685,7 +1689,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           controller: _tabController,
                           children: [
                             // 播放列表面板（index 0，封面信息 tab 左侧）
-                            const PlayerPlaylistView(useDisplayName: true),
+                            PlayerPlaylistView(useDisplayName: true, zenMode: _zenMode),
                             // 封面 tab 与顶栏一样支持向下拖拽原路返回关闭播放器
                             GestureDetector(
                               behavior: HitTestBehavior.opaque,
@@ -1707,43 +1711,48 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 },
                               ),
                             ),
-                            _isLoadingLyrics
-                                // AM 风格：歌词 loading 改为白色，与深色背景协调
-                                ? const Center(
-                                    child: M3ELoadingIndicator(
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : RepaintBoundary(
-                                    // P0: ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
-                                    // 与 playerProvider（播放/暂停切换低频通知），保证暂停时
-                                    // AppleLyricsView 的 isPlaying 更新、Ticker 收敛后停止
-                                    child: ListenableBuilder(
-                                      listenable: Listenable.merge([
-                                        playerProvider.positionNotifier,
-                                        playerProvider,
-                                      ]),
-                                      builder: (context, _) => AppleLyricsView(
-                                        lines: _parsedLyrics,
-                                        currentTimeMs: playerProvider
-                                            .positionNotifier
-                                            .value
-                                            .inMilliseconds,
-                                        isPlaying: playerProvider.isPlaying,
-                                        forceDarkBackground: true,
-                                        // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                                        enableInterludeDots:
-                                            !_isLocalLrcLyricWithoutWordTiming(
-                                              currentSong,
+                            _wrapLyricsWithTranslateToggle(
+                              _isLoadingLyrics
+                                  // AM 风格：歌词 loading 改为白色，与深色背景协调
+                                  ? const Center(
+                                      child: M3ELoadingIndicator(
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : RepaintBoundary(
+                                      // P0: ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
+                                      // 与 playerProvider（播放/暂停切换低频通知），保证暂停时
+                                      // AppleLyricsView 的 isPlaying 更新、Ticker 收敛后停止
+                                      child: ListenableBuilder(
+                                        listenable: Listenable.merge([
+                                          playerProvider.positionNotifier,
+                                          playerProvider,
+                                        ]),
+                                        builder: (context, _) =>
+                                            AppleLyricsView(
+                                              lines: _parsedLyrics,
+                                              currentTimeMs: playerProvider
+                                                  .positionNotifier
+                                                  .value
+                                                  .inMilliseconds,
+                                              isPlaying:
+                                                  playerProvider.isPlaying,
+                                              forceDarkBackground: true,
+                                              // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+                                              enableInterludeDots:
+                                                  !_isLocalLrcLyricWithoutWordTiming(
+                                                    currentSong,
+                                                  ),
+                                              doubleTapToJump: lyricDoubleTap,
+                                              accentColor: _lyricAccentColor,
+                                              onSeek: (ms) =>
+                                                  playerProvider.seek(
+                                                    Duration(milliseconds: ms),
+                                                  ),
                                             ),
-                                        doubleTapToJump: lyricDoubleTap,
-                                        accentColor: _lyricAccentColor,
-                                        onSeek: (ms) => playerProvider.seek(
-                                          Duration(milliseconds: ms),
-                                        ),
                                       ),
                                     ),
-                                  ),
+                            ),
                             // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
                             Selector<PlayerProvider, String?>(
                               selector: (_, p) => p.currentSong?.id,
@@ -1936,7 +1945,7 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                           controller: _tabController,
                           children: [
                             // 播放列表面板（index 0，封面信息 tab 左侧）
-                            const PlayerPlaylistView(useDisplayName: true),
+                            PlayerPlaylistView(useDisplayName: true, zenMode: _zenMode),
                             // 与手机端统一：4 个 tab（播放列表 / 封面 / 歌词 / 评论），
                             // ActionBar 按钮 tab 索引对齐。
                             // Pad 模式左侧已有封面，但 ActionBar 仍依赖标准 tab 顺序。
@@ -1961,43 +1970,48 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                                 },
                               ),
                             ),
-                            _isLoadingLyrics
-                                // AM 风格：歌词 loading 改为白色，与深色背景协调
-                                ? const Center(
-                                    child: M3ELoadingIndicator(
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                : RepaintBoundary(
-                                    // P0: ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
-                                    // 与 playerProvider（播放/暂停切换低频通知），保证暂停时
-                                    // AppleLyricsView 的 isPlaying 更新、Ticker 收敛后停止
-                                    child: ListenableBuilder(
-                                      listenable: Listenable.merge([
-                                        playerProvider.positionNotifier,
-                                        playerProvider,
-                                      ]),
-                                      builder: (context, _) => AppleLyricsView(
-                                        lines: _parsedLyrics,
-                                        currentTimeMs: playerProvider
-                                            .positionNotifier
-                                            .value
-                                            .inMilliseconds,
-                                        isPlaying: playerProvider.isPlaying,
-                                        forceDarkBackground: true,
-                                        // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
-                                        enableInterludeDots:
-                                            !_isLocalLrcLyricWithoutWordTiming(
-                                              currentSong,
+                            _wrapLyricsWithTranslateToggle(
+                              _isLoadingLyrics
+                                  // AM 风格：歌词 loading 改为白色，与深色背景协调
+                                  ? const Center(
+                                      child: M3ELoadingIndicator(
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : RepaintBoundary(
+                                      // P0: ListenableBuilder 同时订阅 positionNotifier（高频 200ms）
+                                      // 与 playerProvider（播放/暂停切换低频通知），保证暂停时
+                                      // AppleLyricsView 的 isPlaying 更新、Ticker 收敛后停止
+                                      child: ListenableBuilder(
+                                        listenable: Listenable.merge([
+                                          playerProvider.positionNotifier,
+                                          playerProvider,
+                                        ]),
+                                        builder: (context, _) =>
+                                            AppleLyricsView(
+                                              lines: _parsedLyrics,
+                                              currentTimeMs: playerProvider
+                                                  .positionNotifier
+                                                  .value
+                                                  .inMilliseconds,
+                                              isPlaying:
+                                                  playerProvider.isPlaying,
+                                              forceDarkBackground: true,
+                                              // 本地歌曲 + LRC 逐行歌词：禁用间奏点（节奏点）
+                                              enableInterludeDots:
+                                                  !_isLocalLrcLyricWithoutWordTiming(
+                                                    currentSong,
+                                                  ),
+                                              doubleTapToJump: lyricDoubleTap,
+                                              accentColor: _lyricAccentColor,
+                                              onSeek: (ms) =>
+                                                  playerProvider.seek(
+                                                    Duration(milliseconds: ms),
+                                                  ),
                                             ),
-                                        doubleTapToJump: lyricDoubleTap,
-                                        accentColor: _lyricAccentColor,
-                                        onSeek: (ms) => playerProvider.seek(
-                                          Duration(milliseconds: ms),
-                                        ),
                                       ),
                                     ),
-                                  ),
+                            ),
                             // Selector 让 CommentsView 仅在切歌时重建（脱离 200ms 通知路径）
                             Selector<PlayerProvider, String?>(
                               selector: (_, p) => p.currentSong?.id,
@@ -2037,7 +2051,8 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
   }
 
   Widget _buildTopBar(PlayerProvider playerProvider) {
-    // AM 风格顶部栏：返回 / 质量徽章 / 菜单分列两侧，无把手、无 TabBar
+    // AM 风格顶部栏：返回 + 音质徽章 + 睡眠药丸 + 更多菜单，无把手、无 TabBar。
+    // 「歌曲信息 / 播放速度」等原先散落在顶栏与底部胶囊的入口统一收进更多菜单。
     // 颜色：白色 + 透明度区分（与 MD 风格的莫奈色对应）
     // 整个顶栏支持向下拖拽原路返回（点击按钮仍由子元素处理，竞技场自动区分）
     return GestureDetector(
@@ -2068,19 +2083,9 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                 return _buildSleepTimerPill(playerProvider);
               },
             ),
-            // 歌曲信息：频率/位深/码率/声道 + USB 独占开关
             IconButton(
-              icon: const Icon(Icons.info_outline, color: Colors.white),
-              tooltip: '歌曲信息',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SongInfoPage()),
-                );
-              },
-            ),
-            IconButton(
-              icon: const Icon(Icons.more_vert, color: Colors.white),
+              icon: const Icon(Icons.more_horiz, color: Colors.white),
+              tooltip: '更多',
               onPressed: () => _showMoreMenu(context),
             ),
           ],
@@ -2221,52 +2226,54 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               ),
             ),
           SizedBox(height: textSpacing),
-          InkWell(
-            onTap: () => _navigateToAlbum(currentSong as Song),
-            borderRadius: BorderRadius.circular(4),
-            child: Text(
-              currentSong.displayName,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style:
-                  (isExpanded
-                          ? Theme.of(context).textTheme.titleMedium
-                          : Theme.of(context).textTheme.titleLarge)
-                      ?.copyWith(color: Colors.white),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 4),
-          InkWell(
-            onTap: () => _navigateToAlbum(currentSong as Song),
-            borderRadius: BorderRadius.circular(4),
-            child: Text(
-              currentSong.artist,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.white70),
-              textAlign: TextAlign.center,
-            ),
-          ),
-          const SizedBox(height: 2),
-          InkWell(
-            onTap: () => _navigateToAlbum(currentSong as Song),
-            borderRadius: BorderRadius.circular(4),
-            child: Text(
-              currentSong.album,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: Colors.white70),
-              textAlign: TextAlign.center,
-            ),
-          ),
+          _buildTitleBlock(playerProvider, currentSong, isExpanded: isExpanded),
           if (!isExpanded) const Spacer(),
         ],
       ),
+    );
+  }
+
+  /// 标题区 —— 两行元数据（标题 + 艺人·专辑）。
+  ///
+  /// 原先「标题 / 艺人 / 专辑」三行居中堆叠。改为 Apple Music 的左对齐布局，
+  /// 艺人与专辑合并成一行（同为元数据）。倍速状态与调节入口都在传输行左端。
+  Widget _buildTitleBlock(
+    PlayerProvider playerProvider,
+    dynamic currentSong, {
+    bool isExpanded = false,
+  }) {
+    final textTheme = Theme.of(context).textTheme;
+    final subtitle = currentSong.album.toString().isEmpty
+        ? currentSong.artist.toString()
+        : '${currentSong.artist} · ${currentSong.album}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        InkWell(
+          onTap: () => _navigateToAlbum(currentSong as Song),
+          borderRadius: BorderRadius.circular(4),
+          child: Text(
+            currentSong.displayName,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: (isExpanded ? textTheme.titleMedium : textTheme.titleLarge)
+                ?.copyWith(color: Colors.white, fontWeight: FontWeight.w600),
+            textAlign: TextAlign.left,
+          ),
+        ),
+        const SizedBox(height: 2),
+        InkWell(
+          onTap: () => _navigateToAlbum(currentSong as Song),
+          borderRadius: BorderRadius.circular(4),
+          child: Text(
+            subtitle,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: textTheme.bodyMedium?.copyWith(color: Colors.white70),
+            textAlign: TextAlign.left,
+          ),
+        ),
+      ],
     );
   }
 
@@ -2278,69 +2285,27 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     return Center(
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            InkWell(
-              onTap: () => _navigateToAlbum(currentSong as Song),
-              borderRadius: BorderRadius.circular(4),
-              child: Text(
-                currentSong.displayName,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(color: Colors.white),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 4),
-            InkWell(
-              onTap: () => _navigateToAlbum(currentSong as Song),
-              borderRadius: BorderRadius.circular(4),
-              child: Text(
-                currentSong.artist,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(color: Colors.white70),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 2),
-            InkWell(
-              onTap: () => _navigateToAlbum(currentSong as Song),
-              borderRadius: BorderRadius.circular(4),
-              child: Text(
-                currentSong.album,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: Colors.white70),
-                textAlign: TextAlign.center,
-              ),
-            ),
-          ],
-        ),
+        child: _buildTitleBlock(playerProvider, currentSong),
       ),
     );
   }
 
+  /// 底部控制区 —— 三层等权重的旧结构（进度行 / 传输行 / 操作胶囊）压成两层：
+  /// 进度（信息）+ 传输（动作），导航独立成一条极简指示条。
   Widget _buildControls(
     PlayerProvider playerProvider,
     ColorScheme colorScheme, {
     bool isExpanded = false,
   }) {
-    final horizontalPadding = isExpanded ? 16.0 : 24.0;
-    final verticalSpacing = isExpanded ? 4.0 : 8.0;
+    final horizontalPadding = isExpanded ? 16.0 : 20.0;
 
     return Padding(
       padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // 与上方 tab 内容拉开距离：进度条拖动时时间标签会向上浮出 16px
+          SizedBox(height: isExpanded ? 4 : 8),
           // P0: 进度条监听 positionNotifier（高频 200ms）+ provider（duration/切歌等低频），
           // 不再依赖 provider 全量通知更新 position
           ListenableBuilder(
@@ -2355,232 +2320,100 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               colorScheme,
             ),
           ),
-          SizedBox(height: verticalSpacing),
-          // Selector 让主控制按钮仅在 isPlaying / loopMode / shuffle 变化时重建
-          // 不再每 200ms 因 position 变化重建
-          Selector<
-            PlayerProvider,
-            ({bool isPlaying, AppLoopMode loopMode, bool shuffleEnabled})
-          >(
-            selector: (_, p) => (
-              isPlaying: p.isPlaying,
-              loopMode: p.loopMode,
-              shuffleEnabled: p.shuffleEnabled,
-            ),
+          SizedBox(height: isExpanded ? 8 : 16),
+          // Selector 让主控制按钮仅在 isPlaying / 倍速变化时重建，
+          // 不再每 200ms 因 position 变化重建（倍速在左端常驻显示当前值）
+          Selector<PlayerProvider, ({bool isPlaying, double speed})>(
+            selector: (_, p) => (isPlaying: p.isPlaying, speed: p.speed),
             builder: (context, state, __) => _buildMainControls(
               playerProvider,
               colorScheme,
               isExpanded: isExpanded,
               isPlaying: state.isPlaying,
-              loopMode: state.loopMode,
-              shuffleEnabled: state.shuffleEnabled,
             ),
           ),
-          SizedBox(height: verticalSpacing),
-          // Selector 让副控制按钮在 currentSong / speed / 音质标签变化时重建
-          Selector<
-            PlayerProvider,
-            ({String? songId, double speed, String currentQualityLabel})
-          >(
-            selector: (_, p) => (
-              songId: p.currentSong?.id,
-              speed: p.speed,
-              currentQualityLabel: p.currentQualityLabel,
-            ),
-            builder: (context, _, __) => _buildSecondaryControls(
-              playerProvider,
-              colorScheme,
-              isExpanded: isExpanded,
-            ),
-          ),
+          SizedBox(height: isExpanded ? 4 : 10),
+          _buildTabStrip(),
         ],
       ),
     );
   }
 
+  /// 进度条 —— AM 皮肤用纯细线，无手柄；按下时轨道膨胀并浮出时间数字。
   Widget _buildProgressBar(
     PlayerProvider playerProvider,
     Duration position,
     Duration duration,
     ColorScheme colorScheme,
   ) {
-    // Apple Music 风格：深色背景下进度条与时间标签用白色
     final song = playerProvider.currentSong;
-    final hasClimax =
-        song?.climaxStart != null &&
-        song?.climaxEnd != null &&
-        duration.inMilliseconds > 0;
-
-    return Row(
-      children: [
-        SizedBox(
-          width: 40,
-          child: Text(
-            _formatDuration(position),
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: Colors.white),
-            textAlign: TextAlign.center,
-          ),
-        ),
-        Expanded(
-          child: hasClimax
-              ? _buildSliderWithClimaxMarker(
-                  playerProvider,
-                  position,
-                  duration,
-                  song!,
-                )
-              : Slider(
-                  value: duration.inMilliseconds > 0
-                      ? (position.inMilliseconds / duration.inMilliseconds)
-                            .clamp(0.0, 1.0)
-                      : 0.0,
-                  activeColor: Colors.white,
-                  inactiveColor: Colors.white24,
-                  onChangeStart: (value) {
-                    _wasPlayingBeforeDrag = playerProvider.isPlaying;
-                    if (_wasPlayingBeforeDrag) {
-                      playerProvider.pauseForSeek();
-                    }
-                  },
-                  onChanged: (value) {
-                    final newPosition = Duration(
-                      milliseconds: (duration.inMilliseconds * value).round(),
-                    );
-                    playerProvider.seek(newPosition);
-                  },
-                  onChangeEnd: (value) async {
-                    AppHaptics.tick();
-                    final newPosition = Duration(
-                      milliseconds: (duration.inMilliseconds * value).round(),
-                    );
-                    await playerProvider.seek(newPosition);
-                    if (_wasPlayingBeforeDrag) {
-                      playerProvider.resume();
-                    }
-                  },
-                ),
-        ),
-        SizedBox(
-          width: 40,
-          child: Text(
-            _formatDuration(duration),
-            style: Theme.of(
-              context,
-            ).textTheme.labelSmall?.copyWith(color: Colors.white),
-            textAlign: TextAlign.center,
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// AM 风格：构建带有高潮点标记的进度条。
-  Widget _buildSliderWithClimaxMarker(
-    PlayerProvider playerProvider,
-    Duration position,
-    Duration duration,
-    Song song,
-  ) {
-    final climaxStart = song.climaxStart!;
-    final climaxEnd = song.climaxEnd!;
-    final totalMs = duration.inMilliseconds;
-    if (totalMs <= 0) return const SizedBox.shrink();
-
-    final climaxStartPos = (climaxStart * 1000 / totalMs).clamp(0.0, 1.0);
-    final climaxEndPos = (climaxEnd * 1000 / totalMs).clamp(0.0, 1.0);
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final trackWidth = constraints.maxWidth;
-        final thumbRadius = 10.0;
-        final usableWidth = trackWidth - thumbRadius * 2;
-
-        return Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Slider(
-              value: totalMs > 0
-                  ? (position.inMilliseconds / totalMs).clamp(0.0, 1.0)
-                  : 0.0,
-              activeColor: Colors.white,
-              inactiveColor: Colors.white24,
-              onChangeStart: (value) {
-                _wasPlayingBeforeDrag = playerProvider.isPlaying;
-                if (_wasPlayingBeforeDrag) {
-                  playerProvider.pauseForSeek();
-                }
-              },
-              onChanged: (value) {
-                final newPosition = Duration(
-                  milliseconds: (totalMs * value).round(),
-                );
-                playerProvider.seek(newPosition);
-              },
-              onChangeEnd: (value) async {
-                AppHaptics.tick();
-                final newPosition = Duration(
-                  milliseconds: (totalMs * value).round(),
-                );
-                await playerProvider.seek(newPosition);
-                if (_wasPlayingBeforeDrag) {
-                  playerProvider.resume();
-                }
-              },
-            ),
-            // 高潮区域高亮条：与进度条轨道同高、垂直居中对齐
-            Positioned(
-              left: thumbRadius + usableWidth * climaxStartPos,
-              top: 0,
-              bottom: 0,
-              width: usableWidth * (climaxEndPos - climaxStartPos),
-              child: IgnorePointer(
-                child: Center(
-                  child: Container(
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.5),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
+    return PlayerSeekBar(
+      position: position,
+      duration: duration,
+      isPlaying: playerProvider.isPlaying,
+      wavy: false,
+      showHandle: false,
+      activeColor: Colors.white,
+      inactiveColor: Colors.white24,
+      labelColor: Colors.white70,
+      climaxStart: song?.climaxStart?.toDouble(),
+      climaxEnd: song?.climaxEnd?.toDouble(),
+      onSeekStart: () {
+        _wasPlayingBeforeDrag = playerProvider.isPlaying;
+        if (_wasPlayingBeforeDrag) {
+          playerProvider.pauseForSeek();
+        }
+      },
+      onSeekUpdate: (value) => playerProvider.seek(value),
+      onSeekEnd: (value) async {
+        AppHaptics.tick();
+        await playerProvider.seek(value);
+        if (_wasPlayingBeforeDrag) {
+          playerProvider.resume();
+        }
       },
     );
   }
 
+  /// 传输行 —— 中央 prev/play/next，左端播放速度、右端收藏。
+  ///
+  /// shuffle / loop 已迁到播放列表面板头部（它们描述的是「队列怎么播」，
+  /// 不属于「这一首怎么播」）。传输行因此从 5 个目标回到 3 个，播放键得以放大；
+  /// 倍速与收藏落在居中留下的左右空白里，不额外占用纵向高度。
+  /// 投屏保留在更多菜单的宫格里。
   Widget _buildMainControls(
     PlayerProvider playerProvider,
     ColorScheme colorScheme, {
     bool isExpanded = false,
     required bool isPlaying,
-    required AppLoopMode loopMode,
-    required bool shuffleEnabled,
   }) {
     // Apple Music HIG 风格：大按钮居中，白色图标，圆形白色播放按钮
-    final spacing = isExpanded ? 4.0 : 8.0;
-    final skipIconSize = isExpanded ? 28.0 : 36.0;
-    final playIconSize = isExpanded ? 40.0 : 48.0;
+    final spacing = isExpanded ? 8.0 : 12.0;
+    final skipIconSize = isExpanded ? 30.0 : 38.0;
+    final playIconSize = isExpanded ? 44.0 : 54.0;
+    final song = playerProvider.currentSong;
+    // 根据歌曲来源（本地/在线）选择对应的收藏 Provider
+    final isOnline = song is Song && song.isOnline;
+    final isFavorited =
+        song != null &&
+        (isOnline
+            ? context.watch<FavoritesProvider>().isFavorite(song.id)
+            : context.watch<LocalFavoritesProvider>().isFavorite(song.id));
 
     return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        IconButton(
-          icon: Icon(
-            shuffleEnabled ? Icons.shuffle : Icons.shuffle_outlined,
-            // 深色背景下：启用时纯白，未启用时半透明白
-            color: shuffleEnabled ? Colors.white : Colors.white70,
+        // 左端：播放速度（常驻显示当前倍速，点击调节）
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _buildEdgeAction(
+              label: '${playerProvider.speed}x',
+              color: Colors.white,
+              tooltip: '播放速度',
+              onTap: () => _showSpeedDialog(playerProvider),
+            ),
           ),
-          onPressed: () {
-            AppHaptics.tick();
-            playerProvider.toggleShuffle();
-          },
         ),
-        SizedBox(width: spacing),
         IconButton(
           iconSize: skipIconSize,
           icon: const Icon(Icons.skip_previous, color: Colors.white),
@@ -2616,331 +2449,174 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
             playerProvider.next();
           },
         ),
-        SizedBox(width: spacing),
-        IconButton(
-          icon: Icon(
-            _getLoopModeIcon(loopMode),
-            color: loopMode != AppLoopMode.off ? Colors.white : Colors.white70,
+        // 右端：收藏
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: _buildEdgeAction(
+              icon: isFavorited ? Icons.favorite : Icons.favorite_border,
+              // 收藏激活时用红色强调（与 MD 风格一致）
+              color: isFavorited ? Colors.redAccent : Colors.white,
+              tooltip: '收藏',
+              onTap: song == null
+                  ? null
+                  : () {
+                      if (isFavorited) {
+                        AppHaptics.click();
+                      } else {
+                        AppHaptics.heavy();
+                      }
+                      if (isOnline) {
+                        context.read<FavoritesProvider>().toggleFavorite(song);
+                      } else {
+                        context.read<LocalFavoritesProvider>().toggleFavorite(
+                          song.id,
+                        );
+                      }
+                    },
+              // 长按：在线歌曲弹出 AI 推荐歌曲面板
+              onLongPress: song != null && isOnline
+                  ? () => showAiRecommendSheet(context, song)
+                  : null,
+            ),
           ),
-          onPressed: () {
-            AppHaptics.tick();
-            playerProvider.toggleLoopMode();
-          },
         ),
       ],
     );
   }
 
-  Widget _buildSecondaryControls(
-    PlayerProvider playerProvider,
-    ColorScheme colorScheme, {
-    bool isExpanded = false,
+  /// 传输行两端的次要动作：48dp 圆形触达区，无容器背景。
+  /// 传 [icon] 画图标，传 [label] 画文字（倍速这类需要显示当前值的动作）。
+  Widget _buildEdgeAction({
+    IconData? icon,
+    String? label,
+    required Color color,
+    VoidCallback? onTap,
+    VoidCallback? onLongPress,
+    String? tooltip,
   }) {
-    final song = playerProvider.currentSong;
-    // 根据歌曲来源（本地/在线）选择对应的收藏 Provider
+    final Widget button = InkWell(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      customBorder: const CircleBorder(),
+      child: SizedBox(
+        width: 48,
+        height: 48,
+        child: Center(
+          child: label != null
+              ? Text(
+                  label,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: color,
+                    fontWeight: FontWeight.w600,
+                  ),
+                )
+              : Icon(icon, size: 24, color: color),
+        ),
+      ),
+    );
+    return tooltip == null ? button : Tooltip(message: tooltip, child: button);
+  }
+
+  /// 底部导航条 —— 只做页面切换这一件事（原先与倍速/收藏/翻译混装在一条胶囊里）。
+  ///
+  /// Pad 竖屏时封面 tab 不存在（_tabController.length == 3），items 随之裁剪。
+  Widget _buildTabStrip() {
+    final song = context.read<PlayerProvider>().currentSong;
     final isOnline = song is Song && song.isOnline;
-    final isFavorited =
-        song != null &&
-        (isOnline
-            ? context.watch<FavoritesProvider>().isFavorite(song.id)
-            : context.watch<LocalFavoritesProvider>().isFavorite(song.id));
-    final textTheme = Theme.of(context).textTheme;
-    // AM 风格：深色蒙版背景上用 15% 透明度白色作 pill 底，图标纯白，
-    // 桌面歌词开启时用实心 icon（与 mini_player 一致）。
-    // ListenableBuilder 监听 LyricPreferences：翻译开关 toggle 时刷新按钮颜色
-    return ListenableBuilder(
-      listenable: LyricPreferences.instance,
-      builder: (context, _) => Material(
-        color: Colors.white.withValues(alpha: 0.15),
-        shape: const StadiumBorder(),
-        clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-          height: 48,
-          child: Row(
-            children: [
-              // 1. 倍速指示（纯文字）
-              Expanded(
-                child: InkWell(
-                  onTap: () => _showSpeedDialog(playerProvider),
-                  child: Center(
-                    child: Text(
-                      '${playerProvider.speed}x',
-                      style: textTheme.labelLarge?.copyWith(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              // 2-5. 页面切换组：播放列表/封面/歌词/评论。
-              // 底部「高亮球」随 _tabController 动画值在 4 个按钮间平滑移动，
-              // 点击切换（animateTo）与 TabBarView 滑动都驱动该动画，因而同步跟随。
-              Expanded(
-                flex: 4,
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final switchWidth = constraints.maxWidth;
-                    final btnW = switchWidth / 4;
-                    const capsuleSize = 34.0;
-                    _tabDragBtnW = btnW; // 供拖动逻辑换算 offset
-                    return GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onHorizontalDragStart: _onTabDragStart,
-                      onHorizontalDragUpdate: _onTabDragUpdate,
-                      onHorizontalDragEnd: (_) => _onTabDragEnd(),
-                      onHorizontalDragCancel: _onTabDragEnd,
-                      child: Stack(
-                        children: [
-                          AnimatedBuilder(
-                            // 必须监听 animation 动画对象本身，而不是 TabController：
-                            // _changeIndex 只在动画开始/结束时 notify，动画期间的每帧进度
-                            // （点击 animateTo 的 Curves.ease 与手指拖拽的 offset）只在新
-                            // value 上体现，监听它才能在拖拽/切换时平滑连贯地跟随滑动。
-                            animation:
-                                _tabController.animation ??
-                                const AlwaysStoppedAnimation<double>(0),
-                            builder: (context, _) {
-                              final anim =
-                                  (_tabController.animation?.value ??
-                                          _tabController.index.toDouble())
-                                      .clamp(0.0, 3.0);
-                              return Positioned(
-                                left: anim * btnW + (btnW - capsuleSize) / 2,
-                                top: (48 - capsuleSize) / 2,
-                                width: capsuleSize,
-                                height: capsuleSize,
-                                child: IgnorePointer(
-                                  child: AnimatedScale(
-                                    // 拖动时放大，松手回缩
-                                    scale: _tabDragActive ? 1.3 : 1.0,
-                                    duration: const Duration(milliseconds: 150),
-                                    curve: Curves.easeOut,
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: Colors.white.withValues(
-                                          alpha: 0.25,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-                          Row(
-                            children: [
-                              // 播放列表 — 切换到播放列表面板
-                              Expanded(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    if (_tabController.index != 0) {
-                                      _tabController.animateTo(0);
-                                    }
-                                  },
-                                  child: Center(
-                                    child: Icon(
-                                      Icons.queue_music,
-                                      size: 22,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // 封面 — 短按跳转到封面 tab，长按弹出下载音质选择（本地歌曲屏蔽长按下载）
-                              Expanded(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    if (_tabController.index != 1) {
-                                      _tabController.animateTo(1);
-                                    }
-                                  },
-                                  onLongPress:
-                                      song != null &&
-                                          isOnline &&
-                                          AmStyleFullPlayer
-                                                  .coverLongPressCallback !=
-                                              null
-                                      ? () {
-                                          HapticFeedback.lightImpact();
-                                          AmStyleFullPlayer
-                                              .coverLongPressCallback!(
-                                            context,
-                                            song,
-                                          );
-                                        }
-                                      : null,
-                                  child: Center(
-                                    child: Icon(
-                                      Icons.album,
-                                      size: 22,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // 歌词 — 短按跳转到歌词 tab，长按开关桌面歌词
-                              Expanded(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    if (_tabController.index != 2) {
-                                      _tabController.animateTo(2);
-                                    }
-                                  },
-                                  onLongPress: () async {
-                                    HapticFeedback.lightImpact();
-                                    await DesktopLyricService.instance.toggle();
-                                    if (mounted) {
-                                      // 同步通知栏"桌面歌词"按钮状态
-                                      final player = context
-                                          .read<PlayerProvider>();
-                                      final curSong = player.currentSong;
-                                      // 收藏状态需实时查询，避免暂停时显示为未收藏
-                                      bool isFavorited = false;
-                                      if (curSong != null) {
-                                        try {
-                                          isFavorited = context
-                                              .read<FavoritesProvider>()
-                                              .isFavorite(curSong.id);
-                                        } catch (_) {}
-                                      }
-                                      await MediaNotificationService.updateNotification(
-                                        // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
-                                        title: curSong?.displayName ?? '',
-                                        artist: curSong?.artist ?? '',
-                                        artUrl: curSong?.artworkUri,
-                                        isPlaying: player.isPlaying,
-                                        position: player.position,
-                                        duration:
-                                            player.duration ?? Duration.zero,
-                                        desktopLyricEnabled: DesktopLyricService
-                                            .instance
-                                            .enabled,
-                                        isFavorited: isFavorited,
-                                      );
-                                    }
-                                  },
-                                  child: Center(
-                                    child: Icon(
-                                      // 桌面歌词开启时用实心 icon + 纯白，与 mini_player 一致
-                                      DesktopLyricService.instance.enabled
-                                          ? Icons.lyrics
-                                          : Icons.lyrics_outlined,
-                                      size: 22,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              // 评论 — 跳转到评论 tab
-                              Expanded(
-                                child: GestureDetector(
-                                  behavior: HitTestBehavior.opaque,
-                                  onTap: () {
-                                    if (_tabController.index != 3) {
-                                      _tabController.animateTo(3);
-                                    }
-                                  },
-                                  child: Center(
-                                    child: Icon(
-                                      Icons.comment_outlined,
-                                      size: 22,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-              ),
-              // 6. 收藏
-              Expanded(
-                child: InkWell(
-                  onTap: song != null
-                      ? () {
-                          // 本地歌曲走 LocalFavoritesProvider，在线走 FavoritesProvider
-                          if (isFavorited) {
-                            AppHaptics.click();
-                          } else {
-                            AppHaptics.heavy();
-                          }
-                          if (isOnline) {
-                            context.read<FavoritesProvider>().toggleFavorite(
-                              song,
-                            );
-                          } else {
-                            context
-                                .read<LocalFavoritesProvider>()
-                                .toggleFavorite(song.id);
-                          }
-                        }
-                      : null,
-                  // 长按：在线歌曲弹出 AI 推荐歌曲面板
-                  onLongPress: song != null && isOnline
-                      ? () => showAiRecommendSheet(context, song)
-                      : null,
-                  child: Center(
-                    child: Icon(
-                      isFavorited ? Icons.favorite : Icons.favorite_border,
-                      size: 22,
-                      // 收藏激活时用红色强调（与 MD 风格一致）
-                      color: isFavorited ? Colors.redAccent : Colors.white,
-                    ),
-                  ),
-                ),
-              ),
-              // 7. 翻译/罗马音开关 — 短按 toggle 副行显示，长按切换模式
-              Expanded(
-                child: InkWell(
-                  onTap: () {
-                    LyricPreferences.instance.setShowTranslation(
-                      !LyricPreferences.instance.showTranslation,
-                    );
-                  },
-                  onLongPress: () {
-                    // 长按在「翻译」与「罗马音」显示模式间切换。
-                    // 判定按目标模式的数据可用性：粤语/纯音译歌常只有罗马音
-                    // 无翻译（旧逻辑要求两者同时存在，导致有罗马音也切不了）。
-                    final next =
-                        LyricPreferences.instance.displayMode ==
-                            LyricDisplayMode.translation
-                        ? LyricDisplayMode.roma
-                        : LyricDisplayMode.translation;
-                    debugPrint(
-                      '[RomaToggle] onLongPress: hasTranslation=$_hasTranslation hasRoma=$_hasRoma showTranslation=${LyricPreferences.instance.showTranslation} displayMode=${LyricPreferences.instance.displayMode} next=$next',
-                    );
-                    if (next == LyricDisplayMode.roma && !_hasRoma) {
-                      debugPrint('[RomaToggle] 无罗马音数据，返回');
-                      showToast('当前歌曲暂无罗马音');
-                      return;
-                    }
-                    if (next == LyricDisplayMode.translation &&
-                        !_hasTranslation) {
-                      debugPrint('[RomaToggle] 无翻译数据，返回');
-                      showToast('当前歌曲暂无翻译');
-                      return;
-                    }
-                    // 副行渲染受 showTranslation 开关控制：短按关副行后长按
-                    // 切模式仍不显示。切模式时强制打开副行，保证生效。
-                    if (!LyricPreferences.instance.showTranslation) {
-                      debugPrint('[RomaToggle] 强制打开副行开关 showTranslation');
-                      LyricPreferences.instance.setShowTranslation(true);
-                    }
-                    LyricPreferences.instance.setDisplayMode(next);
-                    debugPrint('[RomaToggle] 切换完成: displayMode=$next');
-                    showToast(
-                      next == LyricDisplayMode.roma ? '已切换到罗马音' : '已切换到翻译',
-                    );
-                  },
+    final hasCoverTab = _tabController.length == 4;
+    return PlayerTabStrip(
+      controller: _tabController,
+      activeColor: Colors.white,
+      inactiveColor: Colors.white.withValues(alpha: 0.45),
+      onSegmentWidth: (w) => _tabDragBtnW = w,
+      onDragStart: _onTabDragStart,
+      onDragUpdate: _onTabDragUpdate,
+      onDragEnd: _onTabDragEnd,
+      items: [
+        const PlayerTabItem(icon: Icons.queue_music, tooltip: '播放列表'),
+        if (hasCoverTab)
+          PlayerTabItem(
+            icon: Icons.album,
+            tooltip: '封面',
+            // 长按封面段：弹出下载音质选择（本地歌曲屏蔽）
+            onLongPress:
+                song != null &&
+                    isOnline &&
+                    AmStyleFullPlayer.coverLongPressCallback != null
+                ? () {
+                    HapticFeedback.lightImpact();
+                    AmStyleFullPlayer.coverLongPressCallback!(context, song);
+                  }
+                : null,
+          ),
+        PlayerTabItem(
+          // 桌面歌词开启时用实心 icon，与 mini_player 一致
+          icon: DesktopLyricService.instance.enabled
+              ? Icons.lyrics
+              : Icons.lyrics_outlined,
+          tooltip: '歌词',
+          onLongPress: _toggleDesktopLyric,
+        ),
+        const PlayerTabItem(icon: Icons.comment_outlined, tooltip: '评论'),
+      ],
+    );
+  }
+
+  /// 长按歌词段：开关桌面歌词，并同步通知栏的「桌面歌词」按钮状态。
+  Future<void> _toggleDesktopLyric() async {
+    HapticFeedback.lightImpact();
+    await DesktopLyricService.instance.toggle();
+    if (!mounted) return;
+    final player = context.read<PlayerProvider>();
+    final curSong = player.currentSong;
+    // 收藏状态需实时查询，避免暂停时显示为未收藏
+    bool isFavorited = false;
+    if (curSong != null) {
+      try {
+        isFavorited = context.read<FavoritesProvider>().isFavorite(curSong.id);
+      } catch (_) {}
+    }
+    await MediaNotificationService.updateNotification(
+      // 用 displayName 剥离 .mp3 等后缀，避免标题显示文件名
+      title: curSong?.displayName ?? '',
+      artist: curSong?.artist ?? '',
+      artUrl: curSong?.artworkUri,
+      isPlaying: player.isPlaying,
+      position: player.position,
+      duration: player.duration ?? Duration.zero,
+      desktopLyricEnabled: DesktopLyricService.instance.enabled,
+      isFavorited: isFavorited,
+    );
+  }
+
+  /// 给歌词页右上角挂一个翻译/罗马音开关。
+  ///
+  /// 原先这个按钮常驻在底部操作胶囊里，但它只作用于歌词副行；
+  /// 移到歌词内容自身的角落后，其它 tab 不再为它付出常驻空间，
+  /// 短按开关副行、长按在「翻译 / 罗马音」间切换的交互保持不变。
+  /// 无容器底色，只靠图标亮度区分开关态；Zen 模式下随其它控件一起隐藏。
+  Widget _wrapLyricsWithTranslateToggle(Widget child) {
+    return Stack(
+      children: [
+        Positioned.fill(child: child),
+        Positioned(
+          top: 4,
+          right: 8,
+          child: ListenableBuilder(
+            listenable: LyricPreferences.instance,
+            builder: (context, _) {
+              if (_zenMode || (!_hasTranslation && !_hasRoma)) {
+                return const SizedBox.shrink();
+              }
+              final on = LyricPreferences.instance.showTranslation;
+              return InkWell(
+                onTap: () => LyricPreferences.instance.setShowTranslation(!on),
+                onLongPress: _switchLyricSubLineMode,
+                customBorder: const CircleBorder(),
+                child: SizedBox(
+                  width: 40,
+                  height: 40,
                   child: Center(
                     child: Icon(
                       // 罗马音模式用 Icons.abc 区分，翻译模式用 Icons.translate
@@ -2948,34 +2624,58 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                               LyricDisplayMode.roma
                           ? Icons.abc
                           : Icons.translate,
-                      size: 22,
-                      // 开启时纯白，关闭时 50% 白（视觉上与其它按钮激活态一致）
-                      color: LyricPreferences.instance.showTranslation
+                      size: 20,
+                      // 开启时纯白，关闭时 45% 白（与导航条未选中态一致）
+                      color: on
                           ? Colors.white
-                          : Colors.white.withValues(alpha: 0.5),
+                          : Colors.white.withValues(alpha: 0.45),
                     ),
                   ),
                 ),
-              ),
-            ],
+              );
+            },
           ),
         ),
-      ),
+      ],
     );
   }
 
-  /// 高亮球拖动开始：记录起始 tab，进入放大态
-  void _onTabDragStart(DragStartDetails d) {
-    setState(() {
-      _tabDragActive = true;
-      _tabDragDx = 0;
-      _dragStartIndex = _tabController.index;
-    });
+  /// 长按翻译按钮：在「翻译」与「罗马音」显示模式间切换。
+  ///
+  /// 判定按目标模式的数据可用性：粤语/纯音译歌常只有罗马音无翻译
+  /// （旧逻辑要求两者同时存在，导致有罗马音也切不了）。
+  void _switchLyricSubLineMode() {
+    HapticFeedback.lightImpact();
+    final next =
+        LyricPreferences.instance.displayMode == LyricDisplayMode.translation
+        ? LyricDisplayMode.roma
+        : LyricDisplayMode.translation;
+    if (next == LyricDisplayMode.roma && !_hasRoma) {
+      showToast('当前歌曲暂无罗马音');
+      return;
+    }
+    if (next == LyricDisplayMode.translation && !_hasTranslation) {
+      showToast('当前歌曲暂无翻译');
+      return;
+    }
+    // 副行渲染受 showTranslation 开关控制：关掉副行后切模式仍不显示，
+    // 因此切模式时强制打开副行，保证生效。
+    if (!LyricPreferences.instance.showTranslation) {
+      LyricPreferences.instance.setShowTranslation(true);
+    }
+    LyricPreferences.instance.setDisplayMode(next);
+    showToast(next == LyricDisplayMode.roma ? '已切换到罗马音' : '已切换到翻译');
   }
 
-  /// 高亮球拖动中：跟手拖动，支持一次跨多个 tab。
+  /// 导航条拖动开始：记录起始 tab
+  void _onTabDragStart(DragStartDetails d) {
+    _tabDragDx = 0;
+    _dragStartIndex = _tabController.index;
+  }
+
+  /// 导航条拖动中：跟手拖动，支持一次跨多个 tab。
   /// 手指右移 → 目标下标增加；目标越过整格就切换 index，余量写 offset，
-  /// 让上方 TabBarView 页面与高亮球实时跟随。
+  /// 让上方 TabBarView 页面与指示线实时跟随。
   void _onTabDragUpdate(DragUpdateDetails d) {
     _tabDragDx += d.delta.dx;
     final len = _tabController.length;
@@ -2989,15 +2689,14 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     _tabController.offset = off;
   }
 
-  /// 高亮球拖动结束：吸附到最近 tab，球回缩
+  /// 导航条拖动结束：吸附到最近 tab
   void _onTabDragEnd() {
     final current = _tabController.index + _tabController.offset;
     final nearest = current.round().clamp(0, _tabController.length - 1);
-    setState(() => _tabDragActive = false);
     if (nearest != _tabController.index) {
       _tabController.animateTo(nearest);
     } else {
-      // 吸附回原 tab：清掉 offset 余量，避免高亮球卡在两图标之间
+      // 吸附回原 tab：清掉 offset 余量，避免指示线卡在两图标之间
       _tabController.offset = 0;
     }
   }
@@ -3249,25 +2948,6 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
     );
   }
 
-  IconData _getLoopModeIcon(AppLoopMode mode) {
-    switch (mode) {
-      case AppLoopMode.off:
-        // 不循环：空心箭头
-        return Icons.repeat_outlined;
-      case AppLoopMode.one:
-        // 单曲循环：带数字1
-        return Icons.repeat_one;
-      case AppLoopMode.all:
-        // 列表循环：实心箭头，播完回到第一首
-        return Icons.repeat;
-    }
-  }
-
-  String _formatDuration(Duration duration) {
-    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$minutes:$seconds';
-  }
 
   // 下载功能未移植（公开库不包含下载）：原封面长按入口已移除。
 
@@ -3334,6 +3014,18 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
                   onTap: () {
                     Navigator.pop(sheetContext);
                     _showAddToPlaylistDialog(rootContext, song);
+                  },
+                ),
+                // 歌曲信息：频率/位深/码率/声道 + USB 独占开关（原顶栏按钮收纳到菜单）
+                ListTile(
+                  leading: const Icon(Icons.info_outline),
+                  title: const Text('歌曲信息'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    Navigator.push(
+                      rootContext,
+                      MaterialPageRoute(builder: (_) => const SongInfoPage()),
+                    );
                   },
                 ),
                 // 均衡器 / 定时关闭 / 投屏：同一行三格宫格，上方 icon 下方文字
