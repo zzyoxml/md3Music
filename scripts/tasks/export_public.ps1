@@ -59,6 +59,14 @@
   未改写时，只追加新提交记录并 fast-forward 推送（免 force）；否则回落到全量重建 + force。
   仅 force push 覆盖模式有效；PR 模式下本开关无效（被忽略）。
 
+.PARAMETER ForceFullHistory
+  配合 -ForcePush -WithHistory：强制走「全量重建 + force push」，跳过增量探测。
+  当增量基线（.md3/export-state 记录的 prevPrivate）指向的历史对象已在远端/本地被
+  覆盖清理（增量的 partial clone 在 `add -A` 读旧树/旧 blob 时报 `unable to read`，
+  即本次稳定失败路径）时，用它强制回到全量重建覆盖。
+  根因溯源：增量复用 `--filter=blob:none` 的 partial clone，按需 fetch 旧对象失败。
+  本开关让探测阶段直接判定不可增量，走 471 行全量路径。
+
 .PARAMETER NoPause
   结束时不等待按键（CI/被其他脚本调用时使用）。
 
@@ -83,6 +91,7 @@ param(
     [string]$ChangelogSince = '',
     [switch]$ChangelogYes,
     [switch]$WithHistory,
+    [switch]$ForceFullHistory,
     [switch]$NoPause
 )
 
@@ -391,6 +400,9 @@ try {
                 }
             }
             $ErrorActionPreference = $prevEAP
+            # -ForceFullHistory：跳过增量探测结果，强制全量重建
+            # （增量基线指向的旧历史对象若被覆盖/清理，增量 add -A 读旧对象会报 unable to read）
+            if ($ForceFullHistory) { $incremental = $false }
             if ($oldTip) {
                 Write-Ok "已拉取远端历史（oldTip @$($oldTip.Substring(0,7))）"
                 if ($prevPrivate) { Write-Ok "找到上次导出映射（private @$($prevPrivate.Substring(0,7)) / empty @$($prevEmpty.Substring(0,7))）" }

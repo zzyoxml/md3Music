@@ -271,12 +271,19 @@ dart run scripts/tools/gen_settings_search_index.dart   # 产出 lib/modules/set
 .\scripts\md3.ps1 export-messages -PublicRemote <URL> -Force   # 只重建/推送提交记录（空树历史，不叠加公开树）
 .\scripts\md3.ps1 full-export          # 一键发布：空树消息历史 + 全量公开树快照推送公开仓库
 #   ↑ 等价 export -ForcePush -WithHistory，默认 zzyoxml/md3Music : rust-local-force（可 -PublicRemote/-PublicBranch 覆盖）
+.\scripts\md3.ps1 full-export -ForceFullHistory   # 强制全量重建 + force push（增量基线失效时用，见下）
 # 公开树独立构建：cd .public_export && flutter pub get && flutter build apk --debug（入口 lib/main.dart）
 ```
 
 > **历史仓库备份路径**：空树消息历史仓库（`export-messages` 的 `-OutDir`、`export -WithHistory` 全量的 `histDir`、增量探测的 `probe`）
 > 默认落在 **项目根 `tmp\` 下**（`tmp\md3music-public-messages-<时间戳>`），而非系统临时目录；`tmp/` 已被 .gitignore 忽略，可归档不随仓库提交。
 > 一键入口：`.\scripts\md3.ps1 full-export`。新增任务脚本为 `scripts/tasks/export_full.ps1`。
+>
+> **增量基线失效的坑（`full-export -ForceFullHistory` 的由来）**：`export -WithHistory`/`full-export` 默认走增量（复用 `--filter=blob:none` 的 partial clone 当历史仓库）。
+> 当公开分支 `.md3/export-state` 记录的 `prevPrivate` 指向的旧历史对象已在远端/本地被覆盖清理时，
+> 增量路径在 `git -C <probe> add -A` 阶段为 diff 旧树/旧 blob 需按需 fetch，拿不到对象即报
+> `fatal: unable to read <hash>` 稳定失败（私有仓库 `rev-list HEAD`/`fsck --full` 均干净，无法预报）。
+> 此时用 `full-export -ForceFullHistory`（等价 `export -ForcePush -WithHistory -ForceFullHistory`）强制全量重建 + force push 覆盖。
 
 ### 3.6 一键提交（`md3.ps1 commit`）
 

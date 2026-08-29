@@ -21,6 +21,7 @@
   .\scripts\md3.ps1 export-messages -PublicRemote <URL> -Force   # 重建并首推公开仓库
   .\scripts\md3.ps1 full-export          # 一键：空树消息历史 + 全量公开树快照推送公开仓库
                                          #     （默认 https://github.com/zzyoxml/md3Music : rust-local-force）
+  .\scripts\md3.ps1 full-export -ForceFullHistory   # 增量基线失效时强制全量重建覆盖
   .\scripts\md3.ps1 changelog -Version v5.4.0        # 总结提交并更新 CHANGELOG.md
   .\scripts\md3.ps1 commit               # TUI 一键提交（勾选改动 / LLM 写提交信息 / 同步 / PR）
 #>
@@ -91,6 +92,7 @@ function Get-TaskOptions([string]$Key) {
             (New-TaskOption -Name '-PublicRemote' -Kind value -Desc '公开仓库 URL（默认 https://github.com/zzyoxml/md3Music）'),
             (New-TaskOption -Name '-PublicBranch' -Kind value -Desc '目标分支（默认 rust-local-force）'),
             (New-TaskOption -Name '-OutDir'       -Kind value -Desc '公开树快照目录（默认 .public_export）'),
+            (New-TaskOption -Name '-ForceFullHistory' -Desc '强制全量重建 + force push，跳过增量探测（增量基线失效时）'),
             (New-TaskOption -Name '-NoPause'      -Desc '结束后不等待按键')
         ) }
         'changelog' { @(

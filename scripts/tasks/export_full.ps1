@@ -24,6 +24,9 @@
 .PARAMETER OutDir
   公开树快照目录（默认交给 export_public 的 .public_export，已 .gitignore 排除）。
 
+.PARAMETER ForceFullHistory
+  强制走「全量重建 + force push」，跳过增量探测（增量基线失效、add 报 unable to read 时使用）。
+
 .PARAMETER NoPause
   结束时不等待按键（CI/被其他脚本调用时使用）。
 
@@ -31,12 +34,14 @@
   .\scripts\md3.ps1 full-export                              # 默认目标仓库/分支一键发布
   .\scripts\md3.ps1 full-export -PublicBranch main           # 覆盖默认分支
   .\scripts\md3.ps1 full-export -OutDir tmp\pub -NoPause     # 指定快照目录 + 非交互
+  .\scripts\md3.ps1 full-export -ForceFullHistory            # 增量基线失效时强制全量重建覆盖
 #>
 [CmdletBinding()]
 param(
     [string]$PublicRemote = 'https://github.com/zzyoxml/md3Music',
     [string]$PublicBranch = 'rust-local-force',
     [string]$OutDir = '',
+    [switch]$ForceFullHistory,
     [switch]$NoPause
 )
 
@@ -54,6 +59,7 @@ try {
         WithHistory  = $true
         NoPause      = $true
     }
+    if ($ForceFullHistory) { $exportArgs.ForceFullHistory = $true }
     if ($OutDir) { $exportArgs.OutDir = $OutDir }
     & (Join-Path $PSScriptRoot 'export_public.ps1') @exportArgs
     if ($LASTEXITCODE -ne 0) { throw "导出/发布失败（退出码 $LASTEXITCODE）" }
