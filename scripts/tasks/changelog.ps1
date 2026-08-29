@@ -91,6 +91,9 @@ try {
 
     # ---------- 3. 取提交 ----------
     Write-Step '收集提交记录'
+    # PowerShell 5.1 默认按控制台代码页(GBK)解码外部命令输出，而 git 输出是 UTF-8，
+    # 不切会让中文提交标题全部乱码，连带机械分组/预览/写入全乱。故先切 UTF-8 解码。
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     $logArgs = @('--no-merges', '--pretty=format:%h %s')
     if ($since) { $logArgs += @("$since..HEAD") } else { $logArgs += @('-n', '60') }
     $prevEap = $ErrorActionPreference
