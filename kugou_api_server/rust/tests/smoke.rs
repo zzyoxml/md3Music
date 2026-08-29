@@ -29,6 +29,18 @@ fn simulate_rsa_key_parses() {
     assert!(!sim.sid.is_empty());
 }
 
+/// 请求级超时：`timeout_secs` 必须被正确记录（默认 None，设置后 Some(secs)）。
+/// 回归：/user/grade/info 依赖此字段把上游超时从全局 20s 收紧到 8s，
+/// 先于客户端 dio 15s 放弃，避免「客户端已超时、服务器继续空转」的空耗。
+#[test]
+fn request_options_timeout_secs() {
+    use kugou_server::request::RequestOptions;
+    let default = RequestOptions::new("/v2/get_grade_info");
+    assert_eq!(default.timeout_secs, None);
+    let tightened = RequestOptions::new("/v2/get_grade_info").timeout_secs(8);
+    assert_eq!(tightened.timeout_secs, Some(8));
+}
+
 /// q_raw_or 必须复刻 JS `obj?.[key] ?? default`：缺失/null → 默认值（原样保持数字），
 /// 其他 → 原值（URL query 下为字符串，不做类型转换）。
 /// 回归：云盘 /user/cloud 的 AES 明文、/user/cloud/url 的 album_audio_id 依赖此语义

@@ -1221,14 +1221,13 @@ class _FullPlayerState extends State<FullPlayer>
                         )
                       // P0: 歌词时间只订阅 positionNotifier（高频 200ms），
                       // 不再因 positionStream 触发整页重建
-                      : ValueListenableBuilder<Duration>(
-                          valueListenable: playerProvider.positionNotifier,
-                          builder: (context, position, _) => LyricsView(
+                      : RepaintBoundary(
+                          child: LyricsView(
                             lyrics: _lyrics,
-                            position: _adjustedLyricPosition(
-                              position,
-                              currentSong,
-                            ),
+                            position: Duration.zero,
+                            positionListenable: playerProvider.positionNotifier,
+                            adaptPosition: (position) =>
+                                _adjustedLyricPosition(position, currentSong),
                             doubleTapToJump: lyricDoubleTap,
                             onSeek: (duration) {
                               playerProvider.seek(duration);
@@ -1397,21 +1396,22 @@ class _FullPlayerState extends State<FullPlayer>
                                     ),
                                   )
                                 // P0: 歌词时间只订阅 positionNotifier（高频 200ms）
-                                : ValueListenableBuilder<Duration>(
-                                    valueListenable:
-                                        playerProvider.positionNotifier,
-                                    builder: (context, position, _) =>
-                                        LyricsView(
-                                          lyrics: _lyrics,
-                                          position: _adjustedLyricPosition(
+                                : RepaintBoundary(
+                                    child: LyricsView(
+                                      lyrics: _lyrics,
+                                      position: Duration.zero,
+                                      positionListenable: playerProvider
+                                          .positionNotifier,
+                                      adaptPosition: (position) =>
+                                          _adjustedLyricPosition(
                                             position,
                                             currentSong,
                                           ),
-                                          doubleTapToJump: lyricDoubleTap,
-                                          onSeek: (duration) {
-                                            playerProvider.seek(duration);
-                                          },
-                                        ),
+                                      doubleTapToJump: lyricDoubleTap,
+                                      onSeek: (duration) {
+                                        playerProvider.seek(duration);
+                                      },
+                                    ),
                                   ),
                             CommentsView(
                               songHash: currentSong.id,
@@ -1582,21 +1582,22 @@ class _FullPlayerState extends State<FullPlayer>
                                     ),
                                   )
                                 // P0: 歌词时间只订阅 positionNotifier（高频 200ms）
-                                : ValueListenableBuilder<Duration>(
-                                    valueListenable:
-                                        playerProvider.positionNotifier,
-                                    builder: (context, position, _) =>
-                                        LyricsView(
-                                          lyrics: _lyrics,
-                                          position: _adjustedLyricPosition(
+                                : RepaintBoundary(
+                                    child: LyricsView(
+                                      lyrics: _lyrics,
+                                      position: Duration.zero,
+                                      positionListenable: playerProvider
+                                          .positionNotifier,
+                                      adaptPosition: (position) =>
+                                          _adjustedLyricPosition(
                                             position,
                                             currentSong,
                                           ),
-                                          doubleTapToJump: lyricDoubleTap,
-                                          onSeek: (duration) {
-                                            playerProvider.seek(duration);
-                                          },
-                                        ),
+                                      doubleTapToJump: lyricDoubleTap,
+                                      onSeek: (duration) {
+                                        playerProvider.seek(duration);
+                                      },
+                                    ),
                                   ),
                             CommentsView(
                               songHash: currentSong.id,
@@ -1820,15 +1821,12 @@ class _FullPlayerState extends State<FullPlayer>
               ),
             ),
           SizedBox(height: textSpacing),
-          // 竖屏 Zen 模式下标题居中（沉浸态没有其它左对齐参照物）；
-          // 常态仍左对齐
+          // 竖屏标题居中（封面居中显示，标题与封面保持同一中轴）
           _buildTitleBlock(
             playerProvider,
             currentSong,
             colorScheme,
-            alignment: _zenMode
-                ? CrossAxisAlignment.center
-                : CrossAxisAlignment.stretch,
+            alignment: CrossAxisAlignment.center,
           ),
           if (!isExpanded) const Spacer(),
         ],

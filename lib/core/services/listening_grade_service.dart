@@ -21,6 +21,10 @@ class ListeningGradeService {
 
   static const Duration _interval = Duration(seconds: 30);
 
+  /// 「上传听歌时长」开关的 prefs key（与 SettingsRepository 的
+  /// `settings_upload_listening_duration` 保持一致，两边任一侧改名需同步）。
+  static const String _uploadEnabledPrefsKey = 'settings_upload_listening_duration';
+
   /// 累计达该秒数后触发一次上报
   static const int _reportThresholdSeconds = 60;
 
@@ -110,6 +114,9 @@ class ListeningGradeService {
   }
 
   Future<void> _onTickInner() async {
+    // 「上传听歌时长」开关（默认关闭）：关闭时跳过累计与上报，不产生任何网络请求。
+    // 每次心跳重新读取，设置页切换即时生效，无需额外通知机制。
+    if (!await _uploadEnabled()) return;
     final userid = KugouApiClient().userid;
     if (userid == null || userid.isEmpty) return; // 未登录不累计
     if (_userid != userid) {
@@ -222,6 +229,12 @@ class ListeningGradeService {
     );
     _pendingDiff = 0;
     await _save();
+  }
+
+  /// 「上传听歌时长」开关是否开启（默认关闭）。
+  Future<bool> _uploadEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_uploadEnabledPrefsKey) ?? false;
   }
 
   /// 从 grade 响应中安全提取服务器 d_sec（不存在/类型不符返回 0）。

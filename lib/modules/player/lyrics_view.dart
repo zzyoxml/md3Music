@@ -1,12 +1,19 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../widgets/md3_lyric_preferences.dart';
 
 class LyricsView extends StatefulWidget {
   final String lyrics;
+  /// 静态初始位置（未提供 [positionListenable] 时使用）
   final Duration position;
+  /// 播放位置 listenable：提供后内部订阅，仅当前行变化时重建歌词，
+  /// 不再由外层每 ~200ms 因 position 通知强制重建整棵歌词（性能优化）。
+  final ValueListenable<Duration>? positionListenable;
+  /// 对 [positionListenable] 的位置做二次校正（如在线歌词时间偏移），可为 null。
+  final Duration Function(Duration)? adaptPosition;
   final ValueChanged<Duration> onSeek;
   /// 是否启用双击跳转（开启后单击不跳转，双击才跳转）
   final bool doubleTapToJump;
@@ -16,6 +23,8 @@ class LyricsView extends StatefulWidget {
     required this.lyrics,
     required this.position,
     required this.onSeek,
+    this.positionListenable,
+    this.adaptPosition,
     this.doubleTapToJump = false,
   });
 
@@ -28,6 +37,8 @@ class LyricsViewState extends State<LyricsView> {
   List<_LyricLine> _parsedLyrics = [];
   int _currentLineIndex = -1;
   bool _forceScroll = false;
+  /// 内部生效的当前位置：由 [LyricsView.position] 或 [positionListenable] 提供
+  Duration _effPosition = Duration.zero;
 
   // 首次进入 / 切歌后第一次滚动用 jumpTo 直接定位当前行，
   // 避免每次切到歌词页都从顶部滚 300ms 到当前行
@@ -114,6 +125,12 @@ class LyricsViewState extends State<LyricsView> {
   void initState() {
     super.initState();
     _parseLyrics();
+    // 若外层提供 positionListenable（性能优化：内部仅当前行变化才重建），订阅它
+    _effPosition = widget.position;
+    if (widget.positionListenable != null) {
+      _onExternalPos();
+      widget.positionListenable!.addListener(_onExternalPos);
+    }
     // 监听 MD3 歌词偏好变化（字号/行间距/字体），实时刷新视图
     _prefs.addListener(_onPrefsChanged);
   }
@@ -121,6 +138,10 @@ class LyricsViewState extends State<LyricsView> {
   @override
   void didUpdateWidget(covariant LyricsView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // 无 listenable（静态模式）时，用外层传的 position 覆盖
+    if (widget.positionListenable == null) {
+      _effPosition = widget.position;
+    }
     if (oldWidget.lyrics != widget.lyrics) {
       _parseLyrics();
       _currentLineIndex = -1;
@@ -133,10 +154,21 @@ class LyricsViewState extends State<LyricsView> {
 
   @override
   void dispose() {
+    widget.positionListenable?.removeListener(_onExternalPos);
     _prefs.removeListener(_onPrefsChanged);
     _cancelResumeTimer();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  /// 接收外部 position 变化：仅更新内部当前位置并在行变化时重建，
+  /// 行不变时 _updateCurrentLine 的门控会直接跳过，避免每 200ms 全量 build。
+  void _onExternalPos() {
+    final v = widget.positionListenable?.value;
+    if (v != null) {
+      _effPosition = widget.adaptPosition?.call(v) ?? v;
+    }
+    if (mounted) _updateCurrentLine();
   }
 
   void _onPrefsChanged() {
@@ -269,13 +301,18 @@ class LyricsViewState extends State<LyricsView> {
   void _updateCurrentLine() {
     if (_parsedLyrics.isEmpty) return;
 
-    final newIndex = _findLineIndex(widget.position);
-    final shouldScroll = _forceScroll || (newIndex != _currentLineIndex);
+    final newIndex = _findLineIndex(_effPosition);
+    final lineChanged = newIndex != _currentLineIndex;
+    final scrollNeeded = _forceScroll || lineChanged;
+    // P0 优化：父组件经 positionNotifier 每 ~200ms 以新 position 重建本 Widget，
+    // 行未变化时跳过 setState，避免播放中每 200ms 重建 ListView 可见行；
+    // 仅在行切换或显式强制滚动（切歌定位/松手回弹）时才刷新。
+    if (!lineChanged && !_forceScroll) return;
     _currentLineIndex = newIndex;
 
     if (mounted) {
       setState(() {});
-      if (shouldScroll && !_userTouching && newIndex >= 0) {
+      if (scrollNeeded && !_userTouching && newIndex >= 0) {
         _forceScroll = false;
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _scrollToLine(newIndex, jump: !_initialJumpDone);

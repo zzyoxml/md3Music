@@ -739,7 +739,11 @@ pub fn handle_grade_info(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleR
         .header("KG-Rec", "1")
         .header("KG-RC", "1")
         .clear_default_params(true)
-        .not_signature(true);
+        .not_signature(true)
+        // 上游 get_grade_info 偶发无响应/极慢：单独收紧为 8s，先于客户端 dio 15s 超时
+        // 放弃，避免「客户端已超时、本地服务器继续空转到 20s」的空耗，以及连续失败
+        // 每次再触发最长 20s 查询重同步的叠加卡顿。
+        .timeout_secs(8);
 
     // 调试日志：确认上报/查询请求与上游返回（听歌时长不生效排查用）
     eprintln!(

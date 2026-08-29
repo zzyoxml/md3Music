@@ -76,6 +76,8 @@ class _SettingsPageState extends State<SettingsPage>
   String _wifiQuality = '128';
   String _mobileQuality = '128';
   bool _autoReceiveVip = true;
+  // 上传听歌时长（听歌等级累计上报）开关（默认关闭，用户主动开启才累计/上报）
+  bool _uploadListeningDuration = false;
   // 本地 API 服务器重启中（在线音乐区块显示加载态）
   bool _isRestarting = false;
   bool _useDynamicColor = false;
@@ -338,11 +340,14 @@ class _SettingsPageState extends State<SettingsPage>
         .getMiniPlayerSwipeSwitchEnabled();
     final sortCollectedByLatestClick = await _settingsRepository
         .getSortCollectedByLatestClick();
+    final uploadListeningDuration =
+        await _settingsRepository.getUploadListeningDuration();
 
     setState(() {
       _wifiQuality = wifiQuality;
       _mobileQuality = mobileQuality;
       _autoReceiveVip = autoReceiveVip;
+      _uploadListeningDuration = uploadListeningDuration;
       _useDynamicColor = useDynamicColor;
       _useCoverSeedColor = useCoverSeedColor;
       _useAmStylePlayer = useAmStylePlayer;
@@ -2275,6 +2280,19 @@ class _SettingsPageState extends State<SettingsPage>
               ),
             ],
           ),
+        ),
+        // search: 上传听歌时长 听歌时长 上传 等级 累计 上报
+        SwitchListTile(
+          title: const Text('上传听歌时长'),
+          subtitle: const Text('累计在线听歌时长并上传用于等级成长，默认关闭'),
+          value: _uploadListeningDuration,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            setState(() {
+              _uploadListeningDuration = value;
+            });
+            _settingsRepository.setUploadListeningDuration(value);
+          },
         ),
         // ③ 屏幕与视频：都与「播放时的屏幕表现」相关
         _buildGroupLabel('屏幕与视频', colorScheme),

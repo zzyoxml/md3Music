@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -146,6 +148,18 @@ class _DiscoverPageState extends State<DiscoverPage> {
     return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   }
 
+  /// 是否有任一发现分区数据就绪（渐进加载用）：任一就绪即退出整页转圈，
+  /// 未就绪分区由 Selector 在数据到达时自行补出，无需整页等待。
+  bool get _hasAnySectionData {
+    final kugou = context.read<KugouProvider>();
+    return kugou.playlistList.isNotEmpty ||
+        kugou.rankList != null ||
+        kugou.recommendSongs.isNotEmpty ||
+        kugou.sceneData != null ||
+        kugou.themePlaylistData.isNotEmpty ||
+        kugou.personalFmSongs.isNotEmpty;
+  }
+
   Future<void> _loadAllData() async {
     if (!mounted) return; // 页面已销毁则放弃，避免访问 context 触发 null check 崩溃
     final kugou = context.read<KugouProvider>();
@@ -166,7 +180,12 @@ class _DiscoverPageState extends State<DiscoverPage> {
       });
     }
     try {
-      await Future.wait([
+      // 渐进加载（冷启动提速）：请求并行发起，每个分区完成后立即刷新一次，
+      // 页面优先渲染已就绪的分区（分区 builder 用 Selector 监听，空数据返回
+      // 占位，数据到达自动补出），其余分区在后台补充完成后逐个出现，
+      // 不再等全部完成才整页显示。保留 hasAnyData / markDiscoverLoaded
+      // 的语义与下拉刷新行为（刷新时已有数据直接展示，后台静默补充）。
+      final reqs = <Future<void>>[
         kugou.getPlaylist(forceRefresh: hasExistingData),
         kugou.getRankList(forceRefresh: hasExistingData),
         kugou.getRecommendDaily(forceRefresh: hasExistingData),
@@ -179,7 +198,16 @@ class _DiscoverPageState extends State<DiscoverPage> {
         // 也会盖上新鲜时间戳（上一次请求成功但返回了空），不绕开 5 分钟 TTL 的话
         // 卡片会空着却「新鲜」，下拉也补不回来。
         if (needsPersonalFm) kugou.getPersonalFm(forceRefresh: true),
-      ]);
+      ];
+      for (final f in reqs) {
+        unawaited(f.then((_) {
+          if (mounted) setState(() {});
+        }).catchError((Object _) {
+          // 单个分区失败不阻塞其它分区；错误由最终判定/分区自身兜底
+          if (mounted) setState(() {});
+        }));
+      }
+      await Future.wait(reqs);
 
       // 只有确实加载到数据时才标记为已加载
       final hasAnyData =
@@ -240,9 +268,11 @@ class _DiscoverPageState extends State<DiscoverPage> {
       ),
       body: Md3PullToRefresh(
         onRefresh: _loadAllData,
-        child: _isLoading
+        // 渐进加载：任一分区数据就绪即退出整页转圈，先显示已获取的分区；
+        // 未就绪分区由各自 Selector 在数据到达时自动补出（空数据返回占位）。
+        child: _isLoading && !_hasAnySectionData
             ? const Center(child: M3ELoadingIndicator())
-            : _error != null
+            : _error != null && !_hasAnySectionData
             ? _buildError(colorScheme)
             : CustomScrollView(
                 controller: _scrollController,

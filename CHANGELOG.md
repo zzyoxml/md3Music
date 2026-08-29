@@ -1,12 +1,10 @@
-# 更新日志
-
----
-
-
-
 ## v5.4.0
 
 **功能**
+- 记忆本地歌曲排序选择，切页返回保持上次排序
+- 发现页渐进加载，先显示已获取分区其余后台补充
+- 上传听歌时长开关默认关闭，上游超时收紧至 8s
+- full-export 新增 -ForceFullHistory 强制全量重建，处理增量基线失效报 unable to read
 - 优化播放器布局与进度条体验
 - 重构播放列表编辑与播放模式交互
 - 新增音量均衡功能，实现歌曲响度归一化
@@ -31,6 +29,8 @@
 - 新增按网络区分的音质设置
 
 **修复**
+- md3播放页竖屏标题居中
+- 启动恢复静默跳过登录提示，竖屏标题居中
 - 修复音质显示与实际不符问题，优化降级逻辑
 - fast-import 批量重建空树消息历史
 - 修复中文提交记录乱码问题
@@ -46,12 +46,14 @@
 - 修正文档注释标点
 
 **文档**
+- add three lyric-related project references
 - update comment about cached artwork
 - 强化 -WithHistory 模式的运行提示
 - 更新公开导出白名单相关文档与配置
 - 新增Git历史导出分析文档 refactor(full_player): 重构播放器代码格式与交互逻辑
 
 **重构**
+- 优化进度条与歌词渲染性能
 - 重构播放器底部控制与导航组件
 - 重构通知与封面加载逻辑，优化锁屏/车机封面显示
 - adjust navigation rail group alignment to center
@@ -64,17 +66,27 @@
 - 重构封面取色逻辑，统一工具类实现
 
 **CI/构建**
+- 清理冗余的v5.4.0版本变更日志
+- 发布v5.4.0并更新变更日志
 - v5.4.0 发布并更新变更日志
 - release v5.4.0 and update changelog
 - 复制just_audio的CHANGELOG到third_party目录
 
 **其他**
+- fix am30fps
 - 解决 route-b 合并冲突并修正无效 auxPlayer 引用
 - crossfade
 - 重新应用了拆分图片预生成时序的改动
 - 回退了拆分图片预生成时序的改动
 
 ---
+
+---
+
+# 更新日志
+
+
+
 
 ## v5.3.4
 

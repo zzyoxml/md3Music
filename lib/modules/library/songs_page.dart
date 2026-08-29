@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../data/models/song.dart';
 import '../../providers/player_provider.dart';
@@ -17,6 +18,10 @@ class SongsPage extends StatefulWidget {
 }
 
 class _SongsPageState extends State<SongsPage> {
+  /// 排序选择的持久化 key（记忆本地歌曲排序：切页返回后保持上次选择）。
+  static const String _kSortByKey = 'local_songs_sort_by';
+  static const String _kSortDescKey = 'local_songs_sort_desc';
+
   SongSortBy _sortBy = SongSortBy.title;
   // 排序方向：true=倒序(Z→A)，false=正序(A→Z)
   bool _sortDescending = false;
@@ -24,6 +29,32 @@ class _SongsPageState extends State<SongsPage> {
   // 定位目标项的索引与 GlobalKey：滚到位后用 ensureVisible 精确对齐。
   GlobalKey? _targetItemKey;
   int _targetScrollIndex = -1;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSortPreference();
+  }
+
+  /// 恢复上次的排序选择（读取失败/无记录时保持默认按标题）。
+  Future<void> _loadSortPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _sortBy = SongSortBy.values.firstWhere(
+        (e) => e.name == prefs.getString(_kSortByKey),
+        orElse: () => SongSortBy.title,
+      );
+      _sortDescending = prefs.getBool(_kSortDescKey) ?? false;
+    });
+  }
+
+  /// 持久化当前排序选择，供下次进入本地音乐页恢复。
+  Future<void> _saveSortPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_kSortByKey, _sortBy.name);
+    await prefs.setBool(_kSortDescKey, _sortDescending);
+  }
 
   @override
   void dispose() {
@@ -126,6 +157,8 @@ class _SongsPageState extends State<SongsPage> {
                   _sortDescending = false;
                 }
               });
+              // 记忆排序选择：切到其它页面再回来仍保持本次选择
+              _saveSortPreference();
               Navigator.pop(context);
             },
             child: Row(

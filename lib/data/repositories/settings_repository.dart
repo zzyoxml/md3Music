@@ -21,6 +21,8 @@ class SettingsRepository {
   static const String _keyGridColumns = 'grid_columns';
   // MV 画中画：按 Home 自动进入画中画（默认关闭，手动按钮不受影响）
   static const String _keyAutoPip = 'settings_auto_pip';
+  /// 上传听歌时长（听歌等级累计上报）开关。默认关闭：不上传任何听歌时长数据。
+  static const String _keyUploadListeningDuration = 'settings_upload_listening_duration';
   // 逐字歌词时间偏移（ms，默认 0；仅在线音乐生效，正值 = 歌词延后显示）
   static const String _keyLyricTimeOffset = 'lyric_time_offset_ms';
 
@@ -145,6 +147,17 @@ class SettingsRepository {
   Future<void> setAutoPipEnabled(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyAutoPip, value);
+  }
+
+  /// 上传听歌时长（听歌等级累计上报）开关，默认关闭。
+  Future<bool> getUploadListeningDuration() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyUploadListeningDuration) ?? false;
+  }
+
+  Future<void> setUploadListeningDuration(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyUploadListeningDuration, value);
   }
 
   /// 逐字歌词时间偏移（ms，内存缓存）。播放页每帧高频读取，

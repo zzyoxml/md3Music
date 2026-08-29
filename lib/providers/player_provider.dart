@@ -1864,7 +1864,13 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       if (song.url == null || cachedUrlStale) {
         // URL 不存在，需要解析
         if (!KugouApiClient().isLoggedIn) {
-          onLoginRequired?.call();
+          // 仅用户主动播放（play=true）才提示登录。play=false 是启动恢复等
+          // 静默路径：启动早期登录 token 可能尚未从存储加载完成、本地服务器
+          // 也未必就绪，此刻误判未登录会误弹「请先登录」。改为静默跳过，
+          // 待用户点击播放时用已就绪的状态重新校验（届时仍会正确判断）。
+          if (play) {
+            onLoginRequired?.call();
+          }
           return false;
         }
 

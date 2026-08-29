@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' show FontFeature, lerpDouble;
 
@@ -82,8 +83,9 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
   /// 时间行高度（[PlayerSeekBar.height] 减去它就是轨道区高度）
   static const double _labelHeight = 14;
 
-  /// 自驱动帧间隔：30fps（超过这个间隔才重绘，避免跟着 120Hz 屏幕白跑）
-  static const int _frameIntervalMs = 33;
+  /// 自驱动帧间隔：2fps（超过这个间隔才重绘进度条与两侧时间，
+  /// 由 120Hz 屏幕节流到低频，只在校对/拖动时才高频）。
+  static const int _frameIntervalMs = 500;
 
   /// 上报位置与推算位置差值超过这个阈值就认为发生了 seek / 切歌，硬重置
   static const int _resyncThresholdMs = 1000;
@@ -94,8 +96,8 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
   /// 已播放段上色动画：1 = activeColor（播放中/拖动中），0 = inactiveColor
   late final AnimationController _tint;
 
-  /// 30fps 自驱动 ticker
-  late final Ticker _ticker;
+  /// 2fps 自驱动定时器（进度条与两侧时间按此低频推进）
+  Timer? _timerFrame;
 
   /// 自驱动帧计数：每帧 +1，驱动画布与时间数字重绘（不走 setState）
   final ValueNotifier<int> _frame = ValueNotifier(0);
@@ -104,11 +106,8 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
   /// 跟手时每帧只重绘画布与时间数字，不重建整个 widget 子树（避免拖动卡顿）。
   final ValueNotifier<double> _dragFraction = ValueNotifier(0);
 
-  /// 当前展示的位置（毫秒）—— 由 ticker 每帧累加、由上报位置定期校准
+  /// 当前展示的位置（毫秒）—— 由定时器每帧间隔累加、由上报位置定期校准
   int _displayMs = 0;
-
-  /// 上一帧的 ticker elapsed（毫秒），用于 30fps 节流与算帧间隔
-  int _lastTickMs = 0;
 
   bool _dragging = false;
   double _trackWidth = 0;
@@ -125,7 +124,6 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
       duration: const Duration(milliseconds: 220),
       value: widget.isPlaying ? 1 : 0,
     );
-    _ticker = createTicker(_onTick);
     _displayMs = widget.position.inMilliseconds;
     _syncTicker();
   }
@@ -140,13 +138,20 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
     }
     if (oldWidget.isPlaying != widget.isPlaying) {
       _syncTint();
+    }
+    // duration 也要参与：切歌时常是 isPlaying 先变 true、durationStream 稍后才
+    // 送来时长，若只在 isPlaying 变化时同步，ticker 的「时长已知」条件那一轮不
+    // 满足就再无机会启动 → 该首歌全程退化成 200ms 上报驱动（5fps）。
+    if (oldWidget.isPlaying != widget.isPlaying ||
+        (oldWidget.duration > Duration.zero) !=
+            (widget.duration > Duration.zero)) {
       _syncTicker();
     }
   }
 
   @override
   void dispose() {
-    _ticker.dispose();
+    _timerFrame?.cancel();
     _expand.dispose();
     _tint.dispose();
     _frame.dispose();
@@ -163,29 +168,26 @@ class _PlayerSeekBarState extends State<PlayerSeekBar>
     }
   }
 
-  /// 只在「播放中 + 未拖动 + 时长已知」时跑 30fps ticker，其余状态停住省电
+  /// 只在「播放中 + 未拖动 + 时长已知」时跑 2fps Timer，其余状态停住省电
   void _syncTicker() {
     final shouldRun =
         widget.isPlaying && !_dragging && widget.duration > Duration.zero;
     if (shouldRun) {
-      if (!_ticker.isActive) {
-        // Ticker.start() 后 elapsed 从 0 重新计
-        _lastTickMs = 0;
-        _ticker.start();
-      }
-    } else if (_ticker.isActive) {
-      _ticker.stop();
+      // 2fps 自驱动：Timer 周期性累加位置并重绘；暂停/拖动时取消以省电
+      _timerFrame ??= Timer.periodic(
+        Duration(milliseconds: _frameIntervalMs),
+        (_) => _advanceFrame(),
+      );
+    } else {
+      _timerFrame?.cancel();
+      _timerFrame = null;
     }
   }
 
-  /// 30fps 节流：不足一帧间隔就丢弃（不跟着 120Hz 屏幕白跑）
-  void _onTick(Duration elapsed) {
-    final ms = elapsed.inMilliseconds;
-    final delta = ms - _lastTickMs;
-    if (delta < _frameIntervalMs) return;
-    _lastTickMs = ms;
+  /// 2fps 自驱动推进：每帧间隔累加一次播放位置，触发画布与两侧时间重绘。
+  void _advanceFrame() {
     final total = widget.duration.inMilliseconds;
-    var next = _displayMs + (delta * widget.speed).round();
+    var next = _displayMs + (_frameIntervalMs * widget.speed).round();
     if (next < 0) next = 0;
     if (total > 0 && next > total) next = total;
     if (next == _displayMs) return;

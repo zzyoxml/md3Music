@@ -2067,14 +2067,12 @@ class _AmStyleFullPlayerState extends State<AmStyleFullPlayer>
               ),
             ),
           SizedBox(height: textSpacing),
-          // 竖屏 Zen 模式下标题居中（沉浸态没有其它左对齐参照物）；常态仍左对齐
+          // 竖屏标题居中（封面居中显示，标题与封面保持同一中轴）
           _buildTitleBlock(
             playerProvider,
             currentSong,
             isExpanded: isExpanded,
-            alignment: _zenMode
-                ? CrossAxisAlignment.center
-                : CrossAxisAlignment.stretch,
+            alignment: CrossAxisAlignment.center,
           ),
           if (!isExpanded) const Spacer(),
         ],

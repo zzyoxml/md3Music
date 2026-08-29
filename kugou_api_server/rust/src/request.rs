@@ -122,6 +122,9 @@ pub struct RequestOptions {
     pub response_type: Option<String>,
     /// 使用标准版(非概念版)签名盐。刷刷(brush) feed 接口 appid=1005 需要标准盐。
     pub standard_signature: bool,
+    /// 请求级上游超时（秒）。None 时使用全局 20s 默认；
+    /// 对偶发无响应的上游（如 /user/grade/info）单独收紧，避免客户端已放弃而服务器继续空转。
+    pub timeout_secs: Option<u64>,
 }
 
 impl RequestOptions {
@@ -143,6 +146,7 @@ impl RequestOptions {
             real_ip: String::new(),
             response_type: None,
             standard_signature: false,
+            timeout_secs: None,
         }
     }
 
@@ -215,6 +219,11 @@ impl RequestOptions {
 
     pub fn standard_signature(mut self, v: bool) -> Self {
         self.standard_signature = v;
+        self
+    }
+
+    pub fn timeout_secs(mut self, v: u64) -> Self {
+        self.timeout_secs = Some(v);
         self
     }
 
@@ -296,6 +305,17 @@ fn agent() -> ureq::Agent {
         .clone()
 }
 
+/// 按请求级超时选择 agent：有 timeout_secs 时用独立超时的轻量 agent（仅配置不同，
+/// 连接池懒加载，成本可忽略），否则用全局 20s agent。
+fn pick_agent(timeout_secs: Option<u64>) -> ureq::Agent {
+    match timeout_secs {
+        Some(secs) => ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(secs))
+            .build(),
+        None => agent(),
+    }
+}
+
 struct RawResponse {
     cookies: Vec<String>,
     ssa_code: Option<String>,
@@ -341,7 +361,7 @@ fn do_send(opts: &RequestOptions, params: &Value, final_headers: &HashMap<String
         }
     }
 
-    let mut req = agent().request(&opts.method, &url);
+    let mut req = pick_agent(opts.timeout_secs).request(&opts.method, &url);
     let mut content_type: Option<String> = None;
     for (k, v) in final_headers {
         if k.eq_ignore_ascii_case("content-type") {
