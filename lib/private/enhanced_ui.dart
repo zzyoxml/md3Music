@@ -184,10 +184,10 @@ void _showDownloadDialog(BuildContext context, dynamic song) async {
           _qualityOption(
             ctx,
             '高音质 (320kbps)',
-            'hq',
+            '320',
             song,
             downloadsProvider,
-            enabled: available.contains('hq'),
+            enabled: available.contains('320'),
           ),
           _qualityOption(
             ctx,
@@ -199,7 +199,7 @@ void _showDownloadDialog(BuildContext context, dynamic song) async {
           ),
           _qualityOption(
             ctx,
-            'Hi-Res 无损',
+            'Hi-Res',
             'high',
             song,
             downloadsProvider,
@@ -625,9 +625,9 @@ void _showBatchDownloadDialog(BuildContext context, List<Song> selectedSongs) {
 
   final qualityOptions = [
     ('标准音质 (128kbps)', '128'),
-    ('高音质 (320kbps)', 'hq'),
+    ('高音质 (320kbps)', '320'),
     ('无损音质 (FLAC)', 'flac'),
-    ('Hi-Res 无损', 'high'),
+    ('Hi-Res', 'high'),
   ];
 
   showDialog(

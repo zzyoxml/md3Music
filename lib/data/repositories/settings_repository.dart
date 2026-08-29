@@ -472,10 +472,10 @@ class SettingsRepository {
   static const int kCrossfadeMaxSeconds = 12;
   static const int kCrossfadeDefaultSeconds = 4;
 
-  /// 自动切歌时是否把本首的渐出与下一首的渐入叠加，默认 true。
+  /// 自动切歌时是否把本首的渐出与下一首的渐入叠加，默认 false。
   Future<bool> getCrossfadeEnabled() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_keyCrossfadeEnabled) ?? true;
+    return prefs.getBool(_keyCrossfadeEnabled) ?? false;
   }
 
   Future<void> setCrossfadeEnabled(bool value) async {

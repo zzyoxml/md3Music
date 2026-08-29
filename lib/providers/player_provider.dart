@@ -22,6 +22,7 @@ import '../core/services/usb_audio_service.dart';
 import '../data/models/song.dart';
 import '../modules/player/comments_view.dart';
 import '../modules/player/mv_player_page.dart';
+import '../core/utils/app_toast.dart';
 import '../core/utils/audio_scanner.dart';
 import '../data/repositories/history_repository.dart';
 import '../data/repositories/player_state_repository.dart';
@@ -41,7 +42,7 @@ enum AudioQuality {
   standard('128', '标准音质'),
   high('320', '高音质'),
   flac('flac', '无损音质'),
-  hires('high', 'Hi-Res 无损');
+  hires('high', 'Hi-Res');
 
   const AudioQuality(this.value, this.label);
   final String value;
@@ -92,6 +93,11 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   // 当前在线歌曲实际播放的音质标签（降级后可能与用户设置不同）。
   // 每次成功获取播放链接时由 result.quality 更新；切歌或切换音质时重置。
   String? _actualPlayingQuality;
+  // 预取 url 对应的实际音质（songId -> quality）。
+  // 播歌单时会把后面几首的 url 一次性预取好；若之后用户切换了音质，这些 url
+  // 仍是旧音质的，切歌时必须重新解析，否则会静默播放旧音质（"切了 Hi-Res
+  // 却还在播标准音质"）。
+  final Map<String, String> _prefetchedUrlQuality = {};
 
   // —— 睡眠定时（到点自动暂停） ——
   // 用 wall clock（DateTime.now()）计算剩余时间，避免 Timer 漂移；
@@ -165,6 +171,16 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   bool get isResolvingUrl => _isResolvingUrl;
   String? get resolveError => _resolveError;
 
+  /// 实际音质低于用户设置时提示一次。
+  /// 只在实际开始播放的路径调用：预取（_prefetchNextSongs）与交叉淡化预加载
+  /// （_prepareCrossfade）不提示，否则后台行为会弹出莫名的提示。
+  void _warnQualityDowngrade(String requested, String actual) {
+    if (requested == actual) return;
+    showToast(
+      '${KugouQuality.labelOf(requested)}不可用，已降级为${KugouQuality.labelOf(actual)}',
+    );
+  }
+
   /// 播放链接解析失败时的提示文案。
   /// 听书章节付费边界在列表接口不可靠，能点上播放、但无免费部分的付费章节
   /// 解析必然失败——用更明确的文案提示用户，而不是通用的"无法获取播放链接"。
@@ -202,7 +218,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
         case 'flac':
           return '无损音质';
         case 'high':
-          return 'Hi-Res 无损';
+          return 'Hi-Res';
         default:
           return song.quality!;
       }
@@ -1271,6 +1287,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
       if (result != null && result.url.isNotEmpty) {
         _actualPlayingQuality = result.quality;
+        _warnQualityDowngrade(_audioQuality.value, result.quality);
         final resolvedSong = song.copyWith(url: result.url);
         _currentSong = resolvedSong;
         _playlist = [resolvedSong];
@@ -1305,6 +1322,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
   void _loadPlaylist(List<Song> songs, int startIndex) {
     // 换列表：预加载的"下一首"索引已失效
     _resetCrossfadePrepared();
+    _prefetchedUrlQuality.clear();
     _originalPlaylist = List.from(songs);
     if (_shuffleEnabled) {
       final currentSong = songs[startIndex];
@@ -1346,6 +1364,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
         if (result != null && result.url.isNotEmpty) {
           _actualPlayingQuality = result.quality;
+          _warnQualityDowngrade(_audioQuality.value, result.quality);
           final resolvedSong = _currentSong!.copyWith(url: result.url);
           _currentSong = resolvedSong;
           _playlist[_currentIndex] = resolvedSong;
@@ -1447,6 +1466,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
         if (result != null && result.url.isNotEmpty) {
           _actualPlayingQuality = result.quality;
+          _warnQualityDowngrade(_audioQuality.value, result.quality);
           final resolvedSong = _currentSong!.copyWith(url: result.url);
           _currentSong = resolvedSong;
           _playlist[_currentIndex] = resolvedSong;
@@ -1503,6 +1523,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
             .then((result) {
               if (result != null && result.url.isNotEmpty) {
                 _playlist[i] = song.copyWith(url: result.url);
+                _prefetchedUrlQuality[song.id] = result.quality;
               }
             });
       }
@@ -1823,7 +1844,14 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
 
       // 缓存未命中：需要 URL 来播放
-      if (song.url == null) {
+      // 已有 url 但它是按旧音质预取的（切换过音质）→ 同样要重新解析，
+      // 否则会静默沿用旧音质的链接。
+      final prefetchedQuality = _prefetchedUrlQuality[song.id];
+      final cachedUrlStale =
+          song.url != null &&
+          prefetchedQuality != null &&
+          prefetchedQuality != _audioQuality.value;
+      if (song.url == null || cachedUrlStale) {
         // URL 不存在，需要解析
         if (!KugouApiClient().isLoggedIn) {
           onLoginRequired?.call();
@@ -1848,6 +1876,8 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
           if (result != null && result.url.isNotEmpty) {
             _actualPlayingQuality = result.quality;
+            _prefetchedUrlQuality[_currentSong!.id] = result.quality;
+            _warnQualityDowngrade(_audioQuality.value, result.quality);
             final resolvedSong = _currentSong!.copyWith(url: result.url);
             _currentSong = resolvedSong;
             _playlist[_currentIndex] = resolvedSong;
@@ -2521,6 +2551,7 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       }
 
       _actualPlayingQuality = result.quality;
+      _warnQualityDowngrade(_audioQuality.value, result.quality);
       final resolvedSong = song.copyWith(url: result.url);
       _currentSong = resolvedSong;
       if (_playlist.isNotEmpty && _currentIndex >= 0) {
