@@ -42,6 +42,28 @@ jobs:
           fetch-depth: 0   # 需要完整 git 历史来生成 changelog
 
       # ============================================================
+      # 1.1 公开树校验：禁止私有代码触发发版
+      #     标签必须来自导出的公开树（md3.ps1 full-export -Tag）。
+      #     私有仓库直接推送的标签含 lib/private、私有权限或敏感配置，直接终止。
+      # ============================================================
+      - name: Verify public tree (reject private code)
+        run: |
+          set -e
+          if [ -d "lib/private" ]; then
+            echo "::error::检测到 lib/private 私有目录：该标签包含私有代码，禁止发版。请使用 .\scripts\md3.ps1 full-export -Tag <版本> 从导出的公开树打标签"
+            exit 1
+          fi
+          if grep -q "MANAGE_EXTERNAL_STORAGE" android/app/src/main/AndroidManifest.xml 2>/dev/null; then
+            echo "::error::AndroidManifest.xml 含 MANAGE_EXTERNAL_STORAGE 私有权限：该标签来自私有仓库，禁止发版。请使用 .\scripts\md3.ps1 full-export -Tag <版本> 从导出的公开树打标签"
+            exit 1
+          fi
+          if [ -f "networkapi/.env" ]; then
+            echo "::error::检测到 networkapi/.env 私有配置：该标签包含私有内容，禁止发版"
+            exit 1
+          fi
+          echo "公开树校验通过：无私有目录/私有权限/敏感配置"
+
+      # ============================================================
       # 2. 解析版本号（从 git tag 派生，自动递增 versionCode）
       # ============================================================
       - name: Resolve version from tag
