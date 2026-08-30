@@ -256,7 +256,9 @@ fn handle_request(mut request: Request, _data_dir: &str) -> Result<(), String> {
             let remaining = (CACHE_DURATION - (crate::cache::now_epoch_secs() - entry.timestamp))
                 .max(0.0);
             let cache_control = format!("max-age={:.0}", remaining);
-            let mut resp = Response::from_data(entry.data).with_status_code(entry.status);
+            // entry 为 Arc<CacheEntry>：此处唯一一次 data 拷贝（tiny_http 写 socket 需要所有权）
+            let mut resp =
+                Response::from_data(entry.data.clone()).with_status_code(entry.status);
             for (k, v) in &cors_headers {
                 resp = resp.with_header(make_header(k, v)?);
             }

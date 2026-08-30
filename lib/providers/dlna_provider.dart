@@ -200,6 +200,13 @@ class DlnaProvider extends ChangeNotifier {
         }
       } else {
         // ── 本地歌曲：通过 LocalHttpServer 暴露到局域网 ──
+        // 懒启动：LocalHttpServer 只在投屏本地歌曲时才启动（幂等，已在运行则直接复用），
+        // 避免 App 从启动起就常驻一个局域网监听 socket（main.dart 不再无条件启动）。
+        try {
+          await LocalHttpServer.instance.start();
+        } catch (_) {
+          // 启动失败不抛：getUrlForPath 返回 null 走下方错误提示
+        }
         final rawPath = song.localPath;
         if (rawPath == null || rawPath.isEmpty) {
           _state = DlnaCastState.error;

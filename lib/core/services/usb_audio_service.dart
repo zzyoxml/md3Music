@@ -10,7 +10,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 提供：
 /// - 开关：enableExclusive / disableExclusive（原生负责授权、开设备、xHCI 时序）
 /// - 查询：listDevices / getStatus / getFormatInfo / isEnabled
-/// - 实时状态：每秒轮询 getStatus，通过 [statusStream] 广播（设置页/歌曲信息页共用）
+/// - 实时状态：原生事件推送（ATTACHED/DETACHED/enable/disable 完成点），通过
+///   [statusStream] 广播（设置页/歌曲信息页共用）；启动/页面可见时主动查一次兜底
 ///
 /// Debug 约定：所有关键路径输出 `[UsbAudio]` 前缀日志，便于 logcat 过滤排查。
 class UsbAudioService {
@@ -28,10 +29,12 @@ class UsbAudioService {
   final StreamController<Map<String, dynamic>> _statusController =
       StreamController<Map<String, dynamic>>.broadcast();
 
-  Timer? _pollTimer;
   Map<String, dynamic> _lastStatus = const {};
   bool _inited = false;
-  String _lastPollError = '';
+
+  /// 独占从开启→关闭的回调（Dart 侧 PlayerProvider 用它自动恢复 delegate 输出：
+  /// 旧 usb HAL 输出流被独占 force disconnect 杀死，需重建 AudioTrack 才能重新出声）。
+  void Function()? onExclusiveDisabled;
 
   /// USB 独占独立音量（0..100），独立持久化（key: usb_volume），仅独占生效。
   double _usbVolumePercent = 100;
@@ -39,15 +42,15 @@ class UsbAudioService {
   /// USB 音量（0..100），与应用内/系统音量分开记忆。
   double get usbVolumePercent => _usbVolumePercent;
 
-  /// 实时状态流（每秒一帧）。
+  /// 实时状态流（原生事件推送驱动，稀疏事件）。
   Stream<Map<String, dynamic>> get statusStream => _statusController.stream;
 
-  /// 最近一次轮询到的状态。
+  /// 最近一次事件/查询到的状态。
   Map<String, dynamic> get lastStatus => _lastStatus;
 
   bool get _isAndroid => defaultTargetPlatform == TargetPlatform.android;
 
-  /// 启动轮询（幂等）。App 启动时调用一次。
+  /// 订阅原生事件 + 启动时主动查一次（幂等）。App 启动时调用一次。
   void init() {
     if (_inited) return;
     _inited = true;
@@ -55,9 +58,10 @@ class UsbAudioService {
       _debug('init skipped (non-Android)');
       return;
     }
-    _debug('init: start polling (1s)');
-    _poll();
-    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) => _poll());
+    _debug('init: subscribe events + one-shot refresh');
+    _channel.setMethodCallHandler(_handleNativeCall);
+    // 兜底 c：冷启动先查一次，立即填充 lastStatus（页面首帧即可读）
+    refresh();
     // 恢复 USB 独占独立音量（App 重启后保留）
     initUsbVolume();
     // 恢复 32bit 播放开关并下发原生（默认关闭，确保首次播放即按用户选择）
@@ -83,6 +87,8 @@ class UsbAudioService {
       await _channel.invokeMethod('setUsbVolume', {'percent': _usbVolumePercent});
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble('usb_volume', _usbVolumePercent);
+      // slider 拖动高频场景走本地即时广播（原生不为此推送事件）
+      _emit(_lastStatus);
       _debug('setUsbVolume: $_usbVolumePercent% (persisted)');
     } catch (e) {
       _debug('setUsbVolume failed: $e');
@@ -138,41 +144,53 @@ class UsbAudioService {
   }
 
   void dispose() {
-    _pollTimer?.cancel();
-    _pollTimer = null;
+    _channel.setMethodCallHandler(null);
     _inited = false;
   }
 
-  Future<void> _poll() async {
-    try {
-      final status = await _channel.invokeMapMethod<String, dynamic>('getStatus');
-      if (status == null) return;
-      final prev = _lastStatus;
-      _lastStatus = status;
-      if (!_statusController.isClosed) {
-        _statusController.add(status);
-      }
-      // 状态变化 debug 日志（便于排查：开关切换/拔插/采样率切换）
-      final prevEnabled = prev['enabled'] == true;
-      final nowEnabled = status['enabled'] == true;
-      if (prevEnabled != nowEnabled) {
-        _debug('status: enabled $prevEnabled → $nowEnabled');
-      }
-      if (nowEnabled) {
-        final prevConn = prev['deviceConnected'] == true;
-        final nowConn = status['deviceConnected'] == true;
-        if (prevConn != nowConn) {
-          _debug('status: deviceConnected $prevConn → $nowConn (${nowConn ? 'attached' : 'detached'})');
-        }
-      }
-    } catch (e) {
-      // 错误日志节流：同一错误只打印一次，避免后台 isolate 每秒刷屏
-      final err = e.toString();
-      if (err != _lastPollError) {
-        _lastPollError = err;
-        _debug('poll failed: $err');
+  /// 统一状态出口：更新 lastStatus + 广播到 statusStream（保留原有变化日志）。
+  void _emit(Map<String, dynamic> status) {
+    final prev = _lastStatus;
+    _lastStatus = status;
+    if (!_statusController.isClosed) {
+      _statusController.add(status);
+    }
+    // 状态变化 debug 日志（便于排查：开关切换/拔插/采样率切换）
+    final prevEnabled = prev['enabled'] == true;
+    final nowEnabled = status['enabled'] == true;
+    if (prevEnabled != nowEnabled) {
+      _debug('status: enabled $prevEnabled → $nowEnabled');
+      if (prevEnabled && !nowEnabled) {
+        // 独占关闭：通知 PlayerProvider 恢复 delegate 输出（重建 AudioTrack）
+        onExclusiveDisabled?.call();
       }
     }
+    if (nowEnabled) {
+      final prevConn = prev['deviceConnected'] == true;
+      final nowConn = status['deviceConnected'] == true;
+      if (prevConn != nowConn) {
+        _debug('status: deviceConnected $prevConn → $nowConn (${nowConn ? 'attached' : 'detached'})');
+      }
+    }
+  }
+
+  /// 接收原生 onStatusChanged 事件（ATTACHED/DETACHED/enable/disable 完成点推送）。
+  Future<void> _handleNativeCall(MethodCall call) async {
+    if (call.method != 'onStatusChanged') return;
+    try {
+      final s = Map<String, dynamic>.from(
+        (call.arguments as Map?) ?? const <String, dynamic>{},
+      );
+      if (s.isNotEmpty) _emit(s);
+    } catch (e) {
+      _debug('onStatusChanged parse failed: $e');
+    }
+  }
+
+  /// 主动查询一次并广播（兜底 c：启动 / 页面可见时调用）。
+  Future<void> refresh() async {
+    final s = await getStatus();
+    if (s.isNotEmpty) _emit(s);
   }
 
   // ── MethodChannel 封装 ────────────────────────────────────────
@@ -221,6 +239,7 @@ class UsbAudioService {
   }
 
   /// 开启 USB 独占。成功返回最新状态；失败抛出 [UsbAudioException]。
+  /// 状态广播由原生 pushStatus() 推送（同一份状态），此处只同步 _lastStatus。
   Future<Map<String, dynamic>> enableExclusive() async {
     _debug('enableExclusive()');
     try {
@@ -237,6 +256,7 @@ class UsbAudioService {
     }
   }
 
+  /// 关闭 USB 独占。成功返回最新状态；状态广播由原生 pushStatus() 推送。
   Future<Map<String, dynamic>> disableExclusive() async {
     _debug('disableExclusive()');
     try {

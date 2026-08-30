@@ -65,6 +65,13 @@ class _LocalArtworkImageState extends State<LocalArtworkImage> {
     final isFill = widget.size == double.infinity;
 
     if (_bytes != null) {
+      // 缩略图解码：内嵌封面可能远大于显示尺寸（列表项仅 ~52px），
+      // cacheWidth 参与 ImageCache key，同尺寸共享同一份解码结果。
+      final decodeWidth = isFill
+          ? null
+          : (widget.size * MediaQuery.devicePixelRatioOf(context))
+              .round()
+              .clamp(32, 480);
       return ClipRRect(
         borderRadius: BorderRadius.circular(widget.borderRadius),
         child: Image.memory(
@@ -72,6 +79,7 @@ class _LocalArtworkImageState extends State<LocalArtworkImage> {
           width: isFill ? double.infinity : widget.size,
           height: isFill ? double.infinity : widget.size,
           fit: BoxFit.cover,
+          cacheWidth: decodeWidth,
         ),
       );
     }

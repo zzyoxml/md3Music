@@ -118,6 +118,26 @@ class HistoryRepository {
     await prefs.remove(_playCountsKey);
     await prefs.remove(_lastPlayTimesKey);
   }
+
+  /// 删除指定 id 的播放历史，并同步清理对应的播放次数与最近播放时间。
+  Future<void> removeIds(Set<String> ids) async {
+    if (ids.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    final history = await getHistory();
+    history.removeWhere((s) => ids.contains(s.id));
+    await prefs.setStringList(
+      _key,
+      history.map((s) => jsonEncode(s.toJson())).toList(),
+    );
+
+    final counts = await getPlayCounts();
+    counts.removeWhere((k, _) => ids.contains(k));
+    await prefs.setString(_playCountsKey, jsonEncode(counts));
+
+    final times = await getLastPlayTimestamps();
+    times.removeWhere((k, _) => ids.contains(k));
+    await prefs.setString(_lastPlayTimesKey, jsonEncode(times));
+  }
 }
 
 /// 带播放次数的歌曲（用于排行展示）

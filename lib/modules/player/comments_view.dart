@@ -550,22 +550,35 @@ class _CommentsViewState extends State<CommentsView> {
       );
     }
 
-    // 构建显示列表：歌手评论 + 全部评论
+    // 构建显示列表：歌手评论 + 全部评论。
+    // 主列表（最热/最新）里也可能带 isStar 的歌手评论，而「歌手评论」栏
+    // 只来自 /comment/music 的 star_cmts/hot_list，不一定包含它（可能为空）。
+    // 统一在此把主列表里的歌手评论补进「歌手评论」栏（按 id 去重），
+    // 并从主列表移除，避免歌手评论重复或「歌手评论」栏空着。
+    final hotFromComments = _comments.where((c) => c.isStar).toList();
+    final regularComments = _comments.where((c) => !c.isStar).toList();
+    final starFromHot = _hotComments.where((c) => c.isStar).toSet();
+    final singerComments = <KugouComment>[
+      ..._hotComments,
+      for (final c in hotFromComments)
+        if (!starFromHot.any((s) => s.id == c.id)) c,
+    ];
+
     final displayItems = <_CommentDisplayItem>[];
 
-    if (_hotComments.isNotEmpty) {
+    if (singerComments.isNotEmpty) {
       displayItems.add(_CommentDisplayItem.header('歌手评论'));
-      for (final c in _hotComments) {
+      for (final c in singerComments) {
         displayItems.add(_CommentDisplayItem.comment(c));
       }
-      if (_comments.isNotEmpty) {
-        displayItems.add(
-          _CommentDisplayItem.header(_useTopliked ? '最热评论' : '最新评论'),
-        );
-      }
     }
-    for (final c in _comments) {
-      displayItems.add(_CommentDisplayItem.comment(c));
+    if (regularComments.isNotEmpty) {
+      displayItems.add(
+        _CommentDisplayItem.header(_useTopliked ? '最热评论' : '最新评论'),
+      );
+      for (final c in regularComments) {
+        displayItems.add(_CommentDisplayItem.comment(c));
+      }
     }
 
     return ShaderMask(

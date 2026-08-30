@@ -1425,13 +1425,20 @@ class AudioPlaybackService : Service() {
             }
             manager.createNotificationChannel(channel)
 
-            // 阶段6：保活通知专用 MIN 频道（尽量隐形；配合 DETACH 彻底移除）
+            // 保活通知专用频道：IMPORTANCE_NONE 使「播放保活」在系统
+            // 「应用信息 → 通知」里默认关闭（不显示、不打扰），用户仍可手动开启。
             try {
+                val existingKeepalive = manager.getNotificationChannel(KEEPALIVE_CHANNEL_ID)
+                if (existingKeepalive != null &&
+                    existingKeepalive.importance != NotificationManager.IMPORTANCE_NONE) {
+                    // 渠道一旦创建 importance 不可改，必须先删重建让默认关闭生效
+                    manager.deleteNotificationChannel(KEEPALIVE_CHANNEL_ID)
+                }
                 manager.createNotificationChannel(
                     NotificationChannel(
                         KEEPALIVE_CHANNEL_ID,
                         "播放保活",
-                        NotificationManager.IMPORTANCE_MIN
+                        NotificationManager.IMPORTANCE_NONE
                     ).apply {
                         description = "静默保活（不显示）"
                         setShowBadge(false)

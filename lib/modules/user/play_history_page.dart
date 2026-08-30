@@ -28,6 +28,11 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
   List<Song> _songs = [];
   bool _isLoading = true;
 
+  /// 多选编辑模式（与播放列表页/歌单页同一套心智模型）：
+  /// 进入后顶栏变为「✕ / 已选 N 首 / 全选 / 删除」，歌曲项显示圆形复选框。
+  bool _editMode = false;
+  final Set<String> _selectedIds = {};
+
   List<Song> get _displaySongs {
     final filter = PlayHistoryPage.songFilterHook;
     if (filter == null) return _songs;
@@ -49,12 +54,47 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
     });
   }
 
-  Future<void> _confirmClear() async {
+  void _enterEditMode([String? songId]) {
+    setState(() {
+      _editMode = true;
+      if (songId != null) _selectedIds.add(songId);
+    });
+  }
+
+  void _exitEditMode() {
+    setState(() {
+      _editMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelect(String songId) {
+    setState(() {
+      if (!_selectedIds.remove(songId)) _selectedIds.add(songId);
+    });
+  }
+
+  void _toggleSelectAll(List<Song> songs) {
+    setState(() {
+      if (_selectedIds.length == songs.length) {
+        _selectedIds.clear();
+      } else {
+        _selectedIds
+          ..clear()
+          ..addAll(songs.map((s) => s.id));
+      }
+    });
+  }
+
+  Future<void> _confirmDeleteSelected() async {
+    final count = _selectedIds.length;
+    if (count == 0) return;
+    final cs = Theme.of(context).colorScheme;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清空播放历史'),
-        content: const Text('确定要清空所有播放历史吗？'),
+        title: const Text('删除歌曲'),
+        content: Text('确定从播放历史中删除选中的 $count 首歌曲吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -62,13 +102,15 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定'),
+            style: TextButton.styleFrom(foregroundColor: cs.error),
+            child: const Text('删除'),
           ),
         ],
       ),
     );
     if (confirmed == true) {
-      await HistoryRepository().clearHistory();
+      await HistoryRepository().removeIds(Set.of(_selectedIds));
+      if (mounted) _exitEditMode();
       await _loadHistory();
     }
   }
@@ -82,19 +124,52 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
       builder: (context, _) {
         // 在 builder 内计算：筛选状态变化时重新过滤（build 外计算会被闭包捕获旧值）
         final displaySongs = _displaySongs;
+        final allSelected =
+            displaySongs.isNotEmpty &&
+            _selectedIds.length == displaySongs.length;
         return Scaffold(
       appBar: AppBar(
-        title: const Text('播放历史'),
-        actions: [
-          // 可选扩展：私有构建注入的额外操作按钮（默认无）
-          ...?PlayHistoryPage.extraAppBarActionsBuilder?.call(context),
-          if (_songs.isNotEmpty)
-            IconButton(
-              icon: const Icon(Icons.delete_outline),
-              tooltip: '清空',
-              onPressed: _confirmClear,
-            ),
-        ],
+        leading: _editMode
+            ? IconButton(
+                icon: const Icon(Icons.close),
+                onPressed: _exitEditMode,
+              )
+            : null,
+        title: Text(_editMode ? '已选 ${_selectedIds.length} 首' : '播放历史'),
+        actions: _editMode
+            // 编辑模式顶栏：全选 / 删除（与播放列表页、歌单页多选顶栏一致）
+            ? [
+                TextButton(
+                  onPressed: displaySongs.isEmpty
+                      ? null
+                      : () => _toggleSelectAll(displaySongs),
+                  child: Text(allSelected ? '取消全选' : '全选'),
+                ),
+                TextButton(
+                  onPressed: _selectedIds.isEmpty
+                      ? null
+                      : _confirmDeleteSelected,
+                  child: Text(
+                    '删除',
+                    style: TextStyle(
+                      color: _selectedIds.isEmpty
+                          ? Theme.of(context).disabledColor
+                          : Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              ]
+            : [
+                // 可选扩展：私有构建注入的额外操作按钮（默认无）
+                ...?PlayHistoryPage.extraAppBarActionsBuilder?.call(context),
+                // 批量删除入口：进入多选编辑模式（保留「全选→删除」即清空全部）
+                if (_songs.isNotEmpty)
+                  IconButton(
+                    icon: const Icon(Icons.edit_outlined),
+                    tooltip: '批量删除',
+                    onPressed: () => _enterEditMode(),
+                  ),
+              ],
       ),
       body: _isLoading
           ? const Center(child: M3ELoadingIndicator())
@@ -107,8 +182,15 @@ class _PlayHistoryPageState extends State<PlayHistoryPage> {
                   child: ListView.builder(
                     itemCount: displaySongs.length,
                     itemBuilder: (context, index) {
+                      final song = displaySongs[index];
                       return SongListItem(
-                        song: displaySongs[index],
+                        song: song,
+                        isSelectMode: _editMode,
+                        isSelected: _selectedIds.contains(song.id),
+                        onSelectToggle: () => _toggleSelect(song.id),
+                        onLongPress: _editMode
+                            ? null
+                            : () => _enterEditMode(song.id),
                         onTap: () {
                           context.read<PlayerProvider>().playOnlinePlaylist(
                             displaySongs,

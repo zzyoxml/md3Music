@@ -47,6 +47,8 @@ class _SongInfoPageState extends State<SongInfoPage> {
     UsbAudioService.instance.statusStream.listen((s) {
       if (mounted) setState(() => _status = s);
     });
+    // 兜底 c：页面可见时主动查一次（覆盖原生事件未推送的边界场景）
+    UsbAudioService.instance.refresh();
     // 每秒刷新一次文件大小
     _fileSizeTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _refreshFileSize();

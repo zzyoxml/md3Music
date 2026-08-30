@@ -327,6 +327,9 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
       _audioInitialized = true;
       await _audioService.init();
       _initStreams();
+      // USB 独占关闭后自动恢复 delegate 输出：旧 usb HAL 输出流被独占 force
+      // disconnect 杀死，只有重建 AudioTrack（复刻"暂停→重播"）才能重新出声。
+      UsbAudioService.instance.onExclusiveDisabled = _handleUsbExclusiveDisabled;
       await _loadDefaultQuality();
       await _syncIgnoreAudioFocus();
       // 恢复「音频焦点中断策略」设置（重启后保留用户选择）
@@ -470,6 +473,31 @@ class PlayerProvider extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<dynamic> _loadAudioService() async {
     return AudioServiceLoader.load();
+  }
+
+  /// USB 独占关闭后自动恢复 delegate 输出（复刻用户"暂停→重播"）。
+  ///
+  /// 根因：开启独占时 force disconnect 杀死了 usb HAL 的旧输出流，关闭独占后
+  /// delegate AudioTrack 仍连在失效流上 → 数据照走但 DAC 无声；setPreferredDevice /
+  /// pause / play 都不重建该流，只有 Media3 重建 AudioTrack（configure）才能让
+  /// usb HAL 重新创建输出流。故收到 enabled→false 后，等 usb HAL 接管 DAC
+  /// （closeDevice 交还内核需时间），再执行一次 pause→play 触发重建。
+  Future<void> _handleUsbExclusiveDisabled() async {
+    try {
+      await Future.delayed(const Duration(milliseconds: 600));
+      final player = _audioService;
+      if (player == null || !_audioInitialized) return;
+      if (!isPlaying) return;
+      // ignore: avoid_dynamic_calls
+      await player.pause();
+      await Future.delayed(const Duration(milliseconds: 120));
+      // ignore: avoid_dynamic_calls
+      await player.play();
+      // ignore: avoid_print
+      print('[PlayerProvider] USB exclusive disabled — delegate re-route via pause/play');
+    } catch (_) {
+      // 静默：恢复失败时用户手动暂停/重播仍可恢复
+    }
   }
 
   /// 冷启动恢复上次播放状态：加载歌曲、播放列表、恢复位置。

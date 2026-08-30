@@ -105,13 +105,19 @@ class _PlaylistPageState extends State<PlaylistPage> {
   /// 顶栏渐变 ScrollController：监听 CustomScrollView 滚动 offset，
   /// 用于 SliverAppBar pinned 后 fade-in 显示歌单名称
   final ScrollController _scrollController = ScrollController();
-  double _scrollOffset = 0;
-  double _lastReportedOffset = 0;
+  /// 顶栏折叠阈值：原渐变区间 offset ∈ [224, 284]（224 = 280 - kToolbarHeight，
+  /// +60 为渐变完成点）。改为阈值切换 + 动画过渡后，SliverAppBar 只在跨越
+  /// 该阈值时重建一次（而非每帧），滚动中主线程不再承担 SliverAppBar 重建。
+  static const double _appBarFoldThreshold = 280 - kToolbarHeight + 60;
+  /// 折叠状态（offset 越过 [_appBarFoldThreshold] 后为 true）：
+  /// ValueNotifier 只在该状态翻转时通知，SliverAppBar 仅重建 1-2 次/滚屏。
+  final ValueNotifier<bool> _appBarCollapsed = ValueNotifier<bool>(false);
 
   @override
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    _appBarCollapsed.dispose();
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
@@ -123,6 +129,11 @@ class _PlaylistPageState extends State<PlaylistPage> {
     _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       _checkCollected();
+      // 页面恢复滚动位置（如返回上一页）时校正顶栏折叠状态
+      if (_scrollController.hasClients) {
+        _appBarCollapsed.value =
+            _scrollController.offset >= _appBarFoldThreshold;
+      }
       // 「我的收藏」里的歌单：先 await 缓存就位（避免 dio 失败先于
       // SharedPreferences 读到 cache，导致 _error 覆盖了缓存歌曲列表）
       if (widget.isInMyFavorites) {
@@ -163,14 +174,13 @@ class _PlaylistPageState extends State<PlaylistPage> {
         widget.playlist.id;
   }
 
-  /// 滚动监听：减少无意义 setState，仅在偏移变化超过 1px 时更新
+  /// 滚动监听：仅在折叠状态跨越阈值翻转时更新 notifier——
+  /// SliverAppBar 只重建 1-2 次/滚屏，滚动中绝大多数帧零顶栏重建。
   void _onScroll() {
     if (!mounted) return;
-    final offset = _scrollController.offset;
-    if ((offset - _lastReportedOffset).abs() > 1.0) {
-      _lastReportedOffset = offset;
-      _scrollOffset = offset;
-      setState(() {});
+    final collapsed = _scrollController.offset >= _appBarFoldThreshold;
+    if (collapsed != _appBarCollapsed.value) {
+      _appBarCollapsed.value = collapsed;
     }
   }
 
@@ -179,18 +189,24 @@ class _PlaylistPageState extends State<PlaylistPage> {
   String? _lastSearchQuery;
   _SortBy? _lastSortBy;
   bool? _lastSortAscending;
+  /// 筛选结果缓存（叠加在 [_cachedDisplaySongs] 之上）：
+  /// 输入未变时不再对每首歌曲重复全量遍历（itemBuilder 每构建一个新项
+  /// 都会访问 [_displaySongs]，筛选开启时 O(N) 遍历会放大滚动卡顿）。
+  List<Song>? _cachedFilteredSongs;
 
-  /// 获取当前显示的歌曲列表（带缓存；可选扩展筛选在缓存之上每次应用，
-  /// 保证筛选开关切换即时生效——筛选状态不参与缓存 key）。
+  /// 获取当前显示的歌曲列表（带缓存；可选扩展筛选结果同样缓存，
+  /// 仅排序/搜索输入变化或筛选开关切换时重算）。
   List<Song> get _displaySongs {
     if (_cachedDisplaySongs != null &&
         _lastSearchQuery == _searchQuery &&
         _lastSortBy == _sortBy &&
         _lastSortAscending == _sortAscending) {
-      return _applyDisplayFilter(_cachedDisplaySongs!);
+      _cachedFilteredSongs ??= _applyDisplayFilter(_cachedDisplaySongs!);
+      return _cachedFilteredSongs!;
     }
     _rebuildDisplaySongs();
-    return _applyDisplayFilter(_cachedDisplaySongs!);
+    _cachedFilteredSongs = _applyDisplayFilter(_cachedDisplaySongs!);
+    return _cachedFilteredSongs!;
   }
 
   /// 应用可选扩展注入的列表变换（如按本地持久化筛选；每次调用重新执行）。
@@ -235,6 +251,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
   /// 使显示列表缓存失效
   void _invalidateDisplaySongs() {
     _cachedDisplaySongs = null;
+    _cachedFilteredSongs = null;
   }
 
   // ==================== 批量选择模式 ====================
@@ -927,7 +944,12 @@ class _PlaylistPageState extends State<PlaylistPage> {
     return ListenableBuilder(
       listenable: PlaylistPage.songFilterListenable ??
           const AlwaysStoppedAnimation<Object?>(null),
-      builder: (context, _) => PopScope(
+      builder: (context, _) {
+        // 筛选开关切换（songFilterListenable 通知）时失效筛选缓存；
+        // 滚动偏移走 ValueNotifier 不再触发本 builder，此处仅在
+        // 筛选切换/页面重建时执行，重算一次筛选即可。
+        _invalidateDisplaySongs();
+        return PopScope(
       canPop: !_isMultiSelectMode,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && _isMultiSelectMode) _exitMultiSelectMode();
@@ -948,263 +970,18 @@ class _PlaylistPageState extends State<PlaylistPage> {
                 controller: _scrollController,
                 slivers: [
                   if (!_isMultiSelectMode)
-                  SliverAppBar(
-                        expandedHeight: 280,
-                        pinned: true,
-                        // 背景图模式：顶栏恒透明——flexibleSpace 是普通 Stack
-                        // （非 FlexibleSpaceBar，折叠时不产生视差位移，壁纸层顶部
-                        // 固定裁剪），任意滚动位置壁纸都与主体背景对齐、不透 UI；
-                        // 非背景图：上划渐变到 surface（遮住列表不穿透）
-                        backgroundColor: useBackgroundImage
-                            ? Colors.transparent
-                            : Color.lerp(
-                                Colors.transparent,
-                                colorScheme.surface,
-                                (_scrollOffset - (280 - kToolbarHeight))
-                                    .clamp(0.0, 60.0) / 60,
-                              )!,
-                        surfaceTintColor: Colors.transparent,
-                        scrolledUnderElevation: 0,
-                        actions: [
-                          // 可选扩展：私有构建注入的额外操作按钮（默认无）
-                          ...?PlaylistPage.extraAppBarActionsBuilder?.call(
-                            context,
-                          ),
-                          if (_songs.isNotEmpty)
-                            IconButton(
-                              icon: Icon(
-                                _isSearching ? Icons.close : Icons.search,
-                              ),
-                              onPressed: _toggleSearch,
-                            ),
-                          if (_songs.isNotEmpty)
-                            IconButton(
-                              icon: const Icon(Icons.comment_outlined),
-                              onPressed: () => _showCommentsSheet(context),
-                              tooltip: '评论',
-                            ),
-                          if (_songs.isNotEmpty)
-                            IconButton(
-                              icon: const Icon(Icons.my_location),
-                              onPressed: _scrollToPlayingSong,
-                              tooltip: '定位正在播放',
-                            ),
-                          // 专辑详情（isAlbum）不展示相似歌单
-                          if (_songs.isNotEmpty && !widget.isAlbum)
-                            IconButton(
-                              icon: const Icon(Icons.auto_awesome),
-                              onPressed: () =>
-                                  _showSimilarPlaylists(context),
-                              tooltip: '相似歌单',
-                            ),
-                          if (_songs.isNotEmpty)
-                            PopupMenuButton<_SortBy>(
-                              icon: const Icon(Icons.sort),
-                              onSelected: (value) {
-                                setState(() {
-                                  if (_sortBy == value) {
-                                    _sortAscending = !_sortAscending;
-                                  } else {
-                                    _sortBy = value;
-                                    _sortAscending = value == _SortBy.time ? false : true;
-                                  }
-                                  _invalidateDisplaySongs();
-                                });
-                              },
-                              itemBuilder: (context) => [
-                                CheckedPopupMenuItem<_SortBy>(
-                                  value: _SortBy.time,
-                                  checked: _sortBy == _SortBy.time,
-                                  child: Row(
-                                    children: [
-                                      const Text('添加时间'),
-                                      if (_sortBy == _SortBy.time) ...[
-                                        const Spacer(),
-                                        Icon(
-                                          _sortAscending
-                                              ? Icons.arrow_upward
-                                              : Icons.arrow_downward,
-                                          size: 16,
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                CheckedPopupMenuItem<_SortBy>(
-                                  value: _SortBy.title,
-                                  checked: _sortBy == _SortBy.title,
-                                  child: Row(
-                                    children: [
-                                      const Text('歌曲名称'),
-                                      if (_sortBy == _SortBy.title) ...[
-                                        const Spacer(),
-                                        Icon(
-                                          _sortAscending
-                                              ? Icons.arrow_upward
-                                              : Icons.arrow_downward,
-                                          size: 16,
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                CheckedPopupMenuItem<_SortBy>(
-                                  value: _SortBy.duration,
-                                  checked: _sortBy == _SortBy.duration,
-                                  child: Row(
-                                    children: [
-                                      const Text('时长'),
-                                      if (_sortBy == _SortBy.duration) ...[
-                                        const Spacer(),
-                                        Icon(
-                                          _sortAscending
-                                              ? Icons.arrow_upward
-                                              : Icons.arrow_downward,
-                                          size: 16,
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                        ],
-                        // pinned 后顶栏标题：滚动超过阈值后 fade-in 显示歌单名称
-                        title: Opacity(
-                          opacity: ((_scrollOffset - (280 - kToolbarHeight)) /
-                                  60.0)
-                              .clamp(0.0, 1.0),
-                          child: Text(
-                            displayPlaylist.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.w600),
-                          ),
-                        ),
-                        // 不用 FlexibleSpaceBar：折叠时不产生视差位移，壁纸层
-                        // 顶部固定裁剪，滚动中始终与主体背景对齐。
-                        // 显式 ClipRect：全屏壁纸层（OverflowBox+RepaintBoundary）
-                        // 仅靠 Stack 默认 hardEdge 裁剪可能失效，必须显式裁剪，
-                        // 否则壁纸会溢出覆盖下方歌曲列表
-                        flexibleSpace: ClipRect(
-                          child: Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              if (useBackgroundImage)
-                                const WallpaperHeaderBackground(),
-                              Container(
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                begin: Alignment.topCenter,
-                                end: Alignment.bottomCenter,
-                                colors: [
-                                  // 开启壁纸时主题色渐变半透明（alpha 0.5）叠加在壁纸上：
-                                  // 主题色渐变可见且壁纸透出；未开启时实色渐变
-                                  useBackgroundImage
-                                      ? colorScheme.primaryContainer
-                                          .withValues(alpha: 0.35)
-                                      : colorScheme.primaryContainer,
-                                  // 底部渐变到透明：启用全局背景图（页面背景透明）时，
-                                  // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
-                                  colorScheme.surface.withValues(alpha: 0),
-                                ],
-                              ),
-                            ),
-                            child: SafeArea(
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  24,
-                                  48,
-                                  24,
-                                  16,
-                                ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(12),
-                                      child: SizedBox(
-                                        width: 140,
-                                        height: 140,
-                                        child:
-                                            displayPlaylist.artworkUri != null
-                                            ? CachedNetworkImage(
-                                                imageUrl:
-                                                    displayPlaylist.artworkUri!,
-                                                memCacheWidth: 420,
-                                                memCacheHeight: 420,
-                                                fit: BoxFit.cover,
-                                                placeholder: (_, _) => Container(
-                                                  color: colorScheme
-                                                      .surfaceContainerHighest,
-                                                  child: Icon(
-                                                    Icons.queue_music,
-                                                    size: 48,
-                                                    color: colorScheme
-                                                        .onSurfaceVariant,
-                                                  ),
-                                                ),
-                                                errorWidget: (_, _, _) =>
-                                                    Container(
-                                                      color: colorScheme
-                                                          .surfaceContainerHighest,
-                                                      child: Icon(
-                                                        Icons.queue_music,
-                                                        size: 48,
-                                                        color: colorScheme
-                                                            .onSurfaceVariant,
-                                                      ),
-                                                    ),
-                                              )
-                                            : Container(
-                                                color: colorScheme
-                                                    .surfaceContainerHighest,
-                                                child: Icon(
-                                                  Icons.queue_music,
-                                                  size: 48,
-                                                  color: colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
-                                              ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 20),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.end,
-                                        children: [
-                                          Text(
-                                            displayPlaylist.name,
-                                            maxLines: 4,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: textTheme.headlineSmall
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.bold,
-                                                ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            '${displayPlaylist.creator ?? ''} · ${_songs.length} 首',
-                                            style: textTheme.labelMedium
-                                                ?.copyWith(
-                                                  color: colorScheme
-                                                      .onSurfaceVariant,
-                                                ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                          ),
-                          ],
-                        ),
+                    // 顶栏只在折叠状态翻转（跨越阈值）时重建，
+                    // 滚动中不再每帧重建（背景/标题用动画过渡）
+                    ValueListenableBuilder<bool>(
+                      valueListenable: _appBarCollapsed,
+                      builder: (context, collapsed, _) =>
+                      _buildAppBar(
+                        context,
+                        colorScheme,
+                        textTheme,
+                        displayPlaylist,
+                        useBackgroundImage,
+                        collapsed,
                       ),
                     ),
                       // 歌单介绍（默认折叠，最多显示2行，带动画）
@@ -1458,8 +1235,310 @@ class _PlaylistPageState extends State<PlaylistPage> {
             ],
             ),
       ),
-    ),
+    );
+      },
   );
+  }
+
+  /// 顶栏 SliverAppBar：背景/标题只依赖折叠状态 [collapsed]（阈值切换），
+  /// 由 `ValueListenableBuilder<bool>` 在状态翻转时局部重建——滚动中绝大多数
+  /// 帧零重建（此前渐变 lerp 让 SliverAppBar 每帧重建、主线程每帧承担
+  /// actions/title/背景更新）；标题用 AnimatedOpacity 200ms 过渡保持平滑。
+  Widget _buildAppBar(
+    BuildContext context,
+    ColorScheme colorScheme,
+    TextTheme textTheme,
+    Playlist displayPlaylist,
+    bool useBackgroundImage,
+    bool collapsed,
+  ) {
+    return SliverAppBar(
+      expandedHeight: 280,
+      pinned: true,
+      // 背景图模式：顶栏恒透明——flexibleSpace 是普通 Stack
+      // （非 FlexibleSpaceBar，折叠时不产生视差位移，壁纸层顶部
+      // 固定裁剪），任意滚动位置壁纸都与主体背景对齐、不透 UI；
+      // 非背景图：折叠后一次性切到 surface（原渐变 lerp 改为阈值切换，
+      // 避免 SliverAppBar 每帧重建；跨阈值时由 AnimatedOpacity 过渡）
+      backgroundColor: useBackgroundImage
+          ? Colors.transparent
+          : (collapsed ? colorScheme.surface : Colors.transparent),
+      surfaceTintColor: Colors.transparent,
+      scrolledUnderElevation: 0,
+      actions: [
+        // 可选扩展：私有构建注入的额外操作按钮（默认无）
+        ...?PlaylistPage.extraAppBarActionsBuilder?.call(context),
+        if (_songs.isNotEmpty)
+          IconButton(
+            icon: Icon(_isSearching ? Icons.close : Icons.search),
+            onPressed: _toggleSearch,
+          ),
+        if (_songs.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.comment_outlined),
+            onPressed: () => _showCommentsSheet(context),
+            tooltip: '评论',
+          ),
+        if (_songs.isNotEmpty)
+          IconButton(
+            icon: const Icon(Icons.my_location),
+            onPressed: _scrollToPlayingSong,
+            tooltip: '定位正在播放',
+          ),
+        // 专辑详情（isAlbum）不展示相似歌单
+        if (_songs.isNotEmpty && !widget.isAlbum)
+          IconButton(
+            icon: const Icon(Icons.auto_awesome),
+            onPressed: () => _showSimilarPlaylists(context),
+            tooltip: '相似歌单',
+          ),
+        if (_songs.isNotEmpty)
+          PopupMenuButton<_SortBy>(
+            icon: const Icon(Icons.sort),
+            onSelected: (value) {
+              setState(() {
+                if (_sortBy == value) {
+                  _sortAscending = !_sortAscending;
+                } else {
+                  _sortBy = value;
+                  _sortAscending = value == _SortBy.time ? false : true;
+                }
+                _invalidateDisplaySongs();
+              });
+            },
+            itemBuilder: (context) => [
+              CheckedPopupMenuItem<_SortBy>(
+                value: _SortBy.time,
+                checked: _sortBy == _SortBy.time,
+                child: Row(
+                  children: [
+                    const Text('添加时间'),
+                    if (_sortBy == _SortBy.time) ...[
+                      const Spacer(),
+                      Icon(
+                        _sortAscending ? Icons.arrow_upward : Icons.arrow_downward,
+                        size: 16,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              CheckedPopupMenuItem<_SortBy>(
+                value: _SortBy.title,
+                checked: _sortBy == _SortBy.title,
+                child: Row(
+                  children: [
+                    const Text('歌曲名称'),
+                    if (_sortBy == _SortBy.title) ...[
+                      const Spacer(),
+                      Icon(
+                        _sortAscending ? Icons.arrow_upward : Icons.arrow_downward,
+                        size: 16,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              CheckedPopupMenuItem<_SortBy>(
+                value: _SortBy.duration,
+                checked: _sortBy == _SortBy.duration,
+                child: Row(
+                  children: [
+                    const Text('时长'),
+                    if (_sortBy == _SortBy.duration) ...[
+                      const Spacer(),
+                      Icon(
+                        _sortAscending ? Icons.arrow_upward : Icons.arrow_downward,
+                        size: 16,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+      ],
+      // pinned 后顶栏标题：折叠后 fade-in（AnimatedOpacity 200ms 过渡）
+      title: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        opacity: collapsed ? 1.0 : 0.0,
+        child: Text(
+          displayPlaylist.name,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600),
+        ),
+      ),
+      // 不用 FlexibleSpaceBar：折叠时不产生视差位移，壁纸层
+      // 顶部固定裁剪，滚动中始终与主体背景对齐。
+      // 显式 ClipRect：全屏壁纸层（OverflowBox+RepaintBoundary）
+      // 仅靠 Stack 默认 hardEdge 裁剪可能失效，必须显式裁剪，
+      // 否则壁纸会溢出覆盖下方歌曲列表
+      flexibleSpace: _buildCachedFlexibleSpace(
+        context,
+        colorScheme,
+        textTheme,
+        displayPlaylist,
+        useBackgroundImage,
+      ),
+    );
+  }
+
+  // ── flexibleSpace 实例缓存 ──
+  // SliverAppBar 折叠状态翻转时重建，但 flexibleSpace 内容完全不依赖折叠
+  // 状态/滚动 offset：缓存同一 widget 实例，父级 rebuild 时 updateChild 因
+  // identical 跳过整棵子树重建（封面图、渐变、壁纸不再重复 build）；
+  // RepaintBoundary 隔离重绘。
+  Widget? _cachedFlexibleSpace;
+  String? _cachedFsName;
+  String? _cachedFsArtwork;
+  String? _cachedFsCreator;
+  int _cachedFsSongCount = -1;
+  bool? _cachedFsUseBgImage;
+  ColorScheme? _cachedFsColorScheme;
+
+  Widget _buildCachedFlexibleSpace(
+    BuildContext context,
+    ColorScheme colorScheme,
+    TextTheme textTheme,
+    Playlist displayPlaylist,
+    bool useBackgroundImage,
+  ) {
+    if (_cachedFlexibleSpace != null &&
+        _cachedFsName == displayPlaylist.name &&
+        _cachedFsArtwork == displayPlaylist.artworkUri &&
+        _cachedFsCreator == displayPlaylist.creator &&
+        _cachedFsSongCount == _songs.length &&
+        _cachedFsUseBgImage == useBackgroundImage &&
+        _cachedFsColorScheme == colorScheme) {
+      return _cachedFlexibleSpace!;
+    }
+    _cachedFsName = displayPlaylist.name;
+    _cachedFsArtwork = displayPlaylist.artworkUri;
+    _cachedFsCreator = displayPlaylist.creator;
+    _cachedFsSongCount = _songs.length;
+    _cachedFsUseBgImage = useBackgroundImage;
+    _cachedFsColorScheme = colorScheme;
+    _cachedFlexibleSpace = RepaintBoundary(
+      child: ClipRect(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // 折叠时 flexibleSpace 高度从 224px 缩到 0：封面随可用高度平滑
+            // 缩放（140 → 0）而非固定 140 被视口上边界截断，同时不触发
+            // RenderFlex overflowed；可用高度不足以容纳封面+文字时隐藏文字。
+            final availH = constraints.maxHeight - 64; // padding 上下 64
+            final coverSize = availH.clamp(0.0, 140.0);
+            final showText = availH >= 120;
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+            if (useBackgroundImage)
+              const WallpaperHeaderBackground(),
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    // 开启壁纸时主题色渐变半透明（alpha 0.5）叠加在壁纸上：
+                    // 主题色渐变可见且壁纸透出；未开启时实色渐变
+                    useBackgroundImage
+                        ? colorScheme.primaryContainer
+                            .withValues(alpha: 0.35)
+                        : colorScheme.primaryContainer,
+                    // 底部渐变到透明：启用全局背景图（页面背景透明）时，
+                    // 若此处仍是实色 surface 会与下方背景图形成接缝穿帮。
+                    colorScheme.surface.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+              child: SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 48, 24, 16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: SizedBox(
+                          width: coverSize,
+                          height: coverSize,
+                          child: displayPlaylist.artworkUri != null
+                              ? CachedNetworkImage(
+                                  imageUrl: displayPlaylist.artworkUri!,
+                                  memCacheWidth: 420,
+                                  memCacheHeight: 420,
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, _) => Container(
+                                    color:
+                                        colorScheme.surfaceContainerHighest,
+                                    child: Icon(
+                                      Icons.queue_music,
+                                      size: 48,
+                                      color:
+                                          colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                  errorWidget: (_, _, _) => Container(
+                                    color:
+                                        colorScheme.surfaceContainerHighest,
+                                    child: Icon(
+                                      Icons.queue_music,
+                                      size: 48,
+                                      color:
+                                          colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                )
+                              : Container(
+                                  color:
+                                      colorScheme.surfaceContainerHighest,
+                                  child: Icon(
+                                    Icons.queue_music,
+                                    size: 48,
+                                    color: colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                        ),
+                      ),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            if (showText) ...[
+                              Text(
+                                displayPlaylist.name,
+                                maxLines: 4,
+                                overflow: TextOverflow.ellipsis,
+                                style: textTheme.headlineSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '${displayPlaylist.creator ?? ''} · ${_songs.length} 首',
+                                style: textTheme.labelMedium?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                    ),
+                ),
+              ),
+            ),
+          ],
+        );
+          },
+        ),
+      ),
+    );
+    return _cachedFlexibleSpace!;
   }
 
   /// 离线时无缓存歌曲的空状态：仅展示歌单元数据，不显示错误页面。

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbManager
+import android.media.AudioDeviceInfo
 import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
@@ -45,6 +46,12 @@ class UsbAudioPlugin(private val context: Context) {
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
     private val usbAudioDevice: UsbAudioDevice = UsbAudioDevice.getInstance(context)
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** 保存 channel 引用，供广播/开关路径向 Dart 推送最新状态（替代 Dart 每秒轮询）。 */
+    private var channel: MethodChannel? = null
+
+    /** 关闭独占后的延迟路由重试任务（重新 enable 时取消，防止与独占状态竞争）。 */
+    private var rerouteRunnable: Runnable? = null
 
     /** 当前活动流的适配器（disable 时 stop→drain→release）。 */
     private var currentAdapter: UsbAudioAdapter? = null
@@ -171,6 +178,8 @@ class UsbAudioPlugin(private val context: Context) {
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
                     Log.i(TAG, "USB_DEVICE_ATTACHED (exclusive=" + UsbAudioSinkController.isEnabled() + ")")
                     invalidateDeviceCache()
+                    // 未开独占时 UI 也要刷新"设备已连接"（替代轮询发现）
+                    pushStatus()
                     if (UsbAudioSinkController.isEnabled()) {
                         // 重插后设备需重新授权 + 重建流
                         requestEnableInternal(null)
@@ -184,6 +193,8 @@ class UsbAudioPlugin(private val context: Context) {
                     Thread {
                         synchronized(exclusiveLock) {
                             if (UsbAudioSinkController.isEnabled()) disableExclusive()
+                            // 拔线后 UI 即时刷新（含自动暂停逻辑），替代轮询兜底
+                            pushStatus()
                         }
                     }.start()
                 }
@@ -193,6 +204,7 @@ class UsbAudioPlugin(private val context: Context) {
 
     fun register(flutterEngine: FlutterEngine) {
         val channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL_NAME)
+        this.channel = channel
         channel.setMethodCallHandler { call, result ->
             try {
                 handleMethod(call, result)
@@ -258,6 +270,8 @@ class UsbAudioPlugin(private val context: Context) {
                 Thread {
                     synchronized(exclusiveLock) {
                         disableExclusive()
+                        // 推送最新状态（UI 即时刷新），替代轮询兜底
+                        pushStatus()
                         result.success(getStatus())
                     }
                 }.start()
@@ -304,6 +318,31 @@ class UsbAudioPlugin(private val context: Context) {
             }
         } else 0f
         return base
+    }
+
+    /**
+     * 查找当前连接的 USB 音频输出设备（AudioDeviceInfo，供非独占路由）。
+     * AudioFlinger 不会自动把 USB 设为输出路由（重新插拔才触发），
+     * 关闭独占后必须显式 setPreferredDevice 到 USB，声音才能继续走 DAC。
+     */
+    private fun findUsbAudioDeviceInfo(): AudioDeviceInfo? {
+        return audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .firstOrNull {
+                it.type == AudioDeviceInfo.TYPE_USB_DEVICE ||
+                    it.type == AudioDeviceInfo.TYPE_USB_HEADSET ||
+                    it.type == AudioDeviceInfo.TYPE_USB_ACCESSORY
+            }
+    }
+
+    /**
+     * 状态变化 → 主动推送 Dart（替代 Dart 每秒轮询）。仅事件路径调用：
+     * 拔插广播 / 广播触发的自动恢复（无 MethodChannel 调用方）会真正依赖它；
+     * Dart 调用方（enable/disable）同时从返回值拿到同一份状态，幂等。
+     */
+    private fun pushStatus() {
+        val ch = channel ?: return
+        val status = getStatus()
+        mainHandler.post { ch.invokeMethod("onStatusChanged", status) }
     }
 
     // ── 开关 ─────────────────────────────────────────────────────
@@ -354,12 +393,21 @@ class UsbAudioPlugin(private val context: Context) {
                     if (ok) {
                         // 应用初始 DAC 音量 + 启动系统媒体音量轮询（音量键 → DAC 硬件音量）
                         mainHandler.post {
+                            // 取消未执行的关独占延迟路由任务（防止与独占状态竞争）
+                            rerouteRunnable?.let { mainHandler.removeCallbacks(it) }
+                            rerouteRunnable = null
+                            // 独占直写 DAC 时 delegate 静音且不喂数据，路由回系统默认，
+                            // 避免与 usb HAL 竞争（非独占路由在 disable 时再切回 USB）
+                            UsbAudioSinkController.setDelegatePreferredDevice(null)
                             resetVolumeState()
                             applyDacVolume()
                             startVolumePolling()
                         }
                     }
                     mainHandler.post {
+                        // 无论谁触发（Dart 调用 / 拔插广播自动恢复），都推送最新状态；
+                        // Dart 调用方还会从 result 拿到同一份状态（幂等）。
+                        pushStatus()
                         if (result != null) {
                             if (ok) result.success(getStatus())
                             else result.error("ENABLE_FAILED", "USB 独占开启失败", null)
@@ -484,7 +532,28 @@ class UsbAudioPlugin(private val context: Context) {
         usbAudioDevice.closeDevice()
         // 阶段三：设备释放完成后再恢复 delegate 音量/路由
         UsbAudioSinkController.onUsbReleased()
-        Log.i(TAG, "disableExclusive done")
+        // 关闭独占后把 delegate AudioTrack 显式路由到 USB DAC（系统非独占输出）。
+        // AudioFlinger 不会因设备交还内核而自动重新路由 USB（需重新插拔才触发），
+        // 必须显式 setPreferredDevice，否则声音会回扬声器/无声。
+        // 注意：closeDevice 刚把 DAC 交还内核，usb HAL 打开需要时间（snd-usb-audio
+        // probe + AudioFlinger 枚举）。立即迁移会让 AudioTrack 连到未就绪设备 →
+        // 静默无声（进度条照走，暂停→重播才恢复）。故延迟 500ms 待 usb HAL 接管后
+        // 重新设置路由，并强制 AudioTrack 重新 start（等效用户暂停→重播）。
+        val usbDev = findUsbAudioDeviceInfo()
+        UsbAudioSinkController.setDelegatePreferredDevice(usbDev)
+        Log.i(TAG, "disableExclusive done (delegate routed to USB: ${usbDev?.productName ?: "none"})")
+        // 根因：开启独占时 force disconnect 杀死了 usb HAL 的旧输出流；关闭独占后
+        // delegate AudioTrack 仍连在失效流上 → 数据照走但 DAC 无声。setPreferredDevice
+        // / pause / play 都不会重建该流——只有 Media3 重建 AudioTrack（configure）才能让
+        // usb HAL 重新创建输出流。重建由 Dart 侧在收到 enabled→false 后自动执行
+        // "暂停→重播"触发；此处只负责延迟重设 preferredDevice（确保重建时字段为 USB）。
+        val task = Runnable {
+            val dev = findUsbAudioDeviceInfo()
+            UsbAudioSinkController.setDelegatePreferredDevice(dev)
+            Log.i(TAG, "delegate USB re-route (delayed): ${dev?.productName ?: "none"}")
+        }
+        rerouteRunnable = task
+        mainHandler.postDelayed(task, 500)
     }
 
     fun cleanup() {

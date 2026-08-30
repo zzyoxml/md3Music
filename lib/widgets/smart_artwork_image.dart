@@ -90,6 +90,17 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     final uri = widget.artworkUri;
+    // 缩略图解码：列表项封面仅显示 ~52px，但在线封面 URL 是 400×400 原图
+    // （kugou_provider._stripArtworkUrl 把 {size} 替换为 400）。不带 cacheWidth
+    // 会全尺寸解码（内存/解码时间浪费 ~6.6 倍），且 400×400 位图 ~640KB/张
+    // 会让 ImageCache 在长歌单下频繁淘汰（滚动回访重新解码）。cacheWidth
+    // 参与 ImageCache key：同尺寸同 URL 共享同一份解码结果。
+    final isFill = widget.size == double.infinity;
+    final decodeWidth = isFill
+        ? null
+        : (widget.size * MediaQuery.devicePixelRatioOf(context))
+            .round()
+            .clamp(32, 480);
 
     Widget child;
     if (uri == null) {
@@ -101,6 +112,7 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
           width: widget.size,
           height: widget.size,
           fit: BoxFit.cover,
+          cacheWidth: decodeWidth,
         );
       } else if (widget.fallbackFilePath != null) {
         // URI 为空时，尝试用 fallbackFilePath 读内嵌封面
@@ -146,7 +158,6 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
     } else if (uri.startsWith('http://') ||
         uri.startsWith('https://')) {
       // http(s):// 在线封面用 Image.network
-      final isFill = widget.size == double.infinity;
       // 如果已经从本地持久化兜底拿到了字节，直接用 Image.memory 显示
       if (_localArtworkBytes != null) {
         child = Image.memory(
@@ -154,6 +165,7 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
           width: isFill ? double.infinity : widget.size,
           height: isFill ? double.infinity : widget.size,
           fit: BoxFit.cover,
+          cacheWidth: decodeWidth,
         );
       } else {
         child = Image.network(
@@ -161,6 +173,7 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
           width: isFill ? double.infinity : widget.size,
           height: isFill ? double.infinity : widget.size,
           fit: BoxFit.cover,
+          cacheWidth: decodeWidth,
           errorBuilder: (_, _, _) {
             // 在线加载失败：先尝试本地持久化兜底，再退到 fallbackFilePath / 占位符
             if (!_hasTriedLocalFallback) {
@@ -173,6 +186,7 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
                 width: isFill ? double.infinity : widget.size,
                 height: isFill ? double.infinity : widget.size,
                 fit: BoxFit.cover,
+                cacheWidth: decodeWidth,
               );
             }
             if (widget.fallbackFilePath != null) {
@@ -201,7 +215,6 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
       }
     } else if (uri.startsWith('file://')) {
       // file:// 本地文件（云盘提取的内嵌封面等）
-      final isFill = widget.size == double.infinity;
       final file = File.fromUri(Uri.parse(uri));
       if (file.existsSync()) {
         child = Image.file(
@@ -209,6 +222,7 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
           width: isFill ? double.infinity : widget.size,
           height: isFill ? double.infinity : widget.size,
           fit: BoxFit.cover,
+          cacheWidth: decodeWidth,
           errorBuilder: (_, _, _) => _placeholder(colorScheme),
         );
       } else {
@@ -221,6 +235,7 @@ class _SmartArtworkImageState extends State<SmartArtworkImage> {
         width: widget.size,
         height: widget.size,
         fit: BoxFit.cover,
+        cacheWidth: decodeWidth,
         errorBuilder: (_, _, _) => _placeholder(colorScheme),
       );
     }

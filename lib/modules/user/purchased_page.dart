@@ -73,7 +73,7 @@ class _PurchasedPageState extends State<PurchasedPage> {
           await api.getUserPurchasedSongs(page: 1, pagesize: 50, noCache: true);
       if (!mounted) return;
       if (result == null) {
-        _finishLoad(error: '加载失败，请稍后重试');
+        _finishLoad(error: '暂无歌曲');
         return;
       }
       final raw = _extractList(result);
@@ -85,7 +85,7 @@ class _PurchasedPageState extends State<PurchasedPage> {
         _isLoading = false;
       });
     } catch (e) {
-      _finishLoad(error: '加载失败，请稍后重试');
+      _finishLoad(error: '暂无歌曲');
     }
   }
 
@@ -105,7 +105,7 @@ class _PurchasedPageState extends State<PurchasedPage> {
           await api.getUserPurchasedAlbums(page: 1, pagesize: 15, noCache: true);
       if (!mounted) return;
       if (result == null) {
-        _finishLoad(error: '加载失败，请稍后重试');
+        _finishLoad(error: '暂无专辑');
         return;
       }
       final raw = _extractList(result);
@@ -117,7 +117,7 @@ class _PurchasedPageState extends State<PurchasedPage> {
         _isLoading = false;
       });
     } catch (e) {
-      _finishLoad(error: '加载失败，请稍后重试');
+      _finishLoad(error: '暂无专辑');
     }
   }
 

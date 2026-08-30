@@ -1,7 +1,10 @@
 package com.ryanheise.just_audio;
 
 import android.content.Context;
+import android.media.AudioDeviceInfo;
+import android.os.Build;
 import android.util.Log;
+import androidx.annotation.Nullable;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.exoplayer.audio.AudioSink;
@@ -63,6 +66,41 @@ public final class UsbAudioSinkController {
 
     /** 最近一次播放器音量（0..1）。DAC 音量 = 系统媒体音量 × 该值。 */
     private static volatile float lastPlayerVolume = 1f;
+
+    /**
+     * 应用侧指定的 delegate 偏好输出设备（如 USB DAC）。
+     * 关闭独占后显式路由到 USB，实现"非独占仍走 DAC"；开启独占时置 null 回到系统默认。
+     * 保存在静态字段：关闭独占时若没有活跃 sink，后续新建的 sink 也会在 configure 时应用。
+     */
+    private static volatile AudioDeviceInfo preferredDevice = null;
+
+    /**
+     * 设置 delegate AudioTrack 的偏好输出设备（ForwardingAudioSink 已转发给 DefaultAudioSink）。
+     * 设备已存在时 DefaultAudioSink 即时调用 AudioTrack.setPreferredDevice 切换；不存在时
+     * 缓存在 DefaultAudioSink.preferredDevice，下次 configure 创建 AudioTrack 时应用。
+     */
+    public static void setDelegatePreferredDevice(@Nullable AudioDeviceInfo device) {
+        preferredDevice = device;
+        if (Build.VERSION.SDK_INT < 23) return;
+        for (UsbInterceptAudioSink s : liveSinks) s.setPreferredDevice(device);
+    }
+
+    /** 新 sink 在 configure 时应用静态偏好路由（关闭独占后创建的 sink 也要走 USB）。 */
+    private static void applyPreferredDeviceIfNeeded(UsbInterceptAudioSink sink) {
+        AudioDeviceInfo device = preferredDevice;
+        if (device != null && Build.VERSION.SDK_INT >= 23) {
+            sink.setPreferredDevice(device);
+        }
+    }
+
+    /**
+     * 延迟重试用：强制所有 delegate AudioTrack 重新 start（等效用户暂停→重播）。
+     * AudioTrack 迁移到未就绪的 USB 设备会静默失败（无声但数据照走），
+     * pause+play 让 AudioFlinger 基于当前已就绪的设备重新路由。
+     */
+    public static void restartDelegateRouting() {
+        for (UsbInterceptAudioSink s : liveSinks) s.restartRouting();
+    }
 
     /** 播放器音量变化回调（应用侧用它更新 DAC 硬件音量）。 */
     public interface UsbVolumeListener {
@@ -235,6 +273,8 @@ public final class UsbAudioSinkController {
         @Override
         public void configure(Format inputFormat, int specifiedBufferSize, int[] outputChannels)
                 throws ConfigurationException {
+            // 应用静态偏好路由（关闭独占后新建/重配的 sink 也要显式走 USB DAC）
+            applyPreferredDeviceIfNeeded(this);
             int enc = inputFormat.pcmEncoding;
             if (enc != Format.NO_VALUE) currentEncoding = enc;
             int sr = inputFormat.sampleRate > 0 ? inputFormat.sampleRate : 0;
@@ -492,6 +532,21 @@ public final class UsbAudioSinkController {
             if (streamingThread != null) {
                 streamingThread.stop();
                 streamingThread = null;
+            }
+        }
+
+        /**
+         * 强制 AudioTrack 重新 start（直接转发，不走本类的 play/pause 状态逻辑）。
+         * 关闭独占后 AudioTrack 曾迁移到未就绪 USB 设备 → 静默无声；重新 start
+         * 让 AudioFlinger 重新路由到当前已就绪的设备。
+         */
+        void restartRouting() {
+            try {
+                super.pause();
+                super.play();
+                Log.i(TAG, "delegate AudioTrack restarted (re-route to USB)");
+            } catch (Exception e) {
+                Log.w(TAG, "restartRouting failed: " + e.getMessage());
             }
         }
 

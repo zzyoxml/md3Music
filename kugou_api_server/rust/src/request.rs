@@ -305,17 +305,6 @@ fn agent() -> ureq::Agent {
         .clone()
 }
 
-/// 按请求级超时选择 agent：有 timeout_secs 时用独立超时的轻量 agent（仅配置不同，
-/// 连接池懒加载，成本可忽略），否则用全局 20s agent。
-fn pick_agent(timeout_secs: Option<u64>) -> ureq::Agent {
-    match timeout_secs {
-        Some(secs) => ureq::AgentBuilder::new()
-            .timeout(Duration::from_secs(secs))
-            .build(),
-        None => agent(),
-    }
-}
-
 struct RawResponse {
     cookies: Vec<String>,
     ssa_code: Option<String>,
@@ -361,7 +350,12 @@ fn do_send(opts: &RequestOptions, params: &Value, final_headers: &HashMap<String
         }
     }
 
-    let mut req = pick_agent(opts.timeout_secs).request(&opts.method, &url);
+    // 统一使用全局 Agent（连接池共享，keep-alive/TLS 会话跨请求复用）；
+    // 请求级超时仅在本次请求生效（ureq 2.x Request::timeout）。
+    let mut req = agent().request(&opts.method, &url);
+    if let Some(secs) = opts.timeout_secs {
+        req = req.timeout(Duration::from_secs(secs));
+    }
     let mut content_type: Option<String> = None;
     for (k, v) in final_headers {
         if k.eq_ignore_ascii_case("content-type") {

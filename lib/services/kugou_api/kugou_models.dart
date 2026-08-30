@@ -980,6 +980,16 @@ class KugouComment {
       return false;
     }
 
+    // 歌手/演唱者评论：上游在 topliked、comment 等接口里用 isAuthor=1 或
+    // vinfo9.singer_status==4 标识演唱者本人发的评论（此时没有 is_star 字段），
+    // 若不识别就无法把它从最热列表归入「歌手评论」栏并去重。
+    final vinfo9 = json['vinfo9'] is Map<String, dynamic>
+        ? json['vinfo9'] as Map<String, dynamic>
+        : null;
+    final isAuthorComment =
+        parseBool(json['isAuthor'] ?? json['is_author']) ||
+        (vinfo9 != null && _parseInt(vinfo9['singer_status']) == 4);
+
     return KugouComment(
       id: _str(json['commentid'] ?? json['id'] ?? ''),
       username: _str(
@@ -1014,7 +1024,8 @@ class KugouComment {
       ),
       replyCount: _parseInt(json['reply_num'] ?? json['reply_count'] ?? 0),
       isHot: parseBool(json['is_hot'] ?? json['isHot'] ?? isHot),
-      isStar: parseBool(json['is_star'] ?? json['isStar'] ?? isStar),
+      isStar: parseBool(json['is_star'] ?? json['isStar'] ?? isStar) ||
+          isAuthorComment,
       parentId: _strNull(json['pid']),
       specialId: _strNull(
         json['special_child_id'] ??

@@ -34,6 +34,8 @@ class _UsbExclusiveSectionState extends State<UsbExclusiveSection> {
     _wasDeviceConnected = _status['deviceConnected'] == true;
     // 从服务恢复已持久化的 USB 音量（服务启动时已从 SharedPreferences 读取）
     _usbVolume = (UsbAudioService.instance.usbVolumePercent / 100).clamp(0.0, 1.0);
+    // 兜底 c：页面可见时主动查一次（覆盖原生事件未推送的边界场景）
+    UsbAudioService.instance.refresh();
   }
 
   void _onStatus(Map<String, dynamic> s) {

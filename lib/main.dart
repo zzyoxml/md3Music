@@ -11,7 +11,6 @@ import 'app.dart';
 import 'core/services/desktop_lyric_service.dart';
 import 'modules/recognition/floating_recognition_service.dart';
 import 'core/services/equalizer_service.dart';
-import 'core/services/local_http_server.dart';
 import 'core/services/lyricon_provider_service.dart';
 import 'core/services/listening_grade_service.dart';
 import 'core/services/media_notification_service.dart';
@@ -109,9 +108,10 @@ Future<(bool, bool)> runBootstrap() async {
   // 现在首帧立即渲染；发现页等首屏请求通过 KugouApiClient 的
   // serverReady 信号等待服务器就绪后再放行，不会因服务器未启动而失败。
   // 桌面与 Android 都启动本地服务器（桌面走 dart:ffi 加载 kugou_server.dll）。
+  // LocalHttpServer（DLNA 拉流）不再无条件启动：仅投屏本地歌曲时由
+  // DlnaProvider.castSong 懒启动，避免 App 常驻一个局域网监听 socket。
   if (!kIsWeb) {
     unawaited(KugouApiServer.start().catchError((_) {}));
-    unawaited(LocalHttpServer.instance.start().catchError((_) {}));
   }
 
   // 注册 Android 长按应用图标 Shortcut 回调。
