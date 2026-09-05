@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_description">MD3Music 播放器小组件</string>
+    <string name="widget_not_playing">未在播放</string>
+    <string name="widget_cover_desc">专辑封面</string>
+    <string name="widget_play_desc">播放/暂停</string>
+    <string name="widget_next_desc">下一首</string>
+    <string name="music_widget_label">音乐播放器</string>
+    <string name="fm_widget_label">私人FM</string>
+    <string name="fm_widget_description">私人 FM 电台小组件</string>
+    <string name="fm_default_title">点播放，开启你的电台</string>
+    <string name="fm_login_title">登录后开启你的专属电台</string>
+    <string name="fm_login_subtitle">按你的口味不断续播</string>
+    <string name="fm_cover_desc">正在播放封面</string>
+    <string name="fm_next_desc">接下来播放</string>
+    <string name="fm_favorite_desc">收藏</string>
+    <string name="fm_play_desc">播放/暂停</string>
+    <string name="fm_station_desc">电台档位</string>
+    <string name="shortcut_favorites">我的收藏</string>
+    <string name="shortcut_recognition">听歌识曲</string>
+    <string name="shortcut_search">搜索</string>
+</resources>

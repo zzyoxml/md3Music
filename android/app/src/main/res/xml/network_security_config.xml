@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- 默认禁止明文流量：仅对确需的本地回环地址放行（无中间人风险）。
+         此前全局 cleartextTrafficPermitted="true" 允许任意明文 HTTP，
+         配合 login/token 等明文上游存在中间人风险，现收紧为白名单。 -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+    <!-- 本地嵌入式 Rust API 服务器（127.0.0.1 随机端口）与本地资源走明文回环，
+         WebView/原生层访问本地服务器必需放行 -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+        <!-- 酷狗媒体/视频 CDN（fsmvpc.kugou.com、fsmvpc.tx.kugou.com 等区域节点）仅支持
+             HTTP 明文、不支持 HTTPS（实测 https 无响应）。视频播放与封面图必需明文访问，
+             故对酷狗子域放行明文；登录接口走 Rust 本地转发 HTTPS，不经此明文面。 -->
+        <domain includeSubdomains="true">kugou.com</domain>
+    </domain-config>
+</network-security-config>

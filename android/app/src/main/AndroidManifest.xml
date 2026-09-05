@@ -1,0 +1,206 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- SuperLyricApi 3.4 声明 minSdk 26，项目保持 minSdk 24（Android 7.0）。
+         overrideLibrary 强制放行以便构建；minSdk 由 build.gradle 提供（此处不重复声明）。
+         设置页已按 Android 版本（API 26+）禁用开关，低版本不会触发运行调用。 -->
+    <uses-sdk tools:overrideLibrary="com.hchen.superlyricapi" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 播放期间持有 WifiLock（息屏后台网络挂起保护）：API 29+ 需 ACCESS_WIFI_STATE，更早版本需 CHANGE_WIFI_STATE（均为 normal 权限） -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 悬浮窗识曲：Android 14+ 使用 MediaProjection 的前台服务必须声明此类型权限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- Android 15+（API 35+）：MediaProjection 前台服务还需 PROJECT_MEDIA 权限，
+         否则 targetSDK 35 在 Android 15/16 上 startForeground 抛 SecurityException；
+         低版本不认识此权限名会自动忽略，声明无害 -->
+    <uses-permission android:name="com.android.permission.PROJECT_MEDIA" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 悬浮窗识曲：拖拽悬浮窗到底部删除时提供震动反馈 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.MEDIA_AUDIO_UPLOAD" />
+    <uses-permission android:name="android.permission.MEDIA_VIDEO_UPLOAD" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- 均衡器功能需要此权限 -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- 频谱可视化：部分 ROM（如 HyperOS）要求此权限才能使用 Visualizer -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- USB 独占输出：声明 USB Host 能力（非必需，无 USB 口的设备也可安装） -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <application
+        android:label="MD3Music"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
+        android:networkSecurityConfig="@xml/network_security_config">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize"
+            android:supportsPictureInPicture="true">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- 外部调用：文件管理器等以 ACTION_VIEW 打开音频文件。
+                 同时接收 content://（MediaStore / SAF）与 file:// 两种 scheme；
+                 MIME 覆盖 audio/* 与常见的 ogg/opus 容器类型。
+                 命中后由 ExternalMediaBridge 解析并交给 Flutter 播放。 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="application/ogg" />
+                <data android:mimeType="application/x-ogg" />
+                <data android:mimeType="application/opus" />
+            </intent-filter>
+        </activity>
+        <service
+            android:name=".AudioPlaybackService"
+            android:foregroundServiceType="mediaPlayback"
+            android:stopWithTask="false"
+            android:exported="false" />
+        <!-- 线控耳机媒体键接收器：进程被杀死时仍可被 MEDIA_BUTTON 广播拉起，
+             通过启动 AudioPlaybackService 完成「唤醒播放」。
+             有活跃媒体3会话时按键由媒体3会话回调处理。 -->
+        <receiver
+            android:name=".MediaButtonReceiver"
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
+        <!-- 方案B阶段1：媒体3会话承载服务，渲染系统 now playing 通知。
+             不改变 fork 自建会话的关联行为；仅把会话归入本服务以生成通知。
+             exported=false：仅本进程承载通知渲染，不对外暴露绑定（后续阶段再放开）。 -->
+        <service
+            android:name=".MD3MusicMediaSessionService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
+        <service
+            android:name=".FloatingLyricService"
+            android:foregroundServiceType="specialUse"
+            android:exported="false" />
+        <!-- 悬浮窗听歌识曲：AudioPlaybackCapture 采集系统音频识别，需前台服务保活；
+             mediaProjection 类型为 Android 14+ 使用 MediaProjection 的前台服务硬性要求 -->
+        <service
+            android:name=".FloatingRecognitionService"
+            android:foregroundServiceType="specialUse|mediaProjection"
+            android:exported="false" />
+        <!-- 锁屏歌词：全屏覆盖在锁屏上方，显示逐字歌词 -->
+        <activity
+            android:name=".LockScreenLyricActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:theme="@style/Theme.MD3Music.LockScreen" />
+        <!-- Miuix 风格发现页测试（原生 Compose + miuix 组件），由设置页经 MethodChannel 打开 -->
+        <activity
+            android:name=".MiuixDiscoverActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:windowSoftInputMode="adjustResize" />
+        <!-- 用 Lyrico 外部编辑本地歌曲：通过 FileProvider 把音频文件以 content:// URI
+             授权给 Lyrico 读写（用户对本地文件拥有完整编辑权，保存由 Lyrico 写回）。 -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths"/>
+        </provider>
+        <!-- 桌面播放器小组件 -->
+        <receiver
+            android:name=".MusicWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.md3music.md3music.ACTION_UPDATE_WIDGET" />
+                <action android:name="com.md3music.md3music.ACTION_WIDGET_PLAY_PAUSE" />
+                <action android:name="com.md3music.md3music.ACTION_WIDGET_NEXT" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/music_widget_info" />
+        </receiver>
+        <!-- 桌面私人FM小组件 -->
+        <receiver
+            android:name=".PersonalFmWidgetProvider"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="com.md3music.md3music.ACTION_FM_UPDATE_WIDGET" />
+                <action android:name="com.md3music.md3music.ACTION_FM_COVER_READY" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_OPEN_LOGIN" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_PLAY_PAUSE" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_TOGGLE_FAVORITE" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_SELECT_STATION" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_OPEN_TRACK" />
+                <action android:name="com.md3music.md3music.ACTION_FM_WIDGET_OPEN_PLAYER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/personal_fm_widget_info" />
+        </receiver>
+        <meta-data android:name="lyricon_module" android:value="true" />
+        <meta-data android:name="lyricon_module_author" android:value="𝒗𝒄𝒆𝒙𝒎𝒍 &amp; Little-White3110" />
+        <meta-data android:name="lyricon_module_description" android:value="MD3Music Lyricon Provider" />
+        <meta-data android:name="lyricon_module_tags" android:resource="@array/lyricon_module_tags" />
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+        <!-- 渲染引擎固定为 skia（构建期静态值）：EnableImpeller=false，兼容优先；
+             不打包 impeller 变体，杜绝 split-per-abi 出双份安装包 -->
+        <meta-data
+            android:name="io.flutter.embedding.android.EnableImpeller"
+            android:value="${enableImpeller}" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+        <!-- Lyrico 外部编辑：Android 11+ 包可见性限制下，声明后
+             packageManager.getPackageInfo / resolveActivity 才能识别该包 -->
+        <package android:name="com.lonx.lyrico"/>
+    </queries>
+</manifest>
