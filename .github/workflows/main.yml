@@ -77,23 +77,33 @@ jobs:
           fi
           VERSION=${TAG#v}   # e.g. 3.3.0
 
-          # 自动递增 versionCode：取所有历史 tag 中最大的 versionCode +1
-          # pubspec.yaml 格式："version: 3.2.0+9"
-          PREV_MAX_CODE=$(git tag --list 'v*' \
-            | while read t; do
-                pub=$(git show "$t:pubspec.yaml" 2>/dev/null | grep -E '^version:' | head -1)
-                if [ -n "$pub" ]; then
-                  code=$(echo "$pub" | sed -E 's/.*\+([0-9]+).*/\1/')
-                  [ -n "$code" ] && echo "$code"
-                fi
-              done \
-            | sort -n \
-            | tail -1)
+          # versionCode 以「tag 快照的 pubspec.yaml」为准：发布脚本
+          # （scripts/md3.ps1 full-export -Tag）打 tag 前会把 "version: X.Y.Z+N"
+          # 写成与 tag 一致且 N 已递增，这里直接沿用 —— 这样 CI 产物与本地打包
+          # （tasks/android.ps1 / debug-build.yml / flutter build apk）版本号完全一致。
+          # 兜底水位：手动推 tag 且 pubspec 没跟着递增时，取「其他历史 tag 的最大
+          # N + 1」，避免 versionCode 回退导致覆盖安装失败。
+          code_of() {
+            git show "$1:pubspec.yaml" 2>/dev/null \
+              | grep -E '^version:' | head -1 | grep -oE '\+[0-9]+' | tr -d '+' || true
+          }
 
-          if [ -n "$PREV_MAX_CODE" ]; then
-            VERSION_CODE=$((PREV_MAX_CODE + 1))
+          TAG_CODE=$(code_of "$TAG")
+          OTHER_MAX=$(git tag --list 'v*' \
+            | grep -v "^${TAG}$" \
+            | while read t; do code_of "$t"; done \
+            | sort -n | tail -1)
+          FLOOR=$(( ${OTHER_MAX:-0} + 1 ))
+
+          if [ -n "$TAG_CODE" ] && [ "$TAG_CODE" -ge "$FLOOR" ]; then
+            VERSION_CODE=$TAG_CODE
           else
-            VERSION_CODE=1
+            VERSION_CODE=$FLOOR
+            if [ -n "$TAG_CODE" ]; then
+              echo "WARN: tag 快照 pubspec 的 versionCode=$TAG_CODE 低于历史水位 $FLOOR，已抬升（发版前应让 pubspec 版本号递增）"
+            else
+              echo "WARN: tag 快照 pubspec 未解析出 versionCode，回退到历史水位 $FLOOR"
+            fi
           fi
 
           FULL_VERSION="${VERSION}+${VERSION_CODE}"
@@ -281,13 +291,13 @@ jobs:
       # ============================================================
       # 7. 生成更新日志
       # ============================================================
-      - name: Generate changelog
+      - name: Generate release notes
         id: changelog
         run: |
           set -eo pipefail
           CURRENT_TAG="${{ steps.version.outputs.tag }}"
 
-          echo "=== Generate changelog ==="
+          echo "=== Generate release notes ==="
           echo "Current tag: ${CURRENT_TAG}"
           echo "Local tags:"
           git tag --list 2>&1 | head -20 || echo "  (git tag failed)"
@@ -321,8 +331,53 @@ jobs:
             RANGE=""
           fi
 
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # ---- 更新内容来源 ----------------------------------------------------
+          # 优先级 1：CHANGELOG.md 中该版本的段落（权威中文归并说明）
+          # 优先级 2：git log（CHANGELOG 缺该版本时的兜底，等价于历史行为）
+          # 注意：段落必须从 tag 快照读取 —— CI checkout 在 tag ref 上，
+          #       tag 快照的 CHANGELOG.md 才是这一版对应的说明。
+          NOTES=""
+          NOTES_SOURCE=""
+          VER_RE=$(printf '%s' "$VERSION" | sed 's/[.[\*^$]/\\&/g')
+
+          if [ -f CHANGELOG.md ]; then
+            CL_HITS=$(grep -cE "^##[[:space:]]+v?${VER_RE}([[:space:]]|$)" CHANGELOG.md 2>/dev/null || true)
+            if [ "${CL_HITS:-0}" -gt 1 ]; then
+              echo "WARN: CHANGELOG.md 中 v${VERSION} 有 ${CL_HITS} 个同名段落，取第一个（建议清理重复）"
+            fi
+            NOTES=$(awk -v want="v${VERSION}" -v want2="${VERSION}" '
+              /^##[[:space:]]+/ {
+                if (found) { exit }
+                hdr = $0
+                sub(/^##[[:space:]]+/, "", hdr)
+                sub(/[[:space:]]*\(.*$/, "", hdr)   # 去掉可能的 "(2026-09-15)" 后缀
+                sub(/[[:space:]]+$/, "", hdr)
+                if (hdr == want || hdr == want2) { found = 1; next }
+              }
+              found { print }
+            ' CHANGELOG.md | sed -e 's/\r$//' | awk '
+              { line[NR] = $0 }
+              END {
+                n = NR
+                while (n > 0 && (line[n] == "" || line[n] == "---" || line[n] == "***")) n--
+                s = 1
+                while (s <= n && line[s] == "") s++
+                for (i = s; i <= n; i++) print line[i]
+              }')
+          fi
+
+          if [ -n "$NOTES" ]; then
+            NOTES_SOURCE="CHANGELOG.md"
+            echo "OK: 更新内容取自 CHANGELOG.md 的 v${VERSION} 段落（$(printf '%s\n' "$NOTES" | wc -l | tr -d ' ') 行）"
+          else
+            NOTES_SOURCE="git log"
+            echo "WARN: CHANGELOG.md 未找到 v${VERSION} 段落，回退 git log（请在发布前先补 CHANGELOG）"
+          fi
+
           {
-            echo "## MD3Music v${{ steps.version.outputs.version }}"
+            echo "## MD3Music v${VERSION}"
             echo ""
             echo "_Built: $(date -u '+%Y-%m-%d %H:%M UTC')_"
             echo ""
@@ -332,23 +387,29 @@ jobs:
             echo "- **app-x86_64-release.apk** — Android 模拟器"
             echo "- **app-apple-music-arm64-v8a-release.apk** — Vivo 原子随身听兼容包（包名 \`com.apple.android.music\`）"
             echo ""
-            echo "### Commits (${RANGE:-最近 20 条})"
+            echo "### 更新内容 (${RANGE:-最近 20 条})"
             echo ""
-            if [ -n "$RANGE" ]; then
-              git log "$RANGE" --pretty=format:"- \`%h\` %s" --no-merges
+            if [ -n "$NOTES" ]; then
+              printf '%s\n' "$NOTES"
             else
-              git log --pretty=format:"- \`%h\` %s" -20 --no-merges
+              if [ -n "$RANGE" ]; then
+                git log "$RANGE" --pretty=format:"- \`%h\` %s" --no-merges
+              else
+                git log --pretty=format:"- \`%h\` %s" -20 --no-merges
+              fi
+              echo ""
             fi
-            echo ""
             echo ""
             echo "---"
             echo "🤖 本版本由 GitHub Actions 自动构建。"
-          } > changelog.md
+          } > release-notes.md
 
-          cat changelog.md
+          echo "=== 更新内容来源: ${NOTES_SOURCE} ==="
+
+          cat release-notes.md
           {
             echo "body<<EOF"
-            cat changelog.md
+            cat release-notes.md
             echo ""
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
