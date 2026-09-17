@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 白色圆形背景（半径 12，覆盖整个 viewport） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,0 a12,12 0 1,0 0,24 a12,12 0 1,0 0,-24 z" />
+    <!-- 黑色音符图标（本地音乐） -->
+    <group
+        android:scaleX="0.7"
+        android:scaleY="0.7"
+        android:translateX="3.6"
+        android:translateY="3.6">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M12,3v10.55c-0.59,-0.34 -1.27,-0.55 -2,-0.55 -2.21,0 -4,1.79 -4,4s1.79,4 4,4 4,-1.79 4,-4V7h4V3h-6z" />
+    </group>
+</vector>

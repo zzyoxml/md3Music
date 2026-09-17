@@ -1,0 +1,390 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  私人FM桌面小部件布局：1:1 复刻发现页 PersonalFmSection 卡片。
+  两层叠放：电台卡与登录引导卡，由 Provider 按登录态 setViewVisibility 切换。
+  所有圆角底统一用「ImageView + 白色 shape drawable + setColorFilter」实现
+  （RemoteViews 无法动态设置圆角背景色），颜色均由 Flutter 推送的当前
+  ColorScheme 提供。
+
+  MIUI/HyperOS 启动器兼容性约束（实测踩坑）：
+  - 不用负 margin（部分启动器 RemoteViews 兼容层会静默失败，表现为
+    「载入窗口小部件时出现问题」）；
+  - 不用裸 <View> 做占位/分隔：横向间距用 margin、弹性空隙用空 TextView。
+  与发现页的差异（小部件场景简化）：无律动线；档位按钮点击直接循环切换
+  下一档位（无抽屉）。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_fm_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <!-- 卡片底色层：与面板同色，宿主高度超出内容的剩余部分不露异色 -->
+    <ImageView
+        android:id="@+id/fm_card_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_fm_bg_round20"
+        android:contentDescription="@null" />
+
+    <!-- ============ 电台卡（已登录） ============ -->
+    <LinearLayout
+        android:id="@+id/fm_card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <!-- 「正在播」面板：内容 padding 16 对应 Flutter _kPanelPadding -->
+        <FrameLayout
+            android:id="@+id/fm_panel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <!-- 面板底色（surfaceContainerLow，elevation 阴影 RemoteViews 不支持，忽略） -->
+            <ImageView
+                android:id="@+id/fm_panel_bg"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="fitXY"
+                android:src="@drawable/widget_fm_bg_round20"
+                android:contentDescription="@null" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp">
+
+                <LinearLayout
+                    android:id="@+id/fm_panel_row"
+                    android:layout_width="match_parent"
+                    android:layout_height="112dp"
+                    android:orientation="horizontal">
+
+                    <!-- 当前封面 112dp 圆角16（点击：拉起 app 并进入播放器页） -->
+                    <FrameLayout
+                        android:id="@+id/fm_cover_slot"
+                        android:layout_width="112dp"
+                        android:layout_height="112dp">
+
+                        <ImageView
+                            android:id="@+id/fm_cover_bg"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:scaleType="fitXY"
+                            android:src="@drawable/widget_fm_bg_round16"
+                            android:contentDescription="@null" />
+
+                        <ImageView
+                            android:id="@+id/fm_cover_note"
+                            android:layout_width="36dp"
+                            android:layout_height="36dp"
+                            android:layout_gravity="center"
+                            android:scaleType="fitCenter"
+                            android:src="@drawable/ic_wg_music_note"
+                            android:contentDescription="@null" />
+
+                        <ImageView
+                            android:id="@+id/fm_cover"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:scaleType="centerCrop"
+                            android:visibility="gone"
+                            android:contentDescription="@string/fm_cover_desc" />
+                    </FrameLayout>
+
+                    <LinearLayout
+                        android:id="@+id/fm_right_col"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="12dp"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <!-- 上排：歌名/艺术家 + 收藏 + 播放。高度锁定 48dp 与
+                             Flutter 一致（播放按钮主导行高），保证底排与封面底对齐 -->
+                        <LinearLayout
+                            android:id="@+id/fm_top_row"
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:orientation="horizontal">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:id="@+id/fm_title"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:text="@string/fm_default_title"
+                                    android:textSize="14sp"
+                                    android:fontFamily="sans-serif-medium"
+                                    android:maxLines="2"
+                                    android:ellipsize="end" />
+
+                                <TextView
+                                    android:id="@+id/fm_artist"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="3dp"
+                                    android:textSize="12sp"
+                                    android:maxLines="1"
+                                    android:ellipsize="end"
+                                    android:visibility="gone" />
+                            </LinearLayout>
+
+                            <!-- 收藏（图标复用现有 ic_favorite_on/off） -->
+                            <ImageButton
+                                android:id="@+id/fm_btn_favorite"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:layout_marginStart="4dp"
+                                android:src="@drawable/ic_favorite_off"
+                                android:background="?android:attr/selectableItemBackgroundBorderless"
+                                android:scaleType="centerInside"
+                                android:padding="12dp"
+                                android:contentDescription="@string/fm_favorite_desc" />
+
+                            <!-- 播放/暂停：MD3E 圆形填充按钮
+                                 （primary 圆底 + onPrimary 图标，加载中换静态圆弧） -->
+                            <FrameLayout
+                                android:id="@+id/fm_btn_play"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp">
+
+                                <ImageView
+                                    android:id="@+id/fm_btn_play_bg"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:scaleType="fitXY"
+                                    android:src="@drawable/widget_fm_bg_circle"
+                                    android:contentDescription="@null" />
+
+                                <ImageView
+                                    android:id="@+id/fm_btn_play_icon"
+                                    android:layout_width="28dp"
+                                    android:layout_height="28dp"
+                                    android:layout_gravity="center"
+                                    android:scaleType="fitCenter"
+                                    android:src="@drawable/ic_wg_play_arrow"
+                                    android:contentDescription="@string/fm_play_desc" />
+                            </FrameLayout>
+                        </LinearLayout>
+
+                        <!-- 底排：预告封面 ×3 + 档位按钮（与封面底边对齐：
+                             上排 48 + 底排 48 + 间距 16 = 112） -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="48dp"
+                            android:layout_marginTop="16dp"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <FrameLayout
+                                android:id="@+id/fm_next_slot1"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp">
+
+                                <ImageView
+                                    android:id="@+id/fm_next_bg1"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:scaleType="fitXY"
+                                    android:src="@drawable/widget_fm_bg_round12"
+                                    android:contentDescription="@null" />
+
+                                <ImageView
+                                    android:id="@+id/fm_next_note1"
+                                    android:layout_width="18dp"
+                                    android:layout_height="18dp"
+                                    android:layout_gravity="center"
+                                    android:scaleType="fitCenter"
+                                    android:src="@drawable/ic_wg_music_note"
+                                    android:contentDescription="@null" />
+
+                                <ImageView
+                                    android:id="@+id/fm_next_img1"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:scaleType="centerCrop"
+                                    android:visibility="gone"
+                                    android:contentDescription="@string/fm_next_desc" />
+                            </FrameLayout>
+
+                            <FrameLayout
+                                android:id="@+id/fm_next_slot2"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:layout_marginStart="8dp">
+
+                                <ImageView
+                                    android:id="@+id/fm_next_bg2"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:scaleType="fitXY"
+                                    android:src="@drawable/widget_fm_bg_round12"
+                                    android:contentDescription="@null" />
+
+                                <ImageView
+                                    android:id="@+id/fm_next_note2"
+                                    android:layout_width="18dp"
+                                    android:layout_height="18dp"
+                                    android:layout_gravity="center"
+                                    android:scaleType="fitCenter"
+                                    android:src="@drawable/ic_wg_music_note"
+                                    android:contentDescription="@null" />
+
+                                <ImageView
+                                    android:id="@+id/fm_next_img2"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:scaleType="centerCrop"
+                                    android:visibility="gone"
+                                    android:contentDescription="@string/fm_next_desc" />
+                            </FrameLayout>
+
+                            <FrameLayout
+                                android:id="@+id/fm_next_slot3"
+                                android:layout_width="48dp"
+                                android:layout_height="48dp"
+                                android:layout_marginStart="8dp">
+
+                                <ImageView
+                                    android:id="@+id/fm_next_bg3"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:scaleType="fitXY"
+                                    android:src="@drawable/widget_fm_bg_round12"
+                                    android:contentDescription="@null" />
+
+                                <ImageView
+                                    android:id="@+id/fm_next_note3"
+                                    android:layout_width="18dp"
+                                    android:layout_height="18dp"
+                                    android:layout_gravity="center"
+                                    android:scaleType="fitCenter"
+                                    android:src="@drawable/ic_wg_music_note"
+                                    android:contentDescription="@null" />
+
+                                <ImageView
+                                    android:id="@+id/fm_next_img3"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:scaleType="centerCrop"
+                                    android:visibility="gone"
+                                    android:contentDescription="@string/fm_next_desc" />
+                            </FrameLayout>
+
+                            <!-- 弹性空隙：裸 View 在部分启动器上有兼容性风险，
+                                 用空 TextView 承载 weight -->
+                            <TextView
+                                android:layout_width="0dp"
+                                android:layout_height="1dp"
+                                android:layout_weight="1"
+                                android:textSize="0sp" />
+
+                            <!-- 档位按钮 40dp 圆形（点击：循环切换下一档位） -->
+                            <FrameLayout
+                                android:id="@+id/fm_station_btn"
+                                android:layout_width="40dp"
+                                android:layout_height="40dp"
+                                android:layout_marginEnd="4dp">
+
+                                <ImageView
+                                    android:id="@+id/fm_station_bg"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="match_parent"
+                                    android:scaleType="fitXY"
+                                    android:src="@drawable/widget_fm_bg_circle"
+                                    android:contentDescription="@null" />
+
+                                <ImageView
+                                    android:id="@+id/fm_station_icon"
+                                    android:layout_width="20dp"
+                                    android:layout_height="20dp"
+                                    android:layout_gravity="center"
+                                    android:scaleType="fitCenter"
+                                    android:src="@drawable/ic_wg_explore"
+                                    android:contentDescription="@string/fm_station_desc" />
+                            </FrameLayout>
+                        </LinearLayout>
+                    </LinearLayout>
+                </LinearLayout>
+            </LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
+
+    <!-- ============ 登录引导卡（未登录） ============ -->
+    <LinearLayout
+        android:id="@+id/fm_login"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="20dp"
+        android:paddingTop="18dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="18dp">
+
+        <FrameLayout
+            android:layout_width="44dp"
+            android:layout_height="44dp">
+
+            <ImageView
+                android:id="@+id/fm_login_icon_bg"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="fitXY"
+                android:src="@drawable/widget_fm_bg_round14"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/fm_login_radio"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:scaleType="fitCenter"
+                android:src="@drawable/ic_wg_radio"
+                android:contentDescription="@null" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/fm_login_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/fm_login_title"
+                android:textSize="14sp"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/fm_login_subtitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/fm_login_subtitle"
+                android:textSize="12sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <ImageView
+            android:id="@+id/fm_login_chevron"
+            android:layout_width="24dp"
+            android:layout_height="24dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_wg_chevron"
+            android:contentDescription="@null" />
+    </LinearLayout>
+</FrameLayout>
