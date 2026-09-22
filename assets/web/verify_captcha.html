@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <title>安全验证</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      background: #f7f8fa;
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    }
+    #captchaBox { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+    .tip { font-size: 15px; color: #555; text-align: center; padding: 16px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <div id="captchaBox">
+    <div class="tip" id="tip">安全验证加载中…</div>
+  </div>
+
+  <script>
+    // Flutter 侧注入的初始化入口：window.initCaptcha(txappid)
+    var CAPTCHA_READY = false;
+    var CAPTCHA_LOADED = false;
+
+    function loadScript(url, cb) {
+      var s = document.createElement('script');
+      s.src = url;
+      s.onload = function () { cb(); };
+      s.onerror = function () { cb(new Error('load failed')); };
+      document.head.appendChild(s);
+    }
+
+    function postToFlutter(verifycode) {
+      // webview_flutter 的 JavascriptChannel 会暴露名为 CaptchaChannel 的全局对象
+      if (window.CaptchaChannel && window.CaptchaChannel.postMessage) {
+        window.CaptchaChannel.postMessage(verifycode);
+      }
+    }
+
+    window.initCaptcha = function (txappid) {
+      if (!txappid) {
+        document.getElementById('tip').textContent = '验证参数缺失，请关闭重试';
+        postToFlutter('__ERROR__');
+        return;
+      }
+      if (CAPTCHA_READY) return;
+      CAPTCHA_READY = true;
+      document.getElementById('tip').textContent = '安全验证加载中…';
+
+      function start() {
+        if (typeof TencentCaptcha === 'undefined') {
+          document.getElementById('tip').textContent = '验证组件加载失败，请关闭后重试';
+          postToFlutter('__ERROR__');
+          return;
+        }
+        document.getElementById('tip').textContent = '';
+        var appId = String(txappid);
+        try {
+          var captcha = new TencentCaptcha(appId, function (res) {
+            if (res.ret === 0) {
+              // 验证通过：拼接酷狗要求的 verifycode（KGCodeTX 前缀 + JSON）
+              var verifycode = 'KGCodeTX|' + JSON.stringify({
+                ticket: res.ticket,
+                randstr: res.randstr,
+                txappid: appId,
+              });
+              postToFlutter(verifycode);
+            } else {
+              postToFlutter('__CANCEL__');
+            }
+          }, {
+            type: '',
+            showHeader: false,
+            ready: function () {},
+          });
+          captcha.show();
+        } catch (e) {
+          document.getElementById('tip').textContent = '验证组件初始化异常，请关闭后重试';
+          postToFlutter('__ERROR__');
+        }
+      }
+
+      if (CAPTCHA_LOADED) {
+        start();
+      } else {
+        loadScript('https://turing.captcha.qcloud.com/TCaptcha.js', function (err) {
+          CAPTCHA_LOADED = true;
+          if (err) {
+            document.getElementById('tip').textContent = '验证组件加载失败（网络异常），请关闭后重试';
+            postToFlutter('__ERROR__');
+            return;
+          }
+          start();
+        });
+      }
+    };
+
+    // 页面 JS 就绪后主动通知 Flutter（Flutter 收到 __READY__ 后注入 initCaptcha）
+    if (window.CaptchaChannel && window.CaptchaChannel.postMessage) {
+      window.CaptchaChannel.postMessage('__READY__');
+    }
+
+    // 兜底：页面加载后 20 秒内 Flutter 仍未注入 initCaptcha，则提示并关闭
+    setTimeout(function () {
+      if (!CAPTCHA_READY) {
+        document.getElementById('tip').textContent = '验证初始化失败，请关闭后重试';
+        postToFlutter('__ERROR__');
+      }
+    }, 20000);
+  </script>
+</body>
+</html>

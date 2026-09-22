@@ -1,0 +1,103 @@
+import 'song.dart';
+
+class Playlist {
+  final String id;
+  final String name;
+  final String? description;
+  final String? artworkUri;
+  final int songCount;
+  final String? creator;
+  final List<Song> songs;
+  final bool isLocal;
+  final String? listCreateUserid;
+  final String? listCreateListid;
+  final String? listCreateGid;
+  /// 用户订阅/收藏后的版本 listid（用于拉取歌曲列表）。
+  /// 收藏别人歌单时，listCreateListid 是原作者的 listid（无权拉取），
+  /// 而本字段是用户自己订阅后分配的 listid（可正常拉取歌曲）。
+  final String? subscribedListId;
+
+  const Playlist({
+    required this.id,
+    required this.name,
+    this.description,
+    this.artworkUri,
+    required this.songCount,
+    this.creator,
+    required this.songs,
+    this.isLocal = false,
+    this.listCreateUserid,
+    this.listCreateListid,
+    this.listCreateGid,
+    this.subscribedListId,
+  });
+
+  factory Playlist.fromJson(Map<String, dynamic> json) {
+    return Playlist(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      description: json['description'] as String?,
+      artworkUri: json['artworkUri'] as String?,
+      songCount: (json['songCount'] as num).toInt(),
+      creator: json['creator'] as String?,
+      songs: (json['songs'] as List<dynamic>)
+          .map((e) => Song.fromJson(e as Map<String, dynamic>))
+          .toList(),
+      isLocal: (json['isLocal'] as bool?) ?? false,
+      listCreateGid: json['listCreateGid'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'description': description,
+      'artworkUri': artworkUri,
+      'songCount': songCount,
+      'creator': creator,
+      'songs': songs.map((e) => e.toJson()).toList(),
+      'isLocal': isLocal,
+      'listCreateGid': listCreateGid,
+      'subscribedListId': subscribedListId,
+    };
+  }
+
+  Playlist copyWith({
+    String? id,
+    String? name,
+    String? description,
+    String? artworkUri,
+    int? songCount,
+    String? creator,
+    List<Song>? songs,
+    bool? isLocal,
+    String? listCreateUserid,
+    String? listCreateListid,
+    String? listCreateGid,
+    String? subscribedListId,
+  }) {
+    return Playlist(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      description: description ?? this.description,
+      artworkUri: artworkUri ?? this.artworkUri,
+      songCount: songCount ?? this.songCount,
+      creator: creator ?? this.creator,
+      songs: songs ?? this.songs,
+      isLocal: isLocal ?? this.isLocal,
+      listCreateUserid: listCreateUserid ?? this.listCreateUserid,
+      listCreateListid: listCreateListid ?? this.listCreateListid,
+      listCreateGid: listCreateGid ?? this.listCreateGid,
+      subscribedListId: subscribedListId ?? this.subscribedListId,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Playlist && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
+}

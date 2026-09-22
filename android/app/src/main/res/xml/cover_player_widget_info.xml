@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2×2 封面播放器小组件元信息：固定方形，预览用布局本身。
+     minHeight 132dp：MIUI 挑选器行高约 70-73.5dp（70→1 行、147→3 行实测标定），
+     132 落在 (73.5, 140] 区间保证折算 2 行；147 会被进位成 3 行。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="147dp"
+    android:minHeight="132dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_cover_player"
+    android:resizeMode="none"
+    android:widgetCategory="home_screen"
+    android:label="@string/cover_widget_label"
+    android:previewLayout="@layout/widget_cover_player"
+    android:previewImage="@mipmap/ic_launcher"
+    android:description="@string/cover_widget_description" />

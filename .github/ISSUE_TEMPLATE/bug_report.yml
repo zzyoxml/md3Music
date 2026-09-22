@@ -1,0 +1,86 @@
+name: 🐛 Bug 报告
+description: 报告一个可复现的程序错误
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢你花时间填写此报告！请确保你使用的是最新版本。
+        **注意：** 本模板不适用于使用疑问，请使用 Discussions。
+
+  - type: checkboxes
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索过现有 Issue，确认这是新问题。
+          required: true
+        - label: 我使用的是最新版本，且未对音频文件进行过非标准标签修改。
+          required: true
+
+  - type: textarea
+    attributes:
+      label: 复现步骤
+      description: 请按顺序描述如何复现这个 Bug。
+      placeholder: |
+        1. 打开应用 '...'
+        2. 点击 '....'
+        3. 滚动到 '....'
+        4. 看到错误
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 预期行为
+      description: 你期望发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 实际行为
+      description: 实际发生了什么？如果是崩溃，请描述崩溃前的情况。
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: 音频文件来源
+      description: 触发崩溃的音频文件主要来自哪里？
+      options:
+        - 酷狗概念版
+        - 网易云音乐
+        - 其他平台
+        - 本地原有文件
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 日志与异常信息
+      description: |
+        请在此粘贴 adb logcat 抓取的关键日志（通常崩溃在 30-60 秒内）。
+        如果你不会抓取，可以尝试在“关于”页面导出日志。
+        日志将自动格式化为代码块，无需添加反引号。
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: 截图或录屏
+      description: 如果适用，请添加截图或录屏来帮助解释问题。
+    validations:
+      required: false
+
+  - type: textarea
+    attributes:
+      label: 环境信息
+      value: |
+        - 应用版本: [e.g. 1.2.3]
+        - 设备型号: [e.g. Pixel 6]
+        - Android 版本: [e.g. 13]
+        - 是否 Root: [是/否]
+    validations:
+      required: true
