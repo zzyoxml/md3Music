@@ -38,6 +38,7 @@ MD3Music 是一款基于酷狗音乐 API 的 Flutter 音乐播放器，内置嵌
 - **本地音乐** — 文件夹浏览、内嵌封面与歌词、本地收藏、音质标签、多维度排序
 - **播放体验** — 多音质选择（标准/高质/无损/Hi-Res）、USB 独占输出、均衡器、DLNA 投屏、睡眠定时、倍速、进度记忆、画中画
 - **歌词** — Apple Music 风格逐字歌词（KRC/LRC），支持翻译/罗马音、辉光、模糊、动态取色，以及桌面/锁屏/蓝牙歌词与 SuperLyric 推送
+- **状态栏歌词** — 魅族 Flyme 机型可将当前歌词显示在状态栏，支持提前量微调
 - **用户中心** — VIP 双签到、多账号管理、听歌等级/排行/识曲、收藏与播放历史、桌面小组件
 - **个性化** — MD3/AM 双风格、主题色与动态取色、深色模式、全局背景图、桌面歌词、主页 Tab 自定义、设置搜索
 
@@ -125,6 +126,13 @@ MD3Music 是一款基于酷狗音乐 API 的 Flutter 音乐播放器，内置嵌
 <p align="center">
   <img src="img/pad/applemusic/mmexport1788192056938.jpg" width="500" alt="平板 Apple Music 风格 1" />
   <img src="img/pad/applemusic/mmexport1788192058255.jpg" width="500" alt="平板 Apple Music 风格 2" />
+</p>
+
+### Flyme 状态栏歌词
+
+<p align="center">
+  <img src="img/phone/flyme/lyric.gif" width="260" alt="状态栏歌词实际效果" />
+  <img src="img/phone/flyme/settings.png" width="260" alt="状态栏歌词设置" />
 </p>
 
 ### 🚀 快速开始
@@ -274,6 +282,7 @@ md3Music/
 | **USB 独占输出** | 原生 JNI + CMake C++（usbdevfs）                                     |
 | **取色**       | palette\_generator + dynamic\_color + material\_color\_utilities |
 | **桌面歌词**     | Lyricon Provider                                                 |
+| **状态栏歌词**   | Flyme 状态栏 ticker（魅族私有 flag）                                 |
 | **听歌识曲**     | record（录音）+ Rust PCM 预处理                                         |
 | **原生通知**     | fluttertoast（Toast）                                              |
 | **文件/权限**    | permission\_handler + path\_provider                             |
@@ -350,6 +359,10 @@ A: 修改 `kugou_api_server/rust/src/` 下的 Rust 代码，运行 `cargo build 
 
 A: Rust 的 TLS 依赖（`ring` crate）需要交叉编译为 Android 平台的 `.so` 文件。NDK 提供了 `aarch64-linux-android-clang` 等交叉编译工具链。
 
+**Q: 设置里找不到「状态栏歌词」开关？**
+
+A: 该开关仅在魅族 Flyme 机型上出现（由设备能力探测决定），其他品牌不显示。
+
 ***
 
 ## 🤝 致谢
@@ -361,6 +374,7 @@ A: Rust 的 TLS 依赖（`ring` crate）需要交叉编译为 Android 平台的 
 - [LyricInfo](https://github.com/limczhh/LyricInfo) — 蓝牙歌词（AVRCP/LyricInfo 歌词推送参考）
 - [Lyrico](https://github.com/Replica0110/Lyrico) — 本地音乐标签编辑 / Lyrico 外部编辑协作
 - [ColorOS-Live-Lyrics-Bridge](https://github.com/Andrea-lyz/ColorOS-Live-Lyrics-Bridge) — ColorOS 息屏歌词桥接（lyricInfo 开放协议参考）
+- [AM-Lyrics-for-Flyme](https://github.com/liz963/AM-Lyrics-for-Flyme) / [FlymeLyricBridge](https://github.com/linjunyou04/FlymeLyricBridge) — 魅族 Flyme 状态栏歌词的独立实现，用于机制交叉验证
 - [Reorderable](https://github.com/Calvin-LL/Reorderable) — 播放列表面板长按拖拽排序
 - [MaterialKolor](https://github.com/jordond/MaterialKolor) — 莫奈取色 / Material Design 3 动态配色
 - [KuGouMusicApi](https://github.com/MakcRe/KuGouMusicApi) — API 代理服务

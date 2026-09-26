@@ -1486,6 +1486,8 @@ class AudioPlaybackService : Service() {
             registerLyriconChannel(engine)
             // SuperLyric channel 原生 handler 同样只能在 headless 场景下在此注册
             registerSuperLyricChannel(engine)
+            // 魅族状态栏歌词：headless 引擎同样需要，否则后台切歌时收不到歌词行推送
+            FlymeLyricBridge.registerChannel(engine, applicationContext)
             restoreLyriconStateIfNeeded()
             // 音量均衡通道：headless 引擎同样需要，播放/AudioService 在此 isolate 运行。
             registerVolumeNormalizationChannel(engine)

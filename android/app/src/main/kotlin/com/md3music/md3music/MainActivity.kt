@@ -704,6 +704,8 @@ class MainActivity : FlutterActivity() {
         AudioPlaybackService.registerLyriconChannel(flutterEngine)
         // 注册 SuperLyric MethodChannel，让 Dart 端能推送当前歌词行到 SuperLyric
         AudioPlaybackService.registerSuperLyricChannel(flutterEngine)
+        // 注册魅族 Flyme 状态栏歌词 MethodChannel（Dart 切行时推送当前歌词行）
+        FlymeLyricBridge.registerChannel(flutterEngine, applicationContext)
 
         // 注册文件夹选择器 MethodChannel
         val folderPickerChannel = MethodChannel(

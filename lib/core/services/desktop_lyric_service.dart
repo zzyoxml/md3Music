@@ -118,6 +118,33 @@ class DesktopLyricService {
   // 监听 App 的 MediaSession 处理（sendStop），本服务不手动发送停止事件。
   bool _superLyricEnabled = false;
   bool get superLyricEnabled => _superLyricEnabled;
+
+  // 魅族 Flyme 状态栏歌词：复用本服务的定时器与解析管线，仅在 LRC 行切换时把当前行
+  // 文本推给原生，由原生贴到 Media3 媒体通知的 tickerText 上（Flyme 私有 flag 渲染）。
+  // 只发行级文本，绝不下发 KRC 字级时间戳 —— notify() 有系统级限流，逐字刷会被封闭。
+  bool _flymeStatusBarLyricEnabled = false;
+  bool get flymeStatusBarLyricEnabled => _flymeStatusBarLyricEnabled;
+
+  /// 魅族状态栏歌词「提前量」（ms，>=0）：用「播放位置 + 提前量」来选行，
+  /// 让这一路比音频略早翻行。
+  ///
+  /// 为什么需要：状态栏歌词是"通知驱动"的，一条歌词从 Dart 决定翻行到真正画出来，
+  /// 要经过 MethodChannel → notify() → SystemUI 取通知并重绘，这段延迟在 100ms 量级
+  /// 且不在我们掌控内；再叠加 LRC 时间戳普遍标在"字已出声"之后，合起来就是
+  /// 肉眼看到的"唱出来了字才出现"。提前量用来把这段固定损耗抵掉。
+  ///
+  /// 为什么单独一套索引/迟滞/Timer，而不是改 _currentLineIndex 或 posMs：
+  /// 那个索引与迟滞时间戳是悬浮窗、蓝牙、SuperLyric、锁屏等所有通道共用的，
+  /// 改它会把这些通道一起提前；而 posMs 还喂给 _pushLyric(positionMs:) 和进度节流。
+  int _flymeAdvanceMs = 0;
+  int get flymeAdvanceMs => _flymeAdvanceMs;
+  int _flymeLineIndex = -1;
+  Timer? _flymeLineTimer;
+  DateTime? _flymeLastSwitchAt;
+
+  /// 上一次观测到的播放位置（ms），-1 表示尚未采样。
+  /// 只用来判定"位置真的往回走了"，见 [_tickFlymeAdvance]。
+  int _flymePrevPosMs = -1;
   // 共用偏好（设置页三种推送协议共用一份）：
   // - 翻译歌词开关：是否推送翻译（影响 SuperLyric 与 LyricInfo）
   bool _pushTranslation = true;
@@ -356,6 +383,7 @@ class DesktopLyricService {
     _enabled = false;
     _updateTicker();
     _cancelLineTimer();
+    _cancelFlymeLineTimer();
     try {
       await MediaNotificationService.stopFloatingLyric();
     } catch (_) {}
@@ -416,6 +444,47 @@ class DesktopLyricService {
       _maybePushLyricInfo();
     }
     _notify();
+  }
+
+  /// 魅族 Flyme 状态栏歌词开关。开启后立即回灌当前行，避免要等到下一句才显示；
+  /// 关闭时推一次空串，让原生摘掉 ticker 并清掉那两个 Flyme flag。
+  Future<void> setFlymeStatusBarLyricEnabled(bool enabled) async {
+    if (_flymeStatusBarLyricEnabled == enabled) return;
+    _flymeStatusBarLyricEnabled = enabled;
+    _bindProvidersFromContext();
+    _updateTicker();
+    try {
+      await _flymeChannel.invokeMethod(
+          'setFlymeStatusBarLyricEnabled', {'enabled': enabled});
+    } catch (_) {}
+    if (enabled) {
+      // 回灌走"提前量之后"的时间轴，否则刚打开时显示的还是原始时间轴的那一行，
+      // 要等到下一次翻行才看得出提前效果。索引先归零，避免被去重吞掉。
+      _flymeLineIndex = -1;
+      _flymeLastSwitchAt = null;
+      _flymePrevPosMs = -1;
+      final p = _player;
+      if (p != null && _lines.isNotEmpty) {
+        _tickFlymeAdvance(p.position.inMilliseconds);
+      } else if (_currentLineIndex >= 0 && _currentLineIndex < _lines.length) {
+        await _pushFlymeLine(_lines[_currentLineIndex].text);
+      }
+    } else {
+      await _pushFlymeLine('');
+      _cancelFlymeLineTimer();
+      _flymeLineIndex = -1;
+      _flymeLastSwitchAt = null;
+      _flymePrevPosMs = -1;
+    }
+    _notify();
+  }
+
+  /// 只发行级纯文本。原生侧对空串做清空处理。
+  Future<void> _pushFlymeLine(String text) async {
+    try {
+      await _flymeChannel
+          .invokeMethod('updateFlymeStatusBarLyric', {'lyric': text.trim()});
+    } catch (_) {}
   }
 
   /// SuperLyric 歌词推送开关：独立于悬浮窗/蓝牙歌词/LyricInfo。
@@ -633,6 +702,7 @@ class DesktopLyricService {
       _bluetoothLyricEnabled ||
       _lyricInfoEnabled ||
       _superLyricEnabled ||
+      _flymeStatusBarLyricEnabled ||
       _lockScreenLyricEnabled;
 
   /// 根据开关状态启停定时器（250ms tick：逐行歌词足够检测切行）
@@ -671,6 +741,75 @@ class DesktopLyricService {
   void _cancelLineTimer() {
     _lineTimer?.cancel();
     _lineTimer = null;
+  }
+
+  /// 设置状态栏歌词提前量（ms）。改完立刻按新值重算当前该显示哪一行，
+  /// 并把提前量回灌原生 —— 否则要等到下一行才生效。
+  Future<void> setFlymeAdvanceMs(int ms) async {
+    final v = ms < 0 ? 0 : (ms > 600 ? 600 : ms);
+    if (_flymeAdvanceMs == v) return;
+    _flymeAdvanceMs = v;
+    _notify();
+    if (!_flymeStatusBarLyricEnabled) return;
+    final player = _player;
+    if (player == null || _lines.isEmpty) return;
+    _flymeLastSwitchAt = null; // 手动调档视为用户意图，不该被迟滞挡住
+    // 索引也要归零：调小提前量会让目标行倒退，而正常翻行是禁止倒退的（见
+    // _tickFlymeAdvance），不归零就会卡在调整前的那一句。
+    _flymeLineIndex = -1;
+    _tickFlymeAdvance(player.position.inMilliseconds);
+  }
+
+  /// 用「位置 + 提前量」选行并推送。独立于共享的 `_currentLineIndex` 提交路径，
+  /// 所以其它歌词通道仍严格按原始时间轴走。
+  ///
+  /// 只允许索引前进：状态栏是一条只往未来走的时间轴，而真机日志实测位置源抖动
+  /// 会让行号在相邻两行间来回跳。原来只有 300ms 迟滞，它只是把回跳推迟、隔几百
+  /// 毫秒放行一次，结果是"刚换到下一句又翻回上一句"——用户看到的正是同一句反复
+  /// 滚动。改成禁止倒退后抖动被彻底挡住；位置真实回退（拖进度条/重播）仍要跟上，
+  /// 故以「比上一次采样早 1.5s 以上」作为真回退的判据（抖动幅度远小于一个行间隔）。
+  void _tickFlymeAdvance(int posMs) {
+    final idx = _findLineIndex(posMs + _flymeAdvanceMs);
+    final rewound = _flymePrevPosMs - posMs > 1500;
+    _flymePrevPosMs = posMs;
+    if (idx == _flymeLineIndex) return;
+    if (idx < _flymeLineIndex && !rewound) return;
+    // 前进要迟滞：一次抖动可能连跨两行，或换行恰好撞上 notify 限流窗口。
+    // 真回退例外：它同时绕过后面的索引判定，若此处再被吞掉，_flymePrevPosMs
+    // 已经是回退后的位置，之后再也判不出回退，状态栏会钉在后面那句直到播放追平。
+    final now = DateTime.now();
+    if (!rewound &&
+        _flymeLastSwitchAt != null &&
+        now.difference(_flymeLastSwitchAt!).inMilliseconds < 300) {
+      return;
+    }
+    _flymeLastSwitchAt = now;
+    _flymeLineIndex = idx;
+    _pushFlymeLine(idx >= 0 ? _lines[idx].text : '');
+    _scheduleFlymeBoundary(idx + 1);
+  }
+
+  /// 为"提前后的下一个行边界"安排一次性触发，避免只能等 250ms 轮询兜底。
+  void _scheduleFlymeBoundary(int nextIndex) {
+    _flymeLineTimer?.cancel();
+    _flymeLineTimer = null;
+    final player = _player;
+    if (player == null || !player.isPlaying) return;
+    if (nextIndex >= _lines.length) return;
+    final delayMs =
+        _lines[nextIndex].startTime - _flymeAdvanceMs - player.position.inMilliseconds;
+    if (delayMs <= 0) return; // 已经错过，交给下一次 tick 收敛
+    _flymeLineTimer = Timer(Duration(milliseconds: delayMs), () {
+      final p = _player;
+      if (p != null && _flymeStatusBarLyricEnabled) {
+        _tickFlymeAdvance(p.position.inMilliseconds);
+      }
+    });
+  }
+
+  void _cancelFlymeLineTimer() {
+    _flymeLineTimer?.cancel();
+    _flymeLineTimer = null;
   }
 
   // 上一次下发给原生的「显示大小」档位，用于过滤 ThemeProvider 的其他通知
@@ -751,6 +890,9 @@ class DesktopLyricService {
   static const _channel = MethodChannel('com.md3music.md3music/floating_lyric');
   static const _superLyricChannel =
       MethodChannel('com.md3music.md3music/super_lyric');
+  // 通道名与原生 FlymeLyricBridge.CHANNEL_NAME 必须逐字一致
+  static const _flymeChannel =
+      MethodChannel('com.md3music.md3music/flyme_status_bar_lyric');
 
   void _syncCurrentFromPlayer() {
     if (_player == null) return;
@@ -795,6 +937,7 @@ class DesktopLyricService {
     // （点亮屏幕时由 screenStateChanged 回调补一拍对齐漂移）
     if (!_screenOn && !_lockScreenLyricEnabled) {
       _cancelLineTimer();
+      _cancelFlymeLineTimer();
       return;
     }
     // provider 未绑定时（如 app 启动早期 context 未就绪）尝试重新绑定，
@@ -814,6 +957,7 @@ class DesktopLyricService {
     // 暂停时下一行永不到来：取消预测调度；tick 周期同步降频
     if (!tickPlaying) {
       _cancelLineTimer();
+      _cancelFlymeLineTimer();
     }
     _syncTickInterval(tickPlaying);
     final song = _player!.currentSong;
@@ -822,7 +966,11 @@ class DesktopLyricService {
       _currentSongId = null;
       _lines = const [];
       _currentLineIndex = -1;
+      _flymeLineIndex = -1;
+      _flymeLastSwitchAt = null;
+      _flymePrevPosMs = -1;
       _cancelLineTimer();
+      _cancelFlymeLineTimer();
       // 锁屏歌词：清空界面，避免残留上一首歌词
       _markLockLyricLoaded('');
       return;
@@ -848,6 +996,16 @@ class DesktopLyricService {
       if (_superLyricEnabled) {
         _pushSuperLyricLine(null);
       }
+      // 魅族状态栏歌词：切歌时必须立即清空，否则上一首最后一句会一直挂在状态栏，
+      // 直到新歌第一句歌词到来；若新歌没有歌词则永久残留。
+      // 索引与迟滞一起归零：原生按"文本没变就不重发"去重，不清索引的话
+      // 新歌若首句恰好与旧歌末句相同，会被当成重复推送吞掉。
+      if (_flymeStatusBarLyricEnabled) {
+        _pushFlymeLine('');
+      }
+      _flymeLineIndex = -1;
+      _flymeLastSwitchAt = null;
+      _flymePrevPosMs = -1;
       // LyricInfo：切歌时立即移除上一首的 lyricInfo，避免旧歌词短暂匹配到新歌
       if (_lyricInfoEnabled) {
         _lyricInfoPushed = false;
@@ -859,6 +1017,7 @@ class DesktopLyricService {
       // 锁屏歌词：切歌时推占位全量数据，避免残留上一首歌词
       _markLockLyricLoaded('歌词加载中...');
       _cancelLineTimer();
+      _cancelFlymeLineTimer();
       _fetchLyricFor(song);
       return;
     }
@@ -892,6 +1051,11 @@ class DesktopLyricService {
     if (_lines.isEmpty) return;
     final newIndex = _findLineIndex(posMs);
 
+    // 魅族状态栏歌词：走自己的提前量时间轴，与上面的共享索引互不影响
+    if (_flymeStatusBarLyricEnabled) {
+      _tickFlymeAdvance(posMs);
+    }
+
     // 行变化时推送（逐行模式：每行只在进入时推一次，不高频刷字色）
     if (newIndex != _currentLineIndex) {
       // P0: 行切换 300ms 迟滞：position 抖动（MediaSession/just_audio 位置源相位差）
@@ -924,6 +1088,7 @@ class DesktopLyricService {
         if (_superLyricEnabled) {
           _pushSuperLyricLine(line);
         }
+        // 魅族状态栏歌词不在此处推：它有自己的提前量与迟滞，见 _tickFlymeAdvance。
         // 预测调度：下一行起始时刻精确触发，切行延迟从最坏 250ms 降到 Timer 精度
         if (newIndex + 1 < _lines.length) {
           _scheduleLineBoundary(newIndex + 1);

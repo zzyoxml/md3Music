@@ -187,6 +187,16 @@ Future<void> _restoreLyricPushPref() async {
     // ignore: discarded_futures
     DesktopLyricService.instance.setLockScreenLyricEnabled(lockScreenLyricEnabled);
 
+    // 魅族 Flyme 状态栏歌词（独立开关）：冷启动/后台唤醒后无需进设置页即可继续推送
+    // 顺序有讲究：先灌提前量再开开关。开启会立刻回灌当前行，
+    // 若此时提前量还是 0，第一行就按未提前的时间轴显示，要等到下次翻行才对。
+    final flymeAdvance = await settings.getFlymeLyricAdvanceMs();
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setFlymeAdvanceMs(flymeAdvance);
+    final flymeLyricEnabled = await settings.getFlymeStatusBarLyricEnabled();
+    // ignore: discarded_futures
+    DesktopLyricService.instance.setFlymeStatusBarLyricEnabled(flymeLyricEnabled);
+
     // 实时歌词推送协议
     final protocol = await settings.getLyricPushProtocol();
     final translation = await settings.getLyricPushTranslation();
