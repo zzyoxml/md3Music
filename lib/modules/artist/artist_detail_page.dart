@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 import 'package:m3e_core/m3e_core.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/utils/app_toast.dart';
 import '../../core/widgets/app_background.dart';
@@ -35,6 +36,10 @@ class ArtistDetailPage extends StatefulWidget {
 enum _SortBy { time, title, duration }
 
 class _ArtistDetailPageState extends State<ArtistDetailPage> {
+  static const _prefArtistSongSortKey = 'pref_artist_song_sort';
+  String _artistSongSort = 'hot';
+  int _fetchToken = 0;
+
   List<Song> _songs = [];
   bool _isLoading = true;
   String? _error;
@@ -59,6 +64,31 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
   // 排序
   _SortBy _sortBy = _SortBy.time;
   bool _sortAscending = false;
+
+  void _switchArtistSongSort(String newSort) {
+    if (_artistSongSort == newSort && !_isLoading) {
+      if (_sortBy == _SortBy.time) {
+        setState(() {
+          _sortAscending = !_sortAscending;
+          _invalidateDisplaySongs();
+        });
+      } else {
+        setState(() {
+          _sortBy = _SortBy.time;
+          _sortAscending = false;
+          _invalidateDisplaySongs();
+        });
+      }
+      return;
+    }
+    setState(() {
+      _artistSongSort = newSort;
+      _sortBy = _SortBy.time;
+      _sortAscending = false;
+      _invalidateDisplaySongs();
+    });
+    _fetchArtistSongs(sort: newSort);
+  }
 
   // 定位正在播放歌曲
   String? _highlightSongId;
@@ -97,15 +127,14 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       switch (_sortBy) {
         case _SortBy.time:
           cmp = _songs.indexOf(a).compareTo(_songs.indexOf(b));
-          break;
+          return _sortAscending ? -cmp : cmp;
         case _SortBy.title:
           cmp = a.displayName.toLowerCase().compareTo(b.displayName.toLowerCase());
-          break;
+          return _sortAscending ? cmp : -cmp;
         case _SortBy.duration:
           cmp = a.duration.compareTo(b.duration);
-          break;
+          return _sortAscending ? cmp : -cmp;
       }
-      return _sortAscending ? cmp : -cmp;
     });
     _cachedDisplaySongs = list;
     _lastSearchQuery = _searchQuery;
@@ -190,7 +219,27 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
     );
   }
 
-  Future<void> _fetchArtistSongs() async {
+  Future<void> _fetchArtistSongs({String? sort}) async {
+    final token = ++_fetchToken;
+
+    if (sort != null) {
+      _artistSongSort = sort;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_prefArtistSongSortKey, sort);
+      } catch (_) {}
+    } else {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final savedSort = prefs.getString(_prefArtistSongSortKey);
+        if (savedSort != null && (savedSort == 'hot' || savedSort == 'new')) {
+          _artistSongSort = savedSort;
+        }
+      } catch (_) {}
+    }
+
+    if (!mounted || token != _fetchToken) return;
+
     setState(() {
       _isLoading = true;
       _error = null;
@@ -200,20 +249,22 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       final api = KugouApiClient();
       final artistId = widget.artistId;
       final artistName = widget.artistName;
+      final currentSort = _artistSongSort;
 
       // 并行获取歌手详情和第一页歌曲
-      const batchSize = 30;
+      const batchSize = 500;
       const maxPages = 100;
       final detailFuture = api.getArtistDetail(artistId);
       final firstPageFuture = api.getArtistAudios(
         artistId,
         page: 1,
         pagesize: batchSize,
+        sort: currentSort,
         noCache: true,
       );
 
       final initial = await Future.wait([detailFuture, firstPageFuture]);
-      if (!mounted) return;
+      if (!mounted || token != _fetchToken) return;
 
       final detail = initial[0] as KugouArtistDetail?;
       final firstPage = initial[1] as KugouArtistAudios?;
@@ -243,10 +294,12 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
 
         int currentPage = 2;
         while (allSongs.length < targetTotal && currentPage <= maxPages) {
+          if (!mounted || token != _fetchToken) return;
           final pageResult = await api.getArtistAudios(
             artistId,
             page: currentPage,
             pagesize: batchSize,
+            sort: currentSort,
             noCache: true,
           );
           if (pageResult == null || pageResult.songs.isEmpty) break;
@@ -260,7 +313,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
       final expectedTotal = firstPage?.total ?? 0;
       if (allSongs.isEmpty || (expectedTotal > 0 && allSongs.length < expectedTotal && allSongs.length < 30)) {
         final searchSongs = await _searchArtistSongs(api, artistId, artistName);
-        if (!mounted) return;
+        if (!mounted || token != _fetchToken) return;
         if (searchSongs.isNotEmpty) {
           final existingHashes = allSongs.map((s) => s.hash).toSet();
           for (final song in searchSongs) {
@@ -272,13 +325,18 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
         }
       }
 
+      if (!mounted || token != _fetchToken) return;
+
       setState(() {
-        _songs = allSongs.map((s) => s.toSong()).toList();
+        _songs = allSongs.map((s) {
+          final song = s.toSong();
+          return song.copyWith(artistId: song.artistId ?? artistId);
+        }).toList();
         _isLoading = false;
         _invalidateDisplaySongs();
       });
     } catch (e) {
-      if (mounted) {
+      if (mounted && token == _fetchToken) {
         setState(() {
           _error = e.toString();
           _isLoading = false;
@@ -437,40 +495,60 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                             tooltip: '定位正在播放',
                           ),
                         if (_songs.isNotEmpty)
-                          PopupMenuButton<_SortBy>(
+                          PopupMenuButton<String>(
                             icon: const Icon(Icons.sort),
                             tooltip: '排序',
                             onSelected: (value) {
-                              setState(() {
-                                if (_sortBy == value) {
-                                  _sortAscending = !_sortAscending;
-                                } else {
-                                  _sortBy = value;
-                                  _sortAscending = value == _SortBy.time ? false : true;
-                                }
-                                _invalidateDisplaySongs();
-                              });
+                              if (value == 'hot') {
+                                _switchArtistSongSort('hot');
+                              } else if (value == 'new') {
+                                _switchArtistSongSort('new');
+                              } else {
+                                final sortBy = value == 'title' ? _SortBy.title : _SortBy.duration;
+                                setState(() {
+                                  if (_sortBy == sortBy) {
+                                    _sortAscending = !_sortAscending;
+                                  } else {
+                                    _sortBy = sortBy;
+                                    _sortAscending = true;
+                                  }
+                                  _invalidateDisplaySongs();
+                                });
+                              }
                             },
                             itemBuilder: (context) => [
-                              CheckedPopupMenuItem<_SortBy>(
-                                value: _SortBy.time,
-                                checked: _sortBy == _SortBy.time,
+                              CheckedPopupMenuItem<String>(
+                                value: 'hot',
+                                checked: _sortBy == _SortBy.time && _artistSongSort == 'hot',
                                 child: Row(
                                   children: [
-                                    const Text('添加时间'),
-                                    if (_sortBy == _SortBy.time) ...[
+                                    const Text('按热度排行'),
+                                    if (_sortBy == _SortBy.time && _artistSongSort == 'hot') ...[
                                       const Spacer(),
                                       Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 16),
                                     ],
                                   ],
                                 ),
                               ),
-                              CheckedPopupMenuItem<_SortBy>(
-                                value: _SortBy.title,
+                              CheckedPopupMenuItem<String>(
+                                value: 'new',
+                                checked: _sortBy == _SortBy.time && _artistSongSort == 'new',
+                                child: Row(
+                                  children: [
+                                    const Text('按发布时间'),
+                                    if (_sortBy == _SortBy.time && _artistSongSort == 'new') ...[
+                                      const Spacer(),
+                                      Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 16),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              CheckedPopupMenuItem<String>(
+                                value: 'title',
                                 checked: _sortBy == _SortBy.title,
                                 child: Row(
                                   children: [
-                                    const Text('歌曲名称'),
+                                    const Text('按歌曲名称'),
                                     if (_sortBy == _SortBy.title) ...[
                                       const Spacer(),
                                       Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 16),
@@ -478,12 +556,12 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                   ],
                                 ),
                               ),
-                              CheckedPopupMenuItem<_SortBy>(
-                                value: _SortBy.duration,
+                              CheckedPopupMenuItem<String>(
+                                value: 'duration',
                                 checked: _sortBy == _SortBy.duration,
                                 child: Row(
                                   children: [
-                                    const Text('时长'),
+                                    const Text('按时长'),
                                     if (_sortBy == _SortBy.duration) ...[
                                       const Spacer(),
                                       Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 16),
@@ -616,7 +694,7 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                         if (_songs.isNotEmpty) ...[
                                           const SizedBox(height: 4),
                                           Text(
-                                            '${_songs.length} 首歌曲',
+                                            '${_songs.length} 首歌曲 · ${_artistSongSort == "hot" ? "热门" : "最新"}',
                                             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                                               color: colorScheme.onSurfaceVariant,
                                             ),
@@ -771,6 +849,50 @@ class _ArtistDetailPageState extends State<ArtistDetailPage> {
                                 ],
                               ),
                             ),
+                          ),
+                        ),
+                      ),
+                    // 歌曲列表控制栏
+                    if (_songs.isNotEmpty || _isLoading)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                          child: Row(
+                            children: [
+                              Text(
+                                _artistSongSort == 'hot' ? '热门歌曲' : '最新歌曲',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleSmall
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.bold,
+                                      color: colorScheme.onSurface,
+                                    ),
+                              ),
+                              if (_songs.isNotEmpty) ...[
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 6,
+                                    vertical: 2,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: colorScheme.surfaceContainerHighest,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    '${_displaySongs.length}',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: colorScheme.onSurfaceVariant,
+                                        ),
+                                  ),
+                                ),
+                              ],
+                              const Spacer(),
+                            ],
                           ),
                         ),
                       ),

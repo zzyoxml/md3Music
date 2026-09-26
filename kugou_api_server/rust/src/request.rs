@@ -477,7 +477,7 @@ pub fn create_request(opts: &RequestOptions) -> Result<ModuleResponse, ModuleRes
         );
         params_map.insert(
             "clientver".to_string(),
-            json!(if opts.standard_signature { 20789 } else { 11440 }),
+            json!(if opts.standard_signature { 20489 } else { 11440 }),
         );
         params_map.insert("clienttime".to_string(), json!(clienttime));
         if !token.is_empty() {
