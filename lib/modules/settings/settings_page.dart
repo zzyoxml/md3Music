@@ -1168,90 +1168,206 @@ class _SettingsPageState extends State<SettingsPage>
     final canToggleOled =
         context.watch<ThemeProvider>().themeMode != ThemeMode.light;
     final carMode = context.watch<CarModeProvider>();
-    final ratioPercent = (carMode.panelRatio * 100).round();
+    // 滑条下限随布局切换：底部（竖屏/近方屏车机）10%，侧边 20%。
+    // 显示值同样按布局夹取：侧边布局下存量 0.12 若直接喂给滑条会触发
+    // value < min 断言。
+    final sliderMinRatio = carMode.useBottomLayout
+        ? kCarModePanelMinRatioBottom
+        : kCarModePanelMinRatio;
+    final ratioPercent =
+        (carMode.panelRatio.clamp(sliderMinRatio, kCarModePanelMaxRatio) * 100)
+            .round();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // ⓪ 车机模式：原独立分类移入外观，置于顶部独立分组
-        // （开关 + 面板宽度 + 面板位置）。
+        // （开关 + 自动检测 + 面板高度/宽度 + Dock 避让 + 面板位置）。
         //
         // 本页（设置页）自身不显示面板（由 State 上的 CarModePanelSuppressor
         // 声明），所以这里的调整不会在页内实时预览，退出设置页后生效。
         _buildGroupLabel('车机模式', colorScheme, first: true),
         // 独立总开关：默认关闭。开启后任何界面（设置页 / 登录页 / 引导页 /
-        // 用户协议页除外）常驻一块播放器面板，且不再显示 MiniPlayer
+        // 用户协议页除外）常驻一块播放器面板，且不再显示 MiniPlayer。
+        // 这是**强制开启**开关：无论屏幕类型都启用。
         // search: 车机 车载 常驻 面板 大屏 副屏 副驾 miniplayer 迷你条
         SwitchListTile(
           title: const Text('车机模式'),
+          subtitle: const Text('任何界面常驻播放器面板，不再显示 MiniPlayer'),
           value: carMode.enabled,
           onChanged: (value) {
             HapticFeedback.lightImpact();
             context.read<CarModeProvider>().setEnabled(value);
           },
         ),
-        _buildGroupLabel('面板宽度', colorScheme),
-        ListTile(
-          enabled: carMode.enabled,
-          title: const Text('面板宽度'),
-          subtitle: M3ESlider(
-            decoration: const M3ESliderDecoration(
-              // 显式给 hapticConfig：M3ESlider 在 divisions == null 时默认取
-              // M3EHapticConfig.continuous()（10ms 最小间隔 + 2% 阈值），
-              // 拖动中会以最高约 100 次/秒走 MethodChannel 触发 vibrate，
-              // 真机上马达饱和 + 通道洪泛。
-              haptic: M3EHapticFeedback.medium,
-              hapticConfig: M3EHapticConfig.discrete(),
-            ),
-            value: carMode.panelRatio * 100,
-            min: kCarModePanelMinRatio * 100,
-            max: kCarModePanelMaxRatio * 100,
-            // 不传 divisions = 无级调节（M3ESlider.divisions 为 int?），
-            // 有档位吸附会破坏「无级」手感。
-            label: '$ratioPercent%',
-            // 拖动中只改内存（persist: false），松手才落盘。
-            // 注意：divisions == null 时 M3ESlider 的 onChangeEnd 可能在按下
-            // 超过 100ms 后被 tap-cancel 提前触发一次（见 _DisplayScaleTile 的
-            // 注释）。这里提前落盘的只是一个 double，不影响手感，真正的终值
-            // 会在拖动结束时再落一次。
-            onChanged: (value) => context.read<CarModeProvider>().setPanelRatio(
-              value / 100,
-              persist: false,
-            ),
-            onChangeEnd: (value) =>
-                context.read<CarModeProvider>().setPanelRatio(value / 100),
-          ),
-          trailing: Text('$ratioPercent%'),
+        // 自动检测开关：独立于上面的强制开关。开启后按屏幕长比自动判断，
+        // 命中车机屏（短边/长边 ≥ 0.55，常见 16:9 车机即满足）即自动启用。
+        // search: 车机 车载 自动 检测 屏幕 分辨率 识别 竖屏 方屏
+        SwitchListTile(
+          title: const Text('检测到车机屏幕时自动开启'),
+          subtitle: const Text('匹配竖屏或方屏车机等车载屏幕时自动启用车机模式'),
+          value: carMode.autoScreenEnabled,
+          onChanged: (value) {
+            HapticFeedback.lightImpact();
+            context.read<CarModeProvider>().setAutoScreenEnabled(value);
+          },
         ),
-        _buildGroupLabel('面板位置', colorScheme),
+        _buildGroupLabel(
+          carMode.useBottomLayout ? '面板高度' : '面板宽度',
+          colorScheme,
+        ),
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-          // search-item: 面板位置 | 车机 面板 左侧 右侧 停靠 位置
-          child: M3EToggleButtonGroup(
-            actions: const [
-              M3EToggleButtonGroupAction(
-                label: Text('左侧'),
-                icon: Icon(Icons.align_horizontal_left),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // 标题随布局切换：侧边 =「面板宽度」（横贯左侧/右侧、只调宽），
+              // 底部 =「面板高度」（横贯全宽、只调高）。两者共用同一个占比值
+              // （panelRatio），通过 resolveCarModePanelWidth / Height 换算成
+              // 不同的物理尺寸。search: 面板宽度 面板高度 车机 底部
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      carMode.useBottomLayout ? '面板高度' : '面板宽度',
+                      style: Theme.of(context).textTheme.bodyLarge,
+                    ),
+                  ),
+                  Text(
+                    '$ratioPercent%',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
               ),
-              M3EToggleButtonGroupAction(
-                label: Text('右侧'),
-                icon: Icon(Icons.align_horizontal_right),
+              const SizedBox(height: 4),
+              // 滑条始终显示（两布局共用），拖动只改内存，松手落盘。
+              M3ESlider(
+                decoration: const M3ESliderDecoration(
+                  // 显式给 hapticConfig：M3ESlider 在 divisions == null 时默认取
+                  // M3EHapticConfig.continuous()（10ms 最小间隔 + 2% 阈值），
+                  // 拖动中会以最高约 100 次/秒走 MethodChannel 触发 vibrate，
+                  // 真机上马达饱和 + 通道洪泛。
+                  haptic: M3EHapticFeedback.medium,
+                  hapticConfig: M3EHapticConfig.discrete(),
+                ),
+                value:
+                    carMode.panelRatio.clamp(
+                      sliderMinRatio,
+                      kCarModePanelMaxRatio,
+                    ) *
+                    100,
+                // 底部布局（竖屏/近方屏车机）下限 10%，侧边保持 20%。
+                min: sliderMinRatio * 100,
+                max: kCarModePanelMaxRatio * 100,
+                // 不传 divisions = 无级调节（M3ESlider.divisions 为 int?），
+                // 有档位吸附会破坏「无级」手感。
+                label: '$ratioPercent%',
+                // 拖动中只改内存（persist: false），松手才落盘。
+                // 注意：divisions == null 时 M3ESlider 的 onChangeEnd 可能在
+                // 按下超过 100ms 后被 tap-cancel 提前触发一次（见
+                // _DisplayScaleTile 的注释）。这里提前落盘的只是一个 double，
+                // 不影响手感，真正的终值会在拖动结束时再落一次。
+                onChanged: (value) =>
+                    context.read<CarModeProvider>().setPanelRatio(
+                      value / 100,
+                      persist: false,
+                    ),
+                onChangeEnd: (value) =>
+                    context.read<CarModeProvider>().setPanelRatio(value / 100),
               ),
             ],
-            selectedIndex: carMode.panelSide == CarModePanelSide.left ? 0 : 1,
-            onSelectedIndexChanged: (index) {
-              if (index == null || !carMode.enabled) return;
-              HapticFeedback.lightImpact();
-              context.read<CarModeProvider>().setPanelSide(
-                index == 0 ? CarModePanelSide.left : CarModePanelSide.right,
-              );
-            },
           ),
         ),
-        if (!carMode.enabled)
+        // Dock 避让高度校准：仅底部布局（面板贴屏幕下缘）有意义 —— 车联
+        // dock 栏是系统悬浮窗、不产生 WindowInsets，SafeArea 挡不住，只能
+        // 由用户按 dock 实际高度校准（见 kCarModeBottomDockClearance 注释）。
+        // search-item: dock 避让高度 | 车机 车联 dock 避让 底部 空隙 高度
+        if (carMode.useBottomLayout) ...[
+          _buildGroupLabel('Dock 避让高度', colorScheme),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '底部面板与屏幕下缘留出的空隙，用于避开车联 dock 栏；0 为不避让',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  children: [
+                    Expanded(
+                      child: M3ESlider(
+                        decoration: const M3ESliderDecoration(
+                          haptic: M3EHapticFeedback.medium,
+                          hapticConfig: M3EHapticConfig.discrete(),
+                        ),
+                        value: carMode.dockClearanceDp,
+                        min: 0,
+                        max: kCarModeDockClearanceMax,
+                        // 1dp 一档：整数值好读好记，档位 haptic 也与
+                        // M3EHapticConfig.discrete() 匹配。
+                        divisions: kCarModeDockClearanceMax.round(),
+                        label: '${carMode.dockClearanceDp.round()}dp',
+                        onChanged: (value) => context
+                            .read<CarModeProvider>()
+                            .setDockClearance(value, persist: false),
+                        onChangeEnd: (value) => context
+                            .read<CarModeProvider>()
+                            .setDockClearance(value),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 72,
+                      child: Text(
+                        carMode.dockClearanceDp <= 0
+                            ? '不避让'
+                            : '${carMode.dockClearanceDp.round()}dp',
+                        textAlign: TextAlign.end,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+        // 面板位置仅在侧边布局下有意义（底部布局面板横贯全宽）。
+        if (!carMode.useBottomLayout)
+          _buildGroupLabel('面板位置', colorScheme),
+        if (!carMode.useBottomLayout)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+            // search-item: 面板位置 | 车机 面板 左侧 右侧 停靠 位置
+            child: M3EToggleButtonGroup(
+              actions: const [
+                M3EToggleButtonGroupAction(
+                  label: Text('左侧'),
+                  icon: Icon(Icons.align_horizontal_left),
+                ),
+                M3EToggleButtonGroupAction(
+                  label: Text('右侧'),
+                  icon: Icon(Icons.align_horizontal_right),
+                ),
+              ],
+              selectedIndex:
+                  carMode.panelSide == CarModePanelSide.left ? 0 : 1,
+              onSelectedIndexChanged: (index) {
+                if (index == null || !carMode.active) return;
+                HapticFeedback.lightImpact();
+                context.read<CarModeProvider>().setPanelSide(
+                  index == 0 ? CarModePanelSide.left : CarModePanelSide.right,
+                );
+              },
+            ),
+          ),
+        if (!carMode.active)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
             child: Text(
-              '开启车机模式后生效',
+              '开启车机模式或检测到车机屏幕后生效',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: colorScheme.onSurfaceVariant,
               ),

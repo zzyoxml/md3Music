@@ -41,7 +41,15 @@ Future<bool> confirmExitCarMode(BuildContext context) async {
   if (confirmed != true) return false;
 
   HapticFeedback.mediumImpact();
-  // 关闭开关 → CarModePanel 立即返回 child，整块面板随之卸载。
-  await carMode.setEnabled(false);
+  // 关闭当前生效的启用途径 → CarModePanel 立即返回 child，整块面板随之下线。
+  // 车机模式可由「强制开关」（enabled）或「自动检测」（autoScreenEnabled）
+  // 任一触发：退出应关掉**正在让它生效的那个**，而不是只关强制开关。
+  //   仅自动检测命中 → 关 auto；
+  //   其余情况（含两者同时命中）→ 关强制开关（auto 交给二次操作关闭）。
+  if (!carMode.enabled && carMode.autoScreenEnabled) {
+    await carMode.setAutoScreenEnabled(false);
+  } else {
+    await carMode.setEnabled(false);
+  }
   return true;
 }

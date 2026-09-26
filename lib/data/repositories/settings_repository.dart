@@ -1062,12 +1062,17 @@ class SettingsRepository {
 
   // ===== 车机模式 =====
   static const String _keyCarModeEnabled = 'settings_car_mode_enabled';
+  static const String _keyCarModeAutoScreen = 'settings_car_mode_auto_screen';
   static const String _keyCarModePanelRatio = 'settings_car_mode_panel_ratio';
+  static const String _keyCarModeDockClearance =
+      'settings_car_mode_dock_clearance';
   static const String _keyCarModePanelSide = 'settings_car_mode_panel_side';
 
   /// 「车机模式」开关，默认关闭。
   /// 开启后任何界面（设置页 / 登录页 / 引导页 / 用户协议页除外）常驻一块
   /// 全屏播放器面板，且全站不再显示 MiniPlayer。
+  /// 这是**强制开启**开关：无论屏幕是什么类型都启用。它与自动检测开关
+  /// （[_keyCarModeAutoScreen]）相互独立，任一命中即启用车机模式。
   Future<bool> getCarModeEnabled() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getBool(_keyCarModeEnabled) ?? false;
@@ -1078,20 +1083,58 @@ class SettingsRepository {
     await prefs.setBool(_keyCarModeEnabled, value);
   }
 
-  /// 常驻播放器面板的宽度占比（0.20~0.50），默认 0.30。
-  /// 越界值一律夹回合法区间：手改 prefs / 历史脏数据也不会把面板撑爆。
+  /// 「检测到车机屏幕时自动开启」开关，默认关闭。
+  /// 独立于「车机模式」总开关：开启后按屏幕长比自动判断（见
+  /// [isCarLikeScreen]），命中车机屏即自动启用常驻面板。
+  Future<bool> getCarModeAutoScreenEnabled() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_keyCarModeAutoScreen) ?? false;
+  }
+
+  Future<void> setCarModeAutoScreenEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_keyCarModeAutoScreen, value);
+  }
+
+  /// 常驻播放器面板的宽度占比，默认 0.30。
+  ///
+  /// 合法区间取**最宽**范围（底部布局 10% ~ 50%，见
+  /// [kCarModePanelMinRatioBottom]）：本层只挡手改 prefs / 历史脏数据这类
+  /// 明显越界值；布局相关的精确下限（侧边 20% / 底部 10%）由
+  /// [CarModeProvider.setPanelRatio] 按当前布局夹取 —— 本层不知道布局形态，
+  /// 若在这里按 20% 夹会把底部布局存的 10%~20% 值在读回时错误抬高。
   Future<double> getCarModePanelRatio() async {
     final prefs = await SharedPreferences.getInstance();
     final value = prefs.getDouble(_keyCarModePanelRatio);
     if (value == null) return kCarModePanelDefaultRatio;
-    return value.clamp(kCarModePanelMinRatio, kCarModePanelMaxRatio);
+    return value.clamp(kCarModePanelMinRatioBottom, kCarModePanelMaxRatio);
   }
 
   Future<void> setCarModePanelRatio(double value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(
       _keyCarModePanelRatio,
-      value.clamp(kCarModePanelMinRatio, kCarModePanelMaxRatio),
+      value.clamp(kCarModePanelMinRatioBottom, kCarModePanelMaxRatio),
+    );
+  }
+
+  /// 底部面板的 dock 避让高度（dp，逻辑像素）。
+  ///
+  /// 车联 dock 栏以系统悬浮窗绘在 App 之上、不产生 WindowInsets，用户在
+  /// 设置页按 dock 实际高度校准并持久化；默认 [kCarModeBottomDockClearance]
+  /// （48dp）。范围 0–160：0 = 不避让（贴屏幕底边），160 覆盖常见车机 dock。
+  Future<double> getCarModeDockClearance() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getDouble(_keyCarModeDockClearance);
+    if (value == null) return kCarModeBottomDockClearance;
+    return value.clamp(0.0, kCarModeDockClearanceMax);
+  }
+
+  Future<void> setCarModeDockClearance(double value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(
+      _keyCarModeDockClearance,
+      value.clamp(0.0, kCarModeDockClearanceMax),
     );
   }
 

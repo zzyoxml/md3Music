@@ -3,14 +3,20 @@
 // 面板挂在 MaterialApp.builder 的根 Navigator **之外**（见 app.dart），
 // 这是硬要求：面板要同时覆盖所有 Navigator.push 出来的二级页面。
 
+import 'dart:math' as math;
+
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/car_mode_provider.dart';
+import '../../providers/player_provider.dart';
 import '../../providers/theme_provider.dart';
+import '../../widgets/smart_artwork_image.dart';
 import 'car_mode_layout.dart';
+import 'car_mode_lyric_bar.dart';
 import 'full_player.dart';
 import 'full_player_am.dart';
+import 'full_player_route.dart';
 
 /// 车机模式外壳：开启时把 [child]（整棵根 Navigator）与常驻播放器面板并排。
 ///
@@ -115,21 +121,37 @@ class _CarModePanelState extends State<CarModePanel>
           side: carMode.panelSide,
         );
     setState(() {
-      _dragRatio = next.clamp(kCarModePanelMinRatio, kCarModePanelMaxRatio);
+      // 底部布局下限放宽到 10%（见 kCarModePanelMinRatioBottom）；
+      // 物理下限 kCarModePanelMinHeight 在 resolveCarModePanelHeight 内托底。
+      _dragRatio = next.clamp(
+        kCarModePanelMinRatioBottom,
+        kCarModePanelMaxRatio,
+      );
     });
   }
 
   void _onDragEnd() {
     // 落盘的是**实际生效占比**而不是 _dragRatio：窄屏上 20% 会被 196dp 物理下限
-    // 托底（实际约 23%），直接存 20% 会让「存的值 ≠ 看到的宽度」，
-    // 下次进来宽度与设置页滑条显示不一致。
-    final screenWidth = MediaQuery.sizeOf(context).width;
-    final effectiveWidth = resolveCarModePanelWidth(
-      screenWidth: screenWidth,
+    // 托底（实际约 23%），直接存 20% 会让「存的值 ≠ 看到的尺寸」，
+    // 下次进来尺寸与设置页滑条显示不一致。
+    final carMode = context.read<CarModeProvider>();
+    final atBottom = carMode.useBottomLayout;
+    final screenLength = atBottom
+        ? MediaQuery.sizeOf(context).height
+        : MediaQuery.sizeOf(context).width;
+    final effectiveLength = atBottom
+        ? resolveCarModePanelHeight(
+            screenHeight: screenLength,
+            ratio: _dragRatio,
+            minRatio: kCarModePanelMinRatioBottom,
+            minPhysicalHeight: kCarModeDockBarMinHeight,
+          )
+        : resolveCarModePanelWidth(
+            screenWidth: screenLength,
       ratio: _dragRatio,
     );
-    final effectiveRatio = screenWidth > 0
-        ? effectiveWidth / screenWidth
+    final effectiveRatio = screenLength > 0
+        ? effectiveLength / screenLength
         : _dragRatio;
 
     // 顺序不可调换：先落盘（provider 字段同步更新，通知在微任务里发），
@@ -153,6 +175,34 @@ class _CarModePanelState extends State<CarModePanel>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // MediaQuery 是 InheritedWidget：屏幕尺寸/方向变化会触发本方法重跑，
+    // 据此把最新屏幕判定注入 provider（也覆盖冷启动首帧）。
+    _syncScreenMetrics();
+  }
+
+  Size? _lastPhysicalSize;
+
+  /// 把当前屏幕尺寸换算成两个判定并注入 CarModeProvider（首帧 + 尺寸变化）。
+  ///
+  /// 与 [CarModePanel] 渲染用同一个 MediaQuery 口径。放在 build 之前的
+  /// didChangeDependencies 里执行，保证 `useBottomLayout` / `active` 在
+  /// build 时已是最新值。_lastPhysicalSize 用于防抖：尺寸抖动（方向切换的
+  /// 系留系统栏 insets 变化）不触发无谓重建。
+  void _syncScreenMetrics() {
+    final carMode = context.read<CarModeProvider>();
+    final size = MediaQuery.maybeSizeOf(context);
+    if (size == null) return;
+    if (_lastPhysicalSize == size) return;
+    _lastPhysicalSize = size;
+    carMode.updateScreenMetrics(
+      isCar: isCarLikeScreen(size.width, size.height),
+      portraitOrSquare: isPortraitOrSquareScreen(size.width, size.height),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     final carMode = context.watch<CarModeProvider>();
     if (!carMode.panelVisible) return widget.child;
@@ -160,26 +210,74 @@ class _CarModePanelState extends State<CarModePanel>
     final mq = MediaQuery.of(context);
     final frozen = _contentFrozen;
     final isLeft = carMode.panelSide == CarModePanelSide.left;
+    final atBottom = carMode.useBottomLayout;
 
-    // 真实内容宽度：拖动中恒取冻结快照。
-    // 宁可「拖动过程中面板宽度不变」，也不要逐帧重排整个播放器。
-    final contentWidth = resolveCarModePanelWidth(
+    // 底部布局的 dock 避让高度：max(系统底部安全区, 用户校准值)。
+    //
+    // 车联 dock 栏多以系统悬浮窗绘在 App 之上、不产生 WindowInsets，纯
+    // SafeArea 挡不住它。避让策略改为「面板整体上移」：面板底边直接停在
+    // dock 上缘（避让区高度 = dockClearance），播放器本体不再内垫空白条 ——
+    // 旧实现把固定 48dp 垫在面板内容下方，dock 比 48dp 高照样遮挡，又多出
+    // 一条难看的白条。dock 高度可在设置页「Dock 避让高度」校准并持久化，
+    // 默认仍取 48dp 兜底；避让区铺主界面背景色（见下方 ColoredBox）。
+    final dockClearance = atBottom
+        ? math.max(mq.padding.bottom, carMode.dockClearanceDp)
+        : 0.0;
+
+    // 真实内容尺寸：拖动中恒取冻结快照。
+    // 宁可「拖动过程中面板尺寸不变」，也不要逐帧重排整个播放器。
+    final contentLength = atBottom
+        ? resolveCarModePanelHeight(
+            screenHeight: mq.size.height,
+            ratio: frozen ? _frozenRatio : carMode.panelRatio,
+            // 底部布局下限 10%：存量占比（如 0.12）不得在渲染时被抬高。
+            minRatio: kCarModePanelMinRatioBottom,
+            // 物理下限放宽到细条模式高度：10% 小高度由细条渲染兜底。
+            minPhysicalHeight: kCarModeDockBarMinHeight,
+          )
+        : resolveCarModePanelWidth(
       screenWidth: mq.size.width,
       ratio: frozen ? _frozenRatio : carMode.panelRatio,
     );
-    // 遮罩宽度：跟手。
-    final previewWidth = resolveCarModePanelWidth(
+    // 遮罩尺寸：跟手。
+    final previewLength = atBottom
+        ? resolveCarModePanelHeight(
+            screenHeight: mq.size.height,
+            ratio: _dragging ? _dragRatio : carMode.panelRatio,
+            minRatio: kCarModePanelMinRatioBottom,
+            minPhysicalHeight: kCarModeDockBarMinHeight,
+          )
+        : resolveCarModePanelWidth(
       screenWidth: mq.size.width,
       ratio: _dragging ? _dragRatio : carMode.panelRatio,
     );
-    final percentLabel = mq.size.width > 0
-        ? '${(previewWidth / mq.size.width * 100).round()}%'
-        : '${(kCarModePanelDefaultRatio * 100).round()}%';
+    final percentLabel = atBottom
+        ? (mq.size.height > 0
+              ? '${(previewLength / mq.size.height * 100).round()}%'
+              : '${(kCarModePanelDefaultRatio * 100).round()}%')
+        : (mq.size.width > 0
+              ? '${(previewLength / mq.size.width * 100).round()}%'
+              : '${(kCarModePanelDefaultRatio * 100).round()}%');
 
+    // 底部面板两档轻量布局：
+    //   * 歌词条（CarModeLyricBar，2026-09-23）：内容高度 < 35% 屏高（且不足
+    //     FullPlayer 物理下限 140dp 时也归此档）→ [当前行+下一行歌词 | 歌名/
+    //     歌手+传输键 | 大封面]（2026-09-23 晚用户要求镜像：歌词最左、封面
+    //     最右）。35% 及以上走原 FullPlayer 紧凑布局。
+    //   * 旧细条（_CarModeDockBar）：内容高度 < 72dp（更矮的屏上 10% 被 56dp
+    //     托底）时歌词条两行文字 + 传输键放不下，回退旧单行布局。
+    final lyricBarLimit = math.max(
+      kCarModePanelMinHeight.toDouble(),
+      mq.size.height * 0.35,
+    );
+    final useLyricBar = atBottom && contentLength < lyricBarLimit;
+    final compactBar = atBottom && contentLength < kCarModeDockBarFallbackMin;
     final panel = SizedBox(
-      width: contentWidth,
-      // 只覆盖 size：宽 = 面板实际宽度、高不变。
-      // 面板内的响应式判定必须按「面板宽度」而不是屏幕宽度 ——
+      // 底部：横贯全宽、限定高度（含下缘避让区）；侧边：限定宽度、撑满高度。
+      width: atBottom ? mq.size.width : contentLength,
+      height: atBottom ? contentLength + dockClearance : null,
+      // 只覆盖 size：宽 = 面板实际宽度、高不变（侧边），或 宽=全屏、高=面板高
+      // （底部）。面板内的响应式判定必须按「面板实际尺寸」而不是屏幕尺寸 ——
       //   * ResponsiveLayout 用 LayoutBuilder（面板实际宽 → compact）
       //   * FullPlayer._syncTabLayout 用 MediaQuery.sizeOf().width
       //   * isPadLayout 用 shortestSide
@@ -191,7 +289,14 @@ class _CarModePanelState extends State<CarModePanel>
       // 系统栏留白与图片解码分辨率不能因为面板而改变。
       child: MediaQuery(
         data: mq.copyWith(
-          size: Size(contentWidth, mq.size.height),
+          size: Size(
+            atBottom ? mq.size.width : contentLength,
+            atBottom ? contentLength : mq.size.height,
+          ),
+          // 面板内容区不再吃系统底部安全区：dock 避让由面板整体上移承担
+          // （见 dockClearance），避免内容底部再垫一层空白。
+          padding: mq.padding.copyWith(bottom: 0),
+          viewPadding: mq.viewPadding.copyWith(bottom: 0),
           // 窄容器下 1.3x 系统字号会把顶栏（音质徽章 + 睡眠药丸 + 更多）
           // 挤出溢出，面板内收紧文字缩放上限。
           textScaler: mq.textScaler.clamp(
@@ -199,7 +304,11 @@ class _CarModePanelState extends State<CarModePanel>
             maxScaleFactor: 1.10,
           ),
         ),
-        child: const _CarModePlayerHost(),
+        child: useLyricBar
+            ? (compactBar
+                  ? _CarModeDockBar(height: contentLength)
+                  : CarModeLyricBar(height: contentLength))
+            : const _CarModePlayerHost(),
       ),
     );
 
@@ -210,7 +319,17 @@ class _CarModePanelState extends State<CarModePanel>
     // 出现一条 20dp 的纯黑竖条（像素实测：37px @1.875x 亮度恒为 0）——
     // 占位是透明的，露出的是最底层背景。把手的 20dp 热区本来就叠在上层
     // （见下方 Positioned），根本不需要在布局里占位。
-    final row = Row(
+    final layout = atBottom
+        // 底部布局：上为主界面、下为面板，两者都占满宽。
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(child: widget.child),
+              panel,
+            ],
+          )
+        // 侧边布局：左/右停靠，面板与主界面并排。
+        : Row(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: isLeft
           ? [panel, Expanded(child: widget.child)]
@@ -224,7 +343,7 @@ class _CarModePanelState extends State<CarModePanel>
         // 松手后同一实例继续用，不会丢播放/歌词状态）。
         Offstage(
           offstage: frozen,
-          child: TickerMode(enabled: !frozen, child: row),
+          child: TickerMode(enabled: !frozen, child: layout),
         ),
         // 遮罩层：两块**无缝相邻**的纯色区域。
         // 这里刻意不留缝 —— 拖动时真实内容被 offstage，缝里什么都没有，
@@ -236,7 +355,10 @@ class _CarModePanelState extends State<CarModePanel>
               opacity: _scrimController,
               child: _CarModeDragScrim(
                 side: carMode.panelSide,
-                panelWidth: previewWidth,
+                panelWidth: previewLength,
+                // 底部：遮罩面板区含避让区，与真实面板总高一致。
+                panelHeight: atBottom ? previewLength + dockClearance : null,
+                atBottom: atBottom,
                 percentLabel: percentLabel,
               ),
             ),
@@ -247,8 +369,30 @@ class _CarModePanelState extends State<CarModePanel>
         // 2) 在遮罩**之上** —— 遮罩已无缝，把手若在下面会被整块盖住。
         //    遮罩自己包了 IgnorePointer，不会抢把手的事件。
         // 热区以分界线为中心（左右各 hitWidth/2），使把手细线与面板边缘对齐。
-        Positioned(
-          left: (isLeft ? previewWidth : mq.size.width - previewWidth) -
+        // 底部模式：把手是水平横条，沿面板上缘水平放置并在垂直方向拖动。
+        atBottom
+            ? Positioned(
+                top:
+                    mq.size.height -
+                    dockClearance -
+                    previewLength -
+                    _HorizHandle.hitHeight / 2,
+                left: 0,
+                right: 0,
+                height: _HorizHandle.hitHeight,
+                child: _HorizHandle(
+                  active: _dragging,
+                  onDragStart: () => _onDragStart(carMode.panelRatio),
+                  onDragDelta: _onDragVerticalDelta,
+                  onDragEnd: _onDragEnd,
+                  onReset: () => context.read<CarModeProvider>().setPanelRatio(
+                    kCarModePanelDefaultRatio,
+                  ),
+                ),
+              )
+            : Positioned(
+                left:
+                    (isLeft ? previewLength : mq.size.width - previewLength) -
               _CarModeResizeHandle.hitWidth / 2,
           top: 0,
           bottom: 0,
@@ -258,13 +402,35 @@ class _CarModePanelState extends State<CarModePanel>
             onDragStart: () => _onDragStart(carMode.panelRatio),
             onDragDelta: _onDragDelta,
             onDragEnd: _onDragEnd,
-            onReset: () => context
-                .read<CarModeProvider>()
-                .setPanelRatio(kCarModePanelDefaultRatio),
+                  onReset: () => context.read<CarModeProvider>().setPanelRatio(
+                    kCarModePanelDefaultRatio,
+                  ),
           ),
         ),
       ],
     );
+  }
+
+  /// 底部面板垂直拖动：位移增量 → 高度占比增量，并**立即夹取**。
+  void _onDragVerticalDelta(double deltaY) {
+    final carMode = context.read<CarModeProvider>();
+    final screenHeight = MediaQuery.sizeOf(context).height;
+    final next =
+        _dragRatio +
+        resolveCarModeHeightDelta(
+          deltaY: deltaY,
+          screenHeight: screenHeight,
+          atBottom: true,
+        );
+    setState(() {
+      // 底部布局下限放宽到 10%（细条模式托底），与 setPanelRatio /
+      // 渲染路径（kCarModePanelMinRatioBottom）保持同一口径；夹 20% 会让
+      // 拖到 10%~20% 区间时松手值被弹回，滑条显示与实际尺寸不一致。
+      _dragRatio = next.clamp(
+        kCarModePanelMinRatioBottom,
+        kCarModePanelMaxRatio,
+      );
+    });
   }
 }
 
@@ -299,9 +465,8 @@ class _CarModePlayerHost extends StatelessWidget {
     return HeroControllerScope(
       controller: HeroController(),
       child: Navigator(
-        onGenerateRoute: (_) => MaterialPageRoute<void>(
-          builder: (_) => const _CarModePlayerBody(),
-        ),
+        onGenerateRoute: (_) =>
+            MaterialPageRoute<void>(builder: (_) => const _CarModePlayerBody()),
       ),
     );
   }
@@ -447,18 +612,24 @@ class _CarModeResizeHandle extends StatelessWidget {
 /// 拖动期间覆盖在两侧的纯色遮罩：**面板侧**与**主界面侧**各一块，
 /// 各自中央一个圆角徽章图标 + 分区文字，中间留出把手热区的缝。
 ///
+/// 支持侧边（左右）与底部两种布局：底部时上下分区（上=主界面、下=播放器）。
+///
 /// 为什么需要它：拖动期间真实内容被 offstage（看不见），若无标识，
-/// 屏幕会像「白屏」；分区标识把「左边是播放器 / 右边是主界面」讲清楚，
+/// 屏幕会像「白屏」；分区标识把「哪边是播放器 / 哪边是主界面」讲清楚，
 /// 与系统分屏调整界面的做法一致。
 class _CarModeDragScrim extends StatelessWidget {
   const _CarModeDragScrim({
     required this.side,
     required this.panelWidth,
+    required this.panelHeight,
+    required this.atBottom,
     required this.percentLabel,
   });
 
   final CarModePanelSide side;
   final double panelWidth;
+  final double? panelHeight;
+  final bool atBottom;
 
   /// 当前面板占比（如 `30%`），显示在面板侧分区标识下方。
   final String percentLabel;
@@ -510,51 +681,209 @@ class _CarModeDragScrim extends StatelessWidget {
       );
     }
 
+    final playerBlock = SizedBox(
+      width: atBottom ? null : panelWidth,
+      height: atBottom ? panelHeight : null,
+                child: block(
+                  badgeColor: cs.primaryContainer,
+                  iconColor: cs.onPrimaryContainer,
+                  icon: Icons.play_circle_outline,
+                  label: '播放器',
+                  subLabel: percentLabel,
+                ),
+    );
+    final mainBlock = Expanded(
+                child: block(
+                  badgeColor: cs.secondaryContainer,
+                  iconColor: cs.onSecondaryContainer,
+                  icon: Icons.home_outlined,
+                  label: '主界面',
+                ),
+    );
+
     // 两块遮罩**无缝相邻**：中间不留缝。留缝会露出 offstage 之后的底层背景
     // （深色主题下就是黑），看起来是一条与热区同宽（20dp）的粗黑条。
     // 分区感由叠在遮罩之上的把手细线提供。
+    if (atBottom) {
+      // 底部：上为主界面、下为播放器。
+      return Column(children: [mainBlock, playerBlock]);
+    }
     return Row(
       children: side == CarModePanelSide.left
-          ? [
-              SizedBox(
-                width: panelWidth,
-                child: block(
-                  badgeColor: cs.primaryContainer,
-                  iconColor: cs.onPrimaryContainer,
-                  icon: Icons.play_circle_outline,
-                  label: '播放器',
-                  subLabel: percentLabel,
+          ? [playerBlock, mainBlock]
+          : [mainBlock, playerBlock],
+    );
+  }
+}
+
+/// 底部面板与主界面之间的水平把手：热区 20dp、视觉只有 1~6dp，
+/// 垂直拖动调整面板高度。
+///
+/// 与 [_CarModeResizeHandle]（侧边）对称：底部面板贴在屏幕下缘，
+/// 把手横贯全宽、沿面板上缘水平放置，指针**向下**拖动让面板变高。
+class _HorizHandle extends StatelessWidget {
+  /// 热区高度。遮罩层用它留出中间的缝，两端共用同一常量以免视觉对不齐。
+  static const double hitHeight = 20.0;
+
+  const _HorizHandle({
+    required this.active,
+    required this.onDragStart,
+    required this.onDragDelta,
+    required this.onDragEnd,
+    required this.onReset,
+  });
+
+  final bool active;
+  final VoidCallback onDragStart;
+  final ValueChanged<double> onDragDelta;
+  final VoidCallback onDragEnd;
+  final VoidCallback onReset;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeUpDown,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onVerticalDragStart: (_) => onDragStart(),
+        onVerticalDragUpdate: (details) => onDragDelta(details.delta.dy),
+        onVerticalDragEnd: (_) => onDragEnd(),
+        onVerticalDragCancel: onDragEnd,
+        onDoubleTap: onReset,
+        child: SizedBox(
+          height: hitHeight,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Center(
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 1,
+                  child: ColoredBox(color: cs.outlineVariant),
                 ),
               ),
-              Expanded(
-                child: block(
-                  badgeColor: cs.secondaryContainer,
-                  iconColor: cs.onSecondaryContainer,
-                  icon: Icons.home_outlined,
-                  label: '主界面',
-                ),
-              ),
-            ]
-          : [
-              Expanded(
-                child: block(
-                  badgeColor: cs.secondaryContainer,
-                  iconColor: cs.onSecondaryContainer,
-                  icon: Icons.home_outlined,
-                  label: '主界面',
-                ),
-              ),
-              SizedBox(
-                width: panelWidth,
-                child: block(
-                  badgeColor: cs.primaryContainer,
-                  iconColor: cs.onPrimaryContainer,
-                  icon: Icons.play_circle_outline,
-                  label: '播放器',
-                  subLabel: percentLabel,
+              Center(
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  width: 28,
+                  height: active ? 5 : 3,
+                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    color: active ? cs.primary : cs.outlineVariant,
+                    borderRadius: BorderRadius.circular(2.5),
+                  ),
                 ),
               ),
             ],
+              ),
+                ),
+              ),
+    );
+  }
+}
+
+/// 底部面板「细条模式」（dock bar）。
+///
+/// 面板内容高度 < [kCarModePanelMinHeight]（FullPlayer 紧凑布局物理下限）
+/// 时替代 FullPlayer 渲染：封面缩略图 + 曲名/歌手 + 上一首/播放/下一首。
+/// 仅依赖 PlayerProvider，不复用 MiniPlayer —— 后者绑定全局
+/// playerExpansion 与主 Scaffold 上下文，放进面板内行为不可控。
+///
+/// 点按细条空白区展开完整播放器（与 MiniPlayer 行为一致，走根导航器）。
+class _CarModeDockBar extends StatelessWidget {
+  const _CarModeDockBar({required this.height});
+
+  /// 面板内容高度（= [kCarModeDockBarMinHeight] 到
+  /// [kCarModePanelMinHeight) 之间），细条填满并居中内容。
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final player = context.watch<PlayerProvider>();
+    final song = player.currentSong;
+    final colorScheme = Theme.of(context).colorScheme;
+    final playing = player.isPlaying;
+
+    return Material(
+      color: colorScheme.surface,
+      child: InkWell(
+        onTap: () => openFullPlayer(context),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          child: Row(
+            children: [
+              SizedBox(
+                width: height - 12,
+                height: height - 12,
+                child: song == null
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(10),
+                        child: ColoredBox(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.music_note_rounded,
+                            size: 20,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      )
+                    : SmartArtworkImage(
+                        artworkUri: song.artworkUri,
+                        songId: song.id,
+                        size: height - 12,
+                        borderRadius: 10,
+                      ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      song?.title ?? '',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (song != null && song.artist.isNotEmpty)
+                      Text(
+                        song.artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+                ),
+              ),
+              IconButton(
+                onPressed: playing || song != null ? player.previous : null,
+                icon: const Icon(Icons.skip_previous_rounded),
+                tooltip: '上一曲',
+              ),
+              IconButton(
+                onPressed: song == null
+                    ? null
+                    : () => playing ? player.pause() : player.resume(),
+                icon: Icon(
+                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                ),
+                tooltip: playing ? '暂停' : '播放',
+              ),
+              IconButton(
+                onPressed: song == null ? null : player.next,
+                icon: const Icon(Icons.skip_next_rounded),
+                tooltip: '下一曲',
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

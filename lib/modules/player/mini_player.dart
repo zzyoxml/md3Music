@@ -391,9 +391,10 @@ class _MiniPlayerState extends State<MiniPlayer>
     }
 
     // 车机模式：播放器常驻在侧边面板里，任何界面都不再显示 MiniPlayer。
-    // 判定用 enabled 而不是 panelVisible —— 设置页 / 登录页虽然不显示面板，
+    // 判定用 active 而不是 panelVisible —— 设置页 / 登录页虽然不显示面板，
     // 但同样不该出现迷你条，否则「开了车机模式还有迷你条」前后不一致。
-    if (context.watch<CarModeProvider>().enabled) {
+    // active 含自动检测：命中车机屏也静音 MiniPlayer。
+    if (context.watch<CarModeProvider>().active) {
       return const SizedBox.shrink();
     }
 

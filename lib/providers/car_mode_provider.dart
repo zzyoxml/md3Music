@@ -21,13 +21,27 @@ class CarModeProvider extends ChangeNotifier {
   }
 
   bool _enabled = false;
+  bool _autoScreenEnabled = false;
   double _panelRatio = kCarModePanelDefaultRatio;
   CarModePanelSide _panelSide = CarModePanelSide.left;
+  double _dockClearanceDp = kCarModeBottomDockClearance;
   int _panelSuppressCount = 0;
+
+  /// 当前屏幕是否判定为「车机屏」（短边/长边 ≥ 0.55，见 [isCarLikeScreen]）。
+  ///
+  /// 由 UI 层在 build 阶段按 MediaQuery 尺寸计算并注入（见
+  /// [updateScreenMetrics]）。非持久化：每次冷启动先按 false 走，等首帧
+  /// 拿到真实屏幕尺寸后再校正，不影响既有逻辑。
+  bool _screenIsCar = false;
+
+  /// 当前屏幕是否「竖屏或接近方屏」（见 [isPortraitOrSquareScreen]）。
+  /// 命中则面板置于底部。同样由 UI 层注入，非持久化。
+  bool _screenPortraitOrSquare = false;
 
   // 用户是否已改过对应项：异步 [_load] 回来时不得覆盖用户的最新选择
   // （冷启动后立刻拖滑条 / 开开关的竞态）。
   bool _enabledTouched = false;
+  bool _autoScreenTouched = false;
   bool _ratioTouched = false;
   bool _sideTouched = false;
 
@@ -37,8 +51,11 @@ class CarModeProvider extends ChangeNotifier {
   /// 是否已 dispose（见 [_notifySafely] 里微任务的防重入判断）。
   bool _disposed = false;
 
-  /// 车机模式开关（默认关闭）。
+  /// 车机模式**强制开关**（默认关闭）。开启则无论屏幕类型都启动。
   bool get enabled => _enabled;
+
+  /// 「检测到车机屏幕时自动开启」开关（默认关闭）。独立于 [enabled]。
+  bool get autoScreenEnabled => _autoScreenEnabled;
 
   /// 面板宽度占比（0.20~0.50，默认 0.30）。
   double get panelRatio => _panelRatio;
@@ -46,8 +63,49 @@ class CarModeProvider extends ChangeNotifier {
   /// 面板停靠位置（默认左侧）。
   CarModePanelSide get panelSide => _panelSide;
 
-  /// 常驻面板当前是否应当渲染：车机模式开启 **且** 没有页面声明抑制。
-  bool get panelVisible => _enabled && _panelSuppressCount == 0;
+  /// 底部面板的 dock 避让高度（dp）。见
+  /// [SettingsRepository.getCarModeDockClearance]。
+  double get dockClearanceDp => _dockClearanceDp;
+
+  Future<void> setDockClearance(double value, {bool persist = true}) async {
+    final clamped = value.isFinite
+        ? value.clamp(0.0, kCarModeDockClearanceMax)
+        : kCarModeBottomDockClearance;
+    if (clamped == _dockClearanceDp) return;
+    _dockClearanceDp = clamped;
+    _notifySafely();
+    // persist:false 用于拖动过程实时预览（与 setPanelRatio 同一模式），
+    // 避免拖动期间高频写 SharedPreferences；松手时 persist:true 落盘。
+    if (persist) {
+      await SettingsRepository().setCarModeDockClearance(clamped);
+    }
+  }
+
+  /// 当前是否判定为车机屏（由 UI 注入，见 [updateScreenMetrics]）。
+  bool get screenIsCar => _screenIsCar;
+
+  /// 当前是否「竖屏或接近方屏」（由 UI 注入）。
+  bool get screenPortraitOrSquare => _screenPortraitOrSquare;
+
+  /// 车机模式当前是否**有效**：强制开关开启，**或**（自动检测开启且屏幕
+  /// 命中车机屏）。两者相互独立，任一命中即生效。
+  bool get active => _enabled || (_autoScreenEnabled && _screenIsCar);
+
+  /// 常驻面板当前是否应当渲染：车机模式有效 **且** 没有页面声明抑制。
+  bool get panelVisible => active && _panelSuppressCount == 0;
+
+  /// 当前面板是否应**置于底部**（横贯全宽、高度占比可调，忽略 [panelSide]）。
+  ///
+  /// 三条件同时成立才走底部：车机模式有效、屏幕命中车机屏、且为竖屏/近方屏。
+  /// 逐项原因：
+  ///   * 车机模式未启用（`active` 为 false）时面板不渲染，不应误判底部；
+  ///   * `screenIsCar` 排除普通竖屏手机（长比 ≈0.46，未达 0.55 阈值）——
+  ///     否则竖屏手机强制开启车机模式也会被错误放到底部；
+  ///   * `screenPortraitOrSquare` 排除横屏 16:9 车机（长比 0.5625 满足车机
+  ///     判定但非竖屏非方屏）——这类屏幕仍保持左右停靠。
+  /// 命中示例：方屏 880×860、竖屏车机（如 1080×1920）。
+  bool get useBottomLayout =>
+      active && screenIsCar && screenPortraitOrSquare;
 
   /// 仅供测试：当前抑制计数。
   @visibleForTesting
@@ -83,18 +141,37 @@ class CarModeProvider extends ChangeNotifier {
     try {
       final repo = SettingsRepository();
       final enabled = await repo.getCarModeEnabled();
+      final autoScreen = await repo.getCarModeAutoScreenEnabled();
       final ratio = await repo.getCarModePanelRatio();
       final side = await repo.getCarModePanelSide();
+      final clearance = await repo.getCarModeDockClearance();
       if (!_enabledTouched) _enabled = enabled;
+      if (!_autoScreenTouched) _autoScreenEnabled = autoScreen;
       if (!_ratioTouched) _panelRatio = ratio;
       if (!_sideTouched) _panelSide = side;
+      _dockClearanceDp = clearance;
       _notifySafely();
     } catch (_) {
       // 读取失败保持默认（关闭），不影响启动。
     }
   }
 
-  /// 开关车机模式：更新内存 → 通知（主布局据此插入/移除面板）→ 持久化。
+  /// UI 层在 build 阶段按 MediaQuery 尺寸计算并注入两个屏幕判定：
+  /// 是否车机屏（[isCarLikeScreen]）、是否竖屏/近方屏（[isPortraitOrSquareScreen]）。
+  /// 纯运行时状态，不落盘；只在实际变化时通知，避免尺寸抖动引起无效重建。
+  void updateScreenMetrics({
+    required bool isCar,
+    required bool portraitOrSquare,
+  }) {
+    if (_screenIsCar == isCar && _screenPortraitOrSquare == portraitOrSquare) {
+      return;
+    }
+    _screenIsCar = isCar;
+    _screenPortraitOrSquare = portraitOrSquare;
+    _notifySafely();
+  }
+
+  /// 开关车机模式（强制）：更新内存 → 通知（主布局据此插入/移除面板）→ 持久化。
   Future<void> setEnabled(bool value) async {
     if (_enabled == value) return;
     _enabledTouched = true;
@@ -105,12 +182,30 @@ class CarModeProvider extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// 开关「检测到车机屏幕时自动开启」。
+  Future<void> setAutoScreenEnabled(bool value) async {
+    if (_autoScreenEnabled == value) return;
+    _autoScreenTouched = true;
+    _autoScreenEnabled = value;
+    _notifySafely();
+    try {
+      await SettingsRepository().setCarModeAutoScreenEnabled(value);
+    } catch (_) {}
+  }
+
   /// 更新面板宽度占比（越界值夹回合法区间）。
+  ///
+  /// 下限按当前布局动态决定：底部布局（竖屏/近方屏车机，[useBottomLayout]）
+  /// 用 [kCarModePanelMinRatioBottom]（10%），侧边布局用
+  /// [kCarModePanelMinRatio]（20%）。
   ///
   /// [persist] = false 用于拖动过程中的实时预览：只改内存 + 通知，不落盘，
   /// 避免拖动期间高频写 SharedPreferences；松手时用 [persist] = true 落盘。
   Future<void> setPanelRatio(double ratio, {bool persist = true}) async {
-    final next = ratio.clamp(kCarModePanelMinRatio, kCarModePanelMaxRatio);
+    final minRatio = useBottomLayout
+        ? kCarModePanelMinRatioBottom
+        : kCarModePanelMinRatio;
+    final next = ratio.clamp(minRatio, kCarModePanelMaxRatio);
     final changed = _panelRatio != next;
     if (changed) {
       _ratioTouched = true;
