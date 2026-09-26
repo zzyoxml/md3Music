@@ -2661,11 +2661,20 @@ class KugouApiClient {
     String artistId, {
     int page = 1,
     int pagesize = 30,
+    String sort = 'hot',
     bool noCache = false,
   }) async {
+    final query = <String, dynamic>{
+      'id': artistId,
+      'page': page,
+      'pagesize': pagesize,
+    };
+    if (sort.isNotEmpty) {
+      query['sort'] = sort;
+    }
     final json = await _get(
       KugouEndpoints.artistAudios,
-      queryParameters: {'id': artistId, 'page': page, 'pagesize': pagesize},
+      queryParameters: query,
       noCache: noCache,
     );
     if (json == null) return null;

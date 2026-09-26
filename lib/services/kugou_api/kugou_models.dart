@@ -1352,13 +1352,27 @@ class KugouArtistAudios {
   const KugouArtistAudios({this.songs = const [], this.total = 0});
 
   factory KugouArtistAudios.fromJson(Map<String, dynamic> json) {
-    final data = json['data'] as Map<String, dynamic>? ?? json;
-    final list = data['list'] ?? data['songs'] ?? data['info'] ?? [];
+    dynamic rawData = json['data'] ?? json;
+    List<dynamic> list;
+    if (rawData is List) {
+      list = rawData;
+    } else if (rawData is Map) {
+      list = rawData['list'] ?? rawData['songs'] ?? rawData['info'] ?? [];
+    } else {
+      list = [];
+    }
+    
+    // total 可能是根节点的 total，也可能是 data 里的 total
+    int parsedTotal = 0;
+    if (json['total'] != null) {
+      parsedTotal = _parseInt(json['total']);
+    } else if (rawData is Map && (rawData['total'] != null || rawData['total_count'] != null)) {
+      parsedTotal = _parseInt(rawData['total'] ?? rawData['total_count']);
+    }
+
     return KugouArtistAudios(
-      songs: (list as List<dynamic>)
-          .map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>))
-          .toList(),
-      total: _parseInt(data['total'] ?? data['total_count'] ?? 0),
+      songs: list.map((e) => KugouSongDetail.fromJson(e as Map<String, dynamic>)).toList(),
+      total: parsedTotal,
     );
   }
 }

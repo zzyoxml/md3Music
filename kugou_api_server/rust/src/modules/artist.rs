@@ -42,24 +42,28 @@ pub fn handle_audios(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleRespo
     let clienttime = now_epoch_secs() as i64;
     let mid = c_str(q, "KUGOU_API_MID");
     let mut data_map = Map::new();
-    data_map.insert("appid".to_string(), json!(3116));
-    data_map.insert("clientver".to_string(), json!(11440));
+    data_map.insert("appid".to_string(), json!(1005));
+    data_map.insert("clientver".to_string(), json!(20489));
     if !mid.is_empty() {
         data_map.insert("mid".to_string(), json!(mid));
     }
     data_map.insert("clienttime".to_string(), json!(clienttime));
-    data_map.insert("key".to_string(), json!(sign_params_key(&clienttime.to_string(), "", "")));
+    data_map.insert("key".to_string(), json!(crate::helper::sign_params_key_standard(&clienttime.to_string())));
     data_map.insert("author_id".to_string(), q.get("id").cloned().unwrap_or(Value::Null));
     data_map.insert("pagesize".to_string(), json!(q_num(q, "pagesize", 30)));
     data_map.insert("page".to_string(), json!(q_num(q, "page", 1)));
     data_map.insert("sort".to_string(), json!(if q_str(q, "sort", "") == "hot" { 1 } else { 2 }));
     data_map.insert("area_code".to_string(), json!("all"));
-    forward(
-        q, ctx, "POST", "/kmr/v1/audio_group/author", Some("https://openapi.kugou.com"),
-        None, Some(json!(data_map)), "android",
-        &[("x-router", "openapi.kugou.com"), ("kg-tid", "220")],
-        false, false,
-    )
+    let mut o = crate::request::RequestOptions::new("/kmr/v1/audio_group/author");
+    o = o.post("/kmr/v1/audio_group/author")
+        .base_url("https://openapi.kugou.com")
+        .json_body(json!(data_map))
+        .encrypt_type("android")
+        .header("x-router", "openapi.kugou.com")
+        .header("kg-tid", "220")
+        .cookie(crate::modules::q_cookie(q))
+        .standard_signature(true);
+    crate::request::create_request(o, ctx)
 }
 
 /// artist_videos.js → /artist/videos（歌手 MV，openapicdn 明文 query）。
