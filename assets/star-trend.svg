@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360" role="img" aria-labelledby="title desc">
   <title id="title">MD3Music 最近 90 天 GitHub Star 趋势</title>
-  <desc id="desc">截至 2026-09-26，当前 648 Stars，90 天首尾变化 +28。</desc>
+  <desc id="desc">截至 2026-09-26，当前 653 Stars，90 天首尾变化 +33。</desc>
   <a href="https://github.com/zzyoxml/md3Music">
     <rect width="960" height="360" rx="18" fill="#f7faff"/>
     <text x="72" y="30" fill="#172b4d" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="20" font-weight="700">MD3Music · GitHub Star 趋势</text>
-    <text x="932" y="30" text-anchor="end" fill="#526581" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="14">最近 90 天 · 648 Stars</text>
-    <g fill="none" stroke-width="1"><line x1="72" y1="290.0" x2="932" y2="290.0" stroke="#d9e2f0" stroke-dasharray="4 6"/><text x="60" y="294.0" text-anchor="end">615</text><line x1="72" y1="233.6" x2="932" y2="233.6" stroke="#d9e2f0" stroke-dasharray="4 6"/><text x="60" y="237.6" text-anchor="end">624</text><line x1="72" y1="171.0" x2="932" y2="171.0" stroke="#d9e2f0" stroke-dasharray="4 6"/><text x="60" y="175.0" text-anchor="end">634</text><line x1="72" y1="114.6" x2="932" y2="114.6" stroke="#d9e2f0" stroke-dasharray="4 6"/><text x="60" y="118.6" text-anchor="end">644</text><line x1="72" y1="52.0" x2="932" y2="52.0" stroke="#d9e2f0" stroke-dasharray="4 6"/><text x="60" y="56.0" text-anchor="end">653</text></g>
-    <polygon points="72.0,290.0 72.0,258.7 502.0,120.9 932.0,83.3 932.0,290.0" fill="#2f80ed" fill-opacity=".12"/>
-    <polyline points="72.0,258.7 502.0,120.9 932.0,83.3" fill="none" stroke="#1769e0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="932.0" cy="83.3" r="5" fill="#1769e0"/>
+    <text x="932" y="30" text-anchor="end" fill="#526581" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="14">最近 90 天 · 653 Stars</text>
+    <g fill="none" stroke-width="1"><line x1="72" y1="290.0" x2="932" y2="290.0" stroke="#d9e2f0" stroke-dasharray="4 6"/><text x="60" y="294.0" text-anchor="end">615</text><line x1="72" y1="234.7" x2="932" y2="234.7" stroke="#d9e2f0" stroke-dasharray="4 6"/><text x="60" y="238.7" text-anchor="end">626</text><line x1="72" y1="173.8" x2="932" y2="173.8" stroke="#d9e2f0" stroke-dasharray="4 6"/><text x="60" y="177.8" text-anchor="end">636</text><line x1="72" y1="112.9" x2="932" y2="112.9" stroke="#d9e2f0" stroke-dasharray="4 6"/><text x="60" y="116.9" text-anchor="end">647</text><line x1="72" y1="52.0" x2="932" y2="52.0" stroke="#d9e2f0" stroke-dasharray="4 6"/><text x="60" y="56.0" text-anchor="end">658</text></g>
+    <polygon points="72.0,290.0 72.0,262.3 502.0,140.6 932.0,79.7 932.0,290.0" fill="#2f80ed" fill-opacity=".12"/>
+    <polyline points="72.0,262.3 502.0,140.6 932.0,79.7" fill="none" stroke="#1769e0" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="932.0" cy="79.7" r="5" fill="#1769e0"/>
     <g fill="#526581" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="12"><text x="72.0" y="332" text-anchor="middle">09-24</text><text x="502.0" y="332" text-anchor="middle">09-25</text><text x="932.0" y="332" text-anchor="middle">09-26</text></g>
     <text x="932" y="352" text-anchor="end" fill="#8091aa" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" font-size="11">数据源：GitHub API · 更新 2026-09-26</text>
   </a>
