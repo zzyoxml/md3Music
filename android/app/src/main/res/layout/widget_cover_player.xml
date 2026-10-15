@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  2×2 封面播放器小组件：专辑封面全幅铺底 + 渐变遮罩 + 居中歌名/歌手 +
+  底部三键（上一首/播放暂停/下一首）。播放键圆形底色由 Provider 从封面
+  Palette 动态取色（setColorFilter），兜底链同 MusicWidgetProvider。
+  兼容性约束与现有小部件相同：不用负 margin、不用裸 <View>。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 封面底：有封面时 Provider setImageViewBitmap（已裁 16dp 圆角）；
+         无封面时保持白色圆角 shape + setColorFilter 到 panelBg 占位 -->
+    <ImageView
+        android:id="@+id/cover_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:src="@drawable/widget_fm_bg_round16"
+        android:contentDescription="@string/widget_cover_desc" />
+
+    <!-- 渐变遮罩：Provider 按封面亮度切换 light/dark -->
+    <ImageView
+        android:id="@+id/cover_scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="fitXY"
+        android:src="@drawable/cover_scrim_light"
+        android:contentDescription="@null" />
+
+    <!-- 居中歌曲信息 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:orientation="vertical"
+        android:gravity="center"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp">
+
+        <TextView
+            android:id="@+id/cover_widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="MD3Music"
+            android:textSize="16sp"
+            android:fontFamily="sans-serif-medium"
+            android:gravity="center"
+            android:maxLines="1"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/cover_widget_artist"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/widget_not_playing"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:layout_marginTop="4dp" />
+    </LinearLayout>
+
+    <!-- 底部三键：上一首 / 播放暂停（accent 圆底）/ 下一首 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom"
+        android:orientation="horizontal"
+        android:gravity="center_horizontal"
+        android:paddingBottom="14dp">
+
+        <!-- 底部三键：总宽 40+10+44+10+40 = 144dp ≤ 160dp（2 列宽），不再溢出贴边 -->
+        <FrameLayout
+            android:id="@+id/cover_btn_prev"
+            android:layout_width="40dp"
+            android:layout_height="40dp">
+
+            <ImageView
+                android:id="@+id/cover_icon_prev"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_gravity="center"
+                android:scaleType="fitCenter"
+                android:src="@drawable/cover_ic_previous"
+                android:contentDescription="@string/widget_prev_desc" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/cover_btn_play"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:layout_marginStart="10dp">
+
+            <ImageView
+                android:id="@+id/cover_btn_play_bg"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="fitXY"
+                android:src="@drawable/cover_btn_circle"
+                android:contentDescription="@null" />
+
+            <!-- 播放/暂停双图标叠放 + Provider setViewVisibility 切换：
+                 setImageViewResource 的资源切换在 MIUI 桌面跨应用版本会被忽略
+                 （启动器按资源 ID 缓存的映射在版本升级后错乱），可见性通道可靠 -->
+            <ImageView
+                android:id="@+id/cover_icon_play"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:scaleType="fitCenter"
+                android:src="@drawable/cover_ic_play_arrow"
+                android:contentDescription="@string/widget_play_desc" />
+
+            <ImageView
+                android:id="@+id/cover_icon_pause"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:scaleType="fitCenter"
+                android:src="@drawable/cover_ic_pause"
+                android:visibility="gone"
+                android:contentDescription="@string/widget_play_desc" />
+        </FrameLayout>
+
+        <FrameLayout
+            android:id="@+id/cover_btn_next"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:layout_marginStart="10dp">
+
+            <ImageView
+                android:id="@+id/cover_icon_next"
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:layout_gravity="center"
+                android:scaleType="fitCenter"
+                android:src="@drawable/cover_ic_next"
+                android:contentDescription="@string/widget_next_desc" />
+        </FrameLayout>
+    </LinearLayout>
+</FrameLayout>

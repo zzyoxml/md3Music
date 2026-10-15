@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- TV flavor 叠加层：与 main manifest 合并。leanback 桌面入口 + 横屏锁定
+     + 触屏非必需 + 移除手机版的 USB host 特性声明。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- TV 无 USB DAC 场景：移除 main 声明的 USB host 特性 -->
+    <uses-feature
+        android:name="android.hardware.usb.host"
+        android:required="false"
+        tools:node="remove" />
+
+    <!-- TV 设备无触屏也可安装；声明支持 Android TV 桌面。
+         required="false"：侧载场景兼容未通过 ATV 认证的盒子（不声明 leanback feature）。
+         若日后上 Play TV 渠道再改 required="true"（技能样例口径）。 -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+    <uses-feature
+        android:name="android.software.leanback"
+        android:required="false" />
+
+    <application
+        android:banner="@drawable/tv_banner"
+        tools:node="merge">
+
+        <!-- 向 MainActivity 追加 leanback 桌面入口（与 MAIN/LAUNCHER 图标 alias 并存，
+             TV 桌面只认 LEANBACK_LAUNCHER）。TV 是横屏设备，锁定横屏避免重布局；
+             banner 作用于无自带 banner 的入口。手机/TV 分 flavor 发布，
+             不做"一个 APK 双 LAUNCHER category"的混合形态。 -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:screenOrientation="landscape"
+            tools:node="merge">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

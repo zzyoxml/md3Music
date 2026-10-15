@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 白色圆形背景（半径 12，覆盖整个 viewport） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,0 a12,12 0 1,0 0,24 a12,12 0 1,0 0,-24 z" />
+    <!-- 黑色星形图标（编辑精选） -->
+    <group
+        android:scaleX="0.7"
+        android:scaleY="0.7"
+        android:translateX="3.6"
+        android:translateY="3.6">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z" />
+    </group>
+</vector>

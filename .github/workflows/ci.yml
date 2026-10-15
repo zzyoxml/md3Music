@@ -1,0 +1,414 @@
+name: CI Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      # 拉取代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 基础工具链
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK & NDK
+        uses: android-actions/setup-android@v3
+        with:
+          # setup-android@v3 默认还会安装已从 SDK 仓库移除的 tools 包。
+          packages: platform-tools
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            "cmdline-tools;latest" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.22.1"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # 缓存 Gradle
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      # Flutter 构建
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Flutter analyze
+        continue-on-error: true
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      # 下载 release keystore（可选，不存在时用 debug keystore 兜底）
+      - name: Download release keystore
+        id: keystore
+        continue-on-error: true
+        run: |
+          set -e
+          echo "Downloading release.keystore from 'keystore' release..."
+          if ! curl -fL --retry 3 -o /tmp/release.keystore \
+              "https://github.com/${GITHUB_REPOSITORY}/releases/download/keystore/release.keystore"; then
+            echo "keystore release 不存在，使用 debug keystore"
+            echo "keystore_available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          cp /tmp/release.keystore android/app/release.keystore
+          rm /tmp/release.keystore
+          echo "keystore_available=true" >> "$GITHUB_OUTPUT"
+
+      - name: Generate keystore.properties (for CI)
+        if: steps.keystore.outputs.keystore_available == 'true'
+        run: |
+          set -e
+          cat > android/keystore.properties <<EOF
+          storePassword=${KEYSTORE_PASSWORD:-android}
+          keyPassword=${KEY_PASSWORD:-android}
+          keyAlias=${KEY_ALIAS:-androiddebugkey}
+          storeFile=release.keystore
+          EOF
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+
+      # 构建 Release APK（仅 arm64-v8a）
+      # flavor 化之后必须显式 --flavor：定义 productFlavors 后 AGP 不再生成 assembleRelease
+      # 标准版使用 Skia 渲染引擎（-Pmd3EnableImpeller=false → manifest enableImpeller=false）
+      - name: Flutter build APK (standard, release, arm64-v8a, Skia)
+        run: |
+          flutter build apk --release --flavor standard --split-per-abi --target-platform android-arm64 \
+            --android-project-arg=md3EnableImpeller=false \
+            --dart-define=APP_VERSION=ci-${{ github.sha }}
+
+      # 原子随身听按包名识别合作应用：额外构建一个 arm64-v8a 兼容包。
+      # 只覆盖 applicationId，namespace / Kotlin 包路径 / MethodChannel 均保持原样。
+      # 兼容包固定用 standard flavor —— 不含 3D 封面（无 ORT so / 深度模型）。
+      - name: Flutter build Apple Music package APK (standard flavor, arm64-v8a)
+        run: |
+          set -euo pipefail
+          apk_dir="build/app/outputs/flutter-apk"
+          standard_apk="$apk_dir/app-arm64-v8a-standard-release.apk"
+          standard_backup="$RUNNER_TEMP/app-arm64-v8a-standard-release.apk"
+          cp "$standard_apk" "$standard_backup"
+          flutter build apk --release --flavor standard --split-per-abi --target-platform android-arm64 \
+            --android-project-arg=md3ApplicationId=com.apple.android.music \
+            --dart-define=APP_VERSION=ci-${{ github.sha }}
+          mv "$standard_apk" "$apk_dir/app-apple-music-arm64-v8a-release.apk"
+          mv "$standard_backup" "$standard_apk"
+
+      # TV 版包体：MD3_TV 旗标启用 dpad 遥控导航；不含 3D / USB 独占 / 歌词推送
+      # TV 全部使用 Skia 渲染引擎，并产出 arm64 + armv7(32位) 两个 ABI
+      - name: Flutter build TV APK (tv flavor, arm64-v8a, Skia)
+        run: |
+          flutter build apk --release --flavor tv --split-per-abi --target-platform android-arm64 \
+            --android-project-arg=md3EnableImpeller=false \
+            --dart-define=MD3_TV=true \
+            --dart-define=APP_VERSION=ci-${{ github.sha }}
+
+      - name: Flutter build TV APK (tv flavor, armeabi-v7a, Skia)
+        run: |
+          flutter build apk --release --flavor tv --split-per-abi --target-platform android-arm \
+            --android-project-arg=md3EnableImpeller=false \
+            --dart-define=MD3_TV=true \
+            --dart-define=APP_VERSION=ci-${{ github.sha }}
+
+      # ============================================================
+      # 产物改名为发布名（ASCII）
+      # ============================================================
+      # Flutter CLI 按固定名 app-<abi>-<flavor>-<type>.apk 查找产物（flutter_tools 的
+      # gradle.dart listApkPaths），**不能在 Gradle 层改名**，故在构建完成后统一重命名。
+      # ⚠️ GitHub Release 会把 asset 文件名中的非 ASCII 字符规范化为 '.'（下载名由
+      # GitHub 控制，softprops/action-gh-release 只能尽量恢复展示 label，带全角括号
+      # 的文件恢复 label 还会 404 导致整条 job 失败），因此发布名必须使用纯 ASCII。
+      # 中文含义映射见 release notes 的 Downloads 列表。
+      - name: Rename APKs to release-ready names
+        run: |
+          set -euo pipefail
+          apk_dir="build/app/outputs/flutter-apk"
+          ver="$(grep -m1 '^version:' pubspec.yaml | sed 's/^version:[[:space:]]*//' | cut -d+ -f1)"
+          echo "VER=${ver}" >> "$GITHUB_ENV"
+          echo "产物版本号：${ver}"
+          # $1=原文件名 $2=发布名后缀（含前导 - 或空串）
+          rename_apk() {
+            local src="$apk_dir/$1"
+            test -f "$src"
+            mv "$src" "$apk_dir/MD3Music-${ver}$2.apk"
+          }
+          rename_apk app-arm64-v8a-standard-release.apk    ""
+          rename_apk app-apple-music-arm64-v8a-release.apk "-apple-music"
+          rename_apk app-arm64-v8a-tv-release.apk          "-tv-arm64"
+          rename_apk app-armeabi-v7a-tv-release.apk         "-tv-arm32"
+          echo "=== 重命名后的产物 ==="
+          ls -lh "$apk_dir"/
+
+      - name: Verify APKs
+        run: |
+          set -euo pipefail
+          apk_dir="build/app/outputs/flutter-apk"
+          ls -lh "$apk_dir"/
+          aapt2="$ANDROID_HOME/build-tools/36.0.0/aapt2"
+          test "$(find "$apk_dir" -maxdepth 1 -name '*.apk' | wc -l)" -eq 4
+          # 期望的 ABI 与引擎组合：
+          #   standard / apple-music / tv-arm64 → arm64-v8a
+          #   tv-arm32 → armeabi-v7a
+          # 引擎：
+          #   standard + tv（全部）→ Skia（EnableImpeller=false）
+          #   apple-music → Impeller（EnableImpeller=true）
+          apk_id() { "$aapt2" dump badging "$1" | sed -n "s/^package: name='\([^']*\)'.*/\1/p"; }
+          native_code() { "$aapt2" dump badging "$1" | sed -n "s/^native-code: //p"; }
+          impeller_val() {
+            "$aapt2" dump xmltree "$1" --file AndroidManifest.xml > "$RUNNER_TEMP/manifest.txt"
+            # aapt2 对 EnableImpeller 行的下一行 android:value 输出形如：
+            #   (type 1)0xffffffff (true)  → Impeller 启用
+            #   (type 1)0x0 (false)         → Skia（关闭 Impeller）
+            local line
+            line=$(sed -n "/io.flutter.embedding.android.EnableImpeller/,+1p" "$RUNNER_TEMP/manifest.txt" | tail -1)
+            if echo "$line" | grep -q '0xffffffff'; then echo "true"
+            else echo "false"; fi
+          }
+          # 产物已在上一步改为 ASCII 发布名（规则与本文件 Rename 步骤同步）
+          std_apk="$apk_dir/MD3Music-${VER}.apk"
+          am_apk="$apk_dir/MD3Music-${VER}-apple-music.apk"
+          tv64_apk="$apk_dir/MD3Music-${VER}-tv-arm64.apk"
+          tv32_apk="$apk_dir/MD3Music-${VER}-tv-arm32.apk"
+
+          for f in "$apk_dir"/*.apk; do
+            if unzip -l "$f" | grep -E 'libonnxruntime|assets/models/' > /dev/null; then
+              echo "::error::standard 包含有 3D 资产"; exit 1
+            fi
+            echo ""
+            echo "=== $f ==="
+            if unzip -l "$f" > /dev/null; then
+              echo "  OK ($(du -h "$f" | cut -f1))"
+            else
+              echo "  CORRUPTED"
+              exit 1
+            fi
+          done
+
+          # 包名校验
+          test "$(apk_id "$std_apk")" = "com.md3music.md3music"
+          test "$(apk_id "$am_apk")" = "com.apple.android.music"
+          test "$(apk_id "$tv64_apk")" = "com.md3music.md3music.tv"
+          test "$(apk_id "$tv32_apk")" = "com.md3music.md3music.tv"
+
+          # ABI 校验：arm64 包只含 arm64-v8a，arm32 包只含 armeabi-v7a
+          test "$(native_code "$std_apk")" = "'arm64-v8a'"
+          test "$(native_code "$am_apk")" = "'arm64-v8a'"
+          test "$(native_code "$tv64_apk")" = "'arm64-v8a'"
+          test "$(native_code "$tv32_apk")" = "'armeabi-v7a'"
+
+          # 引擎校验：standard + tv 全部 Skia（false），apple-music Impeller（true）
+          test "$(impeller_val "$std_apk")" = "false"
+          test "$(impeller_val "$am_apk")" = "true"
+          test "$(impeller_val "$tv64_apk")" = "false"
+          test "$(impeller_val "$tv32_apk")" = "false"
+          echo "引擎校验通过：standard/tv=Skia, apple-music=Impeller"
+
+          # TV 包专项校验（与本地 android.ps1 产物自检同口径）
+          check_tv() {
+            local f="$1" libdir="$2"
+            if unzip -l "$f" | grep -E 'libusb_audio_driver' > /dev/null; then
+              echo "::error::TV 包混入 USB 独占驱动: $f"; exit 1
+            fi
+            # libapp.so 内检索 Dart AOT 符号（未开 --obfuscate，ASCII 标识符可检索）
+            if unzip -p "$f" "$libdir/libapp.so" | grep -aq DpadFocusable; then
+              echo "  TV dpad 焦点符号: OK ($f)"
+            else
+              echo "::error::TV 包缺少 dpad 焦点符号（MD3_TV 旗标未生效）: $f"; exit 1
+            fi
+            if unzip -p "$f" "$libdir/libapp.so" | grep -aq 'UsbExclusiveSection\|_buildLyricPushSubpage'; then
+              echo "::error::TV 包混入 USB 独占 UI 或歌词推送子页: $f"; exit 1
+            fi
+          }
+          check_tv "$tv64_apk" "lib/arm64-v8a"
+          check_tv "$tv32_apk" "lib/armeabi-v7a"
+
+          # 反向：正常包不得含 TV 焦点符号
+          for f in "$std_apk" "$am_apk"; do
+            if unzip -p "$f" lib/arm64-v8a/libapp.so | grep -aq DpadFocusable; then
+              echo "::error::正常包混入 TV 焦点符号: $f"; exit 1
+            fi
+          done
+
+      # 上传构建产物（每个 APK 单独一个 artifact，方便下载）
+      - name: Upload standard APK (arm64-v8a, Skia)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MD3音乐-标准版-64位
+          path: build/app/outputs/flutter-apk/MD3Music-${{ env.VER }}.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload Apple Music package arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MD3音乐-随身听兼容版-64位
+          path: build/app/outputs/flutter-apk/MD3Music-${{ env.VER }}-apple-music.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload TV arm64-v8a APK (Skia)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MD3音乐-TV版-64位
+          path: build/app/outputs/flutter-apk/MD3Music-${{ env.VER }}-tv-arm64.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload TV armeabi-v7a APK (Skia)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MD3音乐-TV版-32位
+          path: build/app/outputs/flutter-apk/MD3Music-${{ env.VER }}-tv-arm32.apk
+          if-no-files-found: error
+          retention-days: 7
+
+      # 自动创建 Release 并上传 APK（仅 push 到 main/master 时）
+      - name: Create CI Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-${{ github.sha }}
+          name: CI Build ${{ github.sha }}
+          body: |
+            ## CI 自动构建
+
+            **分支:** ${{ github.ref_name }}
+            **提交:** ${{ github.sha }}
+            **时间:** ${{ github.event.head_commit.timestamp }}
+
+            ### 下载
+            - **MD3Music-${{ env.VER }}.apk** — （推荐）标准版-64位：大多数现代 Android 设备（Skia 渲染引擎）
+            - **MD3Music-${{ env.VER }}-apple-music.apk** — 随身听兼容版-64位：Vivo 原子随身听兼容包（包名 `com.apple.android.music`，不含 3D 封面，Impeller）
+            - **MD3Music-${{ env.VER }}-tv-arm64.apk** — TV版-64位：Android TV 专用包（D-pad 遥控导航，包名后缀 `.tv`，Skia）
+            - **MD3Music-${{ env.VER }}-tv-arm32.apk** — TV版-32位：Android TV 专用包（D-pad 遥控导航，包名后缀 `.tv`，Skia）
+            - **md3music-windows-${{ env.VER }}.zip** — Windows 便携版：解压后运行 `md3music.exe` 即可（自带 VC++ 运行库，无需安装）
+
+            > 此为 CI 自动构建，非正式发布版本。
+          prerelease: true
+          generate_release_notes: true
+          files: |
+            build/app/outputs/flutter-apk/*MD3Music-*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================
+  # Windows 便携版构建（与 build-windows.yml 同流程）
+  # needs: build-android 确保 CI Release 已创建，追加 zip 到同一 Release
+  # ============================================================
+  build-windows:
+    name: Build Windows portable
+    runs-on: windows-latest
+    needs: build-android
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      # 构建 Rust 桌面版 kugou_server.dll（jni 按 target_os=android 隔离，Windows 不引入 JNI 符号）
+      - name: Build Rust desktop dll
+        working-directory: kugou_api_server/rust
+        run: cargo build --release
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Flutter build windows
+        run: flutter build windows --release --dart-define=APP_VERSION=ci-${{ github.sha }}
+
+      # 复制 kugou_server.dll 到 exe 同目录（运行时 dart:ffi 加载）
+      - name: Copy kugou_server.dll to Release
+        shell: pwsh
+        run: |
+          Copy-Item kugou_api_server/rust/target/release/kugou_server.dll build/windows/x64/runner/Release/ -Force
+          Get-ChildItem build/windows/x64/runner/Release/
+
+      # 随包 VC++ 运行库（便携版解压即用，目标机无需安装 VC++ 可再发行组件包）
+      - name: Bundle VC++ runtime into Release
+        shell: pwsh
+        run: |
+          $vsWhere = 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe'
+          $vsRoot = @(& $vsWhere -latest -products * -property installationPath)[0]
+          if (-not $vsRoot) { throw '未能定位 Visual Studio 安装目录' }
+          $crtDir = Get-ChildItem (Join-Path $vsRoot 'VC\Redist\MSVC') -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Get-ChildItem (Join-Path $_.FullName 'x64') -Directory -Filter 'Microsoft.VC*.CRT' -ErrorAction SilentlyContinue } |
+            Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $crtDir) { throw "未找到 Microsoft.VC*.CRT：$(Join-Path $vsRoot 'VC\Redist\MSVC')" }
+          $dlls = @(Get-ChildItem (Join-Path $crtDir.FullName '*.dll'))
+          if (-not $dlls.Count) { throw "CRT 目录为空：$($crtDir.FullName)" }
+          Copy-Item $dlls.FullName build/windows/x64/runner/Release/ -Force
+          Write-Host "已随包 $($dlls.Count) 个运行库：$($dlls.Name -join ', ')"
+
+      - name: Package portable zip
+        shell: pwsh
+        run: |
+          $ver = ((Select-String -Path pubspec.yaml -Pattern '^version:').Line -replace '^version:\s*','' -split '\+')[0]
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath "md3music-windows-$ver.zip" -CompressionLevel Optimal
+          Get-Item "md3music-windows-$ver.zip" | Select-Object Name,Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: md3music-windows
+          path: md3music-windows-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      # 追加 Windows zip 到 Android job 创建的 CI Release（同一个 tag）
+      - name: Append Windows zip to CI Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-${{ github.sha }}
+          name: CI Build ${{ github.sha }}
+          prerelease: true
+          files: md3music-windows-*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

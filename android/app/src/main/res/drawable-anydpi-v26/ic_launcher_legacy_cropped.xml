@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 旧版自适应图标（2026-09-29）：给 .LauncherLegacyIcon alias 的
+     ic_launcher_legacy_cropped 补 anydpi-v26 变体（此前仅 nodpi 光栅，
+     切到旧版图标后桌面永远显示非自适应图）。
+     层组合 = 分支方案原版（音符插画 + 紫底 + 音符字形 monochrome）。
+     API 24/25 回退仍走 drawable-nodpi/ic_launcher_legacy_cropped.png。 -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background"/>
+    <foreground android:drawable="@drawable/ic_launcher_foreground"/>
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome_classic"/>
+</adaptive-icon>

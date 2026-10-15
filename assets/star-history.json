@@ -1,0 +1,196 @@
+[
+  {
+    "date": "2026-08-21",
+    "stars": 200
+  },
+  {
+    "date": "2026-08-22",
+    "stars": 204,
+    "daily_growth": 4
+  },
+  {
+    "date": "2026-08-23",
+    "stars": 209,
+    "daily_growth": 5
+  },
+  {
+    "date": "2026-08-24",
+    "stars": 215,
+    "daily_growth": 6
+  },
+  {
+    "date": "2026-08-25",
+    "stars": 221,
+    "daily_growth": 6
+  },
+  {
+    "date": "2026-08-26",
+    "stars": 224,
+    "daily_growth": 3
+  },
+  {
+    "date": "2026-08-27",
+    "stars": 229,
+    "daily_growth": 5
+  },
+  {
+    "date": "2026-08-28",
+    "stars": 231,
+    "daily_growth": 2
+  },
+  {
+    "date": "2026-08-29",
+    "stars": 235,
+    "daily_growth": 4
+  },
+  {
+    "date": "2026-08-30",
+    "stars": 244,
+    "daily_growth": 9
+  },
+  {
+    "date": "2026-08-31",
+    "stars": 257,
+    "daily_growth": 13
+  },
+  {
+    "date": "2026-09-01",
+    "stars": 263,
+    "daily_growth": 6
+  },
+  {
+    "date": "2026-09-02",
+    "stars": 272,
+    "daily_growth": 9
+  },
+  {
+    "date": "2026-09-03",
+    "stars": 276,
+    "daily_growth": 4
+  },
+  {
+    "date": "2026-09-04",
+    "stars": 278,
+    "daily_growth": 2
+  },
+  {
+    "date": "2026-09-05",
+    "stars": 282,
+    "daily_growth": 4
+  },
+  {
+    "date": "2026-09-06",
+    "stars": 288,
+    "daily_growth": 6
+  },
+  {
+    "date": "2026-09-07",
+    "stars": 296,
+    "daily_growth": 8
+  },
+  {
+    "date": "2026-09-08",
+    "stars": 301,
+    "daily_growth": 5
+  },
+  {
+    "date": "2026-09-09",
+    "stars": 303,
+    "daily_growth": 2
+  },
+  {
+    "date": "2026-09-10",
+    "stars": 304,
+    "daily_growth": 1
+  },
+  {
+    "date": "2026-09-11",
+    "stars": 311,
+    "daily_growth": 7
+  },
+  {
+    "date": "2026-09-12",
+    "stars": 314,
+    "daily_growth": 3
+  },
+  {
+    "date": "2026-09-13",
+    "stars": 319,
+    "daily_growth": 5
+  },
+  {
+    "date": "2026-09-14",
+    "stars": 324,
+    "daily_growth": 5
+  },
+  {
+    "date": "2026-09-15",
+    "stars": 355,
+    "daily_growth": 31
+  },
+  {
+    "date": "2026-09-16",
+    "stars": 388,
+    "daily_growth": 33
+  },
+  {
+    "date": "2026-09-17",
+    "stars": 427,
+    "daily_growth": 39
+  },
+  {
+    "date": "2026-09-18",
+    "stars": 467,
+    "daily_growth": 40
+  },
+  {
+    "date": "2026-09-19",
+    "stars": 506,
+    "daily_growth": 39
+  },
+  {
+    "date": "2026-09-20",
+    "stars": 526,
+    "daily_growth": 20
+  },
+  {
+    "date": "2026-09-21",
+    "stars": 553,
+    "daily_growth": 27
+  },
+  {
+    "date": "2026-09-22",
+    "stars": 570,
+    "daily_growth": 17
+  },
+  {
+    "date": "2026-09-23",
+    "stars": 589,
+    "daily_growth": 19
+  },
+  {
+    "date": "2026-09-24",
+    "stars": 605,
+    "daily_growth": 16
+  },
+  {
+    "date": "2026-09-25",
+    "stars": 631,
+    "daily_growth": 26
+  },
+  {
+    "date": "2026-09-26",
+    "stars": 648,
+    "daily_growth": 17
+  },
+  {
+    "date": "2026-09-27",
+    "stars": 662,
+    "daily_growth": 14
+  },
+  {
+    "date": "2026-09-28",
+    "stars": 672,
+    "daily_growth": 10
+  }
+]
