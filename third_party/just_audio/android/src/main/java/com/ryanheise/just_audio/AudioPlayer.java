@@ -306,12 +306,26 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         if (this.audioSessionId != null) {
             for (Object rawAudioEffect : rawAudioEffects) {
                 Map<?, ?> json = (Map<?, ?>)rawAudioEffect;
-                AudioEffect audioEffect = decodeAudioEffect(rawAudioEffect, this.audioSessionId);
-                if ((Boolean)json.get("enabled")) {
-                    audioEffect.setEnabled(true);
+                // 单个效果挂载失败不得中断本方法：它由 ensurePlayerInitialized() 在
+                // `if (player == null)` 块内调用，而 player 已在该块前段赋值。一旦此处抛出，
+                // 块内其后的 player.addListener(this) 与 buildAndHostMediaSession() 会被
+                // **永久**跳过（后续调用因 player != null 不再进入该块）→ Player.Listener
+                // 从未注册 → onPlaybackStateChanged 不触发 → load() 挂上的 prepareResult
+                // 永不 resolve，Dart 侧 setAudioSource 卡到 15s 超时后放弃，play 命令永远
+                // 发不出来（表现为「已 READY 且缓冲完毕，但 pwr 恒为 false、无声」）。
+                // 实测联想 TB710FU（Android 16）上 AudioEffect 无法绑定 generateAudioSessionId()
+                // 生成的 session id。效果属增强项，挂不上不该影响播放。
+                try {
+                    AudioEffect audioEffect = decodeAudioEffect(rawAudioEffect, this.audioSessionId);
+                    if ((Boolean)json.get("enabled")) {
+                        audioEffect.setEnabled(true);
+                    }
+                    audioEffects.add(audioEffect);
+                    audioEffectsMap.put((String)json.get("type"), audioEffect);
+                } catch (Exception e) {
+                    android.util.Log.w("AudioFocusFork",
+                            "audio effect '" + json.get("type") + "' attach failed: " + e);
                 }
-                audioEffects.add(audioEffect);
-                audioEffectsMap.put((String)json.get("type"), audioEffect);
             }
         }
         enqueuePlaybackEvent();
