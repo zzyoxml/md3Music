@@ -911,7 +911,15 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         }
     }
 
-    private static void applyPlayerTag(MediaItem.Builder builder, Object tagObj) {
+    /// MD3Music fork（方向2配套）：standby（活跃播放器之外）预加载时按下 tag 的会话元数据，
+    /// 暂存到 [heldSessionTagMetadata]，等 play() 激活本实例时一次性补写。否则阴影会话
+    /// 在预加载阶段就会拿到下一首的标题/封面，原子岛（shadow 会话的持有方）会提前
+    /// 显示还没开始播的歌。mediaId 不按下：它是源自身的身份，declare 时就写。
+    private Map<?, ?> heldSessionTagMetadata;
+    /// 本实例是否真正播放过（play() 触发过）。shadow 保活只保留「播过」的实例。
+    private boolean everPlayed;
+
+    private void applyPlayerTag(MediaItem.Builder builder, Object tagObj) {
         if (!(tagObj instanceof Map<?, ?>)) return;
         Map<?, ?> tagMap = (Map<?, ?>)tagObj;
         // just_audio 顶层 map.id 是 AudioSource 的内部实例 ID，不是歌曲 ID。
@@ -920,7 +928,18 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         if (tagMediaId != null && !tagMediaId.isEmpty()) {
             builder.setMediaId(tagMediaId);
         }
+        if (SHADOW_SESSION_MODE && sActivePlayer != null && sActivePlayer != this) {
+            heldSessionTagMetadata = tagMap;
+            return;
+        }
         MediaMetadata.Builder metadata = new MediaMetadata.Builder();
+        applyTagMetadataFields(metadata, tagMap);
+        builder.setMediaMetadata(metadata.build());
+    }
+
+    /// 提取 tag 中的标题/艺术家/专辑/封面 URI 写进 MediaMetadata.Builder
+    /// （applyPlayerTag 与 play() 激活补写共用）。字段缺失则保留 item 原值。
+    private static void applyTagMetadataFields(MediaMetadata.Builder metadata, Map<?, ?> tagMap) {
         String title = (String)tagMap.get("title");
         if (title != null && !title.isEmpty()) metadata.setTitle(title);
         String artist = (String)tagMap.get("artist");
@@ -934,7 +953,32 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         if (artUri != null && !artUri.isEmpty()) {
             metadata.setArtworkUri(android.net.Uri.parse(artUri));
         }
-        builder.setMediaMetadata(metadata.build());
+    }
+
+    /// play() 激活本实例时补写按住的 tag 元数据（与活跃元数据相同值由调用方后续
+    /// 推送幂等合并；镜像未覆盖到时，此写入保证跨fade 交叉点元数据即刻正确）。
+    /// 与原值一致时不替换，避免多余的 MediaItem 替换事件。
+    private void reApplyHeldSessionTagMetadata() {
+        Map<?, ?> tagMap = heldSessionTagMetadata;
+        heldSessionTagMetadata = null;
+        if (tagMap == null || player == null) return;
+        try {
+            androidx.media3.common.MediaItem cur = player.getCurrentMediaItem();
+            if (cur == null) return;
+            MediaMetadata m = cur.mediaMetadata;
+            String curTitle = m.title != null ? m.title.toString() : null;
+            String curArtist = m.artist != null ? m.artist.toString() : null;
+            String title = (String)tagMap.get("title");
+            String artist = (String)tagMap.get("artist");
+            if (equalsOrBothNull(curTitle, title) && equalsOrBothNull(curArtist, artist)) return;
+            MediaMetadata.Builder metadata = m.buildUpon();
+            applyTagMetadataFields(metadata, tagMap);
+            androidx.media3.common.MediaItem updated =
+                    cur.buildUpon().setMediaMetadata(metadata.build()).build();
+            player.replaceMediaItem(player.getCurrentMediaItemIndex(), updated);
+        } catch (Exception e) {
+            Log.w("AudioFocusFork", "reApplyHeldSessionTagMetadata failed: " + e);
+        }
     }
 
     private MediaSource[] getAudioSourcesArray(final Object json) {
@@ -1335,6 +1379,91 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         return p != null ? p.mediaSession : null;
     }
 
+    // ==== MD3Music fork（方向2·shadow 会话保活，2026-10-16） ====
+    // vivo 原子随身听（vivomusicmix）在冷启动时经 MediaBrowserServiceCompat 绑定本 App
+    // 的媒体会话，之后把该 MediaControllerCompat 常驻钉在**首个会话对象**上：交叉淡化
+    // 切换活跃播放器时若把旧会话 release()，其 Binder 死亡而原子岛不会重连（真机实测
+    // 表现为第二首起歌词/标题/封面全部失效，直到重启 App；关闭交叉淡化立即恢复）。
+    // 因此仅 vivo/iQOO 机型（SHADOW_SESSION_MODE）：
+    //   1) 收敛时不 release 非活跃播放器的会话，改为保留（shadow 会话）；
+    //   2) 元数据镜像链路（updateActiveSession* 三处）把与活跃会话同一份内容写入
+    //      shadow，使原子岛持有的旧会话始终携带当前曲目的标题/艺术家/封面/LyricInfo，
+    //      且 MediaSessionCompat.resendVivoLrcChange 的静态广播会同时抵达 shadow；
+    //   3) standby 预加载时按住 tag 的元数据（applyPlayerTag hold），play() 激活时
+    //      一次性补写——避免 shadow 在预加载阶段提前显示下一首的标题。
+    // 非 vivo 机型保持原 release 行为（保证系统 Sessions Stack 干净）。
+    private static final boolean SHADOW_SESSION_MODE = isShadowSessionBrand();
+
+    private static boolean isShadowSessionBrand() {
+        try {
+            final String manufacturer = android.os.Build.MANUFACTURER;
+            final String brand = android.os.Build.BRAND;
+            if (manufacturer != null
+                    && manufacturer.toLowerCase(java.util.Locale.US).contains("vivo")) {
+                return true;
+            }
+            if (brand != null) {
+                final String lb = brand.toLowerCase(java.util.Locale.US);
+                if (lb.contains("vivo") || lb.contains("iqoo")) return true;
+            }
+        } catch (Exception ignore) {}
+        return false;
+    }
+
+    /// shadow 会话镜像：把与活跃播放器同一份元数据写入其它存活播放器的会话。
+    /// 仅 SHADOW_SESSION_MODE 生效；走与活跃会话相同的 applySession* 守卫
+    /// （generation 防旧帧 + 幂等跳过），不额外引入写入路径差异。
+    private static void mirrorSessionMetadata(
+            final String expectedMediaId, final long generation,
+            final String title, final String artist, final Bitmap art, final String artUri) {
+        if (!SHADOW_SESSION_MODE) return;
+        final AudioPlayer active = sActivePlayer;
+        if (active == null) return;
+        final AudioPlayer[] snapshot;
+        synchronized (sPlayers) { snapshot = sPlayers.toArray(new AudioPlayer[0]); }
+        for (final AudioPlayer other : snapshot) {
+            if (other == null || other == active || other.mediaSession == null) continue;
+            try {
+                other.applySessionMetadata(
+                        expectedMediaId, generation, title, artist, art, artUri);
+            } catch (Exception ignore) {}
+        }
+    }
+
+    private static void mirrorSessionTitleArtist(
+            final String expectedMediaId, final long generation,
+            final String title, final String artist) {
+        if (!SHADOW_SESSION_MODE) return;
+        final AudioPlayer active = sActivePlayer;
+        if (active == null) return;
+        final AudioPlayer[] snapshot;
+        synchronized (sPlayers) { snapshot = sPlayers.toArray(new AudioPlayer[0]); }
+        for (final AudioPlayer other : snapshot) {
+            if (other == null || other == active || other.mediaSession == null) continue;
+            try {
+                other.applySessionTitleArtist(expectedMediaId, generation, title, artist);
+            } catch (Exception ignore) {}
+        }
+    }
+
+    private static void mirrorSessionTitleArtistAndLyricInfo(
+            final String expectedMediaId, final long generation,
+            final String title, final String artist, final String lyricInfo,
+            final String btTitle, final String btArtist) {
+        if (!SHADOW_SESSION_MODE) return;
+        final AudioPlayer active = sActivePlayer;
+        if (active == null) return;
+        final AudioPlayer[] snapshot;
+        synchronized (sPlayers) { snapshot = sPlayers.toArray(new AudioPlayer[0]); }
+        for (final AudioPlayer other : snapshot) {
+            if (other == null || other == active || other.mediaSession == null) continue;
+            try {
+                other.applySessionTitleArtistAndLyricInfo(
+                        expectedMediaId, generation, title, artist, lyricInfo, btTitle, btArtist);
+            } catch (Exception ignore) {}
+        }
+    }
+
     /// 幂等地把活跃会话加入已注册的 host（重复加入会抛 IllegalArgumentException）。
     /// MD3Music fork（方向1·安全收敛）：再把「非活跃播放器」的会话从 host 移除（不 release
     /// 播放器、不置 null），使系统仅暴露当前活跃播放器的一个会话。调用方保证 sActivePlayer
@@ -1358,11 +1487,23 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                 if (ms == null) continue;
                 try {
                     if (host.isSessionAdded(ms)) host.removeSession(ms);
-                    // MD3Music fork：彻底 release 非活跃会话，从系统 Sessions Stack 注销，
-                    // 使 SystemUI/媒体卡片只跟随当前活跃播放器的一个会话（避免旧歌会话
-                    // 干扰导致封面不更新/显示旧歌）。
-                    try { ms.release(); } catch (Exception ignore) {}
-                    other.mediaSession = null;
+                    if (SHADOW_SESSION_MODE) {
+                        // MD3Music fork（方向2·shadow 会话保活）：vivo 原子随身听把控制器
+                        // 钉在冷启动绑定的首个会话上（release 后 Binder 死亡且不会重连），
+                        // 已播放过的实例（everPlayed）保留会话对象不释放，由 mirror 链路
+                        // 持续同步元数据；从未播放过的实例（如纯备用播放器）仍 release，
+                        // 避免系统栈里多出一张空会话卡片。
+                        if (!other.everPlayed) {
+                            try { ms.release(); } catch (Exception ignore) {}
+                            other.mediaSession = null;
+                        }
+                    } else {
+                        // MD3Music fork：彻底 release 非活跃会话，从系统 Sessions Stack 注销，
+                        // 使 SystemUI/媒体卡片只跟随当前活跃播放器的一个会话（避免旧歌会话
+                        // 干扰导致封面不更新/显示旧歌）。
+                        try { ms.release(); } catch (Exception ignore) {}
+                        other.mediaSession = null;
+                    }
                 } catch (Exception ignore) {}
             }
         }
@@ -1386,12 +1527,22 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
                 if (ms == null) continue;
                 try {
                     if (host.isSessionAdded(ms)) host.removeSession(ms);
-                    // MD3Music fork：play() 收敛时同样彻底 release 非活跃会话，从系统
-                    // Sessions Stack 注销，避免跨fade 角色互换后多个 md3music 会话残留在
-                    // 系统栈里干扰 SystemUI/媒体卡片（显示旧歌封面）。该播放器下次 play()
-                    // 时会按 createMediaSession 重建会话（见 play()）。
-                    try { ms.release(); } catch (Exception ignore) {}
-                    other.mediaSession = null;
+                    if (SHADOW_SESSION_MODE) {
+                        // MD3Music fork（方向2·shadow 会话保活）：同 ensureActiveSessionHosted
+                        // —— vivo 上保留已播放过的实例的会话（mirror 养着），未播放过的
+                        // 仍 release；其余机型按原注释 release（见上方）。
+                        if (!other.everPlayed) {
+                            try { ms.release(); } catch (Exception ignore) {}
+                            other.mediaSession = null;
+                        }
+                    } else {
+                        // MD3Music fork：play() 收敛时同样彻底 release 非活跃会话，从系统
+                        // Sessions Stack 注销，避免跨fade 角色互换后多个 md3music 会话残留在
+                        // 系统栈里干扰 SystemUI/媒体卡片（显示旧歌封面）。该播放器下次 play()
+                        // 时会按 createMediaSession 重建会话（见 play()）。
+                        try { ms.release(); } catch (Exception ignore) {}
+                        other.mediaSession = null;
+                    }
                 } catch (Exception ignore) {}
             }
         }
@@ -1412,6 +1563,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         } else {
             Log.w("AudioFocusFork", "updateActiveSessionMetadata: no active AudioPlayer");
         }
+        mirrorSessionMetadata(expectedMediaId, generation, title, artist, art, artUri);
     }
 
     /// 仅更新媒体3会话稳定标题/艺术家（不重压缩封面）。
@@ -1423,6 +1575,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         } else {
             Log.w("AudioFocusFork", "updateActiveSessionTitleArtist: no active AudioPlayer");
         }
+        mirrorSessionTitleArtist(expectedMediaId, generation, title, artist);
     }
 
     /// 写媒体3 MediaItem 的 MediaMetadata（标题/艺术家/内嵌封面位图）。
@@ -1648,6 +1801,8 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         } else {
             Log.w("AudioFocusFork", "updateActiveSessionTitleArtistAndLyricInfo: no active AudioPlayer");
         }
+        mirrorSessionTitleArtistAndLyricInfo(
+                expectedMediaId, generation, title, artist, lyricInfo, btTitle, btArtist);
     }
 
     // ==== MD3Music fork: 媒体3自定义命令（阶段4，自研 action 迁往媒体3） ====
@@ -2164,6 +2319,7 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
     }
 
     public void play(Result result) {
+        everPlayed = true;
         if (player.getPlayWhenReady()) {
             result.success(new HashMap<String, Object>());
             return;
@@ -2180,6 +2336,9 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         // MD3Music fork（方向1）：play 是权威收敛点——把本实例会话设为唯一 host 会话，
         // 其余实例的会话仅从 host 移除（不 release 播放器/会话对象），使系统只跟随本播放器。
         syncSingleSessionToHost();
+        // MD3Music fork（方向2配套）：本实例刚从 standby 激活，补写按住的预加载元数据，
+        // 交叉点瞬间会话标题/封面即为新歌（等不到后续 pipeline 推送）。
+        reApplyHeldSessionTagMetadata();
         if (playResult != null) {
             playResult.success(new HashMap<String, Object>());
         }
