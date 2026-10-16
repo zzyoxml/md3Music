@@ -25,6 +25,7 @@ import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
+import android.provider.Settings
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -1866,6 +1867,121 @@ class AudioPlaybackService : Service() {
                     }
                     "updateLockScreenAccent" -> {
                         LockScreenLyricActivity.applyAccentCall(call)
+                        result.success(true)
+                    }
+                    // MD3Music fork（悬浮窗桌面歌词恢复链，2026-10-16）：
+                    // vivo 等机型会只杀 Dart 引擎、进程和原生悬浮窗（服务 + overlay）存活，
+                    // 此后桌面歌词的推送（updateLyric/updateProgress/setPlaying/
+                    // setDesktopLyricConfig）在 headless 引擎上落到 notImplemented 被静默
+                    // 丢弃——表现为「黑框还在、歌词没了」。这里补齐这些方法的处理：
+                    // 服务在跑时直接同进程调用（FloatingLyricService.instance 的直达入口，
+                    // 与 MainActivity 的 Intent 路径行为一致，且不受后台 startService
+                    // 限制）；窗口不在则安全空操作。
+                    "isFloatingLyricWindowRunning" -> {
+                        result.success(FloatingLyricService.isRunning && FloatingLyricService.viewAdded)
+                    }
+                    "hasOverlayPermission" -> {
+                        result.success(
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true
+                        )
+                    }
+                    "startFloatingLyric" -> {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                            // 无头引擎没有 Activity 可跳授权页，如实报错让 Dart 端提示；
+                            // 用户回到前台 App 内再开指尖正常流程。
+                            result.error("PERMISSION_DENIED", "需要悬浮窗权限", null)
+                        } else {
+                            if (FloatingLyricService.isRunning && FloatingLyricService.viewAdded) {
+                                result.success(true)
+                            } else {
+                                try {
+                                    startService(
+                                        Intent(this, FloatingLyricService::class.java).apply {
+                                            action = FloatingLyricService.ACTION_UPDATE_LYRIC
+                                            putExtra(FloatingLyricService.EXTRA_LYRIC, call.argument<String>("lyric") ?: "")
+                                            putExtra(FloatingLyricService.EXTRA_TITLE, call.argument<String>("title") ?: "")
+                                        }
+                                    )
+                                    result.success(true)
+                                } catch (e: Exception) {
+                                    result.error("SERVICE_START_FAILED", e.message, null)
+                                }
+                            }
+                        }
+                    }
+                    "stopFloatingLyric" -> {
+                        try {
+                            startService(
+                                Intent(this, FloatingLyricService::class.java).apply {
+                                    action = FloatingLyricService.ACTION_STOP
+                                }
+                            )
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("SERVICE_START_FAILED", e.message, null)
+                        }
+                    }
+                    "updateLyric" -> {
+                        val svc = FloatingLyricService.instance
+                        if (svc == null) {
+                            result.success(true)
+                        } else {
+                            val wordsRaw = call.argument<List<Object>>("words")
+                            val wordsJson = if (wordsRaw != null) {
+                                try {
+                                    org.json.JSONArray(wordsRaw).toString()
+                                } catch (e: Exception) {
+                                    "[]"
+                                }
+                            } else {
+                                "[]"
+                            }
+                            svc.handleUpdateLyric(
+                                call.argument<String>("lyric") ?: "",
+                                call.argument<String>("nextLyric") ?: "",
+                                call.argument<String>("placeholder") ?: "",
+                                wordsJson,
+                                call.argument<Number>("positionMs")?.toLong() ?: 0L
+                            )
+                            result.success(true)
+                        }
+                    }
+                    "updateTitle" -> {
+                        // MainActivity 侧同样为空实现（FloatingLyricService 仅记录标题，窗口不再用）。
+                        result.success(true)
+                    }
+                    "updateProgress" -> {
+                        FloatingLyricService.instance?.handleUpdateProgress(
+                            call.argument<Number>("position")?.toLong() ?: 0L,
+                            call.argument<Number>("duration")?.toLong() ?: 0L
+                        )
+                        result.success(true)
+                    }
+                    "setPlaying" -> {
+                        FloatingLyricService.instance?.handleSetPlaying(
+                            call.argument<Boolean>("isPlaying") ?: false
+                        )
+                        result.success(true)
+                    }
+                    "setDesktopLyricConfig" -> {
+                        FloatingLyricService.instance?.handleSetConfig(
+                            call.argument<Double>(FloatingLyricService.EXTRA_FONT_SIZE)?.toFloat(),
+                            call.argument<Double>(FloatingLyricService.EXTRA_DISPLAY_SCALE)?.toFloat(),
+                            call.argument<Boolean>(FloatingLyricService.EXTRA_DOUBLE_LINE),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_OPACITY) as? Number)?.toInt(),
+                            call.argument<Boolean>(FloatingLyricService.EXTRA_LOCKED),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_GRADIENT_START) as? Number)?.toInt(),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_GRADIENT_END) as? Number)?.toInt(),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_UNPLAYED_COLOR) as? Number)?.toInt(),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_COLOR_MODE) as? Number)?.toInt(),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_PRESET_INDEX) as? Number)?.toInt(),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_CUSTOM_GRAD_START) as? Number)?.toInt(),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_CUSTOM_GRAD_END) as? Number)?.toInt(),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_CUSTOM_UNPLAYED) as? Number)?.toInt()
+                        )
+                        result.success(true)
+                    }
+                    "seekTo" -> {
                         result.success(true)
                     }
                     else -> result.notImplemented()

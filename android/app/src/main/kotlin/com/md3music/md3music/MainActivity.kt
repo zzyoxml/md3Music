@@ -573,6 +573,11 @@ class MainActivity : FlutterActivity() {
                 "hasOverlayPermission" -> {
                     result.success(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true)
                 }
+                "isFloatingLyricWindowRunning" -> {
+                    // MD3Music fork：原生窗口实况查询。引擎被系统杀死后 Dart 侧开关
+                    // 丢失（restoreFloatingFromNative 用它判断是否恢复悬浮窗推送）。
+                    result.success(FloatingLyricService.isRunning && FloatingLyricService.viewAdded)
+                }
                 "setDesktopLyricConfig" -> {
                     val intent = Intent(this, FloatingLyricService::class.java).apply {
                         action = FloatingLyricService.ACTION_SET_CONFIG

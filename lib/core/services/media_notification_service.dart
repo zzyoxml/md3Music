@@ -239,6 +239,21 @@ class MediaNotificationService {
     }
   }
 
+  /// 原生悬浮窗窗口是否真的活着（FloatingLyricService 在跑 + View 已 addView）。
+  ///
+  /// 用途：引擎被系统杀死后，若进程存活，原生窗口原封不动，但 Dart 侧开关
+  /// 丢失；restoreFloatingFromNative 用它判断是否恢复推送。进程一起死则窗口
+  /// 也没了，查询返回 false 属正常。引擎刚启动时通道可能尚未注册，异常按
+  /// false 处理（此时 window 必然显示不了，恢复无人可推）。
+  static Future<bool> isFloatingLyricWindowRunning() async {
+    try {
+      final r = await _channel.invokeMethod<bool>('isFloatingLyricWindowRunning');
+      return r ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<bool> startFloatingLyric({
     required String lyric,
     required String title,

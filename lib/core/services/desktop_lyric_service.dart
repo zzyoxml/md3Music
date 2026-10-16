@@ -714,6 +714,32 @@ class DesktopLyricService {
     _notify();
   }
 
+  /// 引擎被系统杀死后，从原生窗口实况恢复悬浮窗推送。
+  ///
+  /// 原生悬浮窗（服务 + overlay View）随进程存活：vivo 等机型常杀 Dart 引擎而
+  /// 留下进程与窗口，屏幕上黑框原封不动，但 Dart 侧 `_enabled` 归 false →
+  /// `_pushLyric/_pushProgress/_pushPlaying` 全部早退——表现为黑框还在、永远没字。
+  /// 其它歌词通道（蓝牙/锁屏/Flyme/LyricInfo）在 main.dart 的
+  /// `_restoreLyricPushPref` 各有恢复，桌面歌词此前唯独没有恢复路径；引擎启动
+  /// 时（runBootstrap，providers 未就绪也可）调用本方法补齐。以原生实况为
+  /// 用户意图的判据：关窗走 stopFloatingLyric（服务必停 → 查询为 false），
+  /// 查到窗口在显示就按开启恢复。失败静默：下一次引擎重启仍会重试。
+  Future<void> restoreFloatingFromNative() async {
+    if (_enabled) return;
+    final running = await MediaNotificationService.isFloatingLyricWindowRunning();
+    if (!running) return;
+    _enabled = true;
+    // 行索引与推送基线全部复位：下一拍（或 provider 绑定成功后那一拍）按
+    // 常规路径重推当前行/进度/播放态，幂等去重保证不产生额外重绘。
+    _currentLineIndex = -2;
+    _lastLineSwitchAt = null;
+    _lastPushedPlaying = false;
+    _lastPushedPosMs = null;
+    _syncCurrentFromPlayer();
+    _updateTicker();
+    _notify();
+  }
+
   /// 蓝牙歌词开关：独立于悬浮窗。开启后定时器运行以获取当前歌词行，
   /// 但不弹出悬浮窗；关闭后若悬浮窗也未开启则停止定时器。
   Future<void> setBluetoothLyricEnabled(bool enabled) async {

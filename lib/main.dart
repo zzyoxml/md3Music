@@ -322,6 +322,13 @@ Future<void> _restoreLyricPushPref() async {
       lockScreenLyricEnabled,
     );
 
+    // MD3Music fork：悬浮窗桌面歌词的开关恢复。其它歌词通道都在上面恢复了，
+    // 唯独桌面歌词此前没有——引擎被 vivo 等机型杀掉后，进程内的原生悬浮窗
+    // 原封不动，但 Dart 侧 _enabled 归零，黑框从此收不到任何推送（有框无词）。
+    // 以原生窗口实况为准按开启恢复（关窗服务必停，查询自然为 false）。
+    // ignore: discarded_futures
+    DesktopLyricService.instance.restoreFloatingFromNative();
+
     // 魅族 Flyme 状态栏歌词（独立开关）：冷启动/后台唤醒后无需进设置页即可继续推送
     // 顺序有讲究：先灌提前量再开开关。开启会立刻回灌当前行，
     // 若此时提前量还是 0，第一行就按未提前的时间轴显示，要等到下次翻行才对。

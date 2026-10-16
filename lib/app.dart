@@ -686,42 +686,52 @@ class _AppViewState extends State<_AppView> {
                     // 仍导入 package:flutter/material.dart，其 Theme.of(context) 取不到本项目的
                     // material_ui 主题。本桥把 ThemeData / MaterialLocalizations 提供给它们。
                     // 官方定位为过渡工具，待依赖全部迁移到 material_ui 后移除。
+                    // 根级透明 Material 兜底：本 Stack 里挂在 Navigator 之上的全部
+                    // 悬浮层（形变浮层 / 拖拽预览 / 封面形变 / DLNA 面板等）不在任何
+                    // Scaffold 内，其内部 InkWell 的 tapDown 取不到 Material 祖先会
+                    // 直接抛 "Null check operator used on a null value"
+                    //（Material.of，诊断日志 2026-10-16 09:40/09:55 实证），点按被
+                    // 吞掉。根级挂一层 MaterialType.transparency 修复这一类崩溃：
+                    // 最近匹配规则下，页面内已有的 Material 完全不受影响。
                     WindowsWindowFrame(
-                      child: Stack(
-                        children: [
-                          CarModePanel(
-                            // ignore: deprecated_member_use
-                            child: MaterialUiCompatibilityBridge(
-                              // TV 构建：dpad 遍历引擎（区域记忆 + 束流遍历 + 聚焦特效 +
-                              // 返回键收口 + debugOverlay 调试高亮）。正常构建不包。
-                              // tv: TV 构建再叠加 10-foot 内容作用域（overscan 安全边距
-                              // + 正文缩放下限，见 [_tvContentScope]），Dpad 引擎包在
-                              // 最内层。正常构建仍走 child! 原分支，树与改动前一致。
-                              child: kTvBuild
-                                  ? _tvMediaKeyFallback(
-                                      _tvContentScope(context, child),
-                                    )
-                                  : child!,
+                      child: Material(
+                        type: MaterialType.transparency,
+                        child: Stack(
+                          children: [
+                            CarModePanel(
+                              // ignore: deprecated_member_use
+                              child: MaterialUiCompatibilityBridge(
+                                // TV 构建：dpad 遍历引擎（区域记忆 + 束流遍历 + 聚焦特效 +
+                                // 返回键收口 + debugOverlay 调试高亮）。正常构建不包。
+                                // tv: TV 构建再叠加 10-foot 内容作用域（overscan 安全边距
+                                // + 正文缩放下限，见 [_tvContentScope]），Dpad 引擎包在
+                                // 最内层。正常构建仍走 child! 原分支，树与改动前一致。
+                                child: kTvBuild
+                                    ? _tvMediaKeyFallback(
+                                        _tvContentScope(context, child),
+                                      )
+                                    : child!,
+                              ),
                             ),
-                          ),
-                          const DlnaCastingOverlay(),
-                          // 底栏形态交叉过渡浮层（一级常驻条 ↔ 二级悬浮胶囊）：挂在
-                          // Navigator 之上、`PlayerDragOverlay` **之前** —— 形变层 /
-                          // 封面层必须盖在它上面。只在飞行窗口渲染，静止时零成本。
-                          const BottomBarMorphOverlay(),
-                          // 上滑拖拽跟手覆盖层（在 Navigator 之上，拖拽期间显示预览）
-                          const PlayerDragOverlay(),
-                          // 封面连贯形变层：必须排在 PlayerDragOverlay **之后**，
-                          // 否则形变中的封面会被跟手预览页盖住。
-                          const PlayerCoverMorphLayer(),
-                          // 歌单封面连贯过渡的 pane 路径飞行层（详情面板嵌套
-                          // Navigator 内的 push 没有 HeroController 观察者，框架
-                          // Hero 不飞，由该层自绘；根 Navigator 路径走框架 Hero）。
-                          const PlaylistCoverFlightLayer(),
-                          // 「下一首播放」封面跳水动画层：与形变层同处设计像素空间，
-                          // 必须排在最末（球要画在最上面，越过形变层与歌单封面飞行层）。
-                          const PlayNextFlightLayer(),
-                        ],
+                            const DlnaCastingOverlay(),
+                            // 底栏形态交叉过渡浮层（一级常驻条 ↔ 二级悬浮胶囊）：挂在
+                            // Navigator 之上、`PlayerDragOverlay` **之前** —— 形变层 /
+                            // 封面层必须盖在它上面。只在飞行窗口渲染，静止时零成本。
+                            const BottomBarMorphOverlay(),
+                            // 上滑拖拽跟手覆盖层（在 Navigator 之上，拖拽期间显示预览）
+                            const PlayerDragOverlay(),
+                            // 封面连贯形变层：必须排在 PlayerDragOverlay **之后**，
+                            // 否则形变中的封面会被跟手预览页盖住。
+                            const PlayerCoverMorphLayer(),
+                            // 歌单封面连贯过渡的 pane 路径飞行层（详情面板嵌套
+                            // Navigator 内的 push 没有 HeroController 观察者，框架
+                            // Hero 不飞，由该层自绘；根 Navigator 路径走框架 Hero）。
+                            const PlaylistCoverFlightLayer(),
+                            // 「下一首播放」封面跳水动画层：与形变层同处设计像素空间，
+                            // 必须排在最末（球要画在最上面，越过形变层与歌单封面飞行层）。
+                            const PlayNextFlightLayer(),
+                          ],
+                        ),
                       ),
                     ),
                   ],
