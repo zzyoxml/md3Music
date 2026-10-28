@@ -1,4 +1,5 @@
 import 'package:dpad/dpad.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:m3e_core/m3e_core.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:provider/provider.dart';
@@ -28,6 +29,21 @@ import 'playing_spectrum_indicator.dart';
 import 'smart_artwork_image.dart';
 import 'song_menu_header.dart';
 import 'song_menu_info_badges.dart';
+
+/// 「复制歌名与歌手」写入剪贴板的文本（格式：`歌名 - 歌手`）。
+///
+/// 歌名取 [Song.displayName]（已剥离 `.mp3`/`.flac` 等扩展名后缀）；
+/// 歌手经 [isUnknownArtist] 判空（覆盖在线 `未知歌手` 与本地 `未知艺术家`），
+/// 缺省时退化为仅返回歌名——避免拼出 `歌名 - 未知歌手` 后缀。
+String formatSongCopyText(Song song) {
+  final title = song.displayName.trim();
+  if (isUnknownArtist(song.artist)) {
+    return title;
+  }
+  final artist = song.artist.trim();
+  if (title.isEmpty) return artist;
+  return '$title - $artist';
+}
 
 /// 歌曲行右侧操作区的呈现策略。
 ///
@@ -152,6 +168,19 @@ class SongListItem extends StatelessWidget {
                 );
               },
             ),
+            // 复制歌名与歌手：仅手机与桌面端展示（TV 端无剪贴板粘贴场景）
+            if (!kTvBuild)
+              ListTile(
+                leading: const Icon(Icons.copy_outlined),
+                title: const Text('复制歌名与歌手'),
+                onTap: () async {
+                  AppHaptics.click(HapticCategory.listItem);
+                  final text = formatSongCopyText(song);
+                  Navigator.pop(ctx);
+                  await Clipboard.setData(ClipboardData(text: text));
+                  showToast('已复制: $text');
+                },
+              ),
             // 本地音乐（有本地文件路径）：提供 Lyrico 外部编辑入口（公开功能）
             if (!song.isOnline && song.localPath != null)
               ListTile(
