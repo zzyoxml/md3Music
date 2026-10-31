@@ -49,7 +49,7 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
 
   // 排序
   _SortBy _sortBy = _SortBy.time;
-  bool _sortAscending = false;
+  bool _sortAscending = true;
 
   // 专辑内搜索
   bool _isSearching = false;
@@ -553,14 +553,14 @@ class _AlbumDetailPageState extends State<AlbumDetailPage> {
                                       : Icons.arrow_downward_rounded,
                                   current: _sortBy,
                                   options: const [
-                                    (value: _SortBy.time, label: '添加时间'),
+                                    (value: _SortBy.time, label: '专辑顺序'),
                                     (value: _SortBy.title, label: '歌曲名称'),
                                     (value: _SortBy.duration, label: '时长'),
                                   ],
                                   onPicked: (value) {
                                     setState(() {
                                       _sortBy = value;
-                                      _sortAscending = value == _SortBy.time ? false : true;
+                                      _sortAscending = true;
                                       _invalidateDisplaySongs();
                                     });
                                   },
