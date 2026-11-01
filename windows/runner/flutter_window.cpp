@@ -7,6 +7,7 @@
 
 #include <flutter/standard_method_codec.h>
 #include <shellapi.h>
+#include <dwmapi.h>
 #include <windowsx.h>
 
 #include "flutter/generated_plugin_registrant.h"
@@ -14,6 +15,20 @@
 #include "resource.h"
 
 namespace {
+// 保留 Flutter 自绘标题栏，由 DWM 合成原生圆角和窗口边缘。
+void ApplyWindowFrame(HWND hwnd, bool fullscreen) {
+  const DWMNCRENDERINGPOLICY policy = DWMNCRP_ENABLED;
+  DwmSetWindowAttribute(hwnd, DWMWA_NCRENDERING_POLICY, &policy, sizeof(policy));
+  const DWM_WINDOW_CORNER_PREFERENCE corners =
+      fullscreen ? DWMWCP_DONOTROUND : DWMWCP_ROUND;
+  // Windows 10 不支持该属性，失败时保留原有外观。
+  DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+                       &corners, sizeof(corners));
+  const int edge = fullscreen ? 0 : 1;
+  const MARGINS margins{edge, edge, edge, edge};
+  DwmExtendFrameIntoClientArea(hwnd, &margins);
+}
+
 using Arguments = flutter::EncodableMap;
 constexpr UINT kTrayCallbackMessage = WM_APP + 1;
 constexpr UINT kTrayMenuShow = 1;
@@ -167,6 +182,7 @@ void FlutterWindow::SetFullscreen(bool fullscreen) {
     // WM_NCCALCSIZE，那里按 fullscreen_ 决定客户区取 rcMonitor 还是 rcWork。
     // 放在 if 之外：样式已改，即使取显示器信息失败也要让退出路径能还原。
     fullscreen_ = true;
+    ApplyWindowFrame(hwnd, fullscreen_);
     MONITORINFO monitor{sizeof(monitor)};
     if (GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST),
                         &monitor)) {
@@ -182,6 +198,7 @@ void FlutterWindow::SetFullscreen(bool fullscreen) {
       SetWindowLongPtrW(hwnd, GWL_STYLE, fullscreen_restore_style_);
     }
     fullscreen_ = false;
+    ApplyWindowFrame(hwnd, fullscreen_);
     if (fullscreen_restore_placement_.length == sizeof(WINDOWPLACEMENT)) {
       // 先 SW_RESTORE 再套快照：对「已处于 zoomed」的窗口，SetWindowPlacement
       // 不会重跑最大化布局，窗口会停在全屏矩形 (0,0,rcMonitor) 而不是快照里的
@@ -527,6 +544,7 @@ bool FlutterWindow::OnCreate() {
         PostMessageW(GetHandle(), kSpectrumFrameMessage, 0, 0);
       });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  ApplyWindowFrame(GetHandle(), fullscreen_);
   SetWindowPos(GetHandle(), nullptr, 0, 0, 0, 0,
                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER |
                    SWP_NOACTIVATE);
@@ -610,6 +628,10 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
       // 恢复失败时把窗口带回来，避免只剩后台进程且没有可操作入口。
       ShowWindow(hwnd, SW_RESTORE);
     }
+    return 0;
+  }
+  if (message == WM_DWMCOMPOSITIONCHANGED) {
+    ApplyWindowFrame(hwnd, fullscreen_);
     return 0;
   }
   if (message == WM_NCCALCSIZE && wparam == TRUE) {
