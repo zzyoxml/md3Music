@@ -2544,10 +2544,13 @@ class AudioPlaybackService : Service() {
         // 二次 updateActiveSessionMetadata 补全 bitmap——两发合并，仍满足 P0 的
         // "首帧即封面"口径（第一发只到 title/artist，封面位空）。若 SystemUI 出现
         // "控制中心封面闪空后不再补全"的老病，回滚本段即可。
+        // v67：改走 prewrite 变体——切歌瞬间 item 还是上一首，常规严格身份校验会
+        // 把新歌标题当"不匹配数据"丢弃（车机"很久才切换、一直显示上一首"的根因），
+        // prewrite 仅保留 generation 守卫。
         if (!isMetadataRequestCurrent(requestMediaId, requestGeneration)) {
             // 已是旧请求：连轻量首帧都不必发。
         } else {
-            AudioPlayer.updateActiveSessionTitleArtist(
+            AudioPlayer.prewriteActiveSessionTitleArtist(
                 requestMediaId, requestGeneration, displayTitle, displayArtist)
         }
         if (!effectiveArtUrl.isNullOrEmpty()) {
