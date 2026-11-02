@@ -100,6 +100,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
   bool _orderSaving = false;
 
   void _editTrackOrder() {
+    if (_sortBy != PlaylistSongSort.time) return;
     final listId = widget.playlist.subscribedListId ?? widget.playlist.listCreateListid;
     if (listId == null || listId.isEmpty) return;
     if (_undoRequest.value != null) {
@@ -114,7 +115,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
         _trackOrder = PlaylistTrackOrder(
           listId, null, songs, accountId: KugouApiClient().userid,
         );
-        _orderSongs = [...songs];
+        _orderSongs = _sortAscending ? [...songs] : songs.reversed.toList();
       });
     } catch (error) {
       showToast(error is StateError ? error.message : '加载失败，请稍后重新打开排序', long: true);
@@ -127,22 +128,21 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
   Future<void> _finishTrackOrder() async {
     final original = _trackOrder!;
-    if (samePlaylistTrackOrder(original.songs, _orderSongs)) {
+    // 云端保存正序位置；倒序展示的拖动结果先还原为正序。
+    final reordered = _sortAscending ? _orderSongs : _orderSongs.reversed.toList();
+    if (samePlaylistTrackOrder(original.songs, reordered)) {
       _cancelTrackOrder();
       return;
     }
     setState(() => _orderSaving = true);
     try {
-      final order = await KugouApiClient().savePlaylistTrackOrder(original, _orderSongs);
+      final order = await KugouApiClient().savePlaylistTrackOrder(original, reordered);
       if (!mounted) return;
       setState(() {
         _songs = order.songs;
-        _sortBy = PlaylistSongSort.time;
-        _sortAscending = true;
         _trackOrder = null;
         _invalidateDisplaySongs();
       });
-      _saveSortPreference();
       final key = _cacheKey();
       if (key != null) await FavoriteListsCache.savePlaylistSongs(key, order.songs);
     } catch (error) {
@@ -1668,13 +1668,16 @@ class _PlaylistPageState extends State<PlaylistPage> {
         ...?PlaylistPage.extraAppBarActionsBuilder?.call(context),
         if (showTrackOrder)
           IconButton(
-            tooltip: _trackOrder == null ? '自由排序' : '完成排序',
+            tooltip: _sortBy != PlaylistSongSort.time
+                ? '请先切换为歌单顺序'
+                : _trackOrder == null ? '自由排序' : '完成排序',
             icon: Icon(
               _trackOrder == null ? Icons.sort : Icons.check,
               size: 20,
-              color: _trackOrder == null ? colorScheme.onSurfaceVariant : colorScheme.primary,
+              color: _trackOrder == null ? null : colorScheme.primary,
             ),
-            onPressed: _isLoading || _isMultiSelectMode || _orderSaving
+            onPressed: _isLoading || _isMultiSelectMode || _orderSaving ||
+                _sortBy != PlaylistSongSort.time
                 ? null : _trackOrder == null ? _editTrackOrder : _finishTrackOrder,
           ),
         if (_songs.isNotEmpty && _trackOrder == null)
