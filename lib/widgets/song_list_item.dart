@@ -81,6 +81,8 @@ class SongListItem extends StatelessWidget {
 
   /// 右侧操作区呈现策略，默认完整操作（见 [SongTrailingActions]）。
   final SongTrailingActions trailingActions;
+  /// 排序模式等场景替换整个右侧操作区。
+  final Widget? trailingOverride;
 
   /// 可选副标题覆盖：非空时替换默认的「歌手 - 专辑」行
   /// （如歌词搜索结果用于显示命中的歌词片段）。
@@ -104,6 +106,7 @@ class SongListItem extends StatelessWidget {
     this.showDuration = true,
     this.forceFavorited = false,
     this.trailingActions = SongTrailingActions.full,
+    this.trailingOverride,
     this.subtitleOverride,
     this.isSelectMode = false,
     this.isSelected = false,
@@ -497,7 +500,9 @@ class SongListItem extends StatelessWidget {
             ),
 
             // 右侧操作区：多选模式下不显示
-            if (!isSelectMode)
+            if (trailingOverride != null)
+              trailingOverride!
+            else if (!isSelectMode)
               Row(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,

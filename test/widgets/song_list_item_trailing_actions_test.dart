@@ -4,6 +4,7 @@
 // favoriteOnly（只有收藏）与 favoriteAndMore（收藏 + 三点菜单）的差别
 // ——发现页每日推荐 / 刷歌推荐详情页就靠后者拿回三点菜单。
 import 'package:flutter/services.dart' as services;
+import 'package:flutter/gestures.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:just_audio/just_audio.dart' as just_audio;
@@ -16,6 +17,7 @@ import 'package:md3music/providers/favorites_provider.dart';
 import 'package:md3music/providers/local_favorites_provider.dart';
 import 'package:md3music/providers/player_provider.dart';
 import 'package:md3music/widgets/song_list_item.dart';
+import 'package:md3music/widgets/playlist_track_order_list.dart';
 import '../support/controlled_audio_service.dart';
 
 void main() {
@@ -105,6 +107,54 @@ void main() {
       await env.dispose(tester);
     }
   });
+
+  for (final kind in [PointerDeviceKind.touch, PointerDeviceKind.mouse]) {
+    testWidgets('自由排序整行长按可拖动，右侧仅显示六点手柄：$kind', (tester) async {
+      final env = (await tester.runAsync(boot))!;
+      final songs = [
+        song.copyWith(id: 'first', title: '第一首', fileId: 1),
+        song.copyWith(id: 'second', title: '第二首', fileId: 2),
+      ];
+      final moves = <(int, int)>[];
+      try {
+        await tester.pumpWidget(env.host(StatefulBuilder(
+          builder: (context, setState) => CustomScrollView(slivers: [
+            const SliverToBoxAdapter(child: SizedBox(height: 80, child: Text('当前歌单'))),
+            PlaylistTrackOrderList(
+              songs: songs,
+              onReorder: (from, to) => setState(() {
+                moves.add((from, to));
+                songs.insert(to, songs.removeAt(from));
+              }),
+            ),
+          ]),
+        )));
+        await tester.pumpAndSettle();
+        expect(find.byIcon(Icons.drag_indicator), findsNWidgets(2));
+        expect(find.byIcon(Icons.favorite_border), findsNothing);
+        expect(find.byIcon(Icons.more_vert), findsNothing);
+        expect(find.text(song.displayDuration), findsNothing);
+        final from = tester.getCenter(find.text('第一首'));
+        final to = tester.getCenter(find.text('第二首')) + const Offset(0, 24);
+        final gesture = await tester.startGesture(from, kind: kind);
+        await tester.pump(const Duration(milliseconds: 199));
+        await tester.pump(const Duration(milliseconds: 2));
+        // 连续移动，覆盖拖拽跨过相邻行的过程。
+        for (var step = 1; step <= 8; step++) {
+          await gesture.moveTo(Offset.lerp(from, to, step / 8)!);
+          await tester.pump(const Duration(milliseconds: 80));
+        }
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(moves, [(0, 1)]);
+        expect(songs.map((song) => song.fileId), [2, 1]);
+        expect(find.text('当前歌单'), findsOneWidget);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await env.dispose(tester);
+      }
+    });
+  }
 
   testWidgets('favoriteAndMore 的三点能拉起更多菜单面板', (tester) async {
     final env = (await tester.runAsync(boot))!;

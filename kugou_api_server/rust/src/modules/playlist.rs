@@ -205,8 +205,8 @@ fn diag_truncate(s: &str, limit: usize) -> String {
 /// 云歌单（cloudlist）写接口的 playlistAES + rsaEncrypt2 加密往返。
 ///
 /// 端口对应参考 `util/request.js:286` 的 `createCloudRequest`，服务
-/// `/v1/modify_song_sort`、`/v1/modify_list_pic` 两个端点（`/v1/modify_list_sort`
-/// 已迁 [cloud_roundtrip_v1_concept]、`/v1/modify_list` 已迁 [cloud_roundtrip_v4]）。
+/// `/v1/modify_list_pic` 端点（歌曲及歌单排序已迁 [cloud_roundtrip_v1_concept]，
+/// `/v1/modify_list` 已迁 [cloud_roundtrip_v4]）。
 /// 与 [aes_roundtrip] 的差异（全部来自
 /// `createCloudRequest`，见 [CLOUD_APP_ID] 注释）：
 /// - appid/clientver/盐走标准版（1005/20489/`OIlwieks…`），`p` 用标准 RSA 公钥；
@@ -344,8 +344,8 @@ fn cloud_roundtrip(
 ///
 /// 同族迁移状态：`modify_list`（v4，2026-10-14 实网验证）与 `modify_list_sort`
 ///（v1 契约 + 概念版身份，2026-10-15 实网验证，见 [cloud_roundtrip_v1_concept]）
-/// 已修复；`/v1/modify_song_sort|modify_list_pic` 仍走 [cloud_roundtrip] 标准版
-/// 身份，预计同样受 20017 影响，待各自实网验证后按同款方式迁移。
+/// 已修复；`modify_song_sort` 已迁概念版身份并验证写入后回读顺序。
+/// `modify_list_pic` 仍走 [cloud_roundtrip] 标准版身份，待独立验证。
 /// v4 modify_list 的完整 body：业务字段（[build_update_map] 产物）+ `userid` +
 /// `enckey` + `encstr`。seed 每次随机，故 enckey/encstr 不可复现（单测只验形状）。
 pub fn build_v4_body(q: &Value, data_obj: &Value) -> Map<String, Value> {
@@ -664,19 +664,21 @@ pub fn build_update_map(q: &Value) -> Map<String, Value> {
 ///
 /// data 入参 `fileid|sort` 逗号分隔；`type` 0=自建/我喜欢、1=收藏（默认 0）。
 pub fn handle_tracks_sort(q: &Value, ctx: &Ctx) -> Result<ModuleResponse, ModuleResponse> {
+    // 完整歌单可能超过 URL 长度限制，兼容 JSON POST 与原有 GET。
+    let input = q.get("body").filter(|body| body.is_object()).unwrap_or(q);
     let dm = json!({
-        "listid": q_num(q, "listid", 0),
-        "list_ver": q_num(q, "list_ver", 0),
-        "type": q_num(q, "type", 0),
-        "data": build_tracks_sort_resource(&q_str(q, "data", "")),
+        "listid": q_num(input, "listid", 0),
+        "list_ver": q_num(input, "list_ver", 0),
+        "type": q_num(input, "type", 0),
+        "data": build_tracks_sort_resource(&q_str(input, "data", "")),
     });
     log::info!(
         "[playlist/tracks/sort] listid={}, list_ver={}, type={}",
-        q_num(q, "listid", 0),
-        q_num(q, "list_ver", 0),
-        q_num(q, "type", 0),
+        q_num(input, "listid", 0),
+        q_num(input, "list_ver", 0),
+        q_num(input, "type", 0),
     );
-    cloud_roundtrip(q, ctx, "/v1/modify_song_sort", &dm)
+    cloud_roundtrip_v1_concept(q, ctx, "/v1/modify_song_sort", &dm)
 }
 
 /// playlist_sort.js → /playlist/sort（「我的歌单」列表排序，需登录）。

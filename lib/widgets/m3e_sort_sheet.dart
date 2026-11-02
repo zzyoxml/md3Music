@@ -20,8 +20,8 @@ typedef M3ESortOption<T> = ({T value, String label});
 /// `SizedBox(width: 字段渲染宽度)`），而字段本身又是拉起/收起面板的唯一触发器
 /// （外点关闭层会主动跳过落在字段范围内的点击，所以「隐藏的 0 尺寸字段 + 旁边放
 /// 一个 IconButton」会导致点第二次收不起来）。于是这里让字段的真实渲染宽度 =
-/// [_panelWidth]（够放条目文字），再用 [OverflowBox] 把它塞回顶栏一个 [_slot]
-/// 见方的图标位：多出来的宽度从左侧溢出，完全透明、也不可点（[OverflowBox]
+/// [panelWidth]（够放条目文字），再用 [OverflowBox] 把它塞回顶栏一个图标位。
+/// 多出来的宽度从左侧溢出，悬停时显示高亮，但不可点（[OverflowBox]
 /// 只对自身尺寸范围做命中测试），图标（[M3EDropdownFieldStyle.suffixIcon]）
 /// 正好落在图标位中心，顶栏排布与原来的 IconButton 完全一致。
 class M3ESortButton<T> extends StatefulWidget {
@@ -30,6 +30,9 @@ class M3ESortButton<T> extends StatefulWidget {
 
   /// 触发器图标。
   final IconData icon;
+
+  /// 下拉字段及面板宽度，也决定悬停高亮向左延伸的范围。
+  final double panelWidth;
 
   /// 排序选项（值 + 显示文本）。
   final List<M3ESortOption<T>> options;
@@ -51,6 +54,7 @@ class M3ESortButton<T> extends StatefulWidget {
     super.key,
     this.tooltip = '排序',
     this.icon = Icons.sort,
+    this.panelWidth = 220,
     required this.options,
     required this.current,
     this.ascending,
@@ -65,9 +69,6 @@ class M3ESortButton<T> extends StatefulWidget {
 class _M3ESortButtonState<T> extends State<M3ESortButton<T>> {
   /// 在顶栏里实际占位的尺寸：与 IconButton 的 48×48 一致，前后图标不位移。
   static const double _slot = 48;
-
-  /// 字段与面板的真实宽度：够放最长条目文字（默认 itemPadding 16×2 + 选中勾选 20）。
-  static const double _panelWidth = 220;
 
   late final M3EDropdownController<T> _controller;
 
@@ -211,9 +212,9 @@ class _M3ESortButtonState<T> extends State<M3ESortButton<T>> {
         width: _slot,
         height: _slot,
         child: OverflowBox(
-          // 只放开宽度：字段（连带面板）的真实宽度 = _panelWidth
-          minWidth: _panelWidth,
-          maxWidth: _panelWidth,
+          // 只放开宽度，字段与下拉面板共用宽度。
+          minWidth: widget.panelWidth,
+          maxWidth: widget.panelWidth,
           minHeight: _slot,
           maxHeight: _slot,
           // 字段与图标位右对齐：图标留在图标位内，多出的宽度从左侧溢出
@@ -247,8 +248,7 @@ class _M3ESortButtonState<T> extends State<M3ESortButton<T>> {
             fieldStyle: M3EDropdownFieldStyle(
               hintText: widget.tooltip,
               backgroundColor: Colors.transparent,
-              // foregroundColor 同时是按压/悬停高亮色，置为透明，
-              // 否则 220 宽的字段会在顶栏闪出一条高亮条
+              // 使用黑色低透明度高亮；组件内部按交互状态重新设置 alpha。
               foregroundColor: Colors.transparent,
               border: BorderSide.none,
               focusedBorder: BorderSide.none,

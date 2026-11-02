@@ -73,6 +73,7 @@ class KugouEndpoints {
   static const String playlistDel = '/playlist/del';
   static const String playlistTracksAdd = '/playlist/tracks/add';
   static const String playlistTracksDel = '/playlist/tracks/del';
+  static const String playlistTracksSort = '/playlist/tracks/sort';
   static const String playlistSort = '/playlist/sort';
   static const String playlistPic = '/playlist/pic';
   static const String playlistPicUpload = '/playlist/pic/upload';

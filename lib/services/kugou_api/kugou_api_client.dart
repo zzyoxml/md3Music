@@ -10,11 +10,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../data/models/dy_cover_models.dart';
 import '../../data/models/kugou_account.dart';
 import '../../data/models/mv_models.dart';
+import '../../data/models/song.dart';
 import 'kugou_endpoints.dart';
 import 'kugou_models.dart';
 import 'lyric_lookup_result.dart';
 import 'comment_send_result.dart';
 import 'favorite_list_paging.dart';
+import 'playlist_track_order.dart' as track_order;
 import '../local_server_lifecycle.dart';
 
 /// 一次广告领取（/youth/vip → /youth/v1/ad/play_report）的判定结果。
@@ -4754,6 +4756,78 @@ class KugouApiClient {
       queryParameters: {'listid': listid, 'fileids': fileids},
       noCache: true,
     );
+  }
+
+  Future<track_order.PlaylistTrackOrder> getPlaylistTrackOrder(String listid) {
+    final account = userid;
+    Future<Map<String, dynamic>> metadata() async {
+      if (!isLoggedIn || userid != account) {
+        throw StateError('请登录后重新打开排序');
+      }
+      final result = await getAllUserPlaylists(noCache: true);
+      if (userid != account) throw StateError('登录账号已变化，请重新打开排序');
+      final data = result?['data'];
+      final rows = data is Map ? (data['info'] ?? data['list']) : null;
+      if (rows is List) {
+        for (final row in rows) {
+          if (row is Map &&
+              '${row['listid']}' == listid &&
+              '${row['type']}' == '0' &&
+              '${row['source']}' != '2') {
+            return Map<String, dynamic>.from(row);
+          }
+        }
+      }
+      throw StateError('无法读取自建歌单，请刷新后重试');
+    }
+    return track_order.loadPlaylistTrackOrder(
+      listId: listid,
+      accountId: account,
+      metadata: metadata,
+      fetchPage: (page) => _get(
+        KugouEndpoints.playlistTrackAllNew,
+        queryParameters: {'listid': listid, 'page': page, 'pagesize': 200},
+        noCache: true,
+      ),
+    );
+  }
+
+  /// 保存前检查版本，保存后独立回读，只有云端顺序一致才报告成功。
+  Future<track_order.PlaylistTrackOrder> savePlaylistTrackOrder(
+    track_order.PlaylistTrackOrder original,
+    List<Song> reordered,
+  ) async {
+    final payload = track_order.buildPlaylistTrackOrder(
+      original.songs, reordered,
+    );
+    if (!isLoggedIn || original.accountId != userid) {
+      throw StateError('登录账号已变化，请重新打开排序');
+    }
+    final current = await getPlaylistTrackOrder(original.listId);
+    if (current.accountId != original.accountId ||
+        userid != original.accountId ||
+        (original.version != null && current.version != original.version) ||
+        !track_order.samePlaylistTrackOrder(current.songs, original.songs)) {
+      throw StateError('歌单已在其他设备更新，请取消排序并刷新歌单后重试');
+    }
+    final result = await _post(
+      KugouEndpoints.playlistTracksSort,
+      data: {
+        'listid': original.listId,
+        'list_ver': current.version,
+        'type': 0,
+        'data': payload,
+      },
+      noCache: true,
+    );
+    if (!track_order.playlistOrderWriteSucceeded(result)) {
+      throw StateError('云端保存未确认成功，请取消并刷新歌单后重试');
+    }
+    final verified = await getPlaylistTrackOrder(original.listId);
+    if (!track_order.samePlaylistTrackOrder(verified.songs, reordered)) {
+      throw StateError('云端回读顺序不一致，请取消并刷新歌单');
+    }
+    return verified;
   }
 
   /// 对「我的歌单」列表排序（[data] 形如 `listid|type|sort,...`）。
