@@ -166,7 +166,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
   @override
   void initState() {
     super.initState();
-    _sortAscending = widget.isDefaultFavorite;
+    _sortAscending = widget.isAlbum || widget.isDefaultFavorite;
     // ignore: avoid_print
     print('[FlashTrace] PlaylistPage initState id=${widget.playlist.id} '
         'name=${widget.playlist.name} hash=$hashCode');
@@ -376,8 +376,10 @@ class _PlaylistPageState extends State<PlaylistPage> {
   static const String _kFavoriteSortAscKey = 'favorite_song_sort_asc';
 
   String get _sortByKey =>
+      widget.isAlbum ? 'album_song_sort_by' :
       widget.isDefaultFavorite ? _kFavoriteSortByKey : _kSortByKey;
   String get _sortAscKey =>
+      widget.isAlbum ? 'album_song_sort_asc' :
       widget.isDefaultFavorite ? _kFavoriteSortAscKey : _kSortAscKey;
 
   Future<void> _loadSortPreference() async {
@@ -389,7 +391,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
     );
     setState(() {
       _sortBy = restored;
-      _sortAscending = prefs.getBool(_sortAscKey) ?? widget.isDefaultFavorite;
+      _sortAscending = prefs.getBool(_sortAscKey) ??
+          (widget.isAlbum || widget.isDefaultFavorite);
       _invalidateDisplaySongs();
     });
     // 恢复的维度若依赖播放数据，立即补加载
@@ -1623,8 +1626,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
                 ? Icons.arrow_upward_rounded
                 : Icons.arrow_downward_rounded,
             current: _sortBy,
-            options: const [
-              (value: PlaylistSongSort.time, label: '添加时间'),
+            options: [
+              (value: PlaylistSongSort.time, label: widget.isAlbum ? '专辑顺序' : '添加时间'),
               (value: PlaylistSongSort.title, label: '歌曲名称'),
               (value: PlaylistSongSort.artist, label: '歌手名'),
               (value: PlaylistSongSort.duration, label: '时长'),
@@ -1634,7 +1637,8 @@ class _PlaylistPageState extends State<PlaylistPage> {
             onPicked: (value) {
               setState(() {
                 _sortBy = value;
-                _sortAscending = !_descendingByDefault.contains(value);
+                _sortAscending = (widget.isAlbum && value == PlaylistSongSort.time) ||
+                    !_descendingByDefault.contains(value);
                 _invalidateDisplaySongs();
               });
               _saveSortPreference();
