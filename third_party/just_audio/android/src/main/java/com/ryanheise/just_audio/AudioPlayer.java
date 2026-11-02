@@ -1812,6 +1812,20 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
             MediaMetadata.Builder mb = m.buildUpon();
             if (title != null && !title.isEmpty()) mb.setTitle(title);
             if (artist != null && !artist.isEmpty()) mb.setArtist(artist);
+            // MD3Music fork v66：先行的轻量 metadata 不得携带上一首的歌词键。
+            // 车机（JoviInCar）读 extras 的 ucar 整段 LRC 自行滚动——若保留旧词，
+            // 中间态会呈现"新歌标题 + 旧歌歌词"的错位（真机：歌词与声音不同步
+            // 复发，伴随换源重试时中间态被拉长）。此处仅在标题/艺术家变化（=切歌
+            // 先行）时执行（相同则上面已早退）；清键后由歌词就绪路径
+            // doApplySessionTitleArtistAndLyricInfo 按新曲补回。移除键 ≠ 写负
+            // 状态，不触发车机"负状态永久单行"铁律。
+            android.os.Bundle extras = m.extras != null
+                    ? new android.os.Bundle(m.extras)
+                    : new android.os.Bundle();
+            extras.remove(SESSION_LYRIC_INFO_KEY);
+            extras.remove(UCAR_LYRICS_WHOLE);
+            extras.remove(UCAR_LYRICS_STATUS);
+            mb.setExtras(extras);
             player.replaceMediaItem(
                     player.getCurrentMediaItemIndex(),
                     cur.buildUpon().setMediaMetadata(mb.build()).build());
