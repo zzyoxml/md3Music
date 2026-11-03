@@ -61,9 +61,6 @@ class _FavoritesPageState extends State<FavoritesPage>
   List<Map<String, dynamic>> _artists = [];
   bool _isLoadingArtists = true;
 
-  // 专辑原始 global_collection_id 映射
-  final Map<String, String> _albumOriginalIds = {};
-
   // 上次成功同步时间（用于 banner 文字与 cache 同步时间）
   DateTime? _lastSyncTime;
 
@@ -699,7 +696,6 @@ class _FavoritesPageState extends State<FavoritesPage>
         });
         FavoriteListsCache.saveAlbums(albums);
         FavoriteListsCache.saveLastSyncTime(now);
-        _fetchAlbumGlobalIds(albums);
         return;
       }
       setState(() => _isLoadingAlbums = false);
@@ -709,36 +705,6 @@ class _FavoritesPageState extends State<FavoritesPage>
         setState(() {
           _isLoadingAlbums = false;
         });
-      }
-    }
-  }
-
-  /// 通过搜索 API 获取每个专辑的原始数字 album ID
-  Future<void> _fetchAlbumGlobalIds(List<KugouPlaylistBrief> albums) async {
-    final api = KugouApiClient();
-    for (final album in albums) {
-      if (_albumOriginalIds.containsKey(album.id)) continue;
-      try {
-        final searchResult = await api.searchAlbums(album.name);
-        if (!mounted) return;
-        if (searchResult != null && searchResult.isNotEmpty) {
-          for (final found in searchResult) {
-            // 匹配专辑名，取 numericId（来自 albumid 字段）
-            if (found.name == album.name && found.numericId != null) {
-              debugPrint(
-                '[AlbumIDs] ${album.name} -> numericId=${found.numericId}',
-              );
-              if (mounted) {
-                setState(() {
-                  _albumOriginalIds[album.id] = found.numericId!;
-                });
-              }
-              break;
-            }
-          }
-        }
-      } catch (e) {
-        // 忽略搜索错误
       }
     }
   }
@@ -1588,11 +1554,11 @@ class _FavoritesPageState extends State<FavoritesPage>
 
   Widget _buildAlbumTile(KugouPlaylistBrief album, int index) {
     final colorScheme = Theme.of(context).colorScheme;
-    // 优先使用搜索到的原始数字 album ID
-    final originalId = _albumOriginalIds[album.id] ?? album.numericId;
+    // 使用收藏记录中的专辑编号，保留原歌手和发行版本。
+    final originalId = album.numericId;
     final isSelected = _selectedIndices.contains(index);
     debugPrint(
-      '[AlbumTile] ${album.name}: originalId=$originalId (from map: ${_albumOriginalIds[album.id]}, numericId: ${album.numericId})',
+      '[AlbumTile] ${album.name}: originalId=$originalId',
     );
 
     return InkWell(
