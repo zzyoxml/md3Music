@@ -1,0 +1,38 @@
+name: Update GitHub Star Trend
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-star-trend
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Update daily snapshot and SVG
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .github/scripts/update_star_trend.py
+      - name: Commit updated chart
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- assets/star-history.json assets/star-trend.svg; then
+            echo "Star trend is already up to date."
+            exit 0
+          fi
+          git add assets/star-history.json assets/star-trend.svg
+          git commit -m "chore: update GitHub star trend"
+          git push

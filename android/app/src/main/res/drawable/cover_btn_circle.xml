@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 2×2 封面小部件播放键圆底：白色圆形。与 widget_fm_bg_circle 内容相同但
+     独立成档——RemoteViews setColorFilter 会透过同资源的共享 ConstantState
+     串色到旧 4×1 小部件，必须用专属副本承载封面取色 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#FFFFFFFF" />
+</shape>
