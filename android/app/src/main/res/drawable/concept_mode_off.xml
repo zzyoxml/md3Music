@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 概念版 4×1 小部件「顺序播放」图标（白色填充，Material Icons repeat，运行时以暗色 setColorFilter 表示未启用循环）。
+     与 concept_mode_all 路径相同但独立成档——同一张矢量被两个 ImageView 以不同 tint 使用时，
+     RemoteViews 会透过共享 ConstantState 串色（既有小部件实测）。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M7,7h10v3l4,-4l-4,-4v3H5v6h2V7zM17,17H7v-3l-4,4l4,4v-3h12v-6h-2v4z" />
+</vector>

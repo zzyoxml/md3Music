@@ -1,0 +1,67 @@
+name: Fetch stem separation model
+description: 下载端侧分离模型（MSS tflite）并校验，供 full 包构建期注入；不写入仓库任何目录
+
+# 模型是第三方资产，许可不允许随开源源码分发，因此只在构建期注入：
+#   下载到 $RUNNER_TEMP/stem-model/stem/mss-model.tflite → 校验字节数 + SHA256
+#   → 通过 outputs.dir 交给 --android-project-arg=md3StemModelDir
+# 构建结束后由调用方删除该目录（workflow 里另有 if: always() 的残留检查）。
+#
+# 失败即 exit 1，不静默降级：悄悄产出「设置页有分离开关、点了没声」的残包，
+# 比构建失败糟得多。
+
+inputs:
+  url:
+    description: 模型下载地址（私有 repo release asset / 对象存储 / 预签名 URL 均可）
+    required: true
+  token:
+    description: 需要鉴权时的 Bearer token（公开可直连的 URL 可留空）
+    required: false
+    default: ''
+  sha256:
+    description: 期望的 SHA256（小写十六进制）。换模型时同步改这里与 TfliteMssInterpreter.MODEL_BYTES
+    required: false
+    default: '5c26862181c29cc24d0f39c247910195eaf1fa685451b88748c497dba7b664e5'
+  bytes:
+    description: 期望文件字节数
+    required: false
+    default: '4902660'
+
+outputs:
+  dir:
+    description: 含 stem/mss-model.tflite 的目录（直接传给 md3StemModelDir）
+    value: ${{ steps.fetch.outputs.dir }}
+
+runs:
+  using: composite
+  steps:
+    - id: fetch
+      shell: bash
+      env:
+        MODEL_URL: ${{ inputs.url }}
+        MODEL_TOKEN: ${{ inputs.token }}
+        EXPECT_SHA: ${{ inputs.sha256 }}
+        EXPECT_BYTES: ${{ inputs.bytes }}
+      run: |
+        set -euo pipefail
+        dir="$RUNNER_TEMP/stem-model"
+        rm -rf "$dir"
+        mkdir -p "$dir/stem"
+        target="$dir/stem/mss-model.tflite"
+        echo "下载分离模型：$MODEL_URL"
+        if [ -n "${MODEL_TOKEN:-}" ]; then
+          curl -fsSL --retry 3 --retry-connrefused -H "Authorization: Bearer $MODEL_TOKEN" -o "$target" "$MODEL_URL"
+        else
+          curl -fsSL --retry 3 --retry-connrefused -o "$target" "$MODEL_URL"
+        fi
+        actual_bytes=$(stat -c%s "$target")
+        if [ "$actual_bytes" != "$EXPECT_BYTES" ]; then
+          echo "::error::模型字节数不符：实际 $actual_bytes B，期望 $EXPECT_BYTES B（可能下到错误页/截断）"
+          exit 1
+        fi
+        actual_sha=$(sha256sum "$target" | awk '{print $1}')
+        if [ "$actual_sha" != "$EXPECT_SHA" ]; then
+          echo "::error::模型 SHA256 不符：实际 $actual_sha，期望 $EXPECT_SHA"
+          exit 1
+        fi
+        echo "模型校验通过（$actual_bytes B，sha256 $actual_sha）"
+        echo "dir=$dir" >> "$GITHUB_OUTPUT"

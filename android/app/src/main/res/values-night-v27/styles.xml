@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  夜间模式 + API 27+ 的资源变体。
+
+  android:windowLayoutInDisplayCutoutMode 是 API 27 引入的属性，必须放在
+  values-night-v27/ 下：放在 values-night/ 里 lint 的 NewApi 检查（release
+  构建里被提为 fatal，见 android/app/build.gradle.kts 的 lint 块）会因
+  minSdk=24 报错而阻断打包。系统对低于 API 27 的设备本就会忽略该属性，
+  移到版本目录不改变任何运行时行为。
+
+  注意：Android 的资源变体是**整体覆盖**——同名 style 在本目录必须声明
+  values-night/ 版本里的**全部** item，否则 API 27+ 夜间模式设备上会丢掉
+  那些项。
+-->
+<resources>
+    <!-- Theme applied to the Android Window as soon as the process has started.
+         This theme determines the color of the Android Window while your
+         Flutter UI initializes, as well as behind your Flutter UI while its
+         running.
+
+         This Theme is only used starting with V2 of Flutter's Android embedding. -->
+    <style name="NormalTheme" parent="@android:style/Theme.Black.NoTitleBar">
+        <!-- 同日间版：窗口背景钉成不透明深色，不用 ?android:colorBackground。
+             该属性随系统 uiMode 解析，系统浅色时解析成浅色（即使父主题是
+             Theme.Black），Dart 首帧上屏前就会「深色启动屏 → 浅 → 深色首帧」。 -->
+        <item name="android:windowBackground">@android:color/black</item>
+        <!-- 刘海/挖孔屏：内容延伸到短边（与日间版/锁屏歌词主题同款） -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

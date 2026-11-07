@@ -1,0 +1,4 @@
+Source Han Sans CN Medium (Version 1.000)
+Copyright © 2014 Adobe Systems Incorporated. All Rights Reserved.
+Licensed under the Apache License, Version 2.0; see LICENSE-APACHE-2.0.txt.
+The font file is distributed unmodified.
