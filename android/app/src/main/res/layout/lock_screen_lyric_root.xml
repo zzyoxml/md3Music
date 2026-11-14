@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 锁屏歌词根布局：背景模糊封面下沉为 ImageView（只在切歌/尺寸变化时替换位图，
+     覆盖层每帧不再全屏 blit），中间压一层暗色 scrim 保证歌词可读，
+     最上层是 LockScreenLyricView（透明覆盖层，绘制歌词 + 底部玻璃卡片 + 处理触摸）。 -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#FF000000">
+
+    <ImageView
+        android:id="@+id/lock_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop" />
+
+    <View
+        android:id="@+id/lock_scrim"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#66000000" />
+
+    <com.md3music.md3music.LockScreenLyricView
+        android:id="@+id/lock_lyric"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+</FrameLayout>

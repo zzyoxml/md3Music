@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  API 27+ 的资源变体。
+
+  android:windowLayoutInDisplayCutoutMode 是 API 27 引入的属性，必须放在
+  values-v27/ 下：放在 values/ 里 lint 的 NewApi 检查（release 构建里被提为
+  fatal，见 android/app/build.gradle.kts 的 lint 块）会因 minSdk=24 报错而
+  阻断打包。系统对低于 API 27 的设备本就会忽略该属性，移到版本目录不改变
+  任何运行时行为。
+
+  注意：Android 的资源变体是**整体覆盖**——同名 style 在本目录必须声明
+  values/ 版本里的**全部** item，否则 API 27+ 设备上会丢掉那些项。
+-->
+<resources>
+    <!-- Theme applied to the Android Window as soon as the process has started.
+         This theme determines the color of the Android Window while your
+         Flutter UI initializes, as well as behind your Flutter UI while its
+         running.
+
+         This Theme is only used starting with V2 of Flutter's Android embedding. -->
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <!-- 窗口背景钉成不透明浅色，不用 ?android:colorBackground。
+             后者是主题属性，系统处于深色时解析成深色（即使父主题是 Theme.Light），
+             于是 Dart 首帧上屏前这段窗口背景会「白启动屏 → 黑 → 浅色首帧」。
+             用户把应用锁在浅色时也照样闪黑，故按应用主题而非系统 uiMode 取值。 -->
+        <item name="android:windowBackground">@drawable/launch_background</item>
+        <!-- 刘海/挖孔屏：内容延伸到短边（与锁屏歌词主题同款），播放页横屏时
+             安全区由 Dart 侧对称补偿，主题层不再让系统开黑边。 -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+
+    <!-- 锁屏歌词主题：暗色全屏无标题栏，不透明遮住锁屏时钟，作为纯展示层 -->
+    <style name="Theme.MD3Music.LockScreen" parent="@android:style/Theme.Black.NoTitleBar">
+        <item name="android:windowBackground">#FF000000</item>
+        <item name="android:windowFullscreen">true</item>
+        <!-- 锁屏层改为可触控（卡片按钮 + 上滑/双击解锁），窗口保持不透明以遮住系统锁屏时钟 -->
+        <item name="android:windowIsTranslucent">false</item>
+        <!-- 刘海屏：内容延伸到短边，避免上下留黑边导致歌词/卡片被裁 -->
+        <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
+    </style>
+</resources>

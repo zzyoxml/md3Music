@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 概念版 4×1 小部件卡片底：白色圆角矩形，运行时经 setColorFilter 上
+     「封面主色派生底色」（无封面时用压暗的主题色，保证白字可读）。
+
+     为什么用 shape 而不是烤位图：卡片宽度由启动器决定，位图交给 ImageView 的
+     fitXY 铺满时会被按实际宽高拉伸，圆角跟着变成椭圆（实测横向 30dp / 纵向 22dp，
+     设计值 20dp），观感就是「圆角过渡被裁切」。shape 的圆角由系统按 dp 绘制，
+     任何尺寸都保持正圆角。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="#FFFFFFFF" />
+    <corners android:radius="16dp" />
+</shape>

@@ -1,0 +1,12 @@
+name: ort_dart
+description: Pure-Dart ONNX Runtime FFI bindings (vendored from onnxruntime_plus), with no bundled platform binaries.
+version: 0.0.1
+publish_to: none
+
+# 本包不是 Flutter plugin：没有 `flutter: plugin:` 段，因此不会向任何平台注入
+# onnxruntime 二进制。库句柄由调用方注入（见 lib/src/bindings/bindings.dart）。
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  ffi: ^2.1.0

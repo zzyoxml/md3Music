@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 4×1 音乐小部件下一曲键圆底（tint=surfaceHigh，与播放键独立防串色）：白色圆形。RemoteViews setColorFilter 会透过同资源共享的
+     ConstantState 跨视图串色，凡是被赋予不同 tint 的按钮必须各持专属副本 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#FFFFFFFF" />
+</shape>

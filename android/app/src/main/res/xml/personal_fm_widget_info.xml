@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 私人FM桌面小部件元信息：4×2 格，预览图用真机截图裁剪的静态图
+     （MIUI 挑选器只读 previewImage，不用 AOSP 的 previewLayout）。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="140dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_personal_fm"
+    android:resizeMode="horizontal|vertical"
+    android:widgetCategory="home_screen"
+    android:label="@string/fm_widget_label"
+    android:previewLayout="@layout/widget_personal_fm"
+    android:previewImage="@drawable/widget_preview_fm"
+    android:description="@string/fm_widget_description" />
