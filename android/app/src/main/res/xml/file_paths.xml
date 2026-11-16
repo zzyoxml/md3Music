@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 用 Lyrico 外部编辑本地歌曲：允许 FileProvider 暴露整个外部存储根路径，
+     本地音乐文件可能位于任意目录（Download / Music / 自定义目录等）。 -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <external-path name="external" path="."/>
+</paths>

@@ -1,0 +1,32 @@
+{
+  "assets": {},
+  "config": {
+    "build_asset_types": [
+      "code_assets/code"
+    ],
+    "extensions": {
+      "code_assets": {
+        "c_compiler": {
+          "ar": "D:\\xml\\my\\vs2022\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\lib.exe",
+          "cc": "D:\\xml\\my\\vs2022\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe",
+          "ld": "D:\\xml\\my\\vs2022\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe",
+          "windows": {
+            "developer_command_prompt": {
+              "arguments": [],
+              "script": "D:\\xml\\my\\vs2022\\VC\\Auxiliary\\Build\\vcvars64.bat"
+            }
+          }
+        },
+        "link_mode_preference": "dynamic",
+        "target_architecture": "x64",
+        "target_os": "windows"
+      }
+    },
+    "linking_enabled": false
+  },
+  "out_dir_shared": "D:\\xml\\private_md3music\\third_party\\just_audio\\.dart_tool\\hooks_runner\\shared\\objective_c\\build\\",
+  "out_file": "D:\\xml\\private_md3music\\third_party\\just_audio\\.dart_tool\\hooks_runner\\objective_c\\e1cb6a243e\\output.json",
+  "package_name": "objective_c",
+  "package_root": "C:\\Users\\Administrator\\AppData\\Local\\Pub\\Cache\\hosted\\pub.flutter-io.cn\\objective_c-9.6.1\\",
+  "user_defines": {}
+}
