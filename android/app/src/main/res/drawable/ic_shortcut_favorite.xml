@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 白色圆形背景（半径 12，覆盖整个 viewport） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,0 a12,12 0 1,0 0,24 a12,12 0 1,0 0,-24 z" />
+    <!-- 黑色心形图标（缩小并居中：原 20 单位图标缩放到 14 单位，偏移 (5,4)） -->
+    <group
+        android:scaleX="0.7"
+        android:scaleY="0.7"
+        android:translateX="3.6"
+        android:translateY="3.6">
+        <path
+            android:fillColor="#FF000000"
+            android:pathData="M12,20l-1.2,-1.05C5.6,14.25 2,11.18 2,7.5 2,4.42 4.42,2 7.5,2c1.74,0 3.41,0.81 4.5,2.09C13.09,2.81 14.76,2 16.5,2 19.58,2 22,4.42 22,7.5c0,3.68 -3.6,6.75 -8.8,11.45L12,20z" />
+    </group>
+</vector>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 亮封面遮罩：底部白→顶部透明，深色文字可读（圆角与封面裁切 16dp 对齐） -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="16dp" />
+    <gradient
+        android:angle="90"
+        android:startColor="#F2FFFFFF"
+        android:centerColor="#C0FFFFFF"
+        android:endColor="#26FFFFFF" />
+</shape>

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 概念版 4×1 小部件封面外圈：白色描边圆环，运行时经 setColorFilter 上封面取色。
+     48dp 外径 + 8dp 描边（Android shape 的 stroke 画在边界内侧）→ 内孔 32dp，
+     与圆形封面尺寸严格对齐（比例对齐参考图：封面占圆环 2/3、描边占 1/6）。
+     独立成档（不复用 cover_btn_circle 等）：RemoteViews setColorFilter 会透过
+     同资源的共享 ConstantState 串色到其它小部件。 -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#00FFFFFF" />
+    <stroke
+        android:width="8dp"
+        android:color="#FFFFFFFF" />
+</shape>

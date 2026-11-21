@@ -1,0 +1,299 @@
+name: Stability Checks
+
+on:
+  push:
+    branches: [rust-local-two, rust-local-force]
+  pull_request:
+    branches: [rust-local-two, rust-local-force]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stability-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  powershell-linux:
+    name: PowerShell scripts on Linux
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Verify command dispatch and public-surface gate
+        if: ${{ hashFiles('scripts/md3.ps1') != '' }}
+        shell: pwsh
+        run: |
+          $PSVersionTable.PSVersion
+          ./scripts/md3.ps1 help
+          ./scripts/md3.ps1 verify -Quiet
+
+      - name: Run console event decoding regressions
+        if: ${{ hashFiles('scripts/lib/ui.tests.ps1') != '' }}
+        shell: pwsh
+        run: ./scripts/lib/ui.tests.ps1
+
+      - name: Run public export surface regressions
+        if: ${{ hashFiles('scripts/lib/public_export_surface.tests.ps1') != '' }}
+        shell: pwsh
+        run: ./scripts/lib/public_export_surface.tests.ps1
+
+      - name: Run build variant and stem-model injection regressions
+        if: ${{ hashFiles('scripts/lib/flavor_variant.tests.ps1') != '' }}
+        shell: pwsh
+        run: ./scripts/lib/flavor_variant.tests.ps1
+
+      - name: Verify exported build scripts
+        if: ${{ hashFiles('scripts/md3.ps1') == '' }}
+        shell: pwsh
+        run: |
+          foreach ($path in @('scripts/tasks/android.ps1', 'scripts/tasks/windows.ps1')) {
+            if (-not (Test-Path $path)) { throw "Missing public script: $path" }
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $PWD $path), [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) { throw ($errors | Out-String) }
+          }
+          python3 -c "import ast, pathlib; ast.parse(pathlib.Path('scripts/tools/mcp_stdio_bridge.py').read_text(encoding='utf-8-sig'))"
+          if ($LASTEXITCODE -ne 0) { throw 'Public Python bridge syntax check failed' }
+
+  flutter-core:
+    name: Flutter core regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze Dart sources
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Run playback state and provider regressions
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/core/services/playback_command_dispatcher_test.dart
+          test/core/services/media_command_ack_router_test.dart
+          test/core/services/player_frame_driver_test.dart
+          test/providers/playback_request_gate_test.dart
+          test/providers/playback_error_event_gate_test.dart
+          test/providers/playback_recovery_flight_test.dart
+          test/providers/playback_recovery_budget_test.dart
+          test/providers/playback_progress_gate_test.dart
+          test/providers/playback_stall_policy_test.dart
+          test/providers/player_provider_cdn_stall_position_test.dart
+          test/core/services/audio_source_load_deadline_test.dart
+          test/providers/kugou_provider_test.dart
+          test/services/player_provider_request_race_test.dart
+
+      - name: Run local server, API, and persistence regressions
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/services/local_server_lifecycle_test.dart
+          test/services/kugou_api_inflight_lifecycle_test.dart
+          test/services/kugou_api/kugou_api_client_test.dart
+          test/services/kugou_api/kugou_models_test.dart
+          test/services/kugou_api/listen_together_models_test.dart
+          test/data/repositories/player_state_repository_test.dart
+          test/providers/playback_error_presentation_test.dart
+          test/widgets/playback_status_feedback_state_test.dart
+          test/widgets/playback_status_feedback_test.dart
+          test/widgets/full_player_narrow_layout_test.dart
+          test/modules/user/favorites_page_lifecycle_test.dart
+          test/widgets/local_server_down_banner_test.dart
+          test/core/services/local_artwork_cache_test.dart
+
+      - name: Run non-public regression under test/private
+        if: ${{ hashFiles('test/private/*.dart') != '' }}
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/private/
+
+      - name: Run playback URL deadline regression
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/services/kugou_api/playback_url_deadline_test.dart
+
+      - name: Run lyric lookup and parsing regressions
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/providers/lyric_request_lifecycle_test.dart
+          test/providers/kugou_provider_lyric_lifecycle_test.dart
+          test/widgets/page_desktop_lyric_dedup_test.dart
+          test/services/kugou_api/lyric_lookup_result_test.dart
+          test/services/kugou_api/lyric_lookup_client_test.dart
+          test/core/services/desktop_lyric_parse_test.dart
+          test/widgets/apple_lyrics/lyric_position_test.dart
+
+      - name: Run lyric parser stress regressions
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/widgets/apple_lyrics/parsers/lyric_parser_chain_test.dart
+
+      - name: Run lyric position synchronization regression
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/widgets/apple_lyrics/apple_lyrics_view_position_decouple_test.dart
+
+      - name: Run lyric rendering and artwork regressions
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/widgets/apple_lyrics/layout/lyric_layout_inactive_scale_test.dart
+          test/widgets/apple_lyrics/renderers/emphasize_effect_test.dart
+          test/widgets/apple_lyrics/renderers/line_renderer_test.dart
+          test/widgets/apple_lyrics/renderers/word_renderer_test.dart
+          test/widgets/apple_lyrics/apple_lyrics_view_test.dart
+          test/widgets/depth_shader_cover_test.dart
+          test/widgets/dynamic_cover_view_test.dart
+          test/widgets/player_artwork_preload_test.dart
+
+      - name: Run queue panel widget regressions
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/widgets/song_list_item_selector_test.dart
+          test/widgets/player_playlist_view_test.dart
+
+      - name: Run Personal FM queue continuation regressions
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/modules/personal_fm/personal_fm_section_test.dart
+
+      - name: Run car mode layout regressions
+        run: >-
+          flutter test --reporter expanded --concurrency=1
+          test/player/car_mode_layout_test.dart
+
+      - name: Run just_audio proxy lifecycle regressions
+        working-directory: third_party/just_audio
+        run: |
+          flutter pub get
+          flutter test test/just_audio_test.dart --reporter expanded --concurrency=1
+
+      - name: Verify settings search index
+        if: ${{ hashFiles('scripts/tools/gen_settings_search_index.dart') != '' }}
+        run: |
+          dart run scripts/tools/gen_settings_search_index.dart
+          git diff --exit-code -- lib/modules/settings/settings_search_index.g.dart
+
+  rust-core:
+    name: Rust local server regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: kugou_api_server/rust
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Run server and API tests
+        run: cargo test --locked
+
+  android-jvm:
+    name: Android JVM regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
+        with:
+          packages: platform-tools
+
+      - name: Install Android build packages
+        run: |
+          sdkmanager --install \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;28.2.13676358" \
+            "cmake;3.22.1"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve Flutter dependencies
+        run: flutter pub get
+
+      - name: Cache Gradle
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: Run Android JVM unit tests
+        run: >-
+          bash ./android/gradlew -p android :app:testLiteDebugUnitTest
+          --tests 'com.md3music.md3music.ArtworkCacheKeyTest'
+          --tests 'com.md3music.md3music.ArtworkDiskCacheTest'
+          --tests 'com.md3music.md3music.BoundedArtworkExecutorTest'
+          --tests 'com.md3music.md3music.CancellableMainThreadTaskTest'
+          --tests 'com.md3music.md3music.CoverBitmapSizingTest'
+          --tests 'com.md3music.md3music.LatestMediaCommandQueueTest'
+          --no-daemon --quiet
+
+      - name: Report Android JVM test failures
+        if: failure()
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+
+          report_dirs = [
+              Path("build/app/test-results/testLiteDebugUnitTest"),
+              Path("android/app/build/test-results/testLiteDebugUnitTest"),
+          ]
+          paths = [
+              path
+              for reports in report_dirs
+              for path in sorted(reports.glob("TEST-*.xml"))
+          ]
+          if not paths:
+              checked = ", ".join(str(path) for path in report_dirs)
+              print(f"No Gradle XML test reports found; checked: {checked}")
+          for path in paths:
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError as error:
+                  print(f"Unable to parse {path}: {error}")
+                  continue
+              for case in root.iter("testcase"):
+                  failures = [*case.findall("failure"), *case.findall("error")]
+                  for failure in failures:
+                      name = f"{case.get('classname', path.stem)}.{case.get('name', 'unknown')}"
+                      print(f"FAILED {name}: {failure.get('message', '')}")
+                      if failure.text:
+                          print(failure.text)
+          PY
+
+      - name: Run notification action JVM regression
+        run: >-
+          bash ./android/gradlew -p android :just_audio:testDebugUnitTest
+          --tests 'androidx.media3.session.DefaultActionFactoryTest'
+          --no-daemon --quiet
