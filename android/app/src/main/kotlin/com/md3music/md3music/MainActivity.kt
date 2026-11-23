@@ -797,6 +797,12 @@ class MainActivity : FlutterActivity() {
                         val timeout = Runnable { completeFloatingStart(FloatingLyricService.viewAdded) }
                         pendingFloatingTimeout = timeout
                         floatingHandler.postDelayed(timeout, FLOATING_START_TIMEOUT_MS)
+                        // The initial mode must be known BEFORE Service.onCreate/addView.
+                        getSharedPreferences(FloatingLyricService.PREFS_STATUS_NAME, MODE_PRIVATE)
+                            .edit()
+                            .putBoolean(FloatingLyricService.KEY_STATUS_MODE,
+                                call.argument<Boolean>("statusBarMode") ?: false)
+                            .apply()
                         val intent = Intent(this, FloatingLyricService::class.java).apply {
                             action = FloatingLyricService.ACTION_UPDATE_LYRIC
                             putExtra(FloatingLyricService.EXTRA_LYRIC, call.argument<String>("lyric") ?: "")
@@ -857,6 +863,15 @@ class MainActivity : FlutterActivity() {
                     startService(intent)
                     result.success(true)
                 }
+                "setStatusBarLyricMode" -> {
+                    val enabled = call.argument<Boolean>("enabled") ?: false
+                    val ok = FloatingLyricService.instance?.handleSetStatusBarMode(enabled) ?: true
+                    if (ok) {
+                        getSharedPreferences(FloatingLyricService.PREFS_STATUS_NAME, MODE_PRIVATE)
+                            .edit().putBoolean(FloatingLyricService.KEY_STATUS_MODE, enabled).apply()
+                    }
+                    result.success(ok)
+                }
                 "hasOverlayPermission" -> {
                     result.success(if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true)
                 }
@@ -908,6 +923,15 @@ class MainActivity : FlutterActivity() {
                         }
                         call.intArg(FloatingLyricService.EXTRA_CUSTOM_GRAD_END)?.let {
                             putExtra(FloatingLyricService.EXTRA_CUSTOM_GRAD_END, it)
+                        }
+                        call.argument<Double>(FloatingLyricService.EXTRA_STATUS_FONT_DP)?.let {
+                            putExtra(FloatingLyricService.EXTRA_STATUS_FONT_DP, it.toFloat())
+                        }
+                        call.intArg(FloatingLyricService.EXTRA_STATUS_PORTRAIT_WIDTH_PERCENT)?.let {
+                            putExtra(FloatingLyricService.EXTRA_STATUS_PORTRAIT_WIDTH_PERCENT, it)
+                        }
+                        call.intArg(FloatingLyricService.EXTRA_STATUS_LANDSCAPE_WIDTH_PERCENT)?.let {
+                            putExtra(FloatingLyricService.EXTRA_STATUS_LANDSCAPE_WIDTH_PERCENT, it)
                         }
                         call.intArg(FloatingLyricService.EXTRA_CUSTOM_UNPLAYED)?.let {
                             putExtra(FloatingLyricService.EXTRA_CUSTOM_UNPLAYED, it)

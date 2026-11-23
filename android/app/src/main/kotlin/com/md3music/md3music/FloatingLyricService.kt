@@ -62,6 +62,16 @@ class FloatingLyricService : Service() {
     private var lyricText1: GradientTextView? = null
     private var lyricText2: GradientTextView? = null
     private var params: WindowManager.LayoutParams? = null
+    private var statusLyricView: StatusBarLyricView? = null
+    private var statusParams: WindowManager.LayoutParams? = null
+    private var statusBarMode = false
+    private var statusFontDp = 14f
+    private var statusPortraitWidthPercent = 30
+    private var statusLandscapeWidthPercent = 55
+    private var lastLyric = ""
+    private var lastWords: List<WordTiming> = emptyList()
+    private var lastLyricPosition = 0L
+    private var lastPlaybackPosition = 0L
     // SCREEN_OFF/ON 广播接收器（onCreate 注册，onDestroy 注销）
     private var screenReceiver: BroadcastReceiver? = null
 
@@ -151,6 +161,13 @@ class FloatingLyricService : Service() {
         const val NOTIFICATION_ID = 1003
         private const val PREFS_NAME = "floating_lyric"
         private const val KEY_Y_PX = "y_px"
+        const val KEY_STATUS_MODE = "status_bar_mode"
+        const val PREFS_STATUS_NAME = PREFS_NAME
+        const val EXTRA_STATUS_FONT_DP = "statusFontDp"
+        const val EXTRA_STATUS_PORTRAIT_WIDTH_PERCENT = "statusPortraitWidthPercent"
+        const val EXTRA_STATUS_LANDSCAPE_WIDTH_PERCENT = "statusLandscapeWidthPercent"
+        private const val KEY_STATUS_PORTRAIT_WIDTH_PERCENT = "status_bar_portrait_width_percent"
+        private const val KEY_STATUS_LANDSCAPE_WIDTH_PERCENT = "status_bar_landscape_width_percent"
         // 阶段8：桌面歌词运行标志。开启期间本服务常驻 FGS（1003 可见通知）撑住
         // 进程前台，AudioPlaybackService 据此让位（不再显示保活空通知 1002）。
         @Volatile
@@ -224,6 +241,10 @@ class FloatingLyricService : Service() {
             stopSelf()
             return
         }
+        val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+        statusBarMode = prefs.getBoolean(KEY_STATUS_MODE, false)
+        statusPortraitWidthPercent = prefs.getInt(KEY_STATUS_PORTRAIT_WIDTH_PERCENT, 30).coerceIn(15, 90)
+        statusLandscapeWidthPercent = prefs.getInt(KEY_STATUS_LANDSCAPE_WIDTH_PERCENT, 55).coerceIn(15, 90)
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, createNotification())
         if (!createFloatingView()) {
@@ -241,6 +262,7 @@ class FloatingLyricService : Service() {
             screenReceiver = object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
                     screenOn = intent?.action != Intent.ACTION_SCREEN_OFF
+                    if (screenOn) statusLyricView?.invalidate()
                     val engine = io.flutter.embedding.engine.FlutterEngineCache.getInstance()
                         .get("md3music_engine") ?: return
                     io.flutter.plugin.common.MethodChannel(
@@ -263,7 +285,10 @@ class FloatingLyricService : Service() {
         super.onConfigurationChanged(newConfig)
         // 悬浮窗未创建（服务刚起/已销毁）时无需处理；post 到下一帧按最终
         // displayMetrics 重排，规避个别 ROM 回调时尺寸尚未刷新的时序问题。
-        rootView?.post { relayoutForOrientation() }
+        val target = statusLyricView ?: rootView
+        target?.post {
+            if (statusBarMode) relayoutStatusBar() else relayoutForOrientation()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -303,7 +328,10 @@ class FloatingLyricService : Service() {
                     intent.getIntExtra(EXTRA_PRESET_INDEX, lastPresetIndex),
                     intent.getIntExtra(EXTRA_CUSTOM_GRAD_START, customStart),
                     intent.getIntExtra(EXTRA_CUSTOM_GRAD_END, customEnd),
-                    intent.getIntExtra(EXTRA_CUSTOM_UNPLAYED, customUnplayed)
+                    intent.getIntExtra(EXTRA_CUSTOM_UNPLAYED, customUnplayed),
+                    intent.getFloatExtra(EXTRA_STATUS_FONT_DP, statusFontDp),
+                    intent.getIntExtra(EXTRA_STATUS_PORTRAIT_WIDTH_PERCENT, -1).takeIf { it in 15..90 },
+                    intent.getIntExtra(EXTRA_STATUS_LANDSCAPE_WIDTH_PERCENT, -1).takeIf { it in 15..90 }
                 )
             }
             ACTION_SET_PLAYING -> {
@@ -324,10 +352,16 @@ class FloatingLyricService : Service() {
     /// 与 onStartCommand 分支共用同一实现，保证两条路径行为一致。
     fun handleUpdateLyric(lyric: String, nextLyric: String?, placeholder: String,
                           wordsJson: String, basePosMs: Long) {
-        updateLyric(lyric, nextLyric, placeholder, parseWords(wordsJson), basePosMs)
+        val parsed = parseWords(wordsJson)
+        lastLyric = placeholder.ifEmpty { lyric }
+        lastWords = parsed
+        lastLyricPosition = basePosMs
+        updateLyric(lyric, nextLyric, placeholder, parsed, basePosMs)
     }
 
     fun handleUpdateProgress(pos: Long, dur: Long) {
+        lastPlaybackPosition = pos
+        statusLyricView?.syncPosition(pos, isPlayingFlag)
         progressBar?.updateProgress(pos, dur)
         lyricText1?.onKaraokePositionSync(pos, isPlayingFlag)
     }
@@ -340,6 +374,7 @@ class FloatingLyricService : Service() {
             else android.R.drawable.ic_media_play
         )
         lyricText1?.onKaraokePlayingChanged(isPlayingFlag)
+        statusLyricView?.setPlaying(isPlayingFlag)
     }
 
     /// 可空参数 = 字段不变（保持与 intent extra 缺省语义一致）
@@ -347,7 +382,10 @@ class FloatingLyricService : Service() {
                         opacity: Int?, locked: Boolean?,
                         gradientStart: Int?, gradientEnd: Int?, unplayedColor: Int?,
                         colorMode: Int?, activePreset: Int?,
-                        customStart: Int?, customEnd: Int?, customUnplayed: Int?) {
+                        customStart: Int?, customEnd: Int?, customUnplayed: Int?,
+                        statusFontDp: Float? = null,
+                        statusPortraitWidthPercent: Int? = null,
+                        statusLandscapeWidthPercent: Int? = null) {
         fontSize?.let { fontSizeSp = it }
         displayScale?.let { this.displayScale = it }
         doubleLine?.let { this.doubleLine = it }
@@ -366,7 +404,58 @@ class FloatingLyricService : Service() {
         customStart?.let { this.customStart = it }
         customEnd?.let { this.customEnd = it }
         customUnplayed?.let { this.customUnplayed = it }
+        statusFontDp?.let { this.statusFontDp = it.coerceIn(12f, 22f) }
+        if (statusPortraitWidthPercent != null || statusLandscapeWidthPercent != null) {
+            val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            statusPortraitWidthPercent?.let {
+                this.statusPortraitWidthPercent = it.coerceIn(15, 90)
+                prefs.putInt(KEY_STATUS_PORTRAIT_WIDTH_PERCENT, this.statusPortraitWidthPercent)
+            }
+            statusLandscapeWidthPercent?.let {
+                this.statusLandscapeWidthPercent = it.coerceIn(15, 90)
+                prefs.putInt(KEY_STATUS_LANDSCAPE_WIDTH_PERCENT, this.statusLandscapeWidthPercent)
+            }
+            prefs.apply()
+        }
+        statusLyricView?.setFontDp(this.statusFontDp)
+        if (statusLyricView != null) relayoutStatusBar()
         applyConfig()
+    }
+
+    /** Live switch, used by the Dart settings page. Keeps the old window if addView fails. */
+    fun handleSetStatusBarMode(enabled: Boolean): Boolean {
+        if (enabled == statusBarMode) return true
+        val old = statusBarMode
+        statusBarMode = enabled
+        val ok = if (enabled) createStatusBarFloatingView() else createFloatingView()
+        if (!ok) {
+            statusBarMode = old
+            return false
+        }
+        if (enabled) {
+            cancelHeightAnimation()
+            expanded = false
+            lyricText1?.clearKaraoke()
+            rootView?.let { runCatching { windowManager?.removeView(it) } }
+            rootView = null
+            lyricText1 = null
+            lyricText2 = null
+            params = null
+            statusLyricView?.apply {
+                setFontDp(statusFontDp)
+                setLine(lastLyric, lastWords, lastPlaybackPosition, isPlayingFlag)
+            }
+        } else {
+            statusLyricView?.let { runCatching { windowManager?.removeView(it) } }
+            statusLyricView = null
+            statusParams = null
+            updateLyric(lastLyric, null, "", lastWords, lastPlaybackPosition)
+            applyConfig()
+        }
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            .putBoolean(KEY_STATUS_MODE, statusBarMode).apply()
+        updateNotification()
+        return true
     }
 
     private fun hasOverlayPermission(): Boolean =
@@ -470,6 +559,7 @@ class FloatingLyricService : Service() {
         basePosMs: Long = 0L,
     ) {
         val safeLyric = placeholder.ifEmpty { lyric }
+        statusLyricView?.setLine(safeLyric, words, basePosMs, isPlayingFlag)
         val t1 = lyricText1 ?: return
         // 幂等：文本未变不重设，避免 setText 触发无效 invalidate/requestLayout
         // （applyConfig 与 Dart 侧重复推送都会走到这里）
@@ -525,12 +615,17 @@ class FloatingLyricService : Service() {
                        else android.R.drawable.ic_lock_idle_lock
         val lockText = if (locked) "解锁歌词" else "锁定歌词"
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("MD3Music 桌面歌词")
-            .setContentText(if (locked) "已锁定 · 点击穿透" else "已开启 · 可拖动")
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(if (statusBarMode) "MD3Music 状态栏位置歌词" else "MD3Music 桌面歌词")
+            .setContentText(
+                if (statusBarMode) "已开启 · 顶部单行 · 点击穿透"
+                else if (locked) "已锁定 · 点击穿透"
+                else "已开启 · 可拖动"
+            )
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setOngoing(true)
-            .addAction(lockIcon, lockText, lockPendingIntent)
+        if (!statusBarMode) builder.addAction(lockIcon, lockText, lockPendingIntent)
+        return builder
             .addAction(android.R.drawable.ic_media_pause, "关闭", stopPendingIntent)
             .build()
     }
@@ -548,6 +643,7 @@ class FloatingLyricService : Service() {
         v * resources.displayMetrics.scaledDensity
 
     private fun createFloatingView(): Boolean {
+        if (statusBarMode) return createStatusBarFloatingView()
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
         // ===== 唯一容器 =====
@@ -710,6 +806,84 @@ class FloatingLyricService : Service() {
             Log.w(TAG, "Overlay window rejected: ${e.message}")
             false
         }
+    }
+
+    /**
+     * Status bar overlay remains a regular TYPE_APPLICATION_OVERLAY (not a
+     * SystemUI modification). Portrait and landscape have independent,
+     * user-configurable widths as a percentage of the CURRENT display width.
+     * Default portrait 30% ~= Kugou's measured 363px on 1216px RedMagic;
+     * landscape defaults to 55% so long lyric lines can use more room.
+     * Width can overlap clock/signal areas if the user deliberately widens it.
+     */
+    private fun statusWindowLayout(): WindowManager.LayoutParams {
+        val dm = resources.displayMetrics
+        val screenWidth = dm.widthPixels.coerceAtLeast(1)
+        val landscape = resources.configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val percent = if (landscape) statusLandscapeWidthPercent else statusPortraitWidthPercent
+        val minWidth = dp(48).coerceAtMost(screenWidth)
+        val maxWidth = (screenWidth - dp(12)).coerceAtLeast(minWidth)
+        val windowWidth = (screenWidth * percent / 100f).roundToInt().coerceIn(minWidth, maxWidth)
+        val windowHeight = dp((statusFontDp + 7f).roundToInt())
+        val flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH or
+                WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        else {
+            @Suppress("DEPRECATION")
+            WindowManager.LayoutParams.TYPE_PHONE
+        }
+        return WindowManager.LayoutParams(
+            windowWidth, windowHeight, type, flags, PixelFormat.TRANSPARENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = (screenWidth - windowWidth) / 2
+            y = dp(10)
+            alpha = 0.8f
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                setFitInsetsTypes(
+                    android.view.WindowInsets.Type.navigationBars() or
+                    android.view.WindowInsets.Type.captionBar()
+                )
+            }
+        }
+    }
+
+    private fun createStatusBarFloatingView(): Boolean {
+        windowManager = (getSystemService(WINDOW_SERVICE) as WindowManager)
+        val view = StatusBarLyricView(this)
+        val p = statusWindowLayout()
+        return try {
+            windowManager?.addView(view, p)
+            statusLyricView = view
+            statusParams = p
+            view.setFontDp(statusFontDp)
+            view.setLine(lastLyric, lastWords, lastLyricPosition, isPlayingFlag)
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Unable to create status lyric overlay: ${e.message}")
+            false
+        }
+    }
+
+    private fun relayoutStatusBar() {
+        val view = statusLyricView ?: return
+        val p = statusParams ?: return
+        val n = statusWindowLayout()
+        p.x = n.x
+        p.y = n.y
+        p.width = n.width
+        p.height = n.height
+        runCatching { windowManager?.updateViewLayout(view, p) }
     }
 
     /// 按当前显示尺寸重算悬浮窗宽度与纵向位置。
@@ -1583,10 +1757,13 @@ class FloatingLyricService : Service() {
         } catch (_: Exception) {}
         super.onDestroy()
         rootView?.let {
-            try {
-                windowManager?.removeView(it)
-            } catch (_: Exception) {}
+            try { windowManager?.removeView(it) } catch (_: Exception) {}
         }
+        statusLyricView?.let {
+            try { windowManager?.removeView(it) } catch (_: Exception) {}
+        }
+        statusLyricView = null
+        statusParams = null
     }
 }
 

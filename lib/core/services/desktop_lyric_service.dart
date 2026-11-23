@@ -122,6 +122,79 @@ class DesktopLyricService {
   bool _enabled = false;
   bool get enabled => _enabled;
 
+  // When true, FloatingLyricService renders a transparent single-line overlay
+  // at the physical status-bar bounds instead of its original desktop panel.
+  // The rendering modes are mutually exclusive; previous desktop mode remains
+  // default and unchanged. This is a RedMagic proof of concept, not SystemUI.
+  bool _statusBarMode = false;
+  bool get statusBarMode => _statusBarMode;
+  int _statusBarFontSize = 14;
+  int get statusBarFontSize => _statusBarFontSize;
+
+  int _statusBarPortraitWidthPercent = 30;
+  int _statusBarLandscapeWidthPercent = 55;
+  int get statusBarPortraitWidthPercent => _statusBarPortraitWidthPercent;
+  int get statusBarLandscapeWidthPercent => _statusBarLandscapeWidthPercent;
+
+  Future<void> loadStatusBarPreferences() async {
+    _statusBarMode = await _settings.getStatusBarOverlayMode();
+    _statusBarFontSize = await _settings.getStatusBarOverlayFontSize();
+    _statusBarPortraitWidthPercent =
+        await _settings.getStatusBarPortraitWidthPercent();
+    _statusBarLandscapeWidthPercent =
+        await _settings.getStatusBarLandscapeWidthPercent();
+    _notify();
+  }
+
+  Future<bool> setStatusBarMode(bool value) async {
+    if (_statusBarMode == value) return true;
+    // Switching an existing overlay requires addView to succeed before the
+    // old window is removed. Native reports false on failed switches.
+    bool ok;
+    try {
+      ok = await _channel.invokeMethod<bool>(
+            'setStatusBarLyricMode', {'enabled': value}) ?? false;
+    } catch (_) {
+      ok = false;
+    }
+    if (!ok) return false;
+    _statusBarMode = value;
+    await _settings.setStatusBarOverlayMode(value);
+    await _pushConfig();
+    _syncCurrentFromPlayer();
+    _notify();
+    return true;
+  }
+
+  Future<void> setStatusBarFontSize(int value) async {
+    if (!const [12, 14, 16, 18, 22].contains(value)) return;
+    _statusBarFontSize = value;
+    await _settings.setStatusBarOverlayFontSize(value);
+    if (_enabled) await _pushConfig();
+    _notify();
+  }
+
+  /// 更改竖屏/横屏显示窗口的宽度。百分比相对当前屏幕宽度，彼此独立。
+  /// 设置值立即同步到运行中的原生悬浮窗（并不会修改桌面歌词尺寸）。
+  Future<void> setStatusBarWidthPercent({
+    required bool landscape,
+    required int percent,
+  }) async {
+    if (percent < SettingsRepository.statusBarWidthMinPercent ||
+        percent > SettingsRepository.statusBarWidthMaxPercent) return;
+    if (landscape) {
+      if (percent == _statusBarLandscapeWidthPercent) return;
+      _statusBarLandscapeWidthPercent = percent;
+      await _settings.setStatusBarLandscapeWidthPercent(percent);
+    } else {
+      if (percent == _statusBarPortraitWidthPercent) return;
+      _statusBarPortraitWidthPercent = percent;
+      await _settings.setStatusBarPortraitWidthPercent(percent);
+    }
+    if (_enabled) await _pushConfig();
+    _notify();
+  }
+
   // 蓝牙歌词开关：独立于悬浮窗。ColorOS SystemUI 与 AVRCP 共用 MediaSession，
   // 4.0 接入后原生端必须保持稳定 title/artist，因此不再用该通道改写会话身份。
   bool _bluetoothLyricEnabled = false;
@@ -794,6 +867,7 @@ class DesktopLyricService {
     final started = await MediaNotificationService.startFloatingLyric(
       lyric: initialLyric,
       title: song?.title ?? '',
+      statusBarMode: _statusBarMode,
     );
     if (!started) {
       showToast(
@@ -847,7 +921,9 @@ class DesktopLyricService {
     final running =
         await MediaNotificationService.isFloatingLyricWindowRunning();
     if (!running) return;
+    await _loadConfig();
     _enabled = true;
+    await _pushConfig();
     // 行索引与推送基线全部复位：下一拍（或 provider 绑定成功后那一拍）按
     // 常规路径重推当前行/进度/播放态，幂等去重保证不产生额外重绘。
     _currentLineIndex = -2;
@@ -1517,6 +1593,12 @@ class DesktopLyricService {
   }
 
   Future<void> _loadConfig() async {
+    _statusBarMode = await _settings.getStatusBarOverlayMode();
+    _statusBarFontSize = await _settings.getStatusBarOverlayFontSize();
+    _statusBarPortraitWidthPercent =
+        await _settings.getStatusBarPortraitWidthPercent();
+    _statusBarLandscapeWidthPercent =
+        await _settings.getStatusBarLandscapeWidthPercent();
     _fontSize = await _settings.getDesktopLyricFontSize();
     _doubleLine = await _settings.getDesktopLyricDoubleLine();
     _opacity = await _settings.getDesktopLyricOpacity();
@@ -1540,6 +1622,9 @@ class DesktopLyricService {
     try {
       await _channel.invokeMethod('setDesktopLyricConfig', {
         'fontSize': _fontSize,
+        'statusFontDp': _statusBarFontSize.toDouble(),
+        'statusPortraitWidthPercent': _statusBarPortraitWidthPercent,
+        'statusLandscapeWidthPercent': _statusBarLandscapeWidthPercent,
         'displayScale': _theme?.displayScale ?? kDefaultDisplayScale,
         'doubleLine': _doubleLine,
         'opacity': _opacity,

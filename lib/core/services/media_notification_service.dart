@@ -510,11 +510,13 @@ class MediaNotificationService {
   static Future<bool> startFloatingLyric({
     required String lyric,
     required String title,
+    bool statusBarMode = false,
   }) async {
     try {
       final r = await _channel.invokeMethod<bool>('startFloatingLyric', {
         'lyric': lyric,
         'title': title,
+        'statusBarMode': statusBarMode,
       });
       return r ?? false;
     } catch (_) {

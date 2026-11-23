@@ -2351,6 +2351,15 @@ class AudioPlaybackService : Service() {
                             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(this) else true
                         )
                     }
+                    "setStatusBarLyricMode" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        val ok = FloatingLyricService.instance?.handleSetStatusBarMode(enabled) ?: true
+                        if (ok) {
+                            getSharedPreferences(FloatingLyricService.PREFS_STATUS_NAME, MODE_PRIVATE)
+                                .edit().putBoolean(FloatingLyricService.KEY_STATUS_MODE, enabled).apply()
+                        }
+                        result.success(ok)
+                    }
                     "startFloatingLyric" -> {
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
                             // 无头引擎没有 Activity 可跳授权页，如实报错让 Dart 端提示；
@@ -2361,6 +2370,11 @@ class AudioPlaybackService : Service() {
                                 result.success(true)
                             } else {
                                 try {
+                                    getSharedPreferences(FloatingLyricService.PREFS_STATUS_NAME, MODE_PRIVATE)
+                                        .edit()
+                                        .putBoolean(FloatingLyricService.KEY_STATUS_MODE,
+                                            call.argument<Boolean>("statusBarMode") ?: false)
+                                        .apply()
                                     startService(
                                         Intent(this, FloatingLyricService::class.java).apply {
                                             action = FloatingLyricService.ACTION_UPDATE_LYRIC
@@ -2443,7 +2457,10 @@ class AudioPlaybackService : Service() {
                             (call.argument<Any?>(FloatingLyricService.EXTRA_PRESET_INDEX) as? Number)?.toInt(),
                             (call.argument<Any?>(FloatingLyricService.EXTRA_CUSTOM_GRAD_START) as? Number)?.toInt(),
                             (call.argument<Any?>(FloatingLyricService.EXTRA_CUSTOM_GRAD_END) as? Number)?.toInt(),
-                            (call.argument<Any?>(FloatingLyricService.EXTRA_CUSTOM_UNPLAYED) as? Number)?.toInt()
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_CUSTOM_UNPLAYED) as? Number)?.toInt(),
+                            call.argument<Double>(FloatingLyricService.EXTRA_STATUS_FONT_DP)?.toFloat(),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_STATUS_PORTRAIT_WIDTH_PERCENT) as? Number)?.toInt(),
+                            (call.argument<Any?>(FloatingLyricService.EXTRA_STATUS_LANDSCAPE_WIDTH_PERCENT) as? Number)?.toInt()
                         )
                         result.success(true)
                     }

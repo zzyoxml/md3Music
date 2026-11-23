@@ -71,11 +71,16 @@ class _DesktopLyricSettingsPanelState
   double? _draggingOpacity;
   double? _draggingSungHue;
   double? _draggingUnsungHue;
+  double? _draggingStatusPortraitWidth;
+  double? _draggingStatusLandscapeWidth;
 
   @override
   void initState() {
     super.initState();
     _svc.addListener(_onServiceChanged);
+    // The mode is persisted separately from desktop-lyric appearance settings.
+    // ignore: discarded_futures
+    _svc.loadStatusBarPreferences();
   }
 
   @override
@@ -86,6 +91,54 @@ class _DesktopLyricSettingsPanelState
 
   void _onServiceChanged() {
     if (mounted) setState(() {});
+  }
+
+  Widget _buildStatusBarWidthSlider({
+    required String label,
+    required bool landscape,
+    required int currentPercent,
+  }) {
+    final dragging = landscape
+        ? _draggingStatusLandscapeWidth
+        : _draggingStatusPortraitWidth;
+    final value = dragging ?? currentPercent.toDouble();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('$label · ${value.round()}%'),
+          Slider(
+            min: 15,
+            max: 90,
+            divisions: 15,
+            value: value.clamp(15.0, 90.0).toDouble(),
+            label: '${value.round()}%',
+            onChanged: (next) => setState(() {
+              if (landscape) {
+                _draggingStatusLandscapeWidth = next;
+              } else {
+                _draggingStatusPortraitWidth = next;
+              }
+            }),
+            onChangeEnd: (next) {
+              setState(() {
+                if (landscape) {
+                  _draggingStatusLandscapeWidth = null;
+                } else {
+                  _draggingStatusPortraitWidth = null;
+                }
+              });
+              // ignore: discarded_futures
+              _svc.setStatusBarWidthPercent(
+                landscape: landscape,
+                percent: next.round(),
+              );
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   ColorScheme get _cs => Theme.of(context).colorScheme;
@@ -100,6 +153,72 @@ class _DesktopLyricSettingsPanelState
     final child = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (Platform.isAndroid) ...[
+          SwitchListTile.adaptive(
+            title: const Text('启用悬浮歌词'),
+            subtitle: const Text('状态栏和桌面歌词共用这个启停开关'),
+            value: _svc.enabled,
+            onChanged: (value) async {
+              if (value) {
+                await _svc.enable();
+              } else {
+                await _svc.disable();
+              }
+            },
+          ),
+          SwitchListTile.adaptive(
+            title: const Text('酷狗式状态栏歌词（实验性）'),
+            subtitle: const Text(
+              '启用桌面歌词后改为顶部单行显示，不再显示桌面控制面板；'
+              '需允许悬浮窗，红魔 11 Pro+ 已取得参考窗口参数',
+            ),
+            value: _svc.statusBarMode,
+            onChanged: (value) async {
+              final ok = await _svc.setStatusBarMode(value);
+              if (!ok && mounted) {
+                ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                  const SnackBar(content: Text('顶部窗口切换失败，请检查悬浮窗权限')),
+                );
+              }
+            },
+          ),
+          if (_svc.statusBarMode) ...[
+            ListTile(
+              title: const Text('状态栏歌词字号'),
+              subtitle: const Text('酷狗提供 12、14、16、18、22 五档；默认 14dp'),
+              trailing: DropdownButton<int>(
+                value: _svc.statusBarFontSize,
+                items: const [12, 14, 16, 18, 22]
+                    .map((size) => DropdownMenuItem<int>(
+                          value: size,
+                          child: Text('$size'),
+                        ))
+                    .toList(),
+                onChanged: (size) {
+                  if (size != null) _svc.setStatusBarFontSize(size);
+                },
+              ),
+            ),
+            _buildStatusBarWidthSlider(
+              label: '竖屏歌词宽度',
+              landscape: false,
+              currentPercent: _svc.statusBarPortraitWidthPercent,
+            ),
+            _buildStatusBarWidthSlider(
+              label: '横屏歌词宽度',
+              landscape: true,
+              currentPercent: _svc.statusBarLandscapeWidthPercent,
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Text(
+                '宽度按当前屏幕的百分比计算，旋转后自动采用对应设置。'
+                '过宽可能与时间、信号或电量图标重叠；部分全屏游戏会隐藏系统状态栏。',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ],
+        ],
         _buildPreview(),
         _buildColorSection(),
         _buildTypeSection(),

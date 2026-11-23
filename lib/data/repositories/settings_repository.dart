@@ -901,6 +901,58 @@ class SettingsRepository {
     await prefs.setBool(_keyAccompanyFeatureEnabled, v);
   }
 
+  // ===== Kugou-style status-bar overlay (experimental Android option) =====
+  Future<bool> getStatusBarOverlayMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool('settings_dl_status_bar_mode') ?? false;
+  }
+
+  Future<void> setStatusBarOverlayMode(bool enabled) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('settings_dl_status_bar_mode', enabled);
+  }
+
+  Future<int> getStatusBarOverlayFontSize() async {
+    final prefs = await SharedPreferences.getInstance();
+    final value = prefs.getInt('settings_dl_status_bar_size') ?? 14;
+    return const [12, 14, 16, 18, 22].contains(value) ? value : 14;
+  }
+
+  Future<void> setStatusBarOverlayFontSize(int size) async {
+    if (!const [12, 14, 16, 18, 22].contains(size)) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('settings_dl_status_bar_size', size);
+  }
+
+  // 竖屏和横屏单独保留的状态栏歌词宽度，占屏幕宽度百分比。
+  // 默认竖屏 30%（与红魔参考的约 132dp 接近），横屏 55%。
+  static const int statusBarWidthMinPercent = 15;
+  static const int statusBarWidthMaxPercent = 90;
+
+  Future<int> getStatusBarPortraitWidthPercent() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getInt('settings_dl_status_bar_portrait_width_pct') ?? 30)
+        .clamp(statusBarWidthMinPercent, statusBarWidthMaxPercent).toInt();
+  }
+
+  Future<int> getStatusBarLandscapeWidthPercent() async {
+    final prefs = await SharedPreferences.getInstance();
+    return (prefs.getInt('settings_dl_status_bar_landscape_width_pct') ?? 55)
+        .clamp(statusBarWidthMinPercent, statusBarWidthMaxPercent).toInt();
+  }
+
+  Future<void> setStatusBarPortraitWidthPercent(int percent) async {
+    if (percent < statusBarWidthMinPercent || percent > statusBarWidthMaxPercent) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('settings_dl_status_bar_portrait_width_pct', percent);
+  }
+
+  Future<void> setStatusBarLandscapeWidthPercent(int percent) async {
+    if (percent < statusBarWidthMinPercent || percent > statusBarWidthMaxPercent) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('settings_dl_status_bar_landscape_width_pct', percent);
+  }
+
   // ===== 桌面歌词配置 =====
 
   Future<double> getDesktopLyricFontSize() async {
