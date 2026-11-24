@@ -166,6 +166,7 @@ class FloatingLyricService : Service() {
         const val EXTRA_STATUS_FONT_DP = "statusFontDp"
         const val EXTRA_STATUS_PORTRAIT_WIDTH_PERCENT = "statusPortraitWidthPercent"
         const val EXTRA_STATUS_LANDSCAPE_WIDTH_PERCENT = "statusLandscapeWidthPercent"
+        private const val KEY_STATUS_FONT_DP = "status_bar_font_dp"
         private const val KEY_STATUS_PORTRAIT_WIDTH_PERCENT = "status_bar_portrait_width_percent"
         private const val KEY_STATUS_LANDSCAPE_WIDTH_PERCENT = "status_bar_landscape_width_percent"
         // 阶段8：桌面歌词运行标志。开启期间本服务常驻 FGS（1003 可见通知）撑住
@@ -243,6 +244,9 @@ class FloatingLyricService : Service() {
         }
         val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
         statusBarMode = prefs.getBoolean(KEY_STATUS_MODE, false)
+        // Keep the native view consistent with the Dart-persisted setting even if
+        // a foreground service is restored before Flutter has sent its config.
+        statusFontDp = prefs.getFloat(KEY_STATUS_FONT_DP, 14f).coerceIn(12f, 22f)
         statusPortraitWidthPercent = prefs.getInt(KEY_STATUS_PORTRAIT_WIDTH_PERCENT, 30).coerceIn(15, 90)
         statusLandscapeWidthPercent = prefs.getInt(KEY_STATUS_LANDSCAPE_WIDTH_PERCENT, 55).coerceIn(15, 90)
         createNotificationChannel()
@@ -404,21 +408,41 @@ class FloatingLyricService : Service() {
         customStart?.let { this.customStart = it }
         customEnd?.let { this.customEnd = it }
         customUnplayed?.let { this.customUnplayed = it }
-        statusFontDp?.let { this.statusFontDp = it.coerceIn(12f, 22f) }
-        if (statusPortraitWidthPercent != null || statusLandscapeWidthPercent != null) {
+        // Only change the native painter/layout if a setting actually changed.
+        // The previous implementation reset scrollX and relaid out the window
+        // for every config push, even for unrelated desktop-lyric settings.
+        var statusLayoutChanged = false
+        if (statusFontDp != null || statusPortraitWidthPercent != null ||
+            statusLandscapeWidthPercent != null) {
             val prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit()
+            statusFontDp?.let {
+                val next = it.coerceIn(12f, 22f)
+                prefs.putFloat(KEY_STATUS_FONT_DP, next)
+                if (this.statusFontDp != next) {
+                    this.statusFontDp = next
+                    statusLyricView?.setFontDp(next)
+                    statusLayoutChanged = true
+                }
+            }
             statusPortraitWidthPercent?.let {
-                this.statusPortraitWidthPercent = it.coerceIn(15, 90)
-                prefs.putInt(KEY_STATUS_PORTRAIT_WIDTH_PERCENT, this.statusPortraitWidthPercent)
+                val next = it.coerceIn(15, 90)
+                prefs.putInt(KEY_STATUS_PORTRAIT_WIDTH_PERCENT, next)
+                if (this.statusPortraitWidthPercent != next) {
+                    this.statusPortraitWidthPercent = next
+                    statusLayoutChanged = true
+                }
             }
             statusLandscapeWidthPercent?.let {
-                this.statusLandscapeWidthPercent = it.coerceIn(15, 90)
-                prefs.putInt(KEY_STATUS_LANDSCAPE_WIDTH_PERCENT, this.statusLandscapeWidthPercent)
+                val next = it.coerceIn(15, 90)
+                prefs.putInt(KEY_STATUS_LANDSCAPE_WIDTH_PERCENT, next)
+                if (this.statusLandscapeWidthPercent != next) {
+                    this.statusLandscapeWidthPercent = next
+                    statusLayoutChanged = true
+                }
             }
             prefs.apply()
         }
-        statusLyricView?.setFontDp(this.statusFontDp)
-        if (statusLyricView != null) relayoutStatusBar()
+        if (statusLayoutChanged && statusLyricView != null) relayoutStatusBar()
         applyConfig()
     }
 
@@ -529,7 +553,15 @@ class FloatingLyricService : Service() {
         // 面板读数与选中态跟着配置走：Dart 侧下发新配置时，悬浮窗内的面板
         // 也不会停留在旧值上（两端共用同一份状态是本项目的既有约定）。
         refreshPanelReadouts()
-        updateLyric(lyricText1?.text?.toString() ?: "", lyricText2?.text?.toString())
+        // In status-bar mode lyricText1/lyricText2 do not exist. Reading an
+        // absent desktop TextView yields an empty string and updateLyric()
+        // would erase the *currently playing* status-bar line on every slider
+        // update. The status view already retains its line/timings: repaint it.
+        if (statusBarMode) {
+            statusLyricView?.invalidate()
+        } else {
+            updateLyric(lyricText1?.text?.toString() ?: "", lyricText2?.text?.toString())
+        }
     }
 
     /// 解析 Dart 下发的逐字时间戳 JSON（[{"t":"字","s":起始ms,"d":时长ms}]）。
@@ -883,7 +915,14 @@ class FloatingLyricService : Service() {
         p.y = n.y
         p.width = n.width
         p.height = n.height
-        runCatching { windowManager?.updateViewLayout(view, p) }
+        try {
+            windowManager?.updateViewLayout(view, p)
+            view.invalidate()
+        } catch (e: Exception) {
+            // Never hide a failed layout update: ROM-specific overlay rejection
+            // needs a logcat explanation rather than an apparently lost lyric.
+            Log.e(TAG, "Status lyric relayout failed: x=${p.x}, width=${p.width}, height=${p.height}", e)
+        }
     }
 
     /// 按当前显示尺寸重算悬浮窗宽度与纵向位置。
