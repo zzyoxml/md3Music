@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 锁屏歌词卡片专用图标：播放（Material Icons play_arrow）。
+     独立成档（不复用 concept_/ic_wg_ 等既有矢量）：VectorDrawable 的 tint 是共享
+     ConstantState 上的，多个入口复用同一份资源会互相串色；颜色一律由
+     LockScreenCardRenderer 在烘焙位图时 setTint 决定，此处不声明 android:tint。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M8,5v14l11,-7z" />
+</vector>

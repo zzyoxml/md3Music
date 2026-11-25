@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  概念版 4×1 桌面小组件布局（参考讨论 #160 的酷狗概念版卡片）：
+  圆形封面 + 外圈彩色圆环、单行「歌名 - 歌手」、右上收藏爱心、
+  底部「播放模式 / 上一首 / 播放暂停 / 下一首」四个纯图标按钮。
+  无进度条（用户明确不要卡片顶部进度条）。
+
+  动态取色实现：
+  - 卡片底：concept_card_bg（shape 圆角 + setColorFilter）。不用烤位图——
+    位图经 fitXY 会被启动器给的宽高拉伸，圆角随之变成椭圆。
+  - 圆环 / 占位圆：各自独立的 oval shape drawable + setColorFilter。
+  - 播放/暂停、收藏、播放模式：全部「叠放多图标 + setViewVisibility」，
+    不用 setImageViewResource 换资源（MIUI 桌面跨版本会忽略资源切换）。
+
+  MIUI/HyperOS 启动器兼容性约束（与既有三个小部件同一口径）：
+  - 不用负 margin（部分启动器兼容层会静默失败，表现为「载入窗口小部件时出现问题」）；
+  - 不用裸 <View> 做占位/分隔：横向间距用 margin，弹性空隙用 layout_weight。
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/concept_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <!-- 卡片底：shape 圆角 + setColorFilter 上「封面主色派生底色」。
+         不用烤位图：启动器给的宽度不固定，位图经 fitXY 拉伸会把圆角拉成椭圆。
+         左右各留 12dp：卡片不再顶到格子边缘，圆角过渡有完整留白（用户反馈
+         「左右两侧太长导致圆角被裁切」即此）。 -->
+    <ImageView
+        android:id="@+id/concept_card_bg"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginTop="3dp"
+        android:layout_marginBottom="3dp"
+        android:scaleType="fitXY"
+        android:src="@drawable/concept_card_bg"
+        android:contentDescription="@null" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="22dp"
+        android:paddingEnd="22dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
+
+        <!-- 封面组：48dp 圆环（8dp 描边 → 内孔 32dp）+ 33dp 圆形封面
+             （33 而非 32：留 0.5dp 重叠盖住抗锯齿缝隙，参考图里封面与圆环是紧贴的） -->
+        <FrameLayout
+            android:layout_width="48dp"
+            android:layout_height="48dp">
+
+            <ImageView
+                android:id="@+id/concept_cover_ring"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="fitXY"
+                android:src="@drawable/concept_cover_ring"
+                android:contentDescription="@null" />
+
+            <ImageView
+                android:id="@+id/concept_cover_placeholder"
+                android:layout_width="33dp"
+                android:layout_height="33dp"
+                android:layout_gravity="center"
+                android:scaleType="fitXY"
+                android:src="@drawable/concept_cover_placeholder"
+                android:contentDescription="@string/widget_cover_desc" />
+
+            <ImageView
+                android:id="@+id/concept_cover"
+                android:layout_width="33dp"
+                android:layout_height="33dp"
+                android:layout_gravity="center"
+                android:scaleType="fitXY"
+                android:visibility="gone"
+                android:contentDescription="@string/widget_cover_desc" />
+        </FrameLayout>
+
+        <!-- 右侧两行：标题行（歌名 - 歌手 + 爱心）、按钮行 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:orientation="vertical">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <TextView
+                    android:id="@+id/concept_title"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="MD3Music"
+                    android:textSize="15sp"
+                    android:fontFamily="sans-serif-medium"
+                    android:maxLines="1"
+                    android:ellipsize="end" />
+
+                <!-- 收藏：双图标叠放 + 可见性切换（同播放键，规避换资源失效） -->
+                <FrameLayout
+                    android:id="@+id/concept_btn_favorite"
+                    android:layout_width="28dp"
+                    android:layout_height="28dp"
+                    android:layout_marginStart="4dp">
+
+                    <ImageView
+                        android:id="@+id/concept_heart_off"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/concept_heart_off"
+                        android:contentDescription="@string/concept_favorite_desc" />
+
+                    <ImageView
+                        android:id="@+id/concept_heart_on"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/concept_heart_on"
+                        android:visibility="gone"
+                        android:contentDescription="@string/concept_favorite_desc" />
+                </FrameLayout>
+            </LinearLayout>
+
+            <!-- 按钮行：四等分，图标居中 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="28dp"
+                android:layout_marginTop="2dp"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <!-- 播放模式：顺序 / 列表循环 / 单曲循环 / 随机，四图标叠放 -->
+                <FrameLayout
+                    android:id="@+id/concept_btn_mode"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1">
+
+                    <ImageView
+                        android:id="@+id/concept_mode_off"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/concept_mode_off"
+                        android:contentDescription="@string/concept_mode_desc" />
+
+                    <ImageView
+                        android:id="@+id/concept_mode_all"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/concept_mode_all"
+                        android:visibility="gone"
+                        android:contentDescription="@string/concept_mode_desc" />
+
+                    <ImageView
+                        android:id="@+id/concept_mode_one"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/concept_mode_one"
+                        android:visibility="gone"
+                        android:contentDescription="@string/concept_mode_desc" />
+
+                    <ImageView
+                        android:id="@+id/concept_mode_shuffle"
+                        android:layout_width="20dp"
+                        android:layout_height="20dp"
+                        android:layout_gravity="center"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/concept_mode_shuffle"
+                        android:visibility="gone"
+                        android:contentDescription="@string/concept_mode_desc" />
+                </FrameLayout>
+
+                <FrameLayout
+                    android:id="@+id/concept_btn_prev"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1">
+
+                    <ImageView
+                        android:id="@+id/concept_ic_prev"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_gravity="center"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/concept_ic_previous"
+                        android:contentDescription="@string/widget_prev_desc" />
+                </FrameLayout>
+
+                <FrameLayout
+                    android:id="@+id/concept_btn_play"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1">
+
+                    <ImageView
+                        android:id="@+id/concept_ic_play"
+                        android:layout_width="26dp"
+                        android:layout_height="26dp"
+                        android:layout_gravity="center"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/concept_ic_play"
+                        android:contentDescription="@string/widget_play_desc" />
+
+                    <ImageView
+                        android:id="@+id/concept_ic_pause"
+                        android:layout_width="26dp"
+                        android:layout_height="26dp"
+                        android:layout_gravity="center"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/concept_ic_pause"
+                        android:visibility="gone"
+                        android:contentDescription="@string/widget_play_desc" />
+                </FrameLayout>
+
+                <FrameLayout
+                    android:id="@+id/concept_btn_next"
+                    android:layout_width="0dp"
+                    android:layout_height="match_parent"
+                    android:layout_weight="1">
+
+                    <ImageView
+                        android:id="@+id/concept_ic_next"
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_gravity="center"
+                        android:scaleType="fitCenter"
+                        android:src="@drawable/concept_ic_next"
+                        android:contentDescription="@string/widget_next_desc" />
+                </FrameLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

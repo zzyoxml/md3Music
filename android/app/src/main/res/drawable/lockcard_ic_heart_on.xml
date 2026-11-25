@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 锁屏歌词卡片专用图标：已收藏爱心（Material Icons favorite）。
+     独立成档（不复用 concept_/ic_wg_ 等既有矢量）：VectorDrawable 的 tint 是共享
+     ConstantState 上的，多个入口复用同一份资源会互相串色；颜色一律由
+     LockScreenCardRenderer 在烘焙位图时 setTint 决定，此处不声明 android:tint。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,21.35l-1.45,-1.32C5.4,15.36 2,12.28 2,8.5 2,5.42 4.42,3 7.5,3c1.74,0 3.41,0.81 4.5,2.09C13.09,3.81 14.76,3 16.5,3 19.58,3 22,5.42 22,8.5c0,3.78 -3.4,6.86 -8.55,11.54L12,21.35z" />
+</vector>
