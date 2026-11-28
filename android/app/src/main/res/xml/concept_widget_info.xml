@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 概念版 4×1 桌面小部件元信息：4×1 格，预览图用真机截图裁剪的静态图
+     （MIUI 挑选器只读 previewImage，不用 AOSP 的 previewLayout）。
+     minHeight 70dp 与既有 4×1 音乐播放器同一口径（MIUI 挑选器行高实测标定）。 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="70dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_concept_player"
+    android:resizeMode="horizontal"
+    android:widgetCategory="home_screen"
+    android:label="@string/concept_widget_label"
+    android:previewLayout="@layout/widget_concept_player"
+    android:previewImage="@drawable/widget_preview_concept"
+    android:description="@string/concept_widget_description" />

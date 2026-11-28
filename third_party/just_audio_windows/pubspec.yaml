@@ -1,0 +1,23 @@
+name: just_audio_windows
+description: Windows platform implementation of just_audio. Implemented using WinRT MediaPlayer
+version: 0.2.3
+homepage: https://github.com/bdlukaa/just_audio_windows/tree/master/just_audio_windows
+
+environment:
+  sdk: ">=2.16.1 <4.0.0"
+  flutter: ">=2.5.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^1.0.0
+
+flutter:
+  plugin:
+    platforms:
+      windows:
+        pluginClass: JustAudioWindowsPlugin
